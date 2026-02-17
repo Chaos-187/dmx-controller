@@ -225,6 +225,30 @@ function blackout() {
   log('info', '[Art-Net] Blackout');
 }
 
+/**
+ * Save current DMX buffers (for blackout restore)
+ */
+function saveBuffers() {
+  for (const [, node] of nodes) {
+    node.savedDmx = Buffer.from(node.dmx);
+  }
+  log('info', '[Art-Net] Saved DMX buffers');
+}
+
+/**
+ * Restore previously saved DMX buffers
+ */
+function restoreBuffers() {
+  for (const [, node] of nodes) {
+    if (node.savedDmx) {
+      node.savedDmx.copy(node.dmx);
+      delete node.savedDmx;
+    }
+  }
+  transmitAll();
+  log('info', '[Art-Net] Restored DMX buffers');
+}
+
 // ─── Initialise ─────────────────────────────────────────────────────────────
 
 function initialize() {
@@ -283,6 +307,12 @@ function handleMessage(msg) {
       break;
     case 'blackout':
       blackout();
+      break;
+    case 'saveBuffers':
+      saveBuffers();
+      break;
+    case 'restoreBuffers':
+      restoreBuffers();
       break;
     case 'startTx':
       startTxLoop(msg.payload.rate);

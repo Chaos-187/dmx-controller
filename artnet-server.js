@@ -128,6 +128,16 @@ class ArtNetServer {
     this._send('blackout');
   }
 
+  /** Save current DMX buffers (for later restore) */
+  saveBuffers() {
+    this._send('saveBuffers');
+  }
+
+  /** Restore previously saved DMX buffers */
+  restoreBuffers() {
+    this._send('restoreBuffers');
+  }
+
   /** Start transmit loop */
   startTx(rate) {
     this._send('startTx', { rate: rate || 44 });

@@ -163,6 +163,7 @@ function handleMessage(data) {
     broadcast({ type: 'beat', data });
   } else if (evt === 'btn') {
     broadcast({ type: 'btn', data });
+    handleOs2lButtonAction(data);
   } else if (evt === 'cmd') {
     broadcast({ type: 'cmd', data });
   } else {
@@ -227,6 +228,181 @@ const os2lServer = net.createServer((socket) => {
     console.error(`[OS2L] Socket error: ${err.message}`);
   });
 });
+
+// ─── OS2L Button Action Handler ─────────────────────────────────────────────
+
+// Track active toggle states: Set of map IDs currently "on"
+const activeToggles = new Set();
+
+function handleOs2lButtonAction(data) {
+  const btnName = data.name || data.button || '';
+  const btnState = data.state;  // OS2L state: 1 = on/pressed, 0 = off/released
+  const maps = db.getEnabledButtonMaps();
+
+  for (const map of maps) {
+    // Match by os2l_event type and value pattern
+    const matchValue = map.os2l_value.trim();
+    if (!matchValue) continue;
+
+    // Support wildcard (*) or exact match
+    let matched = false;
+    if (matchValue === '*') {
+      matched = true;
+    } else if (btnName.toLowerCase() === matchValue.toLowerCase()) {
+      matched = true;
+    }
+    if (!matched) continue;
+
+    const toggleMode = map.toggle_mode || 'fire';
+
+    // Normalise state: "on"/1/"1" → true, "off"/0/"0" → false, undefined → null
+    let stateOn = null;
+    if (btnState === 'on' || btnState === 1 || btnState === '1') stateOn = true;
+    else if (btnState === 'off' || btnState === 0 || btnState === '0') stateOn = false;
+
+    // For toggle mode, use OS2L state to determine on/off
+    if (toggleMode === 'toggle') {
+      if (stateOn === true) {
+        activeToggles.add(map.id);
+        executeMapAction(map, true);
+      } else if (stateOn === false) {
+        activeToggles.delete(map.id);
+        executeMapAction(map, false);
+      }
+      // If state is undefined, treat as a simple toggle flip
+      else {
+        if (activeToggles.has(map.id)) {
+          activeToggles.delete(map.id);
+          executeMapAction(map, false);
+        } else {
+          activeToggles.add(map.id);
+          executeMapAction(map, true);
+        }
+      }
+    } else {
+      // 'fire' mode — execute on every event regardless of state
+      executeMapAction(map, true);
+    }
+  }
+}
+
+function executeMapAction(map, activate) {
+  let actionData;
+  try {
+    actionData = JSON.parse(map.action_data || '{}');
+  } catch (e) {
+    actionData = {};
+  }
+
+  const stateLabel = activate ? 'ON' : 'OFF';
+  console.log(`[OS2L] Button map "${map.name}" → ${map.action_type} [${stateLabel}]`);
+
+  switch (map.action_type) {
+    case 'blackout':
+      if (activate) {
+        // Save current DMX state then blackout
+        artnetServer.saveBuffers();
+        if (dmxUsbServer.isOpen) dmxUsbServer.saveBuffers();
+        artnetServer.blackout();
+        if (dmxUsbServer.isOpen) dmxUsbServer.blackout();
+      } else {
+        // Restore pre-blackout DMX state
+        artnetServer.restoreBuffers();
+        if (dmxUsbServer.isOpen) dmxUsbServer.restoreBuffers();
+      }
+      broadcast({ type: 'os2l_action', action: 'blackout', map: map.name, active: activate });
+      break;
+
+    case 'set_channels': {
+      // action_data: { universe: 1, channels: [{ ch: 1, val: 255 }, ...] }
+      const universe = actionData.universe || 1;
+      const channels = actionData.channels || [];
+      if (channels.length && dmxOutputEnabled) {
+        if (activate) {
+          artnetServer.setChannels(universe, channels);
+          if (universe === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(channels);
+        } else {
+          // Deactivate: set those channels to 0
+          const offChannels = channels.map(c => ({ ch: c.ch, val: 0 }));
+          artnetServer.setChannels(universe, offChannels);
+          if (universe === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(offChannels);
+        }
+      }
+      broadcast({ type: 'os2l_action', action: 'set_channels', map: map.name, active: activate });
+      break;
+    }
+
+    case 'full_on': {
+      const universe = actionData.universe || 1;
+      const val = activate ? 255 : 0;
+      const ch = [];
+      for (let i = 1; i <= 512; i++) ch.push({ ch: i, val });
+      if (dmxOutputEnabled) {
+        artnetServer.setChannels(universe, ch);
+        if (universe === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(ch);
+      }
+      broadcast({ type: 'os2l_action', action: 'full_on', map: map.name, active: activate });
+      break;
+    }
+
+    case 'scene': {
+      // action_data: { fixtures: [{ universe, channels: [{ ch, val }] }] }
+      const fixtures = actionData.fixtures || [];
+      for (const f of fixtures) {
+        const u = f.universe || 1;
+        if (f.channels && f.channels.length && dmxOutputEnabled) {
+          if (activate) {
+            artnetServer.setChannels(u, f.channels);
+            if (u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(f.channels);
+          } else {
+            const offChannels = f.channels.map(c => ({ ch: c.ch, val: 0 }));
+            artnetServer.setChannels(u, offChannels);
+            if (u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(offChannels);
+          }
+        }
+      }
+      broadcast({ type: 'os2l_action', action: 'scene', map: map.name, active: activate });
+      break;
+    }
+
+    case 'strobe': {
+      // Use saved strobe speed config + fixture channel map (range-aware)
+      const strobeSpeed = parseInt(db.getConfig('strobe_speed') || '200', 10);
+      const channelMap = db.getFixtureChannelMap();
+      const channelUpdates = {}; // { universe: [{ ch, val }] }
+
+      for (const fix of channelMap) {
+        const u = fix.universe;
+        if (!channelUpdates[u]) channelUpdates[u] = [];
+        for (const ch of fix.channels) {
+          if (ch.type === 'strobe') {
+            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? strobeSpeed : 0 });
+          } else if (ch.ranges) {
+            const strobeRange = ch.ranges.find(r => r.type === 'strobe');
+            if (strobeRange) {
+              const mapped = activate
+                ? Math.round(strobeRange.min + (strobeSpeed / 255) * (strobeRange.max - strobeRange.min))
+                : 0;
+              channelUpdates[u].push({ ch: ch.dmx_address, val: mapped });
+            }
+          }
+        }
+      }
+
+      if (dmxOutputEnabled) {
+        for (const [u, channels] of Object.entries(channelUpdates)) {
+          artnetServer.setChannels(+u, channels);
+          if (+u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(channels);
+        }
+      }
+      broadcast({ type: 'os2l_action', action: 'strobe', map: map.name, active: activate });
+      break;
+    }
+
+    default:
+      console.warn(`[OS2L] Unknown action type: ${map.action_type}`);
+  }
+}
 
 // ─── Express Web Server ─────────────────────────────────────────────────────
 
@@ -373,6 +549,33 @@ app.post('/api/subscriptions/resend', (req, res) => {
   sendSubscription();
   const subs = db.getEnabledSubscriptions();
   res.json({ sent: true, count: subs.length, connected: !!activeVdjSocket && !activeVdjSocket.destroyed });
+});
+
+// ─── Mover Presets API ──────────────────────────────────────────────────────
+
+app.get('/api/mover-presets', (req, res) => {
+  res.json(db.getMoverPresets());
+});
+
+app.get('/api/mover-presets/:id', (req, res) => {
+  const p = db.getMoverPreset(+req.params.id);
+  p ? res.json(p) : res.status(404).json({ error: 'Not found' });
+});
+
+app.post('/api/mover-presets', (req, res) => {
+  const result = db.createMoverPreset(req.body);
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.put('/api/mover-presets/:id', (req, res) => {
+  const result = db.updateMoverPreset(+req.params.id, req.body);
+  result ? res.json(result) : res.status(404).json({ error: 'Not found' });
+});
+
+app.delete('/api/mover-presets/:id', (req, res) => {
+  db.deleteMoverPreset(+req.params.id);
+  res.json({ deleted: true });
 });
 
 // ─── Config API ─────────────────────────────────────────────────────────────
@@ -609,6 +812,54 @@ app.post('/api/dmx/channels', (req, res) => {
     dmxUsbServer.setChannels(channels);
   }
   res.json({ ok: true });
+});
+
+// ─── OS2L Button Maps API ───────────────────────────────────────────────────
+
+app.get('/api/os2l-button-maps', (req, res) => {
+  res.json(db.getButtonMaps());
+});
+
+app.get('/api/os2l-button-maps/:id', (req, res) => {
+  const m = db.getButtonMap(+req.params.id);
+  m ? res.json(m) : res.status(404).json({ error: 'Not found' });
+});
+
+app.post('/api/os2l-button-maps', (req, res) => {
+  const result = db.createButtonMap(req.body);
+  if (result.error) return res.status(400).json(result);
+  res.status(201).json(result);
+});
+
+app.put('/api/os2l-button-maps/:id', (req, res) => {
+  const result = db.updateButtonMap(+req.params.id, req.body);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.delete('/api/os2l-button-maps/:id', (req, res) => {
+  db.deleteButtonMap(+req.params.id);
+  res.json({ deleted: true });
+});
+
+app.post('/api/os2l-button-maps/:id/toggle', (req, res) => {
+  const result = db.toggleButtonMap(+req.params.id);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.post('/api/os2l-button-maps/test/:id', (req, res) => {
+  const map = db.getButtonMap(+req.params.id);
+  if (!map) return res.status(404).json({ error: 'Not found' });
+  // Test fires with state=1 (activate)
+  handleOs2lButtonAction({ name: map.os2l_value, button: map.os2l_value, state: 1 });
+  res.json({ ok: true, tested: map.name });
+});
+
+// Get active toggle states
+app.get('/api/os2l-button-maps/active-toggles', (req, res) => {
+  res.json([...activeToggles]);
 });
 
 // ─── Tracks API ─────────────────────────────────────────────────────────────

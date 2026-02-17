@@ -173,18 +173,11 @@
     .tag.ssid { background: #1a2a4e; color: var(--blue); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Event log */
-    .event-log-section { margin-top: 16px; }
-    .log-toggle {
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px;
-      color: var(--text-dim); padding: 8px 16px; cursor: pointer; font-size: 12px; width: 100%; text-align: left;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .log-toggle:hover { border-color: var(--accent); }
-    .log-toggle .log-count { font-size: 10px; color: var(--accent); }
     .event-log {
-      display: none; margin-top: 8px; background: #111; border: 1px solid var(--panel-border);
+      background: #111; border: 1px solid var(--panel-border);
       border-radius: 6px; padding: 0; max-height: 400px; overflow-y: auto;
       font-family: 'Cascadia Code','Consolas', monospace; font-size: 11px; color: var(--text-dim);
+      display: none;
     }
     .event-log.open { display: block; }
     .event-log .log-toolbar {
@@ -662,6 +655,28 @@
     .qa-picker-actions { display: flex; flex-direction: column; gap: 6px; }
     .qa-custom-grid { margin-top: 10px; }
 
+    /* Strobe control */
+    .qa-strobe-ctrl {
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px; padding: 14px;
+    }
+    .qa-strobe-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .qa-strobe-row label {
+      font-size: 12px; color: var(--text-dim); font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px; white-space: nowrap;
+    }
+    .qa-strobe-row input[type=range] { flex: 1; accent-color: #f6f; }
+    .qa-strobe-val {
+      font-size: 13px; font-weight: 600; color: #f6f;
+      min-width: 32px; text-align: right; font-variant-numeric: tabular-nums;
+    }
+    .qa-strobe-actions { display: flex; gap: 8px; }
+    .qa-strobe-status {
+      margin-top: 8px; font-size: 11px; color: var(--text-dim);
+    }
+
     /* Movement presets */
     .qa-move-btn {
       padding: 14px 8px; border: 2px solid var(--panel-border); border-radius: 8px;
@@ -674,6 +689,100 @@
     .qa-move-speed { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .qa-move-speed label { font-size: 12px; color: var(--text-dim); }
     .qa-move-speed input[type=range] { flex: 1; max-width: 200px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Mover Preset Editor
+       ═══════════════════════════════════════════════════════════════ */
+    .mover-preset-editor {
+      display: grid; grid-template-columns: 1fr 300px; gap: 20px; margin-top: 12px;
+    }
+    @media (max-width: 900px) {
+      .mover-preset-editor { grid-template-columns: 1fr; }
+    }
+    .mover-preset-left { display: flex; flex-direction: column; gap: 12px; }
+
+    /* XY Touch Pad */
+    .xy-pad-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .xy-pad {
+      position: relative; width: 280px; height: 280px;
+      background: radial-gradient(circle at center, #1a2a3a 0%, #111 70%);
+      border: 2px solid var(--panel-border); border-radius: 10px;
+      cursor: crosshair; touch-action: none; user-select: none;
+      overflow: hidden;
+    }
+    .xy-crosshair-h, .xy-crosshair-v {
+      position: absolute; background: rgba(0,229,255,.15); pointer-events: none;
+    }
+    .xy-crosshair-h { left: 0; right: 0; height: 1px; top: 50%; }
+    .xy-crosshair-v { top: 0; bottom: 0; width: 1px; left: 50%; }
+    .xy-dot {
+      position: absolute; width: 20px; height: 20px;
+      background: var(--accent); border: 2px solid #fff;
+      border-radius: 50%; transform: translate(-50%, -50%);
+      pointer-events: none; left: 50%; top: 50%;
+      box-shadow: 0 0 12px rgba(233,69,96,.6);
+      transition: left .05s, top .05s;
+    }
+    .xy-label {
+      position: absolute; font-size: 9px; color: rgba(255,255,255,.2);
+      text-transform: uppercase; pointer-events: none;
+    }
+    .xy-label-tl { top: 6px; left: 8px; }
+    .xy-label-tr { top: 6px; right: 8px; }
+    .xy-label-bl { bottom: 6px; left: 8px; }
+    .xy-label-br { bottom: 6px; right: 8px; }
+    .xy-values {
+      display: flex; gap: 20px; font-size: 12px; color: var(--text-dim);
+    }
+    .xy-values strong { color: var(--cyan); font-variant-numeric: tabular-nums; }
+
+    .mover-manual-row { display: flex; gap: 10px; }
+
+    /* Fixture target selection */
+    .mover-fixture-select {
+      display: flex; gap: 12px; margin-bottom: 6px; font-size: 12px;
+    }
+    .mover-target-all { display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-dim); }
+    .mover-target-all input { accent-color: var(--accent); }
+    .mover-fixture-list {
+      max-height: 140px; overflow-y: auto;
+      background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 6px;
+      padding: 6px 8px;
+    }
+    .mover-fixture-item {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 0; font-size: 12px; color: var(--text-dim);
+    }
+    .mover-fixture-item input { accent-color: var(--accent); }
+    .mover-fixture-item .fix-name { color: var(--text); }
+
+    .mover-save-row { display: flex; gap: 8px; align-items: center; }
+
+    /* Preset list */
+    .mover-preset-list { display: flex; flex-direction: column; gap: 6px; max-height: 500px; overflow-y: auto; }
+    .mover-preset-card {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      padding: 10px 12px; cursor: pointer; transition: border-color .15s;
+    }
+    .mover-preset-card:hover { border-color: var(--accent); }
+    .mover-preset-card.active { border-color: var(--accent); box-shadow: 0 0 8px rgba(233,69,96,.2); }
+    .mover-preset-card-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+    }
+    .mover-preset-card-name { font-size: 13px; font-weight: 600; }
+    .mover-preset-card-actions { display: flex; gap: 4px; }
+    .mover-preset-card-actions button {
+      background: none; border: none; cursor: pointer; font-size: 12px;
+      padding: 2px 4px; opacity: .5; transition: opacity .15s;
+    }
+    .mover-preset-card-actions button:hover { opacity: 1; }
+    .mover-preset-card-actions .mp-edit { color: var(--cyan); }
+    .mover-preset-card-actions .mp-delete { color: var(--danger); }
+    .mover-preset-card-meta {
+      font-size: 10px; color: var(--text-dim);
+      display: flex; gap: 10px;
+    }
+    .mover-preset-card-meta .mp-val { color: var(--cyan); font-variant-numeric: tabular-nums; }
 
     /* ═══════════════════════════════════════════════════════════════
        Footer
@@ -728,31 +837,14 @@
     <div class="crossfader-labels"><span>Left</span><span>Right</span></div>
   </div>
   <div class="decks" id="decks"></div>
-  <div class="event-log-section">
-    <button class="log-toggle" id="logToggle">
-      <span>&#9656; Event Log</span>
-      <span class="log-count" id="logCount">0 events</span>
-    </button>
-    <div class="event-log" id="eventLog">
-      <div class="log-toolbar">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="subscribed">Subscribed</button>
-        <button class="filter-btn" data-filter="beat">Beat</button>
-        <button class="filter-btn" data-filter="btn">Btn</button>
-        <button class="filter-btn" data-filter="cmd">Cmd</button>
-        <button class="filter-btn" data-filter="connection">Connection</button>
-        <label class="log-auto"><input type="checkbox" id="logAutoScroll" checked> Auto-scroll</label>
-      </div>
-      <div id="logEntries"></div>
-    </div>
-  </div>
-  <!-- Pretty-print overlay -->
-  <div class="pp-overlay" id="ppOverlay">
-    <div class="pp-box">
-      <h3>Raw OS2L Message</h3>
-      <pre id="ppContent"></pre>
-      <button class="btn btn-secondary pp-close" onclick="document.getElementById('ppOverlay').classList.remove('open')">Close</button>
-    </div>
+</div>
+
+<!-- Pretty-print overlay -->
+<div class="pp-overlay" id="ppOverlay">
+  <div class="pp-box">
+    <h3>Raw OS2L Message</h3>
+    <pre id="ppContent"></pre>
+    <button class="btn btn-secondary pp-close" onclick="document.getElementById('ppOverlay').classList.remove('open')">Close</button>
   </div>
 </div>
 
@@ -897,6 +989,21 @@
       <div class="qa-grid" id="qaEffectsGrid"></div>
     </div>
     <div class="qa-section">
+      <h3>Strobe</h3>
+      <div class="qa-strobe-ctrl">
+        <div class="qa-strobe-row">
+          <label>Speed</label>
+          <input type="range" id="qaStrobeSpeed" min="0" max="255" value="0">
+          <span id="qaStrobeSpeedVal" class="qa-strobe-val">0</span>
+        </div>
+        <div class="qa-strobe-actions">
+          <button class="btn btn-primary btn-sm" id="qaStrobeApply">Apply</button>
+          <button class="btn btn-secondary btn-sm" id="qaStrobeOff">Off</button>
+        </div>
+        <div class="qa-strobe-status" id="qaStrobeStatus"></div>
+      </div>
+    </div>
+    <div class="qa-section">
       <h3>Movement Presets</h3>
       <div class="qa-move-speed">
         <label>Speed:</label>
@@ -982,6 +1089,10 @@
       <button class="config-sidebar-btn" data-cfgtab="artnet"><span class="cfg-icon">&#9729;</span>Art-Net</button>
       <button class="config-sidebar-btn" data-cfgtab="vdj"><span class="cfg-icon">&#9835;</span>VirtualDJ</button>
       <button class="config-sidebar-btn" data-cfgtab="os2l-subs"><span class="cfg-icon">&#9889;</span>OS2L Subs</button>
+      <button class="config-sidebar-btn" data-cfgtab="os2l-buttons"><span class="cfg-icon">&#9881;</span>OS2L Buttons</button>
+      <button class="config-sidebar-btn" data-cfgtab="lighting"><span class="cfg-icon">&#9728;</span>Lighting</button>
+      <button class="config-sidebar-btn" data-cfgtab="movers"><span class="cfg-icon">&#10146;</span>Movers</button>
+      <button class="config-sidebar-btn" data-cfgtab="event-log"><span class="cfg-icon">&#9776;</span>Event Log</button>
     </div>
 
     <!-- Config Panels -->
@@ -1205,6 +1316,166 @@
         </div>
       </div>
 
+      <!-- ─── OS2L Button Mappings ─── -->
+      <div class="config-sub-page" id="cfgpage-os2l-buttons">
+        <div class="config-section">
+          <h3>OS2L Button Mappings</h3>
+          <p class="config-desc">Map incoming OS2L button events from VirtualDJ to DMX actions. When VirtualDJ sends a button event matching the OS2L value, the configured action will execute automatically.</p>
+          <div class="subs-status-bar" id="btnMapsStatus">
+            <span><strong id="btnMapsEnabledCount">0</strong> enabled of <strong id="btnMapsTotalCount">0</strong> total</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary btn-sm" id="btnAddBtnMap">+ Add Button Map</button>
+          </div>
+          <table class="subs-table">
+            <thead>
+              <tr>
+                <th style="width:40px">On</th>
+                <th>Name</th>
+                <th>OS2L Event</th>
+                <th>OS2L Value</th>
+                <th>Action</th>
+                <th style="width:70px">Mode</th>
+                <th style="width:130px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="btnMapsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ─── Lighting ─── -->
+      <div class="config-sub-page" id="cfgpage-lighting">
+        <div class="config-section">
+          <h3>Lighting Defaults</h3>
+          <p class="config-desc">Configure default values for lighting effects. These are used by Quick Actions and OS2L commands.</p>
+
+          <div class="config-card">
+            <h4>Strobe</h4>
+            <p class="config-desc" style="margin-bottom:10px">Set the default strobe speed. This value is sent to all strobe channels (including range-mapped channels) when strobe is triggered via OS2L or Quick Actions.</p>
+            <div class="config-row">
+              <label>Strobe Speed</label>
+              <div style="display:flex;align-items:center;gap:10px;flex:1">
+                <input type="range" id="cfgStrobeSpeed" min="0" max="255" value="200" style="flex:1;accent-color:#f6f">
+                <span id="cfgStrobeSpeedVal" style="font-size:13px;font-weight:600;color:#f6f;min-width:32px;text-align:right;font-variant-numeric:tabular-nums">200</span>
+              </div>
+            </div>
+            <div class="config-row">
+              <label>Channels Found</label>
+              <span id="cfgStrobeChannelCount" style="font-size:12px;color:var(--text-dim)">—</span>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" id="cfgStrobeSave">Save</button>
+              <button class="btn btn-secondary btn-sm" id="cfgStrobeTest">Test Strobe</button>
+              <button class="btn btn-secondary btn-sm" id="cfgStrobeOff">Strobe Off</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Movers ─── -->
+      <div class="config-sub-page" id="cfgpage-movers">
+        <div class="config-section">
+          <h3>Mover Presets</h3>
+          <p class="config-desc">Create position presets for moving head fixtures. Each preset stores a pan/tilt position and can target all movers or specific fixtures. Presets appear in the Quick Actions movement section.</p>
+
+          <div class="mover-preset-editor">
+            <div class="mover-preset-left">
+              <!-- XY Touch Pad -->
+              <div class="xy-pad-wrap">
+                <div class="xy-pad" id="moverXYPad">
+                  <div class="xy-crosshair-h" id="xyCrossH"></div>
+                  <div class="xy-crosshair-v" id="xyCrossV"></div>
+                  <div class="xy-dot" id="xyDot"></div>
+                  <div class="xy-label xy-label-tl">TL</div>
+                  <div class="xy-label xy-label-tr">TR</div>
+                  <div class="xy-label xy-label-bl">BL</div>
+                  <div class="xy-label xy-label-br">BR</div>
+                </div>
+                <div class="xy-values">
+                  <span>Pan: <strong id="xyPanVal">128</strong></span>
+                  <span>Tilt: <strong id="xyTiltVal">128</strong></span>
+                </div>
+              </div>
+
+              <!-- Manual inputs -->
+              <div class="mover-manual-row">
+                <div class="form-group" style="flex:1">
+                  <label>Pan (0–255)</label>
+                  <input type="number" id="moverPanInput" min="0" max="255" value="128">
+                </div>
+                <div class="form-group" style="flex:1">
+                  <label>Tilt (0–255)</label>
+                  <input type="number" id="moverTiltInput" min="0" max="255" value="128">
+                </div>
+              </div>
+
+              <!-- Fixture selection -->
+              <div class="form-group">
+                <label>Target Fixtures</label>
+                <div class="mover-fixture-select">
+                  <label class="mover-target-all">
+                    <input type="radio" name="moverTarget" value="all" checked> All Movers
+                  </label>
+                  <label class="mover-target-all">
+                    <input type="radio" name="moverTarget" value="select"> Select Fixtures
+                  </label>
+                </div>
+                <div class="mover-fixture-list" id="moverFixtureList" style="display:none"></div>
+              </div>
+
+              <!-- Save preset -->
+              <div class="mover-save-row">
+                <input type="text" id="moverPresetName" placeholder="Preset name" style="flex:1">
+                <input type="hidden" id="moverPresetEditId" value="">
+                <button class="btn btn-primary btn-sm" id="btnSaveMoverPreset">Save Preset</button>
+                <button class="btn btn-secondary btn-sm" id="btnTestMoverPos">Test</button>
+                <button class="btn btn-secondary btn-sm" id="btnCancelMoverEdit" style="display:none">Cancel</button>
+              </div>
+            </div>
+
+            <div class="mover-preset-right">
+              <h4 style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Saved Presets</h4>
+              <div class="mover-preset-list" id="moverPresetList">
+                <span style="font-size:11px;color:var(--text-dim)">No presets saved yet.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Event Log ─── -->
+      <div class="config-sub-page" id="cfgpage-event-log">
+        <div class="config-section">
+          <h3>Event Log</h3>
+          <p class="config-desc">View real-time OS2L messages from VirtualDJ. Toggle capture on/off to control whether events are recorded.</p>
+
+          <div class="subs-status-bar" style="margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
+              <input type="checkbox" id="logCaptureToggle" checked style="accent-color:var(--accent);width:16px;height:16px">
+              <strong>Capture Events</strong>
+            </label>
+            <span class="log-count" id="logCount" style="font-size:11px;color:var(--accent)">0 events</span>
+            <span style="flex:1"></span>
+            <label class="log-auto" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
+              <input type="checkbox" id="logAutoScroll" checked style="accent-color:var(--accent)"> Auto-scroll
+            </label>
+            <button class="btn btn-secondary btn-sm" id="btnClearLog">Clear</button>
+          </div>
+
+          <div class="event-log open" id="eventLog" style="max-height:calc(100vh - 300px)">
+            <div class="log-toolbar">
+              <button class="filter-btn active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="subscribed">Subscribed</button>
+              <button class="filter-btn" data-filter="beat">Beat</button>
+              <button class="filter-btn" data-filter="btn">Btn</button>
+              <button class="filter-btn" data-filter="cmd">Cmd</button>
+              <button class="filter-btn" data-filter="connection">Connection</button>
+            </div>
+            <div id="logEntries"></div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /config-panel -->
   </div><!-- /config-layout -->
 </div>
@@ -1357,6 +1628,67 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('subModal')">Cancel</button>
       <button class="btn btn-primary" id="btnSaveSub">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Add/Edit OS2L Button Map
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="btnMapModal">
+  <div class="modal" style="max-width:620px">
+    <h2 id="btnMapModalTitle">Add Button Mapping</h2>
+    <input type="hidden" id="btnMapEditId">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="bmName" placeholder="e.g. Blackout Button">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>OS2L Event Type</label>
+        <select id="bmOs2lEvent">
+          <option value="btn">Button (btn)</option>
+          <option value="cmd">Command (cmd)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>OS2L Value / Button Name</label>
+        <input type="text" id="bmOs2lValue" placeholder="e.g. blackout, strobe, *">
+        <div style="font-size:10px;color:var(--text-dim);margin-top:4px">The button name sent by VDJ. Use <strong>*</strong> to match any button.</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Action Type</label>
+      <select id="bmActionType">
+        <option value="blackout">Blackout (all channels to 0)</option>
+        <option value="full_on">Full On (all channels to 255)</option>
+        <option value="set_channels">Set Specific Channels</option>
+        <option value="scene">Scene (multi-fixture preset)</option>
+        <option value="strobe">Set Strobe Channel</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Trigger Mode</label>
+      <select id="bmToggleMode">
+        <option value="fire">Fire (execute on every event)</option>
+        <option value="toggle">Toggle (use OS2L state on/off)</option>
+      </select>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">
+        <strong>Fire:</strong> Runs the action every time the button event is received.<br>
+        <strong>Toggle:</strong> Uses the OS2L button state — state 1 activates, state 0 deactivates (reverses the action).
+      </div>
+    </div>
+    <div id="bmActionDataSection">
+      <div class="form-group" id="bmChannelsGroup" style="display:none">
+        <label>Channel Data (JSON)</label>
+        <textarea id="bmActionData" rows="5" style="width:100%;padding:8px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;font-family:'Cascadia Code','Consolas',monospace" placeholder='{"universe":1,"channels":[{"ch":1,"val":255}]}'></textarea>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:4px" id="bmActionHint"></div>
+      </div>
+    </div>
+    <div class="form-error" id="btnMapError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('btnMapModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveBtnMap">Save</button>
     </div>
   </div>
 </div>
@@ -1573,20 +1905,24 @@ function handleBeat(data) {
 // Event log
 const eventLogEl = document.getElementById('eventLog');
 const logEntriesEl = document.getElementById('logEntries');
-const logToggleEl = document.getElementById('logToggle');
 const logCountEl = document.getElementById('logCount');
 const ppOverlay = document.getElementById('ppOverlay');
 const ppContent = document.getElementById('ppContent');
 const logAutoScrollEl = document.getElementById('logAutoScroll');
-let logOpen = false;
+const logCaptureToggle = document.getElementById('logCaptureToggle');
+let logCapturing = true;
 let logFilter = 'all';
 let logTotal = 0;
 const MAX_LOG = 2000;
 
-logToggleEl.addEventListener('click', () => {
-  logOpen = !logOpen;
-  eventLogEl.classList.toggle('open', logOpen);
-  logToggleEl.querySelector('span').innerHTML = logOpen ? '&#9662; Event Log' : '&#9656; Event Log';
+logCaptureToggle.addEventListener('change', () => {
+  logCapturing = logCaptureToggle.checked;
+});
+
+document.getElementById('btnClearLog').addEventListener('click', () => {
+  logEntriesEl.innerHTML = '';
+  logTotal = 0;
+  logCountEl.textContent = '0 events';
 });
 
 // Filter buttons
@@ -1611,6 +1947,7 @@ ppOverlay.addEventListener('click', (e) => { if (e.target === ppOverlay) ppOverl
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ppOverlay.classList.remove('open'); });
 
 function logEvent(info) {
+  if (!logCapturing) return;
   const { evtType, raw, ts } = info;
   logTotal++;
   logCountEl.textContent = `${logTotal} events`;
@@ -1655,8 +1992,8 @@ function logEvent(info) {
   while (logEntriesEl.children.length > MAX_LOG) logEntriesEl.removeChild(logEntriesEl.firstChild);
 
   // Auto-scroll
-  if (logAutoScrollEl.checked && logOpen) {
-    logEntriesEl.scrollTop = logEntriesEl.scrollHeight;
+  if (logAutoScrollEl.checked) {
+    eventLogEl.scrollTop = eventLogEl.scrollHeight;
   }
 }
 
@@ -1686,9 +2023,12 @@ async function loadFixtures() {
     card.className = 'fixture-card';
     const type = types.find(t => t.id === f.fixture_type_id);
     const channels = type ? type.channels : [];
-    const chBadges = channels.map(c =>
-      `<span class="ch-badge ${c.type}">${c.channel_number}: ${c.name}</span>`
-    ).join('');
+    const chBadges = channels.map(c => {
+      const hasRanges = c.ranges && c.ranges.length > 0;
+      const badgeClass = hasRanges ? 'multi' : c.type;
+      const title = hasRanges ? c.ranges.map(r => `${r.min}-${r.max}: ${r.label}`).join('\n') : '';
+      return `<span class="ch-badge ${badgeClass}" ${title ? `title="${esc(title)}"` : ''}>${c.channel_number}: ${c.name}${hasRanges ? ' ⚡' : ''}</span>`;
+    }).join('');
 
     card.innerHTML = `
       <div class="fixture-card-header">
@@ -1810,23 +2150,127 @@ function renderChannelsEditor() {
   const ed = document.getElementById('channelsEditor');
   ed.innerHTML = '';
   typeChannels.forEach((ch, i) => {
+    const hasRanges = ch.ranges && ch.ranges.length > 0;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ch-item';
+
+    // Main row
     const row = document.createElement('div');
     row.className = 'ch-row';
     row.innerHTML = `
-      <span style="font-size:11px;color:var(--text-dim);width:20px">${i+1}</span>
-      <input class="ch-name" type="text" value="${esc(ch.name)}" placeholder="Channel name" data-idx="${i}" data-field="name">
-      <select data-idx="${i}" data-field="type">
-        ${CHANNEL_TYPES.map(t => `<option value="${t}" ${t===ch.type?'selected':''}>${t}</option>`).join('')}
-      </select>
-      <input type="number" value="${ch.default_value||0}" min="0" max="255" data-idx="${i}" data-field="default_value" title="Default value">
+      <span style="font-size:11px;color:var(--text-dim);width:20px;padding-top:4px">${i+1}</span>
+      <div class="ch-main">
+        <input class="ch-name" type="text" value="${esc(ch.name)}" placeholder="Channel name" data-idx="${i}" data-field="name">
+        <select data-idx="${i}" data-field="type">
+          ${CHANNEL_TYPES.map(t => `<option value="${t}" ${t===ch.type?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <input type="number" value="${ch.default_value||0}" min="0" max="255" data-idx="${i}" data-field="default_value" title="Default value">
+        <button type="button" class="ch-ranges-toggle ${hasRanges ? 'has-ranges' : ''}" data-idx="${i}" title="Define value ranges for multi-function channels">
+          ${hasRanges ? `Ranges (${ch.ranges.length})` : '+ Ranges'}
+        </button>
+      </div>
       <button class="ch-remove" onclick="removeChannel(${i})">&times;</button>`;
-    ed.appendChild(row);
+    wrapper.appendChild(row);
+
+    // Ranges panel (hidden by default, toggled open)
+    if (hasRanges || ch._rangesOpen) {
+      const rangesWrap = document.createElement('div');
+      rangesWrap.className = 'ch-ranges-wrap';
+      rangesWrap.id = `ch-ranges-${i}`;
+      const ranges = ch.ranges || [];
+      rangesWrap.innerHTML = `
+        <table>
+          <thead><tr><th>Min</th><th>Max</th><th>Label</th><th>Type</th><th></th></tr></thead>
+          <tbody>
+          ${ranges.map((r, ri) => `
+            <tr>
+              <td><input type="number" class="range-min" value="${r.min}" min="0" max="255" data-chidx="${i}" data-ridx="${ri}" data-rfield="min"></td>
+              <td><input type="number" class="range-max" value="${r.max}" min="0" max="255" data-chidx="${i}" data-ridx="${ri}" data-rfield="max"></td>
+              <td><input type="text" class="range-label" value="${esc(r.label || '')}" data-chidx="${i}" data-ridx="${ri}" data-rfield="label" placeholder="e.g. Strobe"></td>
+              <td><select data-chidx="${i}" data-ridx="${ri}" data-rfield="type">
+                ${CHANNEL_TYPES.map(t => `<option value="${t}" ${t===(r.type||ch.type)?'selected':''}>${t}</option>`).join('')}
+              </select></td>
+              <td><button type="button" class="range-remove" data-chidx="${i}" data-ridx="${ri}">&times;</button></td>
+            </tr>
+          `).join('')}
+          </tbody>
+        </table>
+        <div class="range-actions">
+          <button type="button" class="btn btn-secondary btn-sm range-add" data-chidx="${i}">+ Add</button>
+          ${ranges.length > 0 ? `<button type="button" class="btn btn-secondary btn-sm range-add" data-chidx="${i}" data-action="clear" style="color:var(--danger)">Clear</button>` : ''}
+        </div>
+      `;
+      wrapper.appendChild(rangesWrap);
+    }
+
+    ed.appendChild(wrapper);
   });
-  ed.querySelectorAll('input, select').forEach(el => {
+
+  // Bind main field changes
+  ed.querySelectorAll('.ch-main input, .ch-main select').forEach(el => {
     el.addEventListener('change', () => {
       const idx = +el.dataset.idx;
       const field = el.dataset.field;
       typeChannels[idx][field] = field === 'default_value' ? +el.value : el.value;
+    });
+  });
+
+  // Bind ranges toggle buttons
+  ed.querySelectorAll('.ch-ranges-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = +btn.dataset.idx;
+      if (!typeChannels[idx].ranges) typeChannels[idx].ranges = [];
+      typeChannels[idx]._rangesOpen = !typeChannels[idx]._rangesOpen;
+      // If opening and no ranges yet, seed one empty range
+      if (typeChannels[idx]._rangesOpen && typeChannels[idx].ranges.length === 0) {
+        typeChannels[idx].ranges.push({ min: 0, max: 255, label: '', type: typeChannels[idx].type });
+      }
+      renderChannelsEditor();
+    });
+  });
+
+  // Bind range field changes
+  ed.querySelectorAll('.ch-ranges-wrap input, .ch-ranges-wrap select').forEach(el => {
+    if (!el.dataset.rfield) return;
+    el.addEventListener('change', () => {
+      const ci = +el.dataset.chidx;
+      const ri = +el.dataset.ridx;
+      const field = el.dataset.rfield;
+      if (field === 'min' || field === 'max') {
+        typeChannels[ci].ranges[ri][field] = +el.value;
+      } else {
+        typeChannels[ci].ranges[ri][field] = el.value;
+      }
+    });
+  });
+
+  // Bind range remove buttons
+  ed.querySelectorAll('.range-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ci = +btn.dataset.chidx;
+      const ri = +btn.dataset.ridx;
+      typeChannels[ci].ranges.splice(ri, 1);
+      if (typeChannels[ci].ranges.length === 0) {
+        typeChannels[ci].ranges = null;
+        typeChannels[ci]._rangesOpen = false;
+      }
+      renderChannelsEditor();
+    });
+  });
+
+  // Bind add-range / clear-all buttons
+  ed.querySelectorAll('.range-add').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ci = +btn.dataset.chidx;
+      if (btn.dataset.action === 'clear') {
+        typeChannels[ci].ranges = null;
+        typeChannels[ci]._rangesOpen = false;
+      } else {
+        if (!typeChannels[ci].ranges) typeChannels[ci].ranges = [];
+        const lastMax = typeChannels[ci].ranges.length > 0 ? typeChannels[ci].ranges[typeChannels[ci].ranges.length - 1].max + 1 : 0;
+        typeChannels[ci].ranges.push({ min: Math.min(lastMax, 255), max: 255, label: '', type: typeChannels[ci].type });
+      }
+      renderChannelsEditor();
     });
   });
 }
@@ -1835,7 +2279,7 @@ window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(
 
 document.getElementById('btnAddChannel').addEventListener('click', () => {
   const num = typeChannels.length + 1;
-  typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255 });
+  typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255, ranges: null });
   renderChannelsEditor();
   updateDuplicateHint();
 });
@@ -1879,11 +2323,21 @@ window.deleteType = async (id, name) => {
 document.getElementById('btnSaveType').addEventListener('click', async () => {
   const editId = document.getElementById('typeEditId').value;
   typeChannels.forEach((ch, i) => ch.channel_number = i + 1);
+  // Strip temp UI flags before sending
+  const cleanChannels = typeChannels.map(ch => {
+    const clean = { ...ch };
+    delete clean._rangesOpen;
+    delete clean.id;
+    delete clean.fixture_type_id;
+    // Ensure empty ranges arrays become null
+    if (clean.ranges && clean.ranges.length === 0) clean.ranges = null;
+    return clean;
+  });
   const body = {
     name: document.getElementById('tName').value.trim(),
     manufacturer: document.getElementById('tManufacturer').value.trim(),
     category: document.getElementById('tCategory').value,
-    channels: typeChannels,
+    channels: cleanChannels,
   };
   if (!body.name) return showError('typeError', 'Name is required');
   if (body.channels.length === 0) return showError('typeError', 'Add at least one channel');
@@ -1922,7 +2376,7 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
   if (typeChannels.length === 0) return showError('typeError', 'Add at least one channel first');
   if (count <= 1) return showError('typeError', 'Set repeat to more than 1');
   // Snapshot the current pattern as the base template
-  const pattern = typeChannels.map(ch => ({ name: ch.name, type: ch.type, default_value: ch.default_value, min_value: ch.min_value, max_value: ch.max_value }));
+  const pattern = typeChannels.map(ch => ({ name: ch.name, type: ch.type, default_value: ch.default_value, min_value: ch.min_value, max_value: ch.max_value, ranges: ch.ranges || null }));
   // Rename existing channels as group 1
   typeChannels.forEach((ch, i) => {
     ch.name = `${pattern[i].name} 1`;
@@ -1937,6 +2391,7 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
         default_value: 0,
         min_value: tpl.min_value || 0,
         max_value: tpl.max_value || 255,
+        ranges: tpl.ranges ? JSON.parse(JSON.stringify(tpl.ranges)) : null,
       });
     }
   }
@@ -1992,6 +2447,8 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     document.getElementById('cfgpage-' + btn.dataset.cfgtab).classList.add('active');
     if (btn.dataset.cfgtab === 'os2l-subs') loadSubscriptions();
     if (btn.dataset.cfgtab === 'artnet') loadArtnetNodes();
+    if (btn.dataset.cfgtab === 'lighting') loadLightingConfig();
+    if (btn.dataset.cfgtab === 'movers') loadMoverConfig();
   });
 });
 
@@ -2984,6 +3441,96 @@ document.getElementById('qaPickerSave').addEventListener('click', async () => {
   renderCustomColorGrid();
 });
 
+// ─── Strobe Control ──────────────────────────────────────────────────
+let strobeDefaultSpeed = 200; // loaded from config
+
+async function loadStrobeConfig() {
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    strobeDefaultSpeed = parseInt(cfg.strobe_speed || '200', 10);
+  } catch { strobeDefaultSpeed = 200; }
+}
+
+function getStrobeTargets(value) {
+  const filtered = getFilteredChannelMap();
+  const targets = [];
+  for (const fix of filtered) {
+    for (const ch of fix.channels) {
+      // Dedicated strobe channel
+      if (ch.type === 'strobe') {
+        targets.push({ universe: fix.universe, address: ch.dmx_address, val: value });
+        continue;
+      }
+      // Channel with strobe range
+      if (ch.ranges) {
+        const strobeRange = ch.ranges.find(r => r.type === 'strobe');
+        if (strobeRange) {
+          // Map 0-255 slider value into the range's min–max
+          const mapped = value === 0
+            ? 0 // off → send 0 (typically "no function" range)
+            : Math.round(strobeRange.min + (value / 255) * (strobeRange.max - strobeRange.min));
+          targets.push({ universe: fix.universe, address: ch.dmx_address, val: mapped });
+        }
+      }
+    }
+  }
+  return targets;
+}
+
+function sendStrobeValue(value) {
+  const targets = getStrobeTargets(value);
+  const byUniverse = {};
+  for (const t of targets) {
+    if (!byUniverse[t.universe]) byUniverse[t.universe] = [];
+    byUniverse[t.universe].push({ ch: t.address, val: t.val });
+  }
+  for (const [u, channels] of Object.entries(byUniverse)) {
+    fetch('/api/dmx/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ universe: +u, channels }),
+    });
+  }
+}
+
+document.getElementById('qaStrobeApply').addEventListener('click', () => {
+  const val = +document.getElementById('qaStrobeSpeed').value;
+  sendStrobeValue(val);
+  updateStrobeStatus();
+});
+
+// Live-send as slider moves
+document.getElementById('qaStrobeSpeed').addEventListener('input', () => {
+  const val = +document.getElementById('qaStrobeSpeed').value;
+  document.getElementById('qaStrobeSpeedVal').textContent = val;
+  sendStrobeValue(val);
+});
+
+document.getElementById('qaStrobeOff').addEventListener('click', () => {
+  document.getElementById('qaStrobeSpeed').value = 0;
+  document.getElementById('qaStrobeSpeedVal').textContent = '0';
+  sendStrobeValue(0);
+  updateStrobeStatus();
+});
+
+function updateStrobeStatus() {
+  const filtered = getFilteredChannelMap();
+  let dedicatedCount = 0;
+  let rangeCount = 0;
+  for (const fix of filtered) {
+    for (const ch of fix.channels) {
+      if (ch.type === 'strobe') dedicatedCount++;
+      else if (ch.ranges && ch.ranges.find(r => r.type === 'strobe')) rangeCount++;
+    }
+  }
+  const parts = [];
+  if (dedicatedCount) parts.push(`${dedicatedCount} strobe ch`);
+  if (rangeCount) parts.push(`${rangeCount} range-mapped ch`);
+  document.getElementById('qaStrobeStatus').textContent = parts.length
+    ? parts.join(', ')
+    : 'No strobe channels found';
+}
+
 // ─── Movement Presets ─────────────────────────────────────────────────
 function getMoveTargets(type) {
   const targets = [];
@@ -3099,6 +3646,10 @@ async function loadQuickActions() {
   buildQaGrid('qaEffectsGrid', QA_EFFECTS);
   renderCustomColorGrid();
   buildMoveGrid();
+  await loadStrobeConfig();
+  document.getElementById('qaStrobeSpeed').value = strobeDefaultSpeed;
+  document.getElementById('qaStrobeSpeedVal').textContent = strobeDefaultSpeed;
+  updateStrobeStatus();
   bindQuickActionButtons();
 
   const totalFixtures = filtered.length;
@@ -3427,6 +3978,447 @@ function getFilteredChannelMap() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  Lighting Config
+// ═══════════════════════════════════════════════════════════════
+async function loadLightingConfig() {
+  const config = await fetch('/api/config').then(r => r.json());
+  const speed = parseInt(config.strobe_speed || '200', 10);
+  document.getElementById('cfgStrobeSpeed').value = speed;
+  document.getElementById('cfgStrobeSpeedVal').textContent = speed;
+
+  // Count strobe channels from fixture map
+  try {
+    const map = await fetch('/api/fixture-channel-map').then(r => r.json());
+    let dedicated = 0, rangeMapped = 0;
+    for (const fix of map) {
+      for (const ch of fix.channels) {
+        if (ch.type === 'strobe') dedicated++;
+        else if (ch.ranges && ch.ranges.find(r => r.type === 'strobe')) rangeMapped++;
+      }
+    }
+    const parts = [];
+    if (dedicated) parts.push(`${dedicated} dedicated`);
+    if (rangeMapped) parts.push(`${rangeMapped} range-mapped`);
+    document.getElementById('cfgStrobeChannelCount').textContent = parts.length
+      ? parts.join(', ') + ' strobe channel(s)'
+      : 'No strobe channels found — add fixtures with strobe channels or strobe ranges';
+  } catch {
+    document.getElementById('cfgStrobeChannelCount').textContent = '—';
+  }
+}
+
+document.getElementById('cfgStrobeSpeed').addEventListener('input', () => {
+  document.getElementById('cfgStrobeSpeedVal').textContent = document.getElementById('cfgStrobeSpeed').value;
+});
+
+document.getElementById('cfgStrobeSave').addEventListener('click', () => {
+  const val = document.getElementById('cfgStrobeSpeed').value;
+  strobeDefaultSpeed = +val;
+  saveConfigBatch([['strobe_speed', val]], 'cfgStrobeSave');
+});
+
+document.getElementById('cfgStrobeTest').addEventListener('click', () => {
+  const val = +document.getElementById('cfgStrobeSpeed').value;
+  sendStrobeValue(val);
+});
+
+document.getElementById('cfgStrobeOff').addEventListener('click', () => {
+  sendStrobeValue(0);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Mover Presets Config
+// ═══════════════════════════════════════════════════════════════
+let moverPresets = [];
+let moverFixtures = []; // fixtures with pan/tilt
+let moverPan = 128, moverTilt = 128;
+
+async function loadMoverConfig() {
+  // Load presets
+  try { moverPresets = await fetch('/api/mover-presets').then(r => r.json()); } catch { moverPresets = []; }
+
+  // Load fixtures with pan or tilt channels
+  try {
+    const map = await fetch('/api/fixture-channel-map').then(r => r.json());
+    moverFixtures = map.filter(f =>
+      f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt' || ch.type === 'pan_fine' || ch.type === 'tilt_fine')
+    );
+  } catch { moverFixtures = []; }
+
+  renderMoverFixtureList();
+  renderMoverPresetList();
+  updateXYPad(moverPan, moverTilt);
+}
+
+// ─── XY Pad ───────────────────────────────────────────────────────
+function updateXYPad(pan, tilt) {
+  moverPan = Math.max(0, Math.min(255, Math.round(pan)));
+  moverTilt = Math.max(0, Math.min(255, Math.round(tilt)));
+  const pad = document.getElementById('moverXYPad');
+  const pctX = (moverPan / 255) * 100;
+  const pctY = (moverTilt / 255) * 100;
+  document.getElementById('xyDot').style.left = pctX + '%';
+  document.getElementById('xyDot').style.top = pctY + '%';
+  document.getElementById('xyCrossH').style.top = pctY + '%';
+  document.getElementById('xyCrossV').style.left = pctX + '%';
+  document.getElementById('xyPanVal').textContent = moverPan;
+  document.getElementById('xyTiltVal').textContent = moverTilt;
+  document.getElementById('moverPanInput').value = moverPan;
+  document.getElementById('moverTiltInput').value = moverTilt;
+}
+
+function xyPadHandler(e) {
+  const pad = document.getElementById('moverXYPad');
+  const rect = pad.getBoundingClientRect();
+  let clientX, clientY;
+  if (e.touches) {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  } else {
+    clientX = e.clientX;
+    clientY = e.clientY;
+  }
+  const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+  updateXYPad(x * 255, y * 255);
+}
+
+(function initXYPad() {
+  const pad = document.getElementById('moverXYPad');
+  let dragging = false;
+
+  pad.addEventListener('mousedown', (e) => { dragging = true; xyPadHandler(e); });
+  window.addEventListener('mousemove', (e) => { if (dragging) xyPadHandler(e); });
+  window.addEventListener('mouseup', () => { dragging = false; });
+
+  pad.addEventListener('touchstart', (e) => { e.preventDefault(); dragging = true; xyPadHandler(e); }, { passive: false });
+  window.addEventListener('touchmove', (e) => { if (dragging) { e.preventDefault(); xyPadHandler(e); } }, { passive: false });
+  window.addEventListener('touchend', () => { dragging = false; });
+})();
+
+// Manual pan/tilt inputs
+document.getElementById('moverPanInput').addEventListener('change', () => {
+  updateXYPad(+document.getElementById('moverPanInput').value, moverTilt);
+});
+document.getElementById('moverTiltInput').addEventListener('change', () => {
+  updateXYPad(moverPan, +document.getElementById('moverTiltInput').value);
+});
+
+// Target radio
+document.querySelectorAll('input[name=moverTarget]').forEach(r => {
+  r.addEventListener('change', () => {
+    document.getElementById('moverFixtureList').style.display =
+      document.querySelector('input[name=moverTarget]:checked').value === 'select' ? '' : 'none';
+  });
+});
+
+// ─── Fixture list for selection ───────────────────────────────────────
+function renderMoverFixtureList() {
+  const list = document.getElementById('moverFixtureList');
+  list.innerHTML = '';
+  if (moverFixtures.length === 0) {
+    list.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">No fixtures with pan/tilt channels found.</span>';
+    return;
+  }
+  for (const fix of moverFixtures) {
+    const item = document.createElement('label');
+    item.className = 'mover-fixture-item';
+    item.innerHTML = `<input type="checkbox" value="${fix.id}" checked>
+      <span class="fix-name">${esc(fix.name)}</span>
+      <span style="font-size:10px;color:var(--text-dim)">${fix.type_name} • U${fix.universe} @${fix.address}</span>`;
+    list.appendChild(item);
+  }
+}
+
+function getSelectedMoverFixtures() {
+  const mode = document.querySelector('input[name=moverTarget]:checked').value;
+  if (mode === 'all') return null; // null = all
+  const checks = document.querySelectorAll('#moverFixtureList input[type=checkbox]:checked');
+  return Array.from(checks).map(c => +c.value);
+}
+
+// ─── Test position ───────────────────────────────────────────────────
+function sendMoverTestPosition(pan, tilt, fixtureIds) {
+  if (!qaChannelMap.length) return;
+  const fixtures = fixtureIds
+    ? qaChannelMap.filter(f => fixtureIds.includes(f.id))
+    : qaChannelMap.filter(f => f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt'));
+
+  const byUniverse = {};
+  for (const fix of fixtures) {
+    const u = fix.universe;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of fix.channels) {
+      if (ch.type === 'pan' || ch.type === 'pan_fine') byUniverse[u].push({ ch: ch.dmx_address, val: pan });
+      if (ch.type === 'tilt' || ch.type === 'tilt_fine') byUniverse[u].push({ ch: ch.dmx_address, val: tilt });
+    }
+  }
+  for (const [u, channels] of Object.entries(byUniverse)) {
+    fetch('/api/dmx/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ universe: +u, channels }),
+    });
+  }
+}
+
+document.getElementById('btnTestMoverPos').addEventListener('click', () => {
+  sendMoverTestPosition(moverPan, moverTilt, getSelectedMoverFixtures());
+});
+
+// ─── Save / Edit / Delete presets ────────────────────────────────────
+document.getElementById('btnSaveMoverPreset').addEventListener('click', async () => {
+  const name = document.getElementById('moverPresetName').value.trim();
+  if (!name) { alert('Enter a preset name.'); return; }
+  const fixtureIds = getSelectedMoverFixtures();
+  const editId = document.getElementById('moverPresetEditId').value;
+  const body = { name, pan: moverPan, tilt: moverTilt, fixture_ids: fixtureIds };
+
+  if (editId) {
+    await fetch(`/api/mover-presets/${editId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+  } else {
+    await fetch('/api/mover-presets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+  }
+  resetMoverForm();
+  await loadMoverConfig();
+});
+
+document.getElementById('btnCancelMoverEdit').addEventListener('click', () => {
+  resetMoverForm();
+});
+
+function resetMoverForm() {
+  document.getElementById('moverPresetEditId').value = '';
+  document.getElementById('moverPresetName').value = '';
+  document.getElementById('btnCancelMoverEdit').style.display = 'none';
+  document.getElementById('btnSaveMoverPreset').textContent = 'Save Preset';
+  updateXYPad(128, 128);
+  document.querySelector('input[name=moverTarget][value=all]').checked = true;
+  document.getElementById('moverFixtureList').style.display = 'none';
+  // Re-check all fixtures
+  document.querySelectorAll('#moverFixtureList input[type=checkbox]').forEach(c => { c.checked = true; });
+}
+
+function editMoverPreset(id) {
+  const preset = moverPresets.find(p => p.id === id);
+  if (!preset) return;
+  document.getElementById('moverPresetEditId').value = preset.id;
+  document.getElementById('moverPresetName').value = preset.name;
+  document.getElementById('btnSaveMoverPreset').textContent = 'Update Preset';
+  document.getElementById('btnCancelMoverEdit').style.display = '';
+  updateXYPad(preset.pan, preset.tilt);
+
+  if (preset.fixture_ids) {
+    document.querySelector('input[name=moverTarget][value=select]').checked = true;
+    document.getElementById('moverFixtureList').style.display = '';
+    const idSet = new Set(preset.fixture_ids);
+    document.querySelectorAll('#moverFixtureList input[type=checkbox]').forEach(c => {
+      c.checked = idSet.has(+c.value);
+    });
+  } else {
+    document.querySelector('input[name=moverTarget][value=all]').checked = true;
+    document.getElementById('moverFixtureList').style.display = 'none';
+    document.querySelectorAll('#moverFixtureList input[type=checkbox]').forEach(c => { c.checked = true; });
+  }
+}
+
+async function deleteMoverPreset(id) {
+  if (!confirm('Delete this mover preset?')) return;
+  await fetch(`/api/mover-presets/${id}`, { method: 'DELETE' });
+  await loadMoverConfig();
+}
+
+// ─── Render preset list ─────────────────────────────────────────────
+function renderMoverPresetList() {
+  const list = document.getElementById('moverPresetList');
+  list.innerHTML = '';
+  if (moverPresets.length === 0) {
+    list.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">No presets saved yet.</span>';
+    return;
+  }
+  for (const p of moverPresets) {
+    const card = document.createElement('div');
+    card.className = 'mover-preset-card';
+    const targetLabel = p.fixture_ids
+      ? `${p.fixture_ids.length} fixture(s)`
+      : 'All movers';
+    card.innerHTML = `
+      <div class="mover-preset-card-header">
+        <span class="mover-preset-card-name">${esc(p.name)}</span>
+        <span class="mover-preset-card-actions">
+          <button class="mp-edit" title="Edit" onclick="editMoverPreset(${p.id})">✎</button>
+          <button class="mp-delete" title="Delete" onclick="deleteMoverPreset(${p.id})">&times;</button>
+        </span>
+      </div>
+      <div class="mover-preset-card-meta">
+        <span>Pan: <span class="mp-val">${p.pan}</span></span>
+        <span>Tilt: <span class="mp-val">${p.tilt}</span></span>
+        <span>${targetLabel}</span>
+      </div>`;
+    // Click card to apply position
+    card.addEventListener('click', (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+      sendMoverTestPosition(p.pan, p.tilt, p.fixture_ids);
+      updateXYPad(p.pan, p.tilt);
+      list.querySelectorAll('.mover-preset-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+    });
+    list.appendChild(card);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OS2L Button Mappings CRUD
+// ═══════════════════════════════════════════════════════════════
+const ACTION_TYPE_LABELS = {
+  blackout: 'Blackout',
+  full_on: 'Full On',
+  set_channels: 'Set Channels',
+  scene: 'Scene',
+  strobe: 'Strobe',
+};
+
+const TOGGLE_MODE_LABELS = {
+  fire: 'Fire',
+  toggle: 'Toggle',
+};
+
+const ACTION_HINTS = {
+  blackout: 'No additional data needed — all channels will be set to 0.',
+  full_on: 'No additional data needed — all channels will be set to 255. Optionally set universe: <code>{"universe":1}</code>',
+  set_channels: 'Specify universe and channels:<br><code>{"universe":1,"channels":[{"ch":1,"val":255},{"ch":2,"val":128}]}</code>',
+  scene: 'Multi-fixture preset:<br><code>{"fixtures":[{"universe":1,"channels":[{"ch":1,"val":255}]}]}</code>',
+  strobe: 'Set a strobe channel:<br><code>{"universe":1,"channel":7,"value":255}</code>',
+};
+
+async function loadButtonMaps() {
+  const maps = await (await fetch('/api/os2l-button-maps')).json();
+  const tbody = document.getElementById('btnMapsTableBody');
+  const enabled = maps.filter(m => m.enabled).length;
+  document.getElementById('btnMapsEnabledCount').textContent = enabled;
+  document.getElementById('btnMapsTotalCount').textContent = maps.length;
+
+  tbody.innerHTML = maps.map(m => {
+    const disClass = m.enabled ? '' : ' sub-disabled';
+    const actionLabel = ACTION_TYPE_LABELS[m.action_type] || m.action_type;
+    const modeLabel = TOGGLE_MODE_LABELS[m.toggle_mode] || m.toggle_mode || 'Fire';
+    const modeClass = m.toggle_mode === 'toggle' ? 'soundswitch' : 'custom';
+    return `<tr class="${disClass}">
+      <td><input type="checkbox" class="sub-toggle" ${m.enabled ? 'checked' : ''} onchange="toggleBtnMap(${m.id})"></td>
+      <td>${esc(m.name)}</td>
+      <td><span class="sub-cat">${esc(m.os2l_event)}</span></td>
+      <td><span class="sub-trigger">${esc(m.os2l_value)}</span></td>
+      <td><span class="sub-cat custom">${esc(actionLabel)}</span></td>
+      <td><span class="sub-cat ${modeClass}">${esc(modeLabel)}</span></td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="testBtnMap(${m.id})" title="Test this action">&#9654;</button>
+        <button class="btn btn-secondary btn-sm" onclick="editBtnMap(${m.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBtnMap(${m.id}, '${esc(m.name)}')">Del</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function updateActionHint() {
+  const type = document.getElementById('bmActionType').value;
+  const group = document.getElementById('bmChannelsGroup');
+  const hint = document.getElementById('bmActionHint');
+  if (type === 'blackout' || type === 'full_on') {
+    group.style.display = 'none';
+  } else {
+    group.style.display = '';
+  }
+  hint.innerHTML = ACTION_HINTS[type] || '';
+}
+
+document.getElementById('bmActionType').addEventListener('change', updateActionHint);
+
+document.getElementById('btnAddBtnMap').addEventListener('click', () => openBtnMapModal());
+
+async function openBtnMapModal(mapId) {
+  document.getElementById('btnMapEditId').value = mapId || '';
+  document.getElementById('btnMapModalTitle').textContent = mapId ? 'Edit Button Mapping' : 'Add Button Mapping';
+  document.getElementById('btnMapError').textContent = '';
+
+  if (mapId) {
+    const m = await (await fetch(`/api/os2l-button-maps/${mapId}`)).json();
+    document.getElementById('bmName').value = m.name;
+    document.getElementById('bmOs2lEvent').value = m.os2l_event;
+    document.getElementById('bmOs2lValue').value = m.os2l_value;
+    document.getElementById('bmActionType').value = m.action_type;
+    document.getElementById('bmToggleMode').value = m.toggle_mode || 'fire';
+    document.getElementById('bmActionData').value = m.action_data || '{}';
+  } else {
+    document.getElementById('bmName').value = '';
+    document.getElementById('bmOs2lEvent').value = 'btn';
+    document.getElementById('bmOs2lValue').value = '';
+    document.getElementById('bmActionType').value = 'blackout';
+    document.getElementById('bmToggleMode').value = 'fire';
+    document.getElementById('bmActionData').value = '{}';
+  }
+  updateActionHint();
+  document.getElementById('btnMapModal').classList.add('open');
+}
+
+window.editBtnMap = (id) => openBtnMapModal(id);
+
+window.deleteBtnMap = async (id, name) => {
+  if (!confirm(`Delete button map "${name}"?`)) return;
+  await fetch(`/api/os2l-button-maps/${id}`, { method: 'DELETE' });
+  loadButtonMaps();
+};
+
+window.toggleBtnMap = async (id) => {
+  await fetch(`/api/os2l-button-maps/${id}/toggle`, { method: 'POST' });
+  loadButtonMaps();
+};
+
+window.testBtnMap = async (id) => {
+  const res = await fetch(`/api/os2l-button-maps/test/${id}`, { method: 'POST' });
+  const data = await res.json();
+  if (data.ok) {
+    console.log(`[OS2L] Tested button map: ${data.tested}`);
+  }
+};
+
+document.getElementById('btnSaveBtnMap').addEventListener('click', async () => {
+  const editId = document.getElementById('btnMapEditId').value;
+  const name = document.getElementById('bmName').value.trim();
+  const os2l_event = document.getElementById('bmOs2lEvent').value;
+  const os2l_value = document.getElementById('bmOs2lValue').value.trim();
+  const action_type = document.getElementById('bmActionType').value;
+  const toggle_mode = document.getElementById('bmToggleMode').value;
+  let action_data = document.getElementById('bmActionData').value.trim() || '{}';
+
+  if (!name) return showError('btnMapError', 'Name is required');
+  if (!os2l_value) return showError('btnMapError', 'OS2L value is required');
+
+  // Validate JSON for action data (if not blackout/full_on)
+  if (action_type !== 'blackout' && action_type !== 'full_on') {
+    try {
+      JSON.parse(action_data);
+    } catch (e) {
+      return showError('btnMapError', 'Action data must be valid JSON');
+    }
+  }
+
+  const body = { name, os2l_event, os2l_value, action_type, action_data, toggle_mode };
+  const url = editId ? `/api/os2l-button-maps/${editId}` : '/api/os2l-button-maps';
+  const method = editId ? 'PUT' : 'POST';
+
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) return showError('btnMapError', data.error);
+
+  closeModal('btnMapModal');
+  loadButtonMaps();
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  Helpers
 // ═══════════════════════════════════════════════════════════════
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -3441,6 +4433,7 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
 //  Boot
 // ═══════════════════════════════════════════════════════════════
 loadGroups();
+loadButtonMaps();
 connect();
 </script>
 </body>

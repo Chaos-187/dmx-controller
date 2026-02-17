@@ -56,6 +56,7 @@ function init() {
       default_value   INTEGER DEFAULT 0,
       min_value       INTEGER DEFAULT 0,
       max_value       INTEGER DEFAULT 255,
+      ranges          TEXT    DEFAULT NULL,
       UNIQUE(fixture_type_id, channel_number)
     );
 
@@ -131,7 +132,46 @@ function init() {
       fixture_id INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
       UNIQUE(group_id, fixture_id)
     );
+
+    CREATE TABLE IF NOT EXISTS mover_presets (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      pan         INTEGER NOT NULL DEFAULT 128,
+      tilt        INTEGER NOT NULL DEFAULT 128,
+      fixture_ids TEXT    DEFAULT NULL,
+      sort_order  INTEGER DEFAULT 0,
+      created_at  TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS os2l_button_maps (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      os2l_event  TEXT    NOT NULL DEFAULT 'btn',
+      os2l_value  TEXT    NOT NULL DEFAULT '',
+      action_type TEXT    NOT NULL DEFAULT 'blackout',
+      action_data TEXT    DEFAULT '{}',
+      toggle_mode TEXT    NOT NULL DEFAULT 'fire',
+      enabled     INTEGER DEFAULT 1,
+      sort_order  INTEGER DEFAULT 0,
+      created_at  TEXT    DEFAULT (datetime('now'))
+    );
   `);
+
+  // Migrate: add toggle_mode column if missing (existing databases)
+  try {
+    db.prepare("SELECT toggle_mode FROM os2l_button_maps LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE os2l_button_maps ADD COLUMN toggle_mode TEXT NOT NULL DEFAULT 'fire'");
+    console.log('[DB] Migrated os2l_button_maps: added toggle_mode column');
+  }
+
+  // Migrate: add ranges column to fixture_type_channels if missing
+  try {
+    db.prepare("SELECT ranges FROM fixture_type_channels LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixture_type_channels ADD COLUMN ranges TEXT DEFAULT NULL");
+    console.log('[DB] Migrated fixture_type_channels: added ranges column');
+  }
 
   // Seed subscriptions if empty
   const subCount = db.prepare('SELECT COUNT(*) as c FROM subscriptions').get().c;
@@ -299,69 +339,109 @@ function seedDefaults() {
     `INSERT INTO fixture_types (name, manufacturer, category, channel_count) VALUES (?, ?, ?, ?)`
   );
   const insertCh = db.prepare(
-    `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value)
-     VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, ranges)
+     VALUES (?, ?, ?, ?, ?, ?)`
   );
+  /** Helper: insert channel without ranges */
+  const ch = (typeId, num, name, type, def) => insertCh.run(typeId, num, name, type, def || 0, null);
+  /** Helper: insert channel with ranges */
+  const chR = (typeId, num, name, type, def, ranges) => insertCh.run(typeId, num, name, type, def || 0, JSON.stringify(ranges));
 
   const seed = db.transaction(() => {
     // 1 — Generic RGB Par (3ch)
     let r = insertType.run('Generic RGB Par', 'Generic', 'par', 3);
     let id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Red', 'red', 0);
-    insertCh.run(id, 2, 'Green', 'green', 0);
-    insertCh.run(id, 3, 'Blue', 'blue', 0);
+    ch(id, 1, 'Red', 'red', 0);
+    ch(id, 2, 'Green', 'green', 0);
+    ch(id, 3, 'Blue', 'blue', 0);
 
     // 2 — Generic RGBW Par (4ch)
     r = insertType.run('Generic RGBW Par', 'Generic', 'par', 4);
     id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Red', 'red', 0);
-    insertCh.run(id, 2, 'Green', 'green', 0);
-    insertCh.run(id, 3, 'Blue', 'blue', 0);
-    insertCh.run(id, 4, 'White', 'white', 0);
+    ch(id, 1, 'Red', 'red', 0);
+    ch(id, 2, 'Green', 'green', 0);
+    ch(id, 3, 'Blue', 'blue', 0);
+    ch(id, 4, 'White', 'white', 0);
 
     // 3 — Generic Dimmer (1ch)
     r = insertType.run('Generic Dimmer', 'Generic', 'dimmer', 1);
     id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Dimmer', 'dimmer', 0);
+    ch(id, 1, 'Dimmer', 'dimmer', 0);
 
     // 4 — RGB Par + Dimmer (4ch)
     r = insertType.run('RGB Par + Dimmer', 'Generic', 'par', 4);
     id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Dimmer', 'dimmer', 0);
-    insertCh.run(id, 2, 'Red', 'red', 0);
-    insertCh.run(id, 3, 'Green', 'green', 0);
-    insertCh.run(id, 4, 'Blue', 'blue', 0);
+    ch(id, 1, 'Dimmer', 'dimmer', 0);
+    ch(id, 2, 'Red', 'red', 0);
+    ch(id, 3, 'Green', 'green', 0);
+    ch(id, 4, 'Blue', 'blue', 0);
 
-    // 5 — Moving Head (16ch)
+    // 5 — Generic Moving Head (16ch)
     r = insertType.run('Generic Moving Head', 'Generic', 'moving_head', 16);
     id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Pan', 'pan', 128);
-    insertCh.run(id, 2, 'Pan Fine', 'pan_fine', 0);
-    insertCh.run(id, 3, 'Tilt', 'tilt', 128);
-    insertCh.run(id, 4, 'Tilt Fine', 'tilt_fine', 0);
-    insertCh.run(id, 5, 'Speed', 'speed', 0);
-    insertCh.run(id, 6, 'Dimmer', 'dimmer', 0);
-    insertCh.run(id, 7, 'Strobe', 'strobe', 0);
-    insertCh.run(id, 8, 'Red', 'red', 0);
-    insertCh.run(id, 9, 'Green', 'green', 0);
-    insertCh.run(id, 10, 'Blue', 'blue', 0);
-    insertCh.run(id, 11, 'White', 'white', 0);
-    insertCh.run(id, 12, 'Color Wheel', 'color_wheel', 0);
-    insertCh.run(id, 13, 'Gobo', 'gobo', 0);
-    insertCh.run(id, 14, 'Gobo Rotation', 'gobo_rotation', 0);
-    insertCh.run(id, 15, 'Prism', 'prism', 0);
-    insertCh.run(id, 16, 'Focus', 'focus', 128);
+    ch(id, 1, 'Pan', 'pan', 128);
+    ch(id, 2, 'Pan Fine', 'pan_fine', 0);
+    ch(id, 3, 'Tilt', 'tilt', 128);
+    ch(id, 4, 'Tilt Fine', 'tilt_fine', 0);
+    ch(id, 5, 'Speed', 'speed', 0);
+    ch(id, 6, 'Dimmer', 'dimmer', 0);
+    ch(id, 7, 'Strobe', 'strobe', 0);
+    ch(id, 8, 'Red', 'red', 0);
+    ch(id, 9, 'Green', 'green', 0);
+    ch(id, 10, 'Blue', 'blue', 0);
+    ch(id, 11, 'White', 'white', 0);
+    ch(id, 12, 'Color Wheel', 'color_wheel', 0);
+    ch(id, 13, 'Gobo', 'gobo', 0);
+    ch(id, 14, 'Gobo Rotation', 'gobo_rotation', 0);
+    ch(id, 15, 'Prism', 'prism', 0);
+    ch(id, 16, 'Focus', 'focus', 128);
 
     // 6 — Strobe (2ch)
     r = insertType.run('Generic Strobe', 'Generic', 'strobe', 2);
     id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Dimmer', 'dimmer', 0);
-    insertCh.run(id, 2, 'Strobe Speed', 'strobe', 0);
+    ch(id, 1, 'Dimmer', 'dimmer', 0);
+    ch(id, 2, 'Strobe Speed', 'strobe', 0);
 
     // 7 — Fog Machine (1ch)
     r = insertType.run('Generic Fog Machine', 'Generic', 'fog', 1);
     id = r.lastInsertRowid;
-    insertCh.run(id, 1, 'Output', 'dimmer', 0);
+    ch(id, 1, 'Output', 'dimmer', 0);
+
+    // 8 — 14ch Moving Head with ranges (matches common RGBW moving head spec)
+    r = insertType.run('Moving Head 14ch', 'Generic', 'moving_head', 14);
+    id = r.lastInsertRowid;
+    ch(id, 1, 'Pan', 'pan', 128);
+    ch(id, 2, 'Pan Fine', 'pan_fine', 0);
+    ch(id, 3, 'Tilt', 'tilt', 128);
+    ch(id, 4, 'Tilt Fine', 'tilt_fine', 0);
+    ch(id, 5, 'Pan/Tilt Speed', 'speed', 0);
+    chR(id, 6, 'Dimmer / Strobe', 'dimmer', 0, [
+      { min: 0, max: 7, label: 'No function', type: 'other' },
+      { min: 8, max: 134, label: 'Dimmer', type: 'dimmer' },
+      { min: 135, max: 239, label: 'Strobe 0-40Hz', type: 'strobe' },
+      { min: 240, max: 255, label: 'Open', type: 'other' }
+    ]);
+    ch(id, 7, 'Red', 'red', 0);
+    ch(id, 8, 'Green', 'green', 0);
+    ch(id, 9, 'Blue', 'blue', 0);
+    ch(id, 10, 'White', 'white', 0);
+    chR(id, 11, 'Color Mix/Effect', 'color_wheel', 0, [
+      { min: 0, max: 223, label: 'Color Mixed', type: 'color_wheel' },
+      { min: 224, max: 240, label: 'Gradient slow→fast', type: 'macro' },
+      { min: 241, max: 255, label: 'Color jump slow→fast', type: 'macro' }
+    ]);
+    ch(id, 12, 'Color Speed', 'speed', 0);
+    chR(id, 13, 'Movement/Effect', 'macro', 0, [
+      { min: 0, max: 3, label: 'DMX control', type: 'other' },
+      { min: 4, max: 102, label: 'Auto 1', type: 'macro' },
+      { min: 103, max: 152, label: 'Auto 2', type: 'macro' },
+      { min: 153, max: 203, label: 'Auto 3', type: 'macro' },
+      { min: 204, max: 255, label: 'Sound', type: 'macro' }
+    ]);
+    chR(id, 14, 'Reset', 'other', 0, [
+      { min: 0, max: 254, label: 'No function', type: 'other' },
+      { min: 255, max: 255, label: 'Factory Reset', type: 'other' }
+    ]);
   });
 
   seed();
@@ -375,6 +455,9 @@ function getFixtureTypes() {
     t.channels = db.prepare(
       'SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number'
     ).all(t.id);
+    for (const ch of t.channels) {
+      ch.ranges = ch.ranges ? JSON.parse(ch.ranges) : null;
+    }
   }
   return types;
 }
@@ -385,6 +468,9 @@ function getFixtureType(id) {
   t.channels = db.prepare(
     'SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number'
   ).all(t.id);
+  for (const ch of t.channels) {
+    ch.ranges = ch.ranges ? JSON.parse(ch.ranges) : null;
+  }
   return t;
 }
 
@@ -397,12 +483,13 @@ function createFixtureType({ name, manufacturer, category, channels }) {
   const id = r.lastInsertRowid;
   if (channels && channels.length) {
     const ins = db.prepare(
-      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertAll = db.transaction(() => {
       for (const ch of channels) {
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255);
+        const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
+        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson);
       }
     });
     insertAll();
@@ -423,11 +510,12 @@ function updateFixtureType(id, { name, manufacturer, category, channels }) {
     if (channels) {
       db.prepare('DELETE FROM fixture_type_channels WHERE fixture_type_id = ?').run(id);
       const ins = db.prepare(
-        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const ch of channels) {
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255);
+        const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
+        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson);
       }
     }
   });
@@ -755,7 +843,7 @@ function getFixtureChannelMap() {
 
   return fixtures.map(f => {
     const channels = db.prepare(
-      'SELECT channel_number, name, type FROM fixture_type_channels WHERE fixture_type_id = (SELECT fixture_type_id FROM fixtures WHERE id = ?) ORDER BY channel_number'
+      'SELECT channel_number, name, type, ranges FROM fixture_type_channels WHERE fixture_type_id = (SELECT fixture_type_id FROM fixtures WHERE id = ?) ORDER BY channel_number'
     ).all(f.id);
     const group_ids = db.prepare(
       'SELECT group_id FROM fixture_group_members WHERE fixture_id = ?'
@@ -768,6 +856,7 @@ function getFixtureChannelMap() {
         channel_number: ch.channel_number,
         name: ch.name,
         type: ch.type,
+        ranges: ch.ranges ? JSON.parse(ch.ranges) : null,
       })),
     };
   });
@@ -826,6 +915,108 @@ function setGroupFixtures(groupId, fixtureIds) {
   return getGroup(groupId);
 }
 
+// ─── Mover Presets CRUD ─────────────────────────────────────────────────────
+
+function getMoverPresets() {
+  const rows = db.prepare('SELECT * FROM mover_presets ORDER BY sort_order, id').all();
+  return rows.map(r => ({ ...r, fixture_ids: r.fixture_ids ? JSON.parse(r.fixture_ids) : null }));
+}
+
+function getMoverPreset(id) {
+  const r = db.prepare('SELECT * FROM mover_presets WHERE id = ?').get(id);
+  if (!r) return null;
+  return { ...r, fixture_ids: r.fixture_ids ? JSON.parse(r.fixture_ids) : null };
+}
+
+function createMoverPreset({ name, pan, tilt, fixture_ids }) {
+  if (!name || !name.trim()) return { error: 'Name is required' };
+  const result = db.prepare(
+    'INSERT INTO mover_presets (name, pan, tilt, fixture_ids) VALUES (?, ?, ?, ?)'
+  ).run(name.trim(), pan ?? 128, tilt ?? 128, fixture_ids ? JSON.stringify(fixture_ids) : null);
+  return getMoverPreset(result.lastInsertRowid);
+}
+
+function updateMoverPreset(id, { name, pan, tilt, fixture_ids }) {
+  const existing = db.prepare('SELECT * FROM mover_presets WHERE id = ?').get(id);
+  if (!existing) return null;
+  db.prepare(
+    'UPDATE mover_presets SET name = ?, pan = ?, tilt = ?, fixture_ids = ? WHERE id = ?'
+  ).run(
+    name !== undefined ? name.trim() : existing.name,
+    pan !== undefined ? pan : existing.pan,
+    tilt !== undefined ? tilt : existing.tilt,
+    fixture_ids !== undefined ? (fixture_ids ? JSON.stringify(fixture_ids) : null) : existing.fixture_ids,
+    id
+  );
+  return getMoverPreset(id);
+}
+
+function deleteMoverPreset(id) {
+  db.prepare('DELETE FROM mover_presets WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+// ─── OS2L Button Maps CRUD ──────────────────────────────────────────────────
+
+function getButtonMaps() {
+  return db.prepare('SELECT * FROM os2l_button_maps ORDER BY sort_order, id').all();
+}
+
+function getEnabledButtonMaps() {
+  return db.prepare('SELECT * FROM os2l_button_maps WHERE enabled = 1 ORDER BY sort_order, id').all();
+}
+
+function getButtonMap(id) {
+  return db.prepare('SELECT * FROM os2l_button_maps WHERE id = ?').get(id);
+}
+
+function createButtonMap({ name, os2l_event, os2l_value, action_type, action_data, toggle_mode }) {
+  if (!name || !name.trim()) return { error: 'Name is required' };
+  if (!os2l_value && os2l_value !== '') return { error: 'OS2L value is required' };
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM os2l_button_maps').get().next;
+  const r = db.prepare(
+    `INSERT INTO os2l_button_maps (name, os2l_event, os2l_value, action_type, action_data, toggle_mode, enabled, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
+  ).run(
+    name.trim(),
+    os2l_event || 'btn',
+    os2l_value || '',
+    action_type || 'blackout',
+    typeof action_data === 'object' ? JSON.stringify(action_data) : (action_data || '{}'),
+    toggle_mode || 'fire',
+    maxOrder
+  );
+  return db.prepare('SELECT * FROM os2l_button_maps WHERE id = ?').get(r.lastInsertRowid);
+}
+
+function updateButtonMap(id, { name, os2l_event, os2l_value, action_type, action_data, toggle_mode, enabled }) {
+  const existing = db.prepare('SELECT * FROM os2l_button_maps WHERE id = ?').get(id);
+  if (!existing) return null;
+  db.prepare(
+    `UPDATE os2l_button_maps SET name=?, os2l_event=?, os2l_value=?, action_type=?, action_data=?, toggle_mode=?, enabled=? WHERE id=?`
+  ).run(
+    name !== undefined ? name.trim() : existing.name,
+    os2l_event !== undefined ? os2l_event : existing.os2l_event,
+    os2l_value !== undefined ? os2l_value : existing.os2l_value,
+    action_type !== undefined ? action_type : existing.action_type,
+    action_data !== undefined ? (typeof action_data === 'object' ? JSON.stringify(action_data) : action_data) : existing.action_data,
+    toggle_mode !== undefined ? toggle_mode : existing.toggle_mode,
+    enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled,
+    id
+  );
+  return db.prepare('SELECT * FROM os2l_button_maps WHERE id = ?').get(id);
+}
+
+function deleteButtonMap(id) {
+  db.prepare('DELETE FROM os2l_button_maps WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+function toggleButtonMap(id) {
+  db.prepare('UPDATE os2l_button_maps SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE id = ?').run(id);
+  return db.prepare('SELECT * FROM os2l_button_maps WHERE id = ?').get(id);
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -839,4 +1030,6 @@ module.exports = {
   getSubscriptions, getEnabledSubscriptions, createSubscription, updateSubscription, deleteSubscription, toggleSubscription,
   getConfig, setConfig, getAllConfig,
   getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks,
+  getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,
+  getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset,
 };

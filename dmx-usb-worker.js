@@ -439,6 +439,24 @@ function blackout() {
   log('info', '[DMX-USB] Blackout');
 }
 
+let savedDmxBuffer = null;
+
+function saveBuffers() {
+  savedDmxBuffer = Buffer.from(dmxBuffer);
+  log('info', '[DMX-USB] Saved DMX buffer');
+}
+
+function restoreBuffers() {
+  if (savedDmxBuffer) {
+    savedDmxBuffer.copy(dmxBuffer);
+    savedDmxBuffer = null;
+    if (isOpen && device) {
+      sendDmxFrame().catch(() => {});
+    }
+  }
+  log('info', '[DMX-USB] Restored DMX buffer');
+}
+
 // ─── Shutdown ───────────────────────────────────────────────────────────────
 
 async function shutdown() {
@@ -487,6 +505,14 @@ async function handleMessage(msg) {
 
     case 'blackout':
       blackout();
+      break;
+
+    case 'saveBuffers':
+      saveBuffers();
+      break;
+
+    case 'restoreBuffers':
+      restoreBuffers();
       break;
 
     case 'startTx':

@@ -248,12 +248,32 @@ footer {
 
 /* ── Channels Editor ───────────────────────────────── */
 .channels-editor { margin-top: 8px; }
-.ch-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.ch-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
 .ch-row input { width: 50px; }
 .ch-row input.ch-name { flex: 1; width: auto; }
 .ch-row select { width: 120px; }
 .ch-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
 .ch-add { margin-top: 4px; }
+
+/* Channel ranges */
+.ch-main { display: flex; gap: 8px; align-items: center; flex: 1; }
+.ch-ranges-toggle { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; padding: 2px 4px; white-space: nowrap; opacity: .6; transition: all .15s; }
+.ch-ranges-toggle:hover { color: var(--accent); opacity: 1; }
+.ch-ranges-toggle.has-ranges { color: var(--accent); opacity: 1; }
+.ch-ranges-wrap { margin: 0 0 10px 28px; border-left: 2px solid var(--accent); padding: 8px 0 8px 12px; }
+.ch-ranges-wrap table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ch-ranges-wrap th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim); padding: 0 6px 4px 0; font-weight: 500; }
+.ch-ranges-wrap td { padding: 2px 6px 2px 0; vertical-align: middle; }
+.ch-ranges-wrap input, .ch-ranges-wrap select { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 3px; color: var(--text); font-size: 11px; padding: 4px 6px; }
+.ch-ranges-wrap input:focus, .ch-ranges-wrap select:focus { border-color: var(--accent); outline: none; }
+.ch-ranges-wrap input.range-min, .ch-ranges-wrap input.range-max { width: 50px; text-align: center; }
+.ch-ranges-wrap input.range-label { width: 100%; min-width: 80px; }
+.ch-ranges-wrap select { width: 100%; }
+.ch-ranges-wrap .range-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 2px 4px; opacity: .5; transition: all .15s; }
+.ch-ranges-wrap .range-remove:hover { color: var(--danger); opacity: 1; }
+.ch-ranges-wrap .range-actions { display: flex; gap: 8px; margin-top: 6px; }
+.ch-ranges-wrap .range-actions button { font-size: 10px; padding: 3px 8px; }
+.ch-badge.multi { background: linear-gradient(135deg, #2a2a1a, #2a1a2a); border: 1px solid #444; }
 
 /* ── Universe Map ──────────────────────────────────── */
 .universe-bar { display: flex; flex-wrap: wrap; gap: 1px; margin-top: 12px; }
