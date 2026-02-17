@@ -136,9 +136,7 @@ function init() {
     CREATE TABLE IF NOT EXISTS mover_presets (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT    NOT NULL,
-      pan         INTEGER NOT NULL DEFAULT 128,
-      tilt        INTEGER NOT NULL DEFAULT 128,
-      fixture_ids TEXT    DEFAULT NULL,
+      positions   TEXT    NOT NULL DEFAULT '[]',
       sort_order  INTEGER DEFAULT 0,
       created_at  TEXT    DEFAULT (datetime('now'))
     );
@@ -919,33 +917,32 @@ function setGroupFixtures(groupId, fixtureIds) {
 
 function getMoverPresets() {
   const rows = db.prepare('SELECT * FROM mover_presets ORDER BY sort_order, id').all();
-  return rows.map(r => ({ ...r, fixture_ids: r.fixture_ids ? JSON.parse(r.fixture_ids) : null }));
+  return rows.map(r => ({ ...r, positions: JSON.parse(r.positions || '[]') }));
 }
 
 function getMoverPreset(id) {
   const r = db.prepare('SELECT * FROM mover_presets WHERE id = ?').get(id);
   if (!r) return null;
-  return { ...r, fixture_ids: r.fixture_ids ? JSON.parse(r.fixture_ids) : null };
+  return { ...r, positions: JSON.parse(r.positions || '[]') };
 }
 
-function createMoverPreset({ name, pan, tilt, fixture_ids }) {
+function createMoverPreset({ name, positions }) {
   if (!name || !name.trim()) return { error: 'Name is required' };
+  if (!Array.isArray(positions) || positions.length === 0) return { error: 'At least one fixture position is required' };
   const result = db.prepare(
-    'INSERT INTO mover_presets (name, pan, tilt, fixture_ids) VALUES (?, ?, ?, ?)'
-  ).run(name.trim(), pan ?? 128, tilt ?? 128, fixture_ids ? JSON.stringify(fixture_ids) : null);
+    'INSERT INTO mover_presets (name, positions) VALUES (?, ?)'
+  ).run(name.trim(), JSON.stringify(positions));
   return getMoverPreset(result.lastInsertRowid);
 }
 
-function updateMoverPreset(id, { name, pan, tilt, fixture_ids }) {
+function updateMoverPreset(id, { name, positions }) {
   const existing = db.prepare('SELECT * FROM mover_presets WHERE id = ?').get(id);
   if (!existing) return null;
   db.prepare(
-    'UPDATE mover_presets SET name = ?, pan = ?, tilt = ?, fixture_ids = ? WHERE id = ?'
+    'UPDATE mover_presets SET name = ?, positions = ? WHERE id = ?'
   ).run(
     name !== undefined ? name.trim() : existing.name,
-    pan !== undefined ? pan : existing.pan,
-    tilt !== undefined ? tilt : existing.tilt,
-    fixture_ids !== undefined ? (fixture_ids ? JSON.stringify(fixture_ids) : null) : existing.fixture_ids,
+    positions !== undefined ? JSON.stringify(positions) : existing.positions,
     id
   );
   return getMoverPreset(id);

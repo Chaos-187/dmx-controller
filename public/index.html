@@ -501,11 +501,11 @@
     }
     .dmx-toolbar label { font-size: 12px; color: var(--text-dim); }
     .output-toggle {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 16px; border-radius: 6px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; border-radius: 4px;
       background: var(--panel); border: 1px solid var(--panel-border);
     }
-    .output-toggle .toggle-label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .output-toggle .toggle-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
     .output-toggle.active { border-color: var(--green); }
     .output-toggle.active .toggle-label { color: var(--green); }
     .output-toggle.inactive { border-color: var(--danger); }
@@ -738,23 +738,25 @@
 
     .mover-manual-row { display: flex; gap: 10px; }
 
-    /* Fixture target selection */
-    .mover-fixture-select {
-      display: flex; gap: 12px; margin-bottom: 6px; font-size: 12px;
+    /* Fixture tab buttons */
+    .mover-fixture-tabs {
+      display: flex; flex-wrap: wrap; gap: 6px;
     }
-    .mover-target-all { display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-dim); }
-    .mover-target-all input { accent-color: var(--accent); }
-    .mover-fixture-list {
-      max-height: 140px; overflow-y: auto;
-      background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 6px;
-      padding: 6px 8px;
+    .mover-fix-tab {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 6px 12px; border-radius: 6px; cursor: pointer;
+      background: var(--input-bg); border: 2px solid var(--input-border);
+      font-size: 11px; color: var(--text-dim); transition: all .15s;
+      min-width: 80px; text-align: center; position: relative;
     }
-    .mover-fixture-item {
-      display: flex; align-items: center; gap: 6px;
-      padding: 3px 0; font-size: 12px; color: var(--text-dim);
+    .mover-fix-tab:hover { border-color: var(--text-dim); }
+    .mover-fix-tab.active { border-color: var(--accent); color: var(--text); background: rgba(233,69,96,.08); }
+    .mover-fix-tab .fix-tab-name { font-weight: 600; font-size: 12px; color: var(--text); margin-bottom: 2px; }
+    .mover-fix-tab .fix-tab-pos { font-size: 10px; color: var(--cyan); font-variant-numeric: tabular-nums; }
+    .mover-fix-tab .fix-tab-check {
+      position: absolute; top: 3px; right: 5px; font-size: 9px; color: var(--accent); display: none;
     }
-    .mover-fixture-item input { accent-color: var(--accent); }
-    .mover-fixture-item .fix-name { color: var(--text); }
+    .mover-fix-tab.has-pos .fix-tab-check { display: block; }
 
     .mover-save-row { display: flex; gap: 8px; align-items: center; }
 
@@ -806,6 +808,10 @@
     </div>
   </div>
   <div class="header-controls">
+    <div class="output-toggle inactive" id="outputToggle">
+      <span class="toggle-label">OFF</span>
+      <div class="toggle-switch" id="outputSwitch"></div>
+    </div>
     <button class="btn-blackout" id="btnEmergencyBlackout" title="Emergency Blackout — kills all DMX output">BLACKOUT</button>
     <div class="status-badge">
       <div class="status-dot" id="statusDot"></div>
@@ -897,12 +903,6 @@
      TAB 5 — DMX CONTROL
      ══════════════════════════════════════════════════════════════ -->
 <div class="tab-page" id="page-dmxcontrol">
-  <div class="dmx-toolbar">
-    <div class="output-toggle inactive" id="outputToggle">
-      <span class="toggle-label">Output OFF</span>
-      <div class="toggle-switch" id="outputSwitch"></div>
-    </div>
-  </div>
 
   <div class="dmx-subtabs">
     <button class="dmx-subtab active" data-dmxsub="manual">Manual</button>
@@ -1376,10 +1376,16 @@
       <div class="config-sub-page" id="cfgpage-movers">
         <div class="config-section">
           <h3>Mover Presets</h3>
-          <p class="config-desc">Create position presets for moving head fixtures. Each preset stores a pan/tilt position and can target all movers or specific fixtures. Presets appear in the Quick Actions movement section.</p>
+          <p class="config-desc">Create position presets for moving head fixtures. Select each fixture and set its pan/tilt position using the XY pad, then save as a preset. Presets appear in the Quick Actions movement section.</p>
 
           <div class="mover-preset-editor">
             <div class="mover-preset-left">
+              <!-- Fixture selector tabs -->
+              <div class="form-group">
+                <label>Fixtures <span style="font-size:10px;color:var(--text-dim)">(click to set position)</span></label>
+                <div class="mover-fixture-tabs" id="moverFixtureTabs"></div>
+              </div>
+
               <!-- XY Touch Pad -->
               <div class="xy-pad-wrap">
                 <div class="xy-pad" id="moverXYPad">
@@ -1409,26 +1415,12 @@
                 </div>
               </div>
 
-              <!-- Fixture selection -->
-              <div class="form-group">
-                <label>Target Fixtures</label>
-                <div class="mover-fixture-select">
-                  <label class="mover-target-all">
-                    <input type="radio" name="moverTarget" value="all" checked> All Movers
-                  </label>
-                  <label class="mover-target-all">
-                    <input type="radio" name="moverTarget" value="select"> Select Fixtures
-                  </label>
-                </div>
-                <div class="mover-fixture-list" id="moverFixtureList" style="display:none"></div>
-              </div>
-
               <!-- Save preset -->
               <div class="mover-save-row">
                 <input type="text" id="moverPresetName" placeholder="Preset name" style="flex:1">
                 <input type="hidden" id="moverPresetEditId" value="">
                 <button class="btn btn-primary btn-sm" id="btnSaveMoverPreset">Save Preset</button>
-                <button class="btn btn-secondary btn-sm" id="btnTestMoverPos">Test</button>
+                <button class="btn btn-secondary btn-sm" id="btnTestMoverPos">Test All</button>
                 <button class="btn btn-secondary btn-sm" id="btnCancelMoverEdit" style="display:none">Cancel</button>
               </div>
             </div>
@@ -1795,6 +1787,7 @@ function connect() {
     if (msg.type === 'state') updateState(msg.state);
     else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); logEvent({ evtType: 'connection', raw: msg }); }
     else if (msg.type === 'beat') { handleBeat(msg.data); }
+    else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
     else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     else logEvent({ evtType: msg.type || 'event', raw: msg });
   };
@@ -3131,7 +3124,7 @@ function updateOutputToggle() {
   const label = toggle.querySelector('.toggle-label');
   toggle.className = 'output-toggle ' + (dmxOutputOn ? 'active' : 'inactive');
   sw.className = 'toggle-switch' + (dmxOutputOn ? ' on' : '');
-  label.textContent = dmxOutputOn ? 'Output ON' : 'Output OFF';
+  label.textContent = dmxOutputOn ? 'ON' : 'OFF';
 }
 
 document.getElementById('outputSwitch').addEventListener('click', async () => {
@@ -3621,6 +3614,30 @@ function buildMoveGrid() {
     }
     grid.appendChild(btn);
   });
+
+  // Add saved mover preset buttons
+  appendMoverPresetButtons(grid);
+}
+
+function appendMoverPresetButtons(grid) {
+  fetch('/api/mover-presets').then(r => r.json()).then(presets => {
+    if (!presets.length) return;
+    // Separator
+    const sep = document.createElement('div');
+    sep.style.cssText = 'grid-column:1/-1;border-top:1px solid var(--panel-border);margin:4px 0;';
+    grid.appendChild(sep);
+    for (const p of presets) {
+      const btn = document.createElement('button');
+      btn.className = 'qa-move-btn';
+      btn.innerHTML = `<span class="move-icon">📍</span>${esc(p.name)}`;
+      btn.title = `${p.positions.length} fixture(s)`;
+      btn.addEventListener('click', () => {
+        stopSweep();
+        sendMoverTestPositions(p.positions || []);
+      });
+      grid.appendChild(btn);
+    }
+  }).catch(() => {});
 }
 
 document.getElementById('qaMoveSpeed').addEventListener('input', () => {
@@ -4031,40 +4048,106 @@ document.getElementById('cfgStrobeOff').addEventListener('click', () => {
 // ═══════════════════════════════════════════════════════════════
 let moverPresets = [];
 let moverFixtures = []; // fixtures with pan/tilt
-let moverPan = 128, moverTilt = 128;
+let moverPositions = {}; // { fixtureId: { pan, tilt } } — per-fixture positions for current preset
+let moverSelectedFixture = null; // currently selected fixture id
 
 async function loadMoverConfig() {
-  // Load presets
   try { moverPresets = await fetch('/api/mover-presets').then(r => r.json()); } catch { moverPresets = []; }
 
-  // Load fixtures with pan or tilt channels
   try {
     const map = await fetch('/api/fixture-channel-map').then(r => r.json());
+    // Ensure qaChannelMap is populated so live DMX send works
+    if (!qaChannelMap.length) qaChannelMap = map;
     moverFixtures = map.filter(f =>
       f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt' || ch.type === 'pan_fine' || ch.type === 'tilt_fine')
     );
   } catch { moverFixtures = []; }
 
-  renderMoverFixtureList();
+  // Initialise positions for all fixtures if empty
+  if (Object.keys(moverPositions).length === 0) {
+    for (const f of moverFixtures) {
+      moverPositions[f.id] = { pan: 128, tilt: 128 };
+    }
+  }
+
+  // Auto-select first fixture
+  if (!moverSelectedFixture && moverFixtures.length > 0) {
+    moverSelectedFixture = moverFixtures[0].id;
+  }
+
+  renderMoverFixtureTabs();
   renderMoverPresetList();
-  updateXYPad(moverPan, moverTilt);
+  syncXYPadToFixture();
 }
 
 // ─── XY Pad ───────────────────────────────────────────────────────
 function updateXYPad(pan, tilt) {
-  moverPan = Math.max(0, Math.min(255, Math.round(pan)));
-  moverTilt = Math.max(0, Math.min(255, Math.round(tilt)));
-  const pad = document.getElementById('moverXYPad');
-  const pctX = (moverPan / 255) * 100;
-  const pctY = (moverTilt / 255) * 100;
+  pan = Math.max(0, Math.min(255, Math.round(pan)));
+  tilt = Math.max(0, Math.min(255, Math.round(tilt)));
+  const pctX = (pan / 255) * 100;
+  const pctY = (tilt / 255) * 100;
   document.getElementById('xyDot').style.left = pctX + '%';
   document.getElementById('xyDot').style.top = pctY + '%';
   document.getElementById('xyCrossH').style.top = pctY + '%';
   document.getElementById('xyCrossV').style.left = pctX + '%';
-  document.getElementById('xyPanVal').textContent = moverPan;
-  document.getElementById('xyTiltVal').textContent = moverTilt;
-  document.getElementById('moverPanInput').value = moverPan;
-  document.getElementById('moverTiltInput').value = moverTilt;
+  document.getElementById('xyPanVal').textContent = pan;
+  document.getElementById('xyTiltVal').textContent = tilt;
+  document.getElementById('moverPanInput').value = pan;
+  document.getElementById('moverTiltInput').value = tilt;
+
+  // Store to selected fixture and send DMX live
+  if (moverSelectedFixture) {
+    moverPositions[moverSelectedFixture] = { pan, tilt };
+    sendLiveMoverPosition(moverSelectedFixture, pan, tilt);
+    renderMoverFixtureTabs(); // update position badges
+  }
+}
+
+// Throttled live DMX send for the selected fixture
+let _liveMoverTimer = null;
+function sendLiveMoverPosition(fixtureId, pan, tilt) {
+  if (_liveMoverTimer) return; // skip if a send is already pending
+  _liveMoverTimer = setTimeout(() => { _liveMoverTimer = null; }, 30); // ~33 fps max
+  if (!qaChannelMap.length) return;
+  const fix = qaChannelMap.find(f => f.id === fixtureId);
+  if (!fix) return;
+  const channels = [];
+  for (const ch of fix.channels) {
+    if (ch.type === 'pan' || ch.type === 'pan_fine') channels.push({ ch: ch.dmx_address, val: pan });
+    if (ch.type === 'tilt' || ch.type === 'tilt_fine') channels.push({ ch: ch.dmx_address, val: tilt });
+  }
+  if (channels.length) {
+    fetch('/api/dmx/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ universe: fix.universe, channels }),
+    });
+  }
+}
+
+function syncXYPadToFixture() {
+  if (moverSelectedFixture && moverPositions[moverSelectedFixture]) {
+    const pos = moverPositions[moverSelectedFixture];
+    updateXYPadVisual(pos.pan, pos.tilt);
+  } else {
+    updateXYPadVisual(128, 128);
+  }
+}
+
+// Update pad visuals only (no position storage)
+function updateXYPadVisual(pan, tilt) {
+  pan = Math.max(0, Math.min(255, Math.round(pan)));
+  tilt = Math.max(0, Math.min(255, Math.round(tilt)));
+  const pctX = (pan / 255) * 100;
+  const pctY = (tilt / 255) * 100;
+  document.getElementById('xyDot').style.left = pctX + '%';
+  document.getElementById('xyDot').style.top = pctY + '%';
+  document.getElementById('xyCrossH').style.top = pctY + '%';
+  document.getElementById('xyCrossV').style.left = pctX + '%';
+  document.getElementById('xyPanVal').textContent = pan;
+  document.getElementById('xyTiltVal').textContent = tilt;
+  document.getElementById('moverPanInput').value = pan;
+  document.getElementById('moverTiltInput').value = tilt;
 }
 
 function xyPadHandler(e) {
@@ -4098,59 +4181,52 @@ function xyPadHandler(e) {
 
 // Manual pan/tilt inputs
 document.getElementById('moverPanInput').addEventListener('change', () => {
-  updateXYPad(+document.getElementById('moverPanInput').value, moverTilt);
+  const pos = moverPositions[moverSelectedFixture] || { pan: 128, tilt: 128 };
+  updateXYPad(+document.getElementById('moverPanInput').value, pos.tilt);
 });
 document.getElementById('moverTiltInput').addEventListener('change', () => {
-  updateXYPad(moverPan, +document.getElementById('moverTiltInput').value);
+  const pos = moverPositions[moverSelectedFixture] || { pan: 128, tilt: 128 };
+  updateXYPad(pos.pan, +document.getElementById('moverTiltInput').value);
 });
 
-// Target radio
-document.querySelectorAll('input[name=moverTarget]').forEach(r => {
-  r.addEventListener('change', () => {
-    document.getElementById('moverFixtureList').style.display =
-      document.querySelector('input[name=moverTarget]:checked').value === 'select' ? '' : 'none';
-  });
-});
-
-// ─── Fixture list for selection ───────────────────────────────────────
-function renderMoverFixtureList() {
-  const list = document.getElementById('moverFixtureList');
-  list.innerHTML = '';
+// ─── Fixture tab buttons ──────────────────────────────────────────
+function renderMoverFixtureTabs() {
+  const container = document.getElementById('moverFixtureTabs');
+  container.innerHTML = '';
   if (moverFixtures.length === 0) {
-    list.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">No fixtures with pan/tilt channels found.</span>';
+    container.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">No fixtures with pan/tilt channels found.</span>';
     return;
   }
   for (const fix of moverFixtures) {
-    const item = document.createElement('label');
-    item.className = 'mover-fixture-item';
-    item.innerHTML = `<input type="checkbox" value="${fix.id}" checked>
-      <span class="fix-name">${esc(fix.name)}</span>
-      <span style="font-size:10px;color:var(--text-dim)">${fix.type_name} • U${fix.universe} @${fix.address}</span>`;
-    list.appendChild(item);
+    const tab = document.createElement('div');
+    const pos = moverPositions[fix.id];
+    const hasPos = pos && (pos.pan !== 128 || pos.tilt !== 128);
+    tab.className = 'mover-fix-tab' + (moverSelectedFixture === fix.id ? ' active' : '') + (hasPos ? ' has-pos' : '');
+    tab.innerHTML = `
+      <span class="fix-tab-check">✓</span>
+      <span class="fix-tab-name">${esc(fix.name)}</span>
+      <span class="fix-tab-pos">${pos ? pos.pan + '/' + pos.tilt : '—'}</span>`;
+    tab.addEventListener('click', () => {
+      moverSelectedFixture = fix.id;
+      syncXYPadToFixture();
+      renderMoverFixtureTabs();
+    });
+    container.appendChild(tab);
   }
 }
 
-function getSelectedMoverFixtures() {
-  const mode = document.querySelector('input[name=moverTarget]:checked').value;
-  if (mode === 'all') return null; // null = all
-  const checks = document.querySelectorAll('#moverFixtureList input[type=checkbox]:checked');
-  return Array.from(checks).map(c => +c.value);
-}
-
-// ─── Test position ───────────────────────────────────────────────────
-function sendMoverTestPosition(pan, tilt, fixtureIds) {
+// ─── Test all positions ──────────────────────────────────────────
+function sendMoverTestPositions(positions) {
   if (!qaChannelMap.length) return;
-  const fixtures = fixtureIds
-    ? qaChannelMap.filter(f => fixtureIds.includes(f.id))
-    : qaChannelMap.filter(f => f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt'));
-
   const byUniverse = {};
-  for (const fix of fixtures) {
+  for (const pos of positions) {
+    const fix = qaChannelMap.find(f => f.id === pos.fixture_id);
+    if (!fix) continue;
     const u = fix.universe;
     if (!byUniverse[u]) byUniverse[u] = [];
     for (const ch of fix.channels) {
-      if (ch.type === 'pan' || ch.type === 'pan_fine') byUniverse[u].push({ ch: ch.dmx_address, val: pan });
-      if (ch.type === 'tilt' || ch.type === 'tilt_fine') byUniverse[u].push({ ch: ch.dmx_address, val: tilt });
+      if (ch.type === 'pan' || ch.type === 'pan_fine') byUniverse[u].push({ ch: ch.dmx_address, val: pos.pan });
+      if (ch.type === 'tilt' || ch.type === 'tilt_fine') byUniverse[u].push({ ch: ch.dmx_address, val: pos.tilt });
     }
   }
   for (const [u, channels] of Object.entries(byUniverse)) {
@@ -4162,17 +4238,25 @@ function sendMoverTestPosition(pan, tilt, fixtureIds) {
   }
 }
 
+function getPositionsArray() {
+  // Build positions array from moverPositions map
+  return Object.entries(moverPositions).map(([fid, pos]) => ({
+    fixture_id: +fid, pan: pos.pan, tilt: pos.tilt
+  }));
+}
+
 document.getElementById('btnTestMoverPos').addEventListener('click', () => {
-  sendMoverTestPosition(moverPan, moverTilt, getSelectedMoverFixtures());
+  sendMoverTestPositions(getPositionsArray());
 });
 
 // ─── Save / Edit / Delete presets ────────────────────────────────────
 document.getElementById('btnSaveMoverPreset').addEventListener('click', async () => {
   const name = document.getElementById('moverPresetName').value.trim();
   if (!name) { alert('Enter a preset name.'); return; }
-  const fixtureIds = getSelectedMoverFixtures();
+  const positions = getPositionsArray();
+  if (positions.length === 0) { alert('No fixture positions set.'); return; }
   const editId = document.getElementById('moverPresetEditId').value;
-  const body = { name, pan: moverPan, tilt: moverTilt, fixture_ids: fixtureIds };
+  const body = { name, positions };
 
   if (editId) {
     await fetch(`/api/mover-presets/${editId}`, {
@@ -4196,11 +4280,15 @@ function resetMoverForm() {
   document.getElementById('moverPresetName').value = '';
   document.getElementById('btnCancelMoverEdit').style.display = 'none';
   document.getElementById('btnSaveMoverPreset').textContent = 'Save Preset';
-  updateXYPad(128, 128);
-  document.querySelector('input[name=moverTarget][value=all]').checked = true;
-  document.getElementById('moverFixtureList').style.display = 'none';
-  // Re-check all fixtures
-  document.querySelectorAll('#moverFixtureList input[type=checkbox]').forEach(c => { c.checked = true; });
+  // Reset all positions to centre
+  for (const f of moverFixtures) {
+    moverPositions[f.id] = { pan: 128, tilt: 128 };
+  }
+  if (moverFixtures.length > 0) {
+    moverSelectedFixture = moverFixtures[0].id;
+  }
+  syncXYPadToFixture();
+  renderMoverFixtureTabs();
 }
 
 function editMoverPreset(id) {
@@ -4210,20 +4298,21 @@ function editMoverPreset(id) {
   document.getElementById('moverPresetName').value = preset.name;
   document.getElementById('btnSaveMoverPreset').textContent = 'Update Preset';
   document.getElementById('btnCancelMoverEdit').style.display = '';
-  updateXYPad(preset.pan, preset.tilt);
 
-  if (preset.fixture_ids) {
-    document.querySelector('input[name=moverTarget][value=select]').checked = true;
-    document.getElementById('moverFixtureList').style.display = '';
-    const idSet = new Set(preset.fixture_ids);
-    document.querySelectorAll('#moverFixtureList input[type=checkbox]').forEach(c => {
-      c.checked = idSet.has(+c.value);
-    });
-  } else {
-    document.querySelector('input[name=moverTarget][value=all]').checked = true;
-    document.getElementById('moverFixtureList').style.display = 'none';
-    document.querySelectorAll('#moverFixtureList input[type=checkbox]').forEach(c => { c.checked = true; });
+  // Load per-fixture positions — reset to 128 first, then overlay saved positions
+  for (const f of moverFixtures) {
+    moverPositions[f.id] = { pan: 128, tilt: 128 };
   }
+  for (const pos of preset.positions) {
+    moverPositions[pos.fixture_id] = { pan: pos.pan, tilt: pos.tilt };
+  }
+
+  // Select first fixture
+  if (moverFixtures.length > 0) {
+    moverSelectedFixture = moverFixtures[0].id;
+  }
+  syncXYPadToFixture();
+  renderMoverFixtureTabs();
 }
 
 async function deleteMoverPreset(id) {
@@ -4243,9 +4332,11 @@ function renderMoverPresetList() {
   for (const p of moverPresets) {
     const card = document.createElement('div');
     card.className = 'mover-preset-card';
-    const targetLabel = p.fixture_ids
-      ? `${p.fixture_ids.length} fixture(s)`
-      : 'All movers';
+    const posCount = p.positions ? p.positions.length : 0;
+    const posDetail = (p.positions || []).map(pos => {
+      const fix = moverFixtures.find(f => f.id === pos.fixture_id);
+      return fix ? `${fix.name}: ${pos.pan}/${pos.tilt}` : `#${pos.fixture_id}: ${pos.pan}/${pos.tilt}`;
+    }).join(' · ');
     card.innerHTML = `
       <div class="mover-preset-card-header">
         <span class="mover-preset-card-name">${esc(p.name)}</span>
@@ -4255,15 +4346,22 @@ function renderMoverPresetList() {
         </span>
       </div>
       <div class="mover-preset-card-meta">
-        <span>Pan: <span class="mp-val">${p.pan}</span></span>
-        <span>Tilt: <span class="mp-val">${p.tilt}</span></span>
-        <span>${targetLabel}</span>
+        <span>${posCount} fixture(s)</span>
+        <span style="font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px" title="${esc(posDetail)}">${esc(posDetail)}</span>
       </div>`;
-    // Click card to apply position
+    // Click card to apply all positions
     card.addEventListener('click', (e) => {
       if (e.target.tagName === 'BUTTON') return;
-      sendMoverTestPosition(p.pan, p.tilt, p.fixture_ids);
-      updateXYPad(p.pan, p.tilt);
+      sendMoverTestPositions(p.positions || []);
+      // Load positions into editor
+      for (const f of moverFixtures) {
+        moverPositions[f.id] = { pan: 128, tilt: 128 };
+      }
+      for (const pos of (p.positions || [])) {
+        moverPositions[pos.fixture_id] = { pan: pos.pan, tilt: pos.tilt };
+      }
+      syncXYPadToFixture();
+      renderMoverFixtureTabs();
       list.querySelectorAll('.mover-preset-card').forEach(c => c.classList.remove('active'));
       card.classList.add('active');
     });
@@ -4434,6 +4532,8 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
 // ═══════════════════════════════════════════════════════════════
 loadGroups();
 loadButtonMaps();
+// Fetch initial DMX output state so header toggle is correct
+fetch('/api/dmx/output').then(r => r.json()).then(r => { dmxOutputOn = r.enabled; updateOutputToggle(); }).catch(() => {});
 connect();
 </script>
 </body>

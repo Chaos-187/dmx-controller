@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>DMX Touchscreen Controller</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body {
+      background: #181818;
+      color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .touch-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #222;
+      padding: 1rem 1.5rem;
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      border-bottom: 2px solid #333;
+    }
+    .touch-main {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      padding: 1.5rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .touch-section {
+      background: #232323;
+      border-radius: 1.2rem;
+      padding: 1.2rem 1rem 1.5rem 1rem;
+      box-shadow: 0 2px 12px #0008;
+      margin-bottom: 0.5rem;
+    }
+    .touch-section h2 {
+      margin: 0 0 1rem 0;
+      font-size: 1.2rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: #ffb300;
+    }
+    .color-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+    .color-btn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 3px solid #444;
+      margin: 0.2rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #fff;
+      background: #333;
+      transition: border 0.2s, box-shadow 0.2s;
+      box-shadow: 0 2px 8px #0006;
+      outline: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .color-btn.selected, .color-btn:active {
+      border: 3px solid #ffb300;
+      box-shadow: 0 0 0 4px #ffb30044;
+    }
+    .group-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      justify-content: center;
+    }
+    .group-btn {
+      min-width: 90px;
+      padding: 0.7rem 1.2rem;
+      border-radius: 2rem;
+      border: none;
+      background: #2a2a2a;
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: 500;
+      margin: 0.2rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .group-btn.selected, .group-btn:active {
+      background: #ffb300;
+      color: #222;
+    }
+    .fixture-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      justify-content: center;
+    }
+    .fixture-btn {
+      min-width: 80px;
+      padding: 0.6rem 1.1rem;
+      border-radius: 1.5rem;
+      border: none;
+      background: #292929;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 500;
+      margin: 0.2rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .fixture-btn.selected, .fixture-btn:active {
+      background: #ffb300;
+      color: #222;
+    }
+    .preset-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      justify-content: center;
+    }
+    .preset-btn {
+      min-width: 90px;
+      padding: 0.7rem 1.2rem;
+      border-radius: 2rem;
+      border: none;
+      background: #2a2a2a;
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: 500;
+      margin: 0.2rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .preset-btn.selected, .preset-btn:active {
+      background: #ffb300;
+      color: #222;
+    }
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 1.2rem;
+      margin: 1.2rem 0 0.5rem 0;
+      justify-content: center;
+    }
+    .slider-label {
+      font-size: 1.1rem;
+      color: #ffb300;
+      min-width: 70px;
+      text-align: right;
+    }
+    .slider {
+      width: 220px;
+      accent-color: #ffb300;
+      height: 2.2em;
+    }
+    .touch-footer {
+      background: #222;
+      padding: 1rem 1.5rem;
+      text-align: center;
+      font-size: 1rem;
+      color: #aaa;
+      border-top: 2px solid #333;
+      margin-top: 2rem;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.2rem;
+      justify-content: center;
+      align-items: center;
+    }
+    .big-btn {
+      font-size: 1.3rem;
+      font-weight: 600;
+      padding: 1.1rem 2.2rem;
+      border-radius: 2.5rem;
+      border: none;
+      background: #ff1744;
+      color: #fff;
+      margin: 0.5rem 1rem;
+      cursor: pointer;
+      box-shadow: 0 2px 8px #0006;
+      transition: background 0.2s, color 0.2s;
+    }
+    .big-btn:active {
+      background: #b71c1c;
+    }
+    .placeholder {
+      color: #888;
+      text-align: center;
+      margin: 2rem 0 1rem 0;
+      font-size: 1.1rem;
+      letter-spacing: 0.03em;
+    }
+    @media (max-width: 700px) {
+      .touch-main { padding: 0.5rem; }
+      .touch-section { padding: 0.7rem 0.3rem 1rem 0.3rem; }
+      .slider { width: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="touch-header">
+    <span>DMX Touchscreen</span>
+    <button id="btnBlackout" class="big-btn" style="background:#222;color:#ff1744;font-size:1.1rem;padding:0.7rem 1.5rem;">BLACKOUT</button>
+  </div>
+  <div class="touch-main">
+    <div class="touch-section">
+      <h2>Groups</h2>
+      <div id="groupGrid" class="group-grid"></div>
+    </div>
+    <div class="touch-section">
+      <h2>Fixtures</h2>
+      <div id="fixtureGrid" class="fixture-grid"></div>
+    </div>
+    <div class="touch-section">
+      <h2>Colors</h2>
+      <div id="colorGrid" class="color-grid"></div>
+      <div class="slider-row">
+        <span class="slider-label">Dimmer</span>
+        <input id="dimmerSlider" class="slider" type="range" min="0" max="255" value="255">
+        <span id="dimmerVal">255</span>
+      </div>
+    </div>
+    <div class="touch-section">
+      <h2>Movement Presets</h2>
+      <div id="presetGrid" class="preset-grid"></div>
+    </div>
+    <div class="touch-section">
+      <h2>Effects <span style="font-size:0.9em;color:#888;">(coming soon)</span></h2>
+      <div class="placeholder">Effects and sequences will appear here in a future update.</div>
+    </div>
+  </div>
+  <div class="touch-footer">
+    &copy; 2026 DMX Controller &mdash; Touchscreen Mode
+  </div>
+  <script>
+    // --- Touchscreen Controller JS ---
+    const COLOR_PRESETS = [
+      { name: 'Red', color: '#ff1744', rgb: [255,0,0] },
+      { name: 'Green', color: '#00e676', rgb: [0,255,0] },
+      { name: 'Blue', color: '#2979ff', rgb: [0,0,255] },
+      { name: 'White', color: '#fff', rgb: [255,255,255] },
+      { name: 'Amber', color: '#ffb300', rgb: [255,191,0] },
+      { name: 'UV', color: '#b388ff', rgb: [180,136,255] },
+      { name: 'Yellow', color: '#fff176', rgb: [255,241,118] },
+      { name: 'Magenta', color: '#f500a3', rgb: [245,0,163] },
+      { name: 'Cyan', color: '#00e5ff', rgb: [0,229,255] },
+      { name: 'White (RGB)', color: '#eee', rgb: [255,255,255] }
+    ];
+    let groups = [], fixtures = [], selectedGroup = null, selectedFixtures = [], moverPresets = [], selectedColor = null, dimmer = 255;
+
+    async function fetchGroups() {
+      groups = await fetch('/api/groups').then(r => r.json());
+      renderGroups();
+    }
+    function renderGroups() {
+      const grid = document.getElementById('groupGrid');
+      grid.innerHTML = '';
+      groups.forEach(g => {
+        const btn = document.createElement('button');
+        btn.className = 'group-btn' + (selectedGroup === g.id ? ' selected' : '');
+        btn.textContent = g.name;
+        btn.onclick = () => {
+          selectedGroup = (selectedGroup === g.id) ? null : g.id;
+          renderGroups();
+          renderFixtures();
+        };
+        grid.appendChild(btn);
+      });
+    }
+    async function fetchFixtures() {
+      fixtures = await fetch('/api/fixture-channel-map').then(r => r.json());
+      renderFixtures();
+    }
+    function renderFixtures() {
+      const grid = document.getElementById('fixtureGrid');
+      grid.innerHTML = '';
+      let filtered = selectedGroup ? fixtures.filter(f => f.group_ids && f.group_ids.includes(selectedGroup)) : fixtures;
+      filtered.forEach(f => {
+        const btn = document.createElement('button');
+        btn.className = 'fixture-btn' + (selectedFixtures.includes(f.id) ? ' selected' : '');
+        btn.textContent = f.name;
+        btn.onclick = () => {
+          if (selectedFixtures.includes(f.id)) {
+            selectedFixtures = selectedFixtures.filter(x => x !== f.id);
+          } else {
+            selectedFixtures.push(f.id);
+          }
+          renderFixtures();
+        };
+        grid.appendChild(btn);
+      });
+    }
+    function renderColors() {
+      const grid = document.getElementById('colorGrid');
+      grid.innerHTML = '';
+      COLOR_PRESETS.forEach((c, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'color-btn' + (selectedColor === i ? ' selected' : '');
+        btn.style.background = c.color;
+        btn.title = c.name;
+        btn.onclick = () => {
+          selectedColor = i;
+          sendColor(c.rgb);
+          renderColors();
+        };
+        grid.appendChild(btn);
+      });
+    }
+    function sendColor(rgb) {
+      let targets = getSelectedFixtureIds();
+      if (!targets.length) return;
+      let channels = [];
+      for (const f of fixtures) {
+        if (!targets.includes(f.id)) continue;
+        for (const ch of f.channels) {
+          if (ch.type === 'red') channels.push({ address: ch.dmx_address, value: rgb[0] });
+          if (ch.type === 'green') channels.push({ address: ch.dmx_address, value: rgb[1] });
+          if (ch.type === 'blue') channels.push({ address: ch.dmx_address, value: rgb[2] });
+        }
+      }
+      fetch('/api/dmx/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channels })
+      });
+    }
+    function getSelectedFixtureIds() {
+      if (selectedFixtures.length) return selectedFixtures;
+      if (selectedGroup) {
+        return fixtures.filter(f => f.group_ids && f.group_ids.includes(selectedGroup)).map(f => f.id);
+      }
+      return fixtures.map(f => f.id);
+    }
+    function renderDimmer() {
+      document.getElementById('dimmerSlider').value = dimmer;
+      document.getElementById('dimmerVal').textContent = dimmer;
+    }
+    function sendDimmer() {
+      let targets = getSelectedFixtureIds();
+      if (!targets.length) return;
+      let channels = [];
+      for (const f of fixtures) {
+        if (!targets.includes(f.id)) continue;
+        for (const ch of f.channels) {
+          if (ch.type === 'dimmer') channels.push({ address: ch.dmx_address, value: dimmer });
+        }
+      }
+      fetch('/api/dmx/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channels })
+      });
+    }
+    async function fetchMoverPresets() {
+      moverPresets = await fetch('/api/mover-presets').then(r => r.json());
+      renderPresets();
+    }
+    function renderPresets() {
+      const grid = document.getElementById('presetGrid');
+      grid.innerHTML = '';
+      moverPresets.forEach((p, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'preset-btn';
+        btn.textContent = p.name;
+        btn.onclick = () => {
+          sendMoverPreset(p.positions);
+        };
+        grid.appendChild(btn);
+      });
+    }
+    function sendMoverPreset(positions) {
+      // positions: [{fixture_id, pan, tilt}, ...]
+      let channels = [];
+      for (const pos of positions) {
+        const f = fixtures.find(fx => fx.id === pos.fixture_id);
+        if (!f) continue;
+        for (const ch of f.channels) {
+          if (ch.type === 'pan') channels.push({ address: ch.dmx_address, value: pos.pan });
+          if (ch.type === 'tilt') channels.push({ address: ch.dmx_address, value: pos.tilt });
+        }
+      }
+      fetch('/api/dmx/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channels })
+      });
+    }
+    document.getElementById('dimmerSlider').addEventListener('input', e => {
+      dimmer = parseInt(e.target.value);
+      renderDimmer();
+      sendDimmer();
+    });
+    document.getElementById('btnBlackout').addEventListener('click', () => {
+      fetch('/api/dmx/output', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false })
+      });
+      fetch('/api/artnet/blackout', { method: 'POST' });
+    });
+    // --- Init ---
+    fetchGroups();
+    fetchFixtures();
+    fetchMoverPresets();
+    renderColors();
+    renderDimmer();
+  </script>
+</body>
+</html>
