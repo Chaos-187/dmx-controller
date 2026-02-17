@@ -1,0 +1,3447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DMX Controller</title>
+  <style>
+    /* ═══════════════════════════════════════════════════════════════
+       CSS Variables & Reset
+       ═══════════════════════════════════════════════════════════════ */
+    :root {
+      --bg: #0d0d0d;
+      --panel: #1a1a2e;
+      --panel-border: #2a2a4e;
+      --accent: #e94560;
+      --accent-dim: #a33347;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --green: #00e676;
+      --yellow: #ffea00;
+      --blue: #448aff;
+      --cyan: #00e5ff;
+      --danger: #f44;
+      --input-bg: #222;
+      --input-border: #444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Header
+       ═══════════════════════════════════════════════════════════════ */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 24px;
+      border-bottom: 1px solid var(--panel-border);
+      background: var(--panel);
+      gap: 16px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+    .status-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #f44; transition: background .3s; }
+    .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+    /* Now-Playing bar in header */
+    .now-playing { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; justify-content: center; }
+    .now-playing-info { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-dim); overflow: hidden; }
+    .now-playing-info .np-track { color: var(--text); font-weight: 500; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .now-playing-info .np-bpm { color: var(--cyan); font-weight: 600; font-size: 13px; }
+    .now-playing-info .np-state { font-size: 10px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+    .now-playing-info .np-state.playing { background: var(--green); color: #000; }
+    .now-playing-info .np-state.paused { background: var(--amber); color: #000; }
+    .now-playing-info .np-state.stopped { background: #555; color: #aaa; }
+    .now-playing-info .np-divider { width: 1px; height: 18px; background: var(--panel-border); }
+
+    /* Header controls */
+    .header-controls { display: flex; align-items: center; gap: 10px; }
+    .btn-blackout {
+      background: #b71c1c; color: #fff; border: 2px solid #f44;
+      padding: 6px 16px; border-radius: 4px; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
+      transition: all .15s; white-space: nowrap;
+    }
+    .btn-blackout:hover { background: #e53935; box-shadow: 0 0 12px rgba(244,68,68,0.5); }
+    .btn-blackout:active, .btn-blackout.active { background: #f44; box-shadow: 0 0 20px rgba(244,68,68,0.8); }
+
+    /* Fixture Groups */
+    .groups-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 12px; }
+    .groups-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .group-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--panel-border); background: var(--input-bg); color: var(--text);
+      cursor: default; transition: all .15s;
+    }
+    .group-chip .group-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .group-chip .group-count { font-size: 10px; color: var(--text-dim); }
+    .group-chip-actions { display: flex; gap: 4px; margin-left: 4px; }
+    .group-chip-actions button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 2px; }
+    .group-chip-actions button:hover { color: var(--text); }
+
+    /* Group assign modal */
+    .group-assign-list { max-height: 300px; overflow-y: auto; }
+    .group-assign-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--panel-border); font-size: 13px; }
+    .group-assign-item label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Tabs
+       ═══════════════════════════════════════════════════════════════ */
+    .tabs {
+      display: flex; border-bottom: 1px solid var(--panel-border); background: var(--panel);
+    }
+    .tab-btn {
+      padding: 10px 28px; cursor: pointer; border: none; background: none;
+      color: var(--text-dim); font-size: 13px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 1px;
+      border-bottom: 2px solid transparent; transition: all .2s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-page { display: none; padding: 20px; max-width: 1600px; margin: 0 auto; }
+    .tab-page.active { display: block; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Deck Styles (tab 1)
+       ═══════════════════════════════════════════════════════════════ */
+    .crossfader-section {
+      margin-bottom: 20px; padding: 12px 20px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    }
+    .crossfader-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; }
+    .crossfader-track { position: relative; height: 8px; background: #333; border-radius: 4px; }
+    .crossfader-thumb {
+      position: absolute; top: 50%; width: 16px; height: 22px;
+      background: var(--accent); border-radius: 3px;
+      transform: translate(-50%, -50%); transition: left .05s linear;
+      box-shadow: 0 0 6px rgba(233,69,96,.5);
+    }
+    .crossfader-labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
+
+    .decks { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .deck {
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 10px; overflow: hidden; position: relative; transition: border-color .3s;
+    }
+    .deck.playing { border-color: var(--accent); box-shadow: 0 0 15px rgba(233,69,96,.15); }
+    .beat-flash {
+      position: absolute; inset: 0; pointer-events: none;
+      background: rgba(233,69,96,.08); opacity: 0; transition: opacity .06s; border-radius: 10px;
+    }
+    .deck.beat .beat-flash { opacity: 1; }
+
+    .deck-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; background: rgba(0,0,0,.3); border-bottom: 1px solid var(--panel-border);
+    }
+    .deck-number { font-size: 14px; font-weight: 700; color: var(--accent); }
+    .deck-play-state {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+      padding: 2px 8px; border-radius: 3px; background: #333; color: var(--text-dim);
+    }
+    .deck-play-state.playing { background: var(--accent); color: #fff; }
+    .deck-play-state.paused  { background: var(--yellow); color: #000; }
+
+    .deck-body { padding: 14px 16px; }
+    .deck-track {
+      font-size: 13px; font-weight: 500; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; margin-bottom: 12px; min-height: 18px;
+    }
+    .deck-track.empty { color: var(--text-dim); font-style: italic; }
+
+    .deck-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-bottom: 14px; }
+    .deck-info-item { display: flex; justify-content: space-between; align-items: baseline; }
+    .deck-info-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+    .deck-info-value { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .deck-info-value.bpm  { color: var(--cyan); }
+    .deck-info-value.time { color: var(--blue); }
+    .deck-info-value.beat { color: var(--yellow); }
+
+    .level-section { margin-bottom: 10px; }
+    .level-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; display: flex; justify-content: space-between; }
+    .level-bar-bg { height: 6px; background: #222; border-radius: 3px; overflow: hidden; }
+    .level-bar-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--yellow), var(--accent)); border-radius: 3px; transition: width .05s linear; width: 0%; }
+
+    .deck-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tag { font-size: 10px; padding: 2px 7px; border-radius: 3px; background: #222; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
+    .tag.active { background: var(--accent-dim); color: #fff; }
+    .tag.ssid { background: #1a2a4e; color: var(--blue); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Event log */
+    .event-log-section { margin-top: 16px; }
+    .log-toggle {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px;
+      color: var(--text-dim); padding: 8px 16px; cursor: pointer; font-size: 12px; width: 100%; text-align: left;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .log-toggle:hover { border-color: var(--accent); }
+    .log-toggle .log-count { font-size: 10px; color: var(--accent); }
+    .event-log {
+      display: none; margin-top: 8px; background: #111; border: 1px solid var(--panel-border);
+      border-radius: 6px; padding: 0; max-height: 400px; overflow-y: auto;
+      font-family: 'Cascadia Code','Consolas', monospace; font-size: 11px; color: var(--text-dim);
+    }
+    .event-log.open { display: block; }
+    .event-log .log-toolbar {
+      position: sticky; top: 0; z-index: 1; background: #181818;
+      display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+      border-bottom: 1px solid var(--panel-border); flex-wrap: wrap;
+    }
+    .event-log .log-toolbar .filter-btn {
+      font-size: 10px; padding: 2px 7px; border-radius: 3px; cursor: pointer;
+      border: 1px solid var(--panel-border); background: transparent;
+      color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; transition: all .15s;
+    }
+    .event-log .log-toolbar .filter-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(233,69,96,.1); }
+    .event-log .log-toolbar .filter-btn:hover { border-color: var(--accent); }
+    .event-log .log-toolbar .log-auto { font-size: 10px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; margin-left: auto; }
+    .event-log .log-toolbar .log-auto input { accent-color: var(--accent); }
+    .event-log .log-entry {
+      padding: 3px 10px; border-bottom: 1px solid #1a1a1a;
+      display: flex; gap: 8px; align-items: baseline; cursor: pointer; transition: background .1s;
+    }
+    .event-log .log-entry:hover { background: rgba(233,69,96,.05); }
+    .log-entry .log-time { color: #555; flex-shrink: 0; width: 72px; }
+    .log-entry .log-type {
+      flex-shrink: 0; width: 80px; font-weight: 600; text-transform: uppercase;
+    }
+    .log-entry .log-type.subscribed { color: var(--cyan); }
+    .log-entry .log-type.beat { color: var(--accent); }
+    .log-entry .log-type.btn { color: var(--blue); }
+    .log-entry .log-type.cmd { color: var(--green); }
+    .log-entry .log-type.connection { color: var(--yellow); }
+    .log-entry .log-type.event { color: var(--text-dim); }
+    .log-entry .log-data { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Pretty-print modal */
+    .pp-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .pp-overlay.open { display: flex; }
+    .pp-box {
+      background: #1a1a2e; border: 1px solid var(--panel-border); border-radius: 10px;
+      padding: 20px; width: 90%; max-width: 700px; max-height: 80vh; overflow-y: auto;
+    }
+    .pp-box h3 { font-size: 13px; color: var(--accent); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .pp-box pre {
+      background: #111; padding: 14px; border-radius: 6px; font-size: 12px;
+      color: var(--green); white-space: pre-wrap; word-break: break-all;
+      font-family: 'Cascadia Code','Consolas', monospace; line-height: 1.5;
+    }
+    .pp-box .pp-close {
+      margin-top: 12px; float: right;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Fixtures Tab (tab 2)
+       ═══════════════════════════════════════════════════════════════ */
+    .fixtures-toolbar {
+      display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+    }
+    .btn {
+      padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer;
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+      transition: all .15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #d63a54; }
+    .btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--panel-border); }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+    .fixtures-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;
+    }
+    .fixture-card {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      padding: 14px 16px; transition: border-color .2s;
+    }
+    .fixture-card:hover { border-color: var(--accent); }
+    .fixture-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .fixture-card-name { font-size: 14px; font-weight: 600; }
+    .fixture-card-type { font-size: 11px; color: var(--cyan); }
+    .fixture-card-meta { font-size: 11px; color: var(--text-dim); display: flex; gap: 12px; margin-bottom: 8px; }
+    .fixture-card-channels {
+      display: flex; gap: 3px; flex-wrap: wrap; margin-top: 8px;
+    }
+    .ch-badge {
+      font-size: 9px; padding: 2px 5px; border-radius: 3px;
+      background: #222; color: var(--text-dim); text-transform: uppercase;
+    }
+    .ch-badge.red { background: #3a1515; color: #f66; }
+    .ch-badge.green { background: #153a15; color: #6f6; }
+    .ch-badge.blue { background: #15153a; color: #66f; }
+    .ch-badge.white { background: #2a2a2a; color: #ddd; }
+    .ch-badge.dimmer { background: #2a2a1a; color: var(--yellow); }
+    .ch-badge.pan, .ch-badge.tilt, .ch-badge.pan_fine, .ch-badge.tilt_fine { background: #1a2a2a; color: var(--cyan); }
+    .ch-badge.strobe { background: #2a1a2a; color: #f6f; }
+    .ch-badge.gobo, .ch-badge.gobo_rotation { background: #1a2a1a; color: #6fa; }
+    .fixture-card-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Fixture Types Tab (tab 3)
+       ═══════════════════════════════════════════════════════════════ */
+    .types-list { display: flex; flex-direction: column; gap: 8px; }
+    .type-row {
+      display: flex; align-items: center; gap: 16px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      padding: 12px 16px; transition: border-color .2s;
+    }
+    .type-row:hover { border-color: var(--panel-border); }
+    .type-name { font-size: 14px; font-weight: 600; min-width: 180px; }
+    .type-meta { font-size: 12px; color: var(--text-dim); flex: 1; display: flex; gap: 16px; }
+    .type-actions { display: flex; gap: 6px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Universe Map Tab (tab 4)
+       ═══════════════════════════════════════════════════════════════ */
+    .universe-bar {
+      display: flex; flex-wrap: wrap; gap: 1px; margin-top: 12px;
+    }
+    .universe-slot {
+      width: 18px; height: 30px; font-size: 7px;
+      display: flex; align-items: center; justify-content: center;
+      background: #1a1a1a; border: 1px solid #222; color: var(--text-dim);
+      cursor: default; position: relative;
+    }
+    .universe-slot.occupied { background: var(--accent-dim); border-color: var(--accent); color: #fff; cursor: pointer; }
+    .universe-slot.occupied:hover { background: var(--accent); }
+    .universe-info { margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Config Tab — Sub-tab layout
+       ═══════════════════════════════════════════════════════════════ */
+    .config-layout { display: flex; gap: 0; min-height: calc(100vh - 160px); }
+    .config-sidebar {
+      width: 200px; flex-shrink: 0;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px 0 0 8px;
+      overflow: hidden;
+    }
+    .config-sidebar-btn {
+      display: block; width: 100%; padding: 12px 16px; border: none; background: none;
+      color: var(--text-dim); font-size: 12px; font-weight: 600; text-align: left;
+      text-transform: uppercase; letter-spacing: .5px; cursor: pointer;
+      border-bottom: 1px solid var(--panel-border); border-left: 3px solid transparent;
+      transition: all .15s;
+    }
+    .config-sidebar-btn:hover { color: var(--text); background: rgba(233,69,96,.05); }
+    .config-sidebar-btn.active { color: var(--accent); border-left-color: var(--accent); background: rgba(233,69,96,.08); }
+    .config-sidebar-btn .cfg-icon { margin-right: 8px; font-size: 14px; }
+    .config-panel {
+      flex: 1; padding: 20px;
+      background: rgba(26,26,46,.3); border: 1px solid var(--panel-border); border-left: none;
+      border-radius: 0 8px 8px 0;
+    }
+    .config-sub-page { display: none; }
+    .config-sub-page.active { display: block; }
+    .config-section { margin-bottom: 24px; }
+    .config-section h3 {
+      font-size: 14px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--accent); margin-bottom: 12px;
+      padding-bottom: 6px; border-bottom: 1px solid var(--panel-border);
+    }
+    .config-desc { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.5; }
+    .config-row {
+      display: flex; gap: 12px; align-items: center; margin-bottom: 10px;
+    }
+    .config-row label {
+      font-size: 12px; color: var(--text-dim); min-width: 160px; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .config-row input, .config-row select {
+      padding: 6px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 13px;
+    }
+    .config-row input:focus { border-color: var(--accent); outline: none; }
+    .config-row .cfg-hint { font-size: 10px; color: var(--text-dim); }
+    .config-status {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 11px;
+      padding: 4px 10px; border-radius: 4px; background: #222;
+    }
+    .config-status.ok { color: var(--green); }
+    .config-status.warn { color: var(--yellow); }
+    .config-status.off { color: var(--text-dim); }
+    .config-card {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      padding: 14px 18px; margin-bottom: 12px;
+    }
+    .config-card h4 { font-size: 12px; color: var(--text); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+    .subs-table { width: 100%; border-collapse: collapse; }
+    .subs-table th {
+      text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-dim); padding: 6px 10px; border-bottom: 1px solid var(--panel-border);
+    }
+    .subs-table td {
+      padding: 6px 10px; border-bottom: 1px solid #1a1a2e; font-size: 12px; vertical-align: middle;
+    }
+    .subs-table tr:hover td { background: rgba(233,69,96,.03); }
+    .subs-table .sub-trigger {
+      font-family: 'Cascadia Code','Consolas', monospace; font-size: 11px;
+      color: var(--cyan); max-width: 500px; word-break: break-all;
+    }
+    .subs-table .sub-toggle { accent-color: var(--accent); cursor: pointer; width: 16px; height: 16px; }
+    .sub-disabled td { opacity: .4; }
+    .sub-cat {
+      font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;
+      letter-spacing: .5px; background: #222; color: var(--text-dim);
+    }
+    .sub-cat.track { background: #1a2a1a; color: #6f6; }
+    .sub-cat.mixer { background: #2a2a1a; color: var(--yellow); }
+    .sub-cat.transport { background: #1a1a3a; color: var(--blue); }
+    .sub-cat.loop { background: #2a1a2a; color: #f6f; }
+    .sub-cat.soundswitch { background: #1a2a4e; color: var(--blue); }
+    .sub-cat.custom { background: #2a1a1a; color: var(--accent); }
+    .subs-status-bar {
+      display: flex; gap: 16px; align-items: center; margin-bottom: 12px;
+      padding: 8px 14px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px;
+      font-size: 12px; color: var(--text-dim);
+    }
+    .subs-status-bar strong { color: var(--text); }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Tracks Tab
+       ═══════════════════════════════════════════════════════════════ */
+    .tracks-toolbar {
+      display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+    }
+    .tracks-search {
+      padding: 8px 12px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 6px; color: var(--text); font-size: 13px; width: 280px;
+    }
+    .tracks-search:focus { border-color: var(--accent); outline: none; }
+    .tracks-select {
+      padding: 7px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 6px; color: var(--text); font-size: 12px;
+    }
+    .tracks-stats-bar {
+      display: flex; gap: 20px; margin-bottom: 16px; padding: 10px 16px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      font-size: 12px; color: var(--text-dim); flex-wrap: wrap;
+    }
+    .tracks-stats-bar .stat-val { color: var(--accent); font-weight: 600; margin-left: 4px; }
+    .tracks-table-wrap {
+      overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 320px);
+      border: 1px solid var(--panel-border); border-radius: 8px;
+      background: var(--panel);
+    }
+    .tracks-table thead { position: sticky; top: 0; z-index: 1; }
+    .tracks-table thead th { background: var(--panel); }
+    .tracks-table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    .tracks-table th {
+      text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-dim); padding: 10px 12px; border-bottom: 1px solid var(--panel-border);
+      background: rgba(0,0,0,.2); cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    .tracks-table th:hover { color: var(--text); }
+    .tracks-table td {
+      padding: 8px 12px; border-bottom: 1px solid #1a1a2e; font-size: 12px;
+      vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tracks-table tr:hover td { background: rgba(233,69,96,.03); }
+    .tracks-table .trk-title { color: var(--text); font-weight: 500; max-width: 300px; }
+    .tracks-table .trk-artist { color: var(--cyan); max-width: 200px; }
+    .tracks-table .trk-bpm { color: var(--yellow); font-variant-numeric: tabular-nums; text-align: right; }
+    .tracks-table .trk-key { color: var(--blue); }
+    .tracks-table .trk-genre { color: var(--text-dim); max-width: 140px; }
+    .tracks-table .trk-duration { color: var(--text-dim); font-variant-numeric: tabular-nums; text-align: right; }
+    .tracks-table .trk-source {
+      font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;
+    }
+    .tracks-table .trk-source.local { background: #1a2a1a; color: #6f6; }
+    .tracks-table .trk-source.netsearch { background: #1a1a3a; color: var(--blue); }
+    .tracks-pagination {
+      display: flex; gap: 10px; align-items: center; justify-content: center;
+      margin-top: 16px; font-size: 12px; color: var(--text-dim);
+    }
+    .tracks-pagination button {
+      padding: 6px 14px; border: 1px solid var(--panel-border); background: var(--panel);
+      color: var(--text-dim); border-radius: 4px; cursor: pointer; font-size: 12px;
+    }
+    .tracks-pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+    .tracks-pagination button:disabled { opacity: .3; cursor: default; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Modal
+       ═══════════════════════════════════════════════════════════════ */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px;
+      padding: 24px; width: 90%; max-width: 560px; max-height: 85vh; overflow-y: auto;
+    }
+    .modal h2 { font-size: 16px; margin-bottom: 16px; color: var(--accent); }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 8px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 13px;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: var(--accent); outline: none; }
+    .form-row { display: flex; gap: 12px; }
+    .form-row .form-group { flex: 1; }
+    .form-error { color: var(--danger); font-size: 12px; margin-top: 8px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+    /* Channels editor */
+    .channels-editor { margin-top: 8px; }
+    .ch-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .ch-row input { width: 50px; }
+    .ch-row input.ch-name { flex: 1; width: auto; }
+    .ch-row select { width: 120px; }
+    .ch-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+    .ch-add { margin-top: 4px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       DMX Control Panel
+       ═══════════════════════════════════════════════════════════════ */
+    .dmx-toolbar {
+      display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .dmx-toolbar label { font-size: 12px; color: var(--text-dim); }
+    .output-toggle {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; border-radius: 6px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+    }
+    .output-toggle .toggle-label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .output-toggle.active { border-color: var(--green); }
+    .output-toggle.active .toggle-label { color: var(--green); }
+    .output-toggle.inactive { border-color: var(--danger); }
+    .output-toggle.inactive .toggle-label { color: var(--danger); }
+    .toggle-switch {
+      position: relative; width: 44px; height: 24px; cursor: pointer;
+      background: #444; border-radius: 12px; transition: background .2s;
+    }
+    .toggle-switch.on { background: var(--green); }
+    .toggle-switch::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; transition: transform .2s;
+    }
+    .toggle-switch.on::after { transform: translateX(20px); }
+
+    .dmx-channel-range {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dmx-channel-range select {
+      padding: 6px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 13px;
+    }
+
+    .dmx-faders {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+      gap: 2px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px; padding: 12px 8px;
+    }
+    .dmx-fader {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+    }
+    .dmx-fader-label {
+      font-size: 9px; color: var(--text-dim); text-align: center;
+      min-height: 12px; line-height: 12px;
+    }
+    .dmx-fader-val {
+      font-size: 9px; color: var(--cyan); font-variant-numeric: tabular-nums;
+      min-height: 12px; line-height: 12px; text-align: center;
+    }
+    .dmx-fader input[type=range] {
+      writing-mode: vertical-lr;
+      direction: rtl;
+      width: 28px;
+      height: 120px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    .dmx-fader input[type=range]::-webkit-slider-runnable-track {
+      width: 6px; background: #333; border-radius: 3px;
+    }
+    .dmx-fader input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 8px; border-radius: 2px;
+      background: var(--accent); border: none;
+      margin-left: -4px;
+    }
+    .dmx-fader input[type=range]::-moz-range-track {
+      width: 6px; background: #333; border-radius: 3px;
+    }
+    .dmx-fader input[type=range]::-moz-range-thumb {
+      width: 14px; height: 8px; border-radius: 2px;
+      background: var(--accent); border: none;
+    }
+    .dmx-fader.nonzero input[type=range]::-webkit-slider-thumb { background: var(--green); }
+    .dmx-fader.nonzero input[type=range]::-moz-range-thumb { background: var(--green); }
+    .dmx-fader.nonzero .dmx-fader-val { color: var(--green); }
+
+    /* DMX Sub-tabs */
+    .dmx-subtabs {
+      display: flex; gap: 0; margin-bottom: 16px;
+      border-bottom: 2px solid var(--panel-border);
+    }
+    .dmx-subtab {
+      padding: 8px 20px; cursor: pointer; font-size: 13px; font-weight: 600;
+      color: var(--text-dim); background: none; border: none;
+      border-bottom: 2px solid transparent; margin-bottom: -2px;
+      transition: color .15s, border-color .15s;
+    }
+    .dmx-subtab:hover { color: var(--text); }
+    .dmx-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .dmx-subpage { display: none; }
+    .dmx-subpage.active { display: block; }
+
+    /* Quick Actions */
+    .qa-section { margin-bottom: 20px; }
+    .qa-section h3 { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .qa-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+      gap: 8px;
+    }
+    .qa-btn {
+      padding: 16px 8px; border: 2px solid transparent; border-radius: 8px;
+      font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      transition: transform .1s, box-shadow .1s;
+      user-select: none; -webkit-user-select: none;
+      touch-action: none;
+    }
+    .qa-btn:active, .qa-btn.pressed {
+      transform: scale(0.95); box-shadow: 0 0 16px rgba(255,255,255,0.2);
+    }
+    .qa-btn.toggled-on {
+      transform: scale(0.95);
+      box-shadow: 0 0 20px rgba(255,255,255,0.35);
+      outline: 3px solid var(--accent);
+      outline-offset: -3px;
+    }
+    .qa-mode-switch {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+      padding: 8px 14px; background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 6px; width: fit-content;
+    }
+    .qa-mode-switch label { font-size: 12px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .qa-mode-switch select { padding: 4px 10px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 4px; color: var(--text); font-size: 13px; }
+    .qa-status {
+      margin-top: 12px; padding: 10px 14px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 6px; font-size: 12px; color: var(--text-dim);
+    }
+
+    /* Color Picker */
+    .qa-picker-section {
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px; padding: 14px; margin-bottom: 20px;
+    }
+    .qa-picker-section h3 { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .qa-picker-row {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    }
+    .qa-picker-preview {
+      width: 64px; height: 64px; border-radius: 8px; border: 2px solid var(--panel-border);
+      flex-shrink: 0;
+    }
+    .qa-picker-sliders { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
+    .qa-picker-sliders label { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
+    .qa-picker-sliders input[type=range] { flex: 1; height: 6px; cursor: pointer; }
+    .qa-picker-sliders input[type=range].r-slider::-webkit-slider-thumb { background: #f44; }
+    .qa-picker-sliders input[type=range].g-slider::-webkit-slider-thumb { background: #4c4; }
+    .qa-picker-sliders input[type=range].b-slider::-webkit-slider-thumb { background: #48f; }
+    .qa-picker-sliders input[type=range].w-slider::-webkit-slider-thumb { background: #fff; }
+    .qa-picker-sliders .slider-val { width: 30px; text-align: right; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--cyan); }
+    .qa-picker-actions { display: flex; flex-direction: column; gap: 6px; }
+    .qa-custom-grid { margin-top: 10px; }
+
+    /* Movement presets */
+    .qa-move-btn {
+      padding: 14px 8px; border: 2px solid var(--panel-border); border-radius: 8px;
+      font-size: 12px; font-weight: 600; text-align: center; cursor: pointer;
+      background: var(--panel); color: var(--text); transition: transform .1s;
+      user-select: none; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    }
+    .qa-move-btn:active, .qa-move-btn.active { transform: scale(0.95); border-color: var(--accent); color: var(--accent); }
+    .qa-move-btn .move-icon { font-size: 20px; }
+    .qa-move-speed { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .qa-move-speed label { font-size: 12px; color: var(--text-dim); }
+    .qa-move-speed input[type=range] { flex: 1; max-width: 200px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Footer
+       ═══════════════════════════════════════════════════════════════ */
+    footer {
+      text-align: center; padding: 16px; color: var(--text-dim); font-size: 11px;
+      border-top: 1px solid var(--panel-border); margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════ Header ══════ -->
+<header>
+  <h1>DMX Controller</h1>
+  <div class="now-playing" id="nowPlaying">
+    <div class="now-playing-info" id="nowPlayingInfo">
+      <span class="np-state stopped" id="npState">Stopped</span>
+      <span class="np-track" id="npTrack">No track loaded</span>
+      <span class="np-bpm" id="npBpm"></span>
+    </div>
+  </div>
+  <div class="header-controls">
+    <button class="btn-blackout" id="btnEmergencyBlackout" title="Emergency Blackout — kills all DMX output">BLACKOUT</button>
+    <div class="status-badge">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Disconnected</span>
+    </div>
+  </div>
+</header>
+
+<!-- ══════ Tabs ══════ -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="decks">Decks</button>
+  <button class="tab-btn" data-tab="fixtures">Fixtures</button>
+  <button class="tab-btn" data-tab="types">Fixture Types</button>
+  <button class="tab-btn" data-tab="universe">Universe</button>
+  <button class="tab-btn" data-tab="dmxcontrol">DMX Control</button>
+  <button class="tab-btn" data-tab="tracks">Tracks</button>
+  <button class="tab-btn" data-tab="config">Config</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 1 — DECKS
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page active" id="page-decks">
+  <div class="crossfader-section">
+    <div class="crossfader-label">Crossfader</div>
+    <div class="crossfader-track">
+      <div class="crossfader-thumb" id="crossfaderThumb" style="left:50%"></div>
+    </div>
+    <div class="crossfader-labels"><span>Left</span><span>Right</span></div>
+  </div>
+  <div class="decks" id="decks"></div>
+  <div class="event-log-section">
+    <button class="log-toggle" id="logToggle">
+      <span>&#9656; Event Log</span>
+      <span class="log-count" id="logCount">0 events</span>
+    </button>
+    <div class="event-log" id="eventLog">
+      <div class="log-toolbar">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="subscribed">Subscribed</button>
+        <button class="filter-btn" data-filter="beat">Beat</button>
+        <button class="filter-btn" data-filter="btn">Btn</button>
+        <button class="filter-btn" data-filter="cmd">Cmd</button>
+        <button class="filter-btn" data-filter="connection">Connection</button>
+        <label class="log-auto"><input type="checkbox" id="logAutoScroll" checked> Auto-scroll</label>
+      </div>
+      <div id="logEntries"></div>
+    </div>
+  </div>
+  <!-- Pretty-print overlay -->
+  <div class="pp-overlay" id="ppOverlay">
+    <div class="pp-box">
+      <h3>Raw OS2L Message</h3>
+      <pre id="ppContent"></pre>
+      <button class="btn btn-secondary pp-close" onclick="document.getElementById('ppOverlay').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 2 — FIXTURES
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-fixtures">
+  <div class="fixtures-toolbar">
+    <button class="btn btn-primary" id="btnAddFixture">+ Add Fixture</button>
+    <span style="flex:1"></span>
+    <span style="font-size:12px;color:var(--text-dim)" id="fixtureCount"></span>
+  </div>
+  <!-- Fixture Groups -->
+  <div class="groups-toolbar">
+    <span style="font-size:13px;font-weight:600;color:var(--text)">Groups</span>
+    <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
+    <span style="flex:1"></span>
+  </div>
+  <div class="groups-list" id="groupsList">
+    <span style="font-size:11px;color:var(--text-dim)">No groups yet.</span>
+  </div>
+  <div class="fixtures-grid" id="fixturesGrid"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 3 — FIXTURE TYPES
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-types">
+  <div class="fixtures-toolbar">
+    <button class="btn btn-primary" id="btnAddType">+ Add Fixture Type</button>
+  </div>
+  <div class="types-list" id="typesList"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 4 — UNIVERSE MAP
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-universe">
+  <div class="fixtures-toolbar">
+    <label style="font-size:12px;color:var(--text-dim)">Universe:</label>
+    <select id="universeSelect" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;">
+      <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+    </select>
+  </div>
+  <div class="universe-bar" id="universeBar"></div>
+  <div class="universe-info" id="universeInfo"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 5 — DMX CONTROL
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-dmxcontrol">
+  <div class="dmx-toolbar">
+    <div class="output-toggle inactive" id="outputToggle">
+      <span class="toggle-label">Output OFF</span>
+      <div class="toggle-switch" id="outputSwitch"></div>
+    </div>
+  </div>
+
+  <div class="dmx-subtabs">
+    <button class="dmx-subtab active" data-dmxsub="manual">Manual</button>
+    <button class="dmx-subtab" data-dmxsub="quickactions">Quick Actions</button>
+  </div>
+
+  <!-- Sub-page: Manual Faders -->
+  <div class="dmx-subpage active" id="dmxsub-manual">
+    <div class="dmx-channel-range" style="margin-bottom:12px">
+      <label>Universe:</label>
+      <select id="dmxCtrlUniverse" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+      </select>
+      <label>Channels:</label>
+      <select id="dmxCtrlRange">
+        <option value="1-512">All (1 – 512)</option>
+        <option value="1-32">1 – 32</option>
+        <option value="33-64">33 – 64</option>
+        <option value="65-96">65 – 96</option>
+        <option value="97-128">97 – 128</option>
+        <option value="129-160">129 – 160</option>
+        <option value="161-192">161 – 192</option>
+        <option value="193-224">193 – 224</option>
+        <option value="225-256">225 – 256</option>
+        <option value="257-288">257 – 288</option>
+        <option value="289-320">289 – 320</option>
+        <option value="321-352">321 – 352</option>
+        <option value="353-384">353 – 384</option>
+        <option value="385-416">385 – 416</option>
+        <option value="417-448">417 – 448</option>
+        <option value="449-480">449 – 480</option>
+        <option value="481-512">481 – 512</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" id="dmxCtrlZeroAll">Zero All</button>
+      <button class="btn btn-secondary btn-sm" id="dmxCtrlFullAll">Full All</button>
+    </div>
+    <div class="dmx-faders" id="dmxFaders"></div>
+  </div>
+
+  <!-- Sub-page: Quick Actions -->
+  <div class="dmx-subpage" id="dmxsub-quickactions">
+    <div class="qa-mode-switch">
+      <label>Mode:</label>
+      <select id="qaModeSelect">
+        <option value="hold">Hold to Activate</option>
+        <option value="toggle">Toggle On/Off</option>
+      </select>
+      <span style="width:1px;height:20px;background:var(--panel-border);margin:0 4px"></span>
+      <label>Group:</label>
+      <select id="qaGroupFilter" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;min-width:120px">
+        <option value="">All Fixtures</option>
+      </select>
+    </div>
+
+    <!-- Live Color Picker -->
+    <div class="qa-picker-section">
+      <h3>Live Colour Picker</h3>
+      <div class="qa-picker-row">
+        <div class="qa-picker-preview" id="qaPickerPreview" style="background:#000"></div>
+        <div class="qa-picker-sliders">
+          <label>R <input type="range" class="r-slider" id="qaPickerR" min="0" max="255" value="0"> <span class="slider-val" id="qaPickerRVal">0</span></label>
+          <label>G <input type="range" class="g-slider" id="qaPickerG" min="0" max="255" value="0"> <span class="slider-val" id="qaPickerGVal">0</span></label>
+          <label>B <input type="range" class="b-slider" id="qaPickerB" min="0" max="255" value="0"> <span class="slider-val" id="qaPickerBVal">0</span></label>
+          <label>W <input type="range" class="w-slider" id="qaPickerW" min="0" max="255" value="0"> <span class="slider-val" id="qaPickerWVal">0</span></label>
+        </div>
+        <div class="qa-picker-actions">
+          <button class="btn btn-primary btn-sm" id="qaPickerApply">Apply</button>
+          <button class="btn btn-secondary btn-sm" id="qaPickerOff">Off</button>
+          <button class="btn btn-secondary btn-sm" id="qaPickerSave">Save Preset</button>
+        </div>
+      </div>
+      <div class="qa-custom-grid">
+        <h3 style="margin-top:10px">Custom Presets</h3>
+        <div class="qa-grid" id="qaCustomGrid"></div>
+      </div>
+    </div>
+
+    <div class="qa-section">
+      <h3 id="qaColorTitle">Colours</h3>
+      <div class="qa-grid" id="qaColorGrid"></div>
+    </div>
+    <div class="qa-section">
+      <h3>Effects</h3>
+      <div class="qa-grid" id="qaEffectsGrid"></div>
+    </div>
+    <div class="qa-section">
+      <h3>Movement Presets</h3>
+      <div class="qa-move-speed">
+        <label>Speed:</label>
+        <input type="range" id="qaMoveSpeed" min="1" max="255" value="128">
+        <span style="font-size:11px;color:var(--cyan)" id="qaMoveSpeedVal">128</span>
+      </div>
+      <div class="qa-grid" id="qaMoveGrid"></div>
+    </div>
+    <div class="qa-section">
+      <h3>Master</h3>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+        <label style="font-size:12px;color:var(--text-dim);white-space:nowrap">Master Dimmer</label>
+        <input type="range" id="qaMasterDimmer" min="0" max="255" value="0" style="flex:1;accent-color:var(--cyan)">
+        <span id="qaMasterDimmerVal" style="font-size:13px;font-weight:600;color:var(--cyan);min-width:32px;text-align:right">0</span>
+      </div>
+      <div class="qa-grid">
+        <button class="qa-btn" style="background:#fff;color:#000;border-color:#ccc" data-qa-type="dimmer" data-qa-val="255">Dimmer Full</button>
+        <button class="qa-btn" style="background:#333;color:#fff;border-color:#555" data-qa-type="dimmer" data-qa-val="0">Dimmer Off</button>
+        <button class="qa-btn" style="background:#111;color:#f55;border-color:#f55" data-qa-type="all" data-qa-val="0">Blackout</button>
+      </div>
+    </div>
+    <div class="qa-status" id="qaStatus">No fixtures loaded. Add fixtures with colour channel types (red, green, blue, etc.) to use Quick Actions.</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 6 — TRACKS
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-tracks">
+  <div class="tracks-stats-bar" id="tracksStats">
+    <span>Total tracks:<span class="stat-val" id="statTotal">0</span></span>
+    <span>Local:<span class="stat-val" id="statLocal">0</span></span>
+    <span>NetSearch:<span class="stat-val" id="statNetsearch">0</span></span>
+    <span>With BPM:<span class="stat-val" id="statBpm">0</span></span>
+    <span>Genres:<span class="stat-val" id="statGenres">0</span></span>
+  </div>
+  <div class="tracks-toolbar">
+    <input type="text" class="tracks-search" id="tracksSearch" placeholder="Search artist, title, remix...">
+    <select class="tracks-select" id="tracksGenreFilter"><option value="">All Genres</option></select>
+    <select class="tracks-select" id="tracksSourceFilter">
+      <option value="">All Sources</option>
+      <option value="local">Local</option>
+      <option value="netsearch">NetSearch</option>
+    </select>
+    <input type="number" class="tracks-select" id="tracksBpmMin" placeholder="BPM min" style="width:80px">
+    <input type="number" class="tracks-select" id="tracksBpmMax" placeholder="BPM max" style="width:80px">
+    <span style="flex:1"></span>
+    <button class="btn btn-secondary btn-sm" id="btnImportTracks">&#8635; Re-import</button>
+    <span id="tracksPageInfo" style="font-size:11px;color:var(--text-dim)"></span>
+  </div>
+  <div class="tracks-table-wrap">
+    <table class="tracks-table">
+      <thead>
+        <tr>
+          <th style="width:30px">#</th>
+          <th>Title</th>
+          <th>Artist</th>
+          <th>Genre</th>
+          <th style="width:70px;text-align:right">BPM</th>
+          <th style="width:50px">Key</th>
+          <th style="width:70px;text-align:right">Duration</th>
+          <th style="width:60px">Source</th>
+        </tr>
+      </thead>
+      <tbody id="tracksBody"></tbody>
+    </table>
+  </div>
+  <div class="tracks-pagination" id="tracksPagination">
+    <button id="tracksPrev" disabled>&laquo; Prev</button>
+    <span id="tracksPageLabel">Page 1</span>
+    <button id="tracksNext">Next &raquo;</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TAB 6 — CONFIGURATION
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-config">
+  <div class="config-layout">
+    <!-- Sidebar Navigation -->
+    <div class="config-sidebar">
+      <button class="config-sidebar-btn active" data-cfgtab="dmx-usb"><span class="cfg-icon">&#9783;</span>DMX USB</button>
+      <button class="config-sidebar-btn" data-cfgtab="artnet"><span class="cfg-icon">&#9729;</span>Art-Net</button>
+      <button class="config-sidebar-btn" data-cfgtab="vdj"><span class="cfg-icon">&#9835;</span>VirtualDJ</button>
+      <button class="config-sidebar-btn" data-cfgtab="os2l-subs"><span class="cfg-icon">&#9889;</span>OS2L Subs</button>
+    </div>
+
+    <!-- Config Panels -->
+    <div class="config-panel">
+
+      <!-- ─── DMX USB Output ─── -->
+      <div class="config-sub-page active" id="cfgpage-dmx-usb">
+        <div class="config-section">
+          <h3>DMX USB Output (FTDI D2XX)</h3>
+          <p class="config-desc">Configure a USB DMX controller (e.g. Enttec Open DMX, DMXKING ultraDMX Micro, SoundSwitch DMX Micro). Scans for devices via FTDI D2XX and libusb.</p>
+          <div class="config-card">
+            <h4>Connection</h4>
+            <div class="config-row">
+              <label>Status</label>
+              <span class="config-status off" id="cfgDmxUsbStatus">Not connected</span>
+            </div>
+            <div class="config-row">
+              <label>USB Device</label>
+              <select id="cfgDmxPort" style="min-width:280px">
+                <option value="">— Click Scan to find devices —</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="btnDmxRefreshPorts">&#128269; Scan</button>
+            </div>
+            <div id="dmxPortInfo" style="font-size:11px;color:var(--text-dim);padding:4px 0 0 150px;display:none"></div>
+            <div class="config-row">
+              <label>Refresh Rate</label>
+              <input type="number" id="cfgDmxRefreshRate" value="40" min="1" max="44" style="width:70px">
+              <span class="cfg-hint">Hz (DMX512 max ~44Hz)</span>
+            </div>
+            <div class="config-row">
+              <label>Break Method</label>
+              <select id="cfgDmxBreakMethod" style="min-width:160px">
+                <option value="baud">Baud Rate Switch (default)</option>
+                <option value="break">Set Break On/Off</option>
+              </select>
+              <span class="cfg-hint">Baud switch is more reliable for most adapters</span>
+            </div>
+          </div>
+          <div class="modal-actions" style="justify-content:flex-start;gap:8px">
+            <button class="btn btn-primary btn-sm" id="btnDmxUsbConnect">Connect</button>
+            <button class="btn btn-secondary btn-sm" id="btnDmxUsbDisconnect" disabled>Disconnect</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Art-Net ─── -->
+      <div class="config-sub-page" id="cfgpage-artnet">
+        <div class="config-section">
+          <h3>Art-Net Output Nodes</h3>
+          <p class="config-desc">Map local DMX universes to Art-Net output nodes. Each node sends DMX data over the network via Art-Net protocol. The worker thread runs in the background so packet transmission never blocks the main server.</p>
+
+          <div class="config-card">
+            <h4>Global</h4>
+            <div class="config-row">
+              <label>Refresh Rate</label>
+              <input type="number" id="cfgArtnetRefreshRate" value="44" min="1" max="44" style="width:70px">
+              <span class="cfg-hint">Hz — applies to all nodes</span>
+              <button class="btn btn-secondary btn-sm" id="btnSaveArtnetRate" style="margin-left:12px">Save</button>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;margin:16px 0 12px">
+            <button class="btn btn-primary btn-sm" id="btnAddArtnetNode">+ Add Art-Net Node</button>
+            <button class="btn btn-secondary btn-sm" id="btnArtnetBlackout">Blackout All</button>
+            <span style="flex:1"></span>
+            <span style="font-size:11px;color:var(--text-dim)" id="artnetNodeCount"></span>
+          </div>
+
+          <table class="subs-table" id="artnetNodesTable">
+            <thead>
+              <tr>
+                <th style="width:30px">On</th>
+                <th>Local Uni</th>
+                <th>Label</th>
+                <th>Target IP</th>
+                <th>Port</th>
+                <th>Subnet</th>
+                <th>Art-Net Uni</th>
+                <th style="width:80px"></th>
+              </tr>
+            </thead>
+            <tbody id="artnetNodesBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Art-Net Node Modal -->
+      <div class="modal-overlay" id="artnetNodeModal">
+        <div class="modal">
+          <h2 id="artnetNodeModalTitle">Add Art-Net Node</h2>
+          <input type="hidden" id="artnetNodeEditId">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Local Universe</label>
+              <input type="number" id="anLocalUniverse" value="1" min="1" max="16">
+              <div style="font-size:10px;color:var(--text-dim);margin-top:4px">The universe number used in your fixture patch</div>
+            </div>
+            <div class="form-group">
+              <label>Label</label>
+              <input type="text" id="anLabel" placeholder="e.g. Main Rig">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Target IP</label>
+              <input type="text" id="anIp" value="255.255.255.255" placeholder="255.255.255.255">
+              <div style="font-size:10px;color:var(--text-dim);margin-top:4px">Broadcast (255.255.255.255) or specific node IP</div>
+            </div>
+            <div class="form-group">
+              <label>Port</label>
+              <input type="number" id="anPort" value="6454" min="1" max="65535">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Art-Net Subnet</label>
+              <input type="number" id="anSubnet" value="0" min="0" max="15">
+            </div>
+            <div class="form-group">
+              <label>Art-Net Universe</label>
+              <input type="number" id="anArtnetUniverse" value="0" min="0" max="15">
+            </div>
+          </div>
+          <div class="form-error" id="artnetNodeError"></div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModal('artnetNodeModal')">Cancel</button>
+            <button class="btn btn-primary" id="btnSaveArtnetNode">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── VirtualDJ ─── -->
+      <div class="config-sub-page" id="cfgpage-vdj">
+        <div class="config-section">
+          <h3>VirtualDJ Configuration</h3>
+          <p class="config-desc">Settings for the VirtualDJ connection, OS2L integration, and database paths.</p>
+
+          <div class="config-card">
+            <h4>OS2L Connection</h4>
+            <div class="config-row">
+              <label>OS2L TCP Port</label>
+              <input type="number" id="cfgOs2lPort" value="8787" style="width:100px">
+              <span class="cfg-hint">Default: 8787</span>
+            </div>
+            <div class="config-row">
+              <label>Service Name</label>
+              <input type="text" id="cfgOs2lServiceName" value="DMX-Controller" style="width:200px">
+              <span class="cfg-hint">mDNS/Bonjour service name</span>
+            </div>
+            <div class="config-row">
+              <label>Web UI Port</label>
+              <input type="number" id="cfgWebPort" value="3000" style="width:100px">
+              <span class="cfg-hint">Restart required on change</span>
+            </div>
+            <div class="config-row">
+              <label>Subscription Frequency</label>
+              <input type="number" id="cfgFrequency" value="25" min="1" max="60" style="width:80px">
+              <span class="cfg-hint">Hz (updates per second from VDJ)</span>
+            </div>
+          </div>
+
+          <div class="config-card">
+            <h4>VirtualDJ Database</h4>
+            <div class="config-row">
+              <label>VDJ Database Path</label>
+              <input type="text" id="cfgVdjDbPath" style="width:100%;max-width:500px" placeholder="C:\Users\...\VirtualDJ\database.xml">
+            </div>
+            <div class="config-row">
+              <label>VDJ Folder</label>
+              <input type="text" id="cfgVdjFolder" style="width:100%;max-width:500px" placeholder="C:\Users\...\Documents\VirtualDJ">
+              <span class="cfg-hint">VDJ root folder for SoundSwitch data</span>
+            </div>
+            <div class="config-row">
+              <label>Auto-read Metadata</label>
+              <input type="checkbox" id="cfgVdjAutoMeta" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span class="cfg-hint">Read track metadata from VDJ database when loaded</span>
+            </div>
+          </div>
+
+          <div class="config-card">
+            <h4>Deck Configuration</h4>
+            <div class="config-row">
+              <label>Number of Decks</label>
+              <select id="cfgVdjDecks" style="width:80px">
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+              </select>
+              <span class="cfg-hint">Restart required on change</span>
+            </div>
+          </div>
+
+          <div class="modal-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary btn-sm" id="btnSaveVdj">Save VDJ Settings</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── OS2L Subscriptions ─── -->
+      <div class="config-sub-page" id="cfgpage-os2l-subs">
+        <div class="config-section">
+          <h3>OS2L Subscriptions</h3>
+          <p class="config-desc">Manage the VirtualDJ trigger expressions sent via OS2L. Toggle, add, or remove individual subscriptions.</p>
+          <div class="subs-status-bar" id="subsStatus">
+            <span><strong id="subsEnabledCount">0</strong> enabled of <strong id="subsTotalCount">0</strong> total</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-secondary btn-sm" id="btnResendSubs" title="Re-send subscriptions to VDJ">Re-send to VDJ</button>
+            <button class="btn btn-primary btn-sm" id="btnAddSub">+ Add Subscription</button>
+          </div>
+          <table class="subs-table">
+            <thead>
+              <tr>
+                <th style="width:40px">On</th>
+                <th style="width:70px">Category</th>
+                <th>Label</th>
+                <th>Trigger Expression</th>
+                <th style="width:100px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="subsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /config-panel -->
+  </div><!-- /config-layout -->
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Add/Edit Fixture
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="fixtureModal">
+  <div class="modal">
+    <h2 id="fixtureModalTitle">Add Fixture</h2>
+    <input type="hidden" id="fixtureEditId">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="fName" placeholder="e.g. Stage Left Par 1">
+    </div>
+    <div class="form-group">
+      <label>Fixture Type</label>
+      <select id="fTypeId"></select>
+    </div>
+    <div class="form-group">
+      <label>Output Type</label>
+      <select id="fOutputType">
+        <option value="artnet">Art-Net</option>
+        <option value="dmx_usb">DMX USB</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Universe</label>
+        <input type="number" id="fUniverse" value="1" min="1" max="16">
+      </div>
+      <div class="form-group">
+        <label>DMX Address</label>
+        <input type="number" id="fAddress" value="1" min="1" max="512">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea id="fNotes" rows="2" placeholder="Optional notes..."></textarea>
+    </div>
+    <div class="form-error" id="fixtureError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('fixtureModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveFixture">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Assign Fixtures to Group
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="groupAssignModal">
+  <div class="modal">
+    <h2 id="groupAssignTitle">Assign Fixtures</h2>
+    <input type="hidden" id="groupAssignId">
+    <div class="group-assign-list" id="groupAssignList"></div>
+    <div class="form-error" id="groupAssignError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('groupAssignModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveGroupAssign">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Add/Edit Fixture Type
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="typeModal">
+  <div class="modal">
+    <h2 id="typeModalTitle">Add Fixture Type</h2>
+    <input type="hidden" id="typeEditId">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="tName" placeholder="e.g. Chauvet SlimPAR 56">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Manufacturer</label>
+        <input type="text" id="tManufacturer" placeholder="e.g. Chauvet">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="tCategory">
+          <option value="par">Par Can</option>
+          <option value="moving_head">Moving Head</option>
+          <option value="strobe">Strobe</option>
+          <option value="laser">Laser</option>
+          <option value="fog">Fog / Haze</option>
+          <option value="dimmer">Dimmer</option>
+          <option value="led_bar">LED Bar</option>
+          <option value="effect">Effect</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Channels</label>
+      <div class="channels-editor" id="channelsEditor"></div>
+      <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
+    </div>
+    <div class="form-group" id="tDuplicateGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+      <label>Duplicate Channel Pattern</label>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Repeat the channels above N times. Names auto-number (e.g. Red 1, Green 1, Blue 1, Red 2, Green 2...)</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:12px;color:var(--text-dim);margin:0">Repeat:</label>
+        <input type="number" id="tDuplicateCount" value="1" min="1" max="512" style="width:80px">
+        <label style="font-size:12px;color:var(--text-dim);margin:0">times</label>
+        <button class="btn btn-secondary btn-sm" id="btnDuplicateChannels" type="button">Duplicate</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tDuplicateHint"></div>
+    </div>
+    <div class="form-error" id="typeError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('typeModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveType">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Add/Edit Subscription
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="subModal">
+  <div class="modal">
+    <h2 id="subModalTitle">Add Subscription</h2>
+    <input type="hidden" id="subEditId">
+    <div class="form-group">
+      <label>VDJ Trigger Expression</label>
+      <input type="text" id="subTrigger" placeholder="e.g. deck 1 get_bpm">
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">VirtualDJ script expression. Use deck N prefix for per-deck triggers.</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Label</label>
+        <input type="text" id="subLabel" placeholder="e.g. Deck 1 BPM">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="subCategory">
+          <option value="track">Track</option>
+          <option value="transport">Transport</option>
+          <option value="mixer">Mixer</option>
+          <option value="loop">Loop</option>
+          <option value="soundswitch">SoundSwitch</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-error" id="subError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('subModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveSub">Save</button>
+    </div>
+  </div>
+</div>
+
+<footer>&copy; Eyup Events &mdash; DMX Controller &middot; OS2L &middot; VirtualDJ</footer>
+
+<!-- ══════════════════════════════════════════════════════════════
+     JavaScript
+     ══════════════════════════════════════════════════════════════ -->
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  Constants
+// ═══════════════════════════════════════════════════════════════
+const CHANNEL_TYPES = [
+  'dimmer','red','green','blue','white','amber','uv',
+  'pan','pan_fine','tilt','tilt_fine',
+  'speed','strobe','gobo','gobo_rotation','color_wheel',
+  'prism','focus','zoom','frost','macro','other'
+];
+const CATEGORY_LABELS = {
+  par:'Par Can', moving_head:'Moving Head', strobe:'Strobe', laser:'Laser',
+  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', effect:'Effect', other:'Other'
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  Tab Switching
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('page-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'fixtures') { loadFixtures(); loadGroups(); }
+    if (btn.dataset.tab === 'types') loadTypes();
+    if (btn.dataset.tab === 'universe') loadUniverse();
+    if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
+    if (btn.dataset.tab === 'tracks') loadTracksPage();
+    if (btn.dataset.tab === 'config') loadConfigPage();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Build Deck Panels
+// ═══════════════════════════════════════════════════════════════
+const decksContainer = document.getElementById('decks');
+let deckCount = 4; // default, updated from config
+
+function buildDeckPanels(count) {
+  deckCount = count;
+  decksContainer.innerHTML = '';
+  for (let d = 1; d <= count; d++) {
+    const el = document.createElement('div');
+    el.className = 'deck'; el.id = `deck-${d}`;
+    el.innerHTML = `
+      <div class="beat-flash"></div>
+      <div class="deck-header">
+        <span class="deck-number">Deck ${d}</span>
+        <span class="deck-play-state" id="play-${d}">Stopped</span>
+      </div>
+      <div class="deck-body">
+        <div class="deck-track empty" id="track-${d}">No track loaded</div>
+        <div class="deck-genre" id="genre-${d}" style="font-size:11px;color:var(--cyan);margin-bottom:10px;min-height:14px"></div>
+        <div class="deck-info-grid">
+          <div class="deck-info-item"><span class="deck-info-label">BPM</span><span class="deck-info-value bpm" id="bpm-${d}">---</span></div>
+          <div class="deck-info-item"><span class="deck-info-label">Time</span><span class="deck-info-value time" id="time-${d}">--:--</span></div>
+          <div class="deck-info-item"><span class="deck-info-label">Beat</span><span class="deck-info-value beat" id="beat-${d}">-</span></div>
+          <div class="deck-info-item"><span class="deck-info-label">First Beat</span><span class="deck-info-value" id="firstbeat-${d}" style="font-size:12px">-</span></div>
+        </div>
+        <div class="level-section">
+          <div class="level-label"><span>Level</span><span id="level-val-${d}">0%</span></div>
+          <div class="level-bar-bg"><div class="level-bar-fill" id="level-${d}"></div></div>
+        </div>
+        <div class="deck-tags">
+          <span class="tag" id="loop-${d}">Loop</span>
+          <span class="tag" id="looproll-${d}">Roll</span>
+          <span class="tag ssid" id="ssid-${d}" title="">SS: —</span>
+        </div>
+      </div>`;
+    decksContainer.appendChild(el);
+  }
+}
+
+// Load deck count from config and build panels
+(async () => {
+  try {
+    const config = await fetch('/api/config').then(r => r.json());
+    buildDeckPanels(parseInt(config.vdj_deck_count) || 4);
+  } catch {
+    buildDeckPanels(4);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  WebSocket
+// ═══════════════════════════════════════════════════════════════
+let ws;
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => console.log('[WS] Connected');
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'state') updateState(msg.state);
+    else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); logEvent({ evtType: 'connection', raw: msg }); }
+    else if (msg.type === 'beat') { handleBeat(msg.data); }
+    else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
+    else logEvent({ evtType: msg.type || 'event', raw: msg });
+  };
+  ws.onclose = () => setTimeout(connect, 2000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Deck State Update
+// ═══════════════════════════════════════════════════════════════
+function updateState(state) {
+  updateConnection(state.connected, state.vdjAddress);
+  document.getElementById('crossfaderThumb').style.left = `${(state.crossfader * 100).toFixed(1)}%`;
+
+  for (let d = 1; d <= deckCount; d++) {
+    const dk = state.decks[d]; if (!dk) continue;
+    const deckEl = document.getElementById(`deck-${d}`);
+    if (!deckEl) continue;
+    const isPlaying = dk.play > 0;
+    const hasTrack = !!dk.filename;
+    const isPaused = hasTrack && !isPlaying;
+
+    deckEl.classList.toggle('playing', isPlaying);
+    const pb = document.getElementById(`play-${d}`);
+    pb.textContent = isPlaying ? 'Playing' : (isPaused ? 'Paused' : 'Stopped');
+    pb.className = 'deck-play-state' + (isPlaying ? ' playing' : (isPaused ? ' paused' : ''));
+
+    const te = document.getElementById(`track-${d}`);
+    if (dk.filename) { te.textContent = dk.filename; te.classList.remove('empty'); }
+    else { te.textContent = 'No track loaded'; te.classList.add('empty'); }
+
+    document.getElementById(`bpm-${d}`).textContent = dk.bpm > 0 ? dk.bpm.toFixed(1) : '---';
+    const secs = Math.floor(dk.time || 0);
+    document.getElementById(`time-${d}`).textContent = `${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
+    document.getElementById(`beat-${d}`).textContent = dk.beatpos !== undefined ? dk.beatpos.toFixed(2) : '-';
+    document.getElementById(`firstbeat-${d}`).textContent = dk.firstbeat > 0 ? dk.firstbeat.toFixed(3)+'s' : '-';
+
+    const lvl = ((dk.level||0)*100).toFixed(0);
+    document.getElementById(`level-${d}`).style.width = `${lvl}%`;
+    document.getElementById(`level-val-${d}`).textContent = `${lvl}%`;
+
+    const lt = document.getElementById(`loop-${d}`);
+    const il = dk.loop > 0; lt.classList.toggle('active', il);
+    lt.textContent = il && dk.get_loop > 0 ? `Loop ${dk.get_loop.toFixed(1)}` : 'Loop';
+
+    const rt = document.getElementById(`looproll-${d}`);
+    const ir = dk.loop_roll > 0; rt.classList.toggle('active', ir);
+    rt.textContent = ir ? `Roll ${dk.loop_roll}` : 'Roll';
+
+    const ss = document.getElementById(`ssid-${d}`);
+    if (dk.soundswitch_id) { ss.textContent = `SS: ${dk.soundswitch_id}`; ss.title = dk.soundswitch_id; }
+    else { ss.textContent = 'SS: —'; ss.title = ''; }
+
+    document.getElementById(`genre-${d}`).textContent = dk.genre || '';
+  }
+
+  // ─── Update Now Playing in header ───────────────────────────────────
+  updateNowPlaying(state);
+}
+
+function updateNowPlaying(state) {
+  // Find the first playing deck (prefer deck 1)
+  let activeDeck = null;
+  for (let d = 1; d <= deckCount; d++) {
+    const dk = state.decks[d];
+    if (dk && dk.play > 0 && dk.filename) { activeDeck = dk; break; }
+  }
+  // If nothing playing, show first deck with a loaded track
+  if (!activeDeck) {
+    for (let d = 1; d <= deckCount; d++) {
+      const dk = state.decks[d];
+      if (dk && dk.filename) { activeDeck = dk; break; }
+    }
+  }
+
+  const npState = document.getElementById('npState');
+  const npTrack = document.getElementById('npTrack');
+  const npBpm = document.getElementById('npBpm');
+
+  if (!activeDeck || !activeDeck.filename) {
+    npState.textContent = 'Stopped';
+    npState.className = 'np-state stopped';
+    npTrack.textContent = 'No track loaded';
+    npBpm.textContent = '';
+    return;
+  }
+
+  const isPlaying = activeDeck.play > 0;
+  npState.textContent = isPlaying ? 'Playing' : 'Paused';
+  npState.className = 'np-state ' + (isPlaying ? 'playing' : 'paused');
+  npTrack.textContent = activeDeck.filename;
+  npTrack.title = activeDeck.filename;
+  npBpm.textContent = activeDeck.bpm > 0 ? activeDeck.bpm.toFixed(1) + ' BPM' : '';
+}
+
+function updateConnection(connected, address) {
+  document.getElementById('statusDot').classList.toggle('connected', connected);
+  document.getElementById('statusText').textContent = connected ? `Connected: ${address||'VirtualDJ'}` : 'Disconnected';
+}
+
+function handleBeat(data) {
+  for (let d = 1; d <= deckCount; d++) {
+    const el = document.getElementById(`deck-${d}`);
+    if (el && el.classList.contains('playing')) { el.classList.add('beat'); setTimeout(() => el.classList.remove('beat'), 80); }
+  }
+  logEvent({ evtType: 'beat', raw: data });
+}
+
+// Event log
+const eventLogEl = document.getElementById('eventLog');
+const logEntriesEl = document.getElementById('logEntries');
+const logToggleEl = document.getElementById('logToggle');
+const logCountEl = document.getElementById('logCount');
+const ppOverlay = document.getElementById('ppOverlay');
+const ppContent = document.getElementById('ppContent');
+const logAutoScrollEl = document.getElementById('logAutoScroll');
+let logOpen = false;
+let logFilter = 'all';
+let logTotal = 0;
+const MAX_LOG = 2000;
+
+logToggleEl.addEventListener('click', () => {
+  logOpen = !logOpen;
+  eventLogEl.classList.toggle('open', logOpen);
+  logToggleEl.querySelector('span').innerHTML = logOpen ? '&#9662; Event Log' : '&#9656; Event Log';
+});
+
+// Filter buttons
+eventLogEl.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    eventLogEl.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    logFilter = btn.dataset.filter;
+    // Show/hide entries based on filter
+    logEntriesEl.querySelectorAll('.log-entry').forEach(entry => {
+      if (logFilter === 'all' || entry.dataset.evtType === logFilter) {
+        entry.style.display = '';
+      } else {
+        entry.style.display = 'none';
+      }
+    });
+  });
+});
+
+// Pretty-print on double-click
+ppOverlay.addEventListener('click', (e) => { if (e.target === ppOverlay) ppOverlay.classList.remove('open'); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ppOverlay.classList.remove('open'); });
+
+function logEvent(info) {
+  const { evtType, raw, ts } = info;
+  logTotal++;
+  logCountEl.textContent = `${logTotal} events`;
+
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.dataset.evtType = evtType;
+
+  const time = ts ? new Date(ts) : new Date();
+  const timeStr = time.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(time.getMilliseconds()).padStart(3, '0');
+
+  // Build summary text based on event type
+  let summary = '';
+  if (evtType === 'subscribed' && raw) {
+    summary = `${raw.trigger || ''} = ${JSON.stringify(raw.value ?? '')}`;
+  } else if (evtType === 'beat' && raw) {
+    summary = `pos=${raw.pos ?? ''} strength=${raw.strength ?? ''} bpm=${raw.bpm ?? ''}`;
+  } else if (evtType === 'connection') {
+    summary = raw?.connected ? `VDJ connected: ${raw.address || ''}` : 'VDJ disconnected';
+  } else {
+    summary = JSON.stringify(raw || info).substring(0, 200);
+  }
+
+  entry.innerHTML = `<span class="log-time">${timeStr}</span><span class="log-type ${evtType}">${evtType}</span><span class="log-data">${esc(summary)}</span>`;
+
+  // Store raw data for pretty-print
+  entry._rawData = raw || info;
+
+  entry.addEventListener('dblclick', () => {
+    ppContent.textContent = JSON.stringify(entry._rawData, null, 2);
+    ppOverlay.classList.add('open');
+  });
+
+  // Apply current filter
+  if (logFilter !== 'all' && evtType !== logFilter) {
+    entry.style.display = 'none';
+  }
+
+  logEntriesEl.appendChild(entry);
+
+  // Trim old entries
+  while (logEntriesEl.children.length > MAX_LOG) logEntriesEl.removeChild(logEntriesEl.firstChild);
+
+  // Auto-scroll
+  if (logAutoScrollEl.checked && logOpen) {
+    logEntriesEl.scrollTop = logEntriesEl.scrollHeight;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Fixtures CRUD
+// ═══════════════════════════════════════════════════════════════
+let fixtureTypesCache = [];
+
+async function loadFixtures() {
+  const [fixtures, types] = await Promise.all([
+    fetch('/api/fixtures').then(r=>r.json()),
+    fetch('/api/fixture-types').then(r=>r.json())
+  ]);
+  fixtureTypesCache = types;
+  document.getElementById('fixtureCount').textContent = `${fixtures.length} fixture(s)`;
+
+  const grid = document.getElementById('fixturesGrid');
+  grid.innerHTML = '';
+
+  if (fixtures.length === 0) {
+    grid.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center;">No fixtures configured. Click "+ Add Fixture" to get started.</div>';
+    return;
+  }
+
+  for (const f of fixtures) {
+    const card = document.createElement('div');
+    card.className = 'fixture-card';
+    const type = types.find(t => t.id === f.fixture_type_id);
+    const channels = type ? type.channels : [];
+    const chBadges = channels.map(c =>
+      `<span class="ch-badge ${c.type}">${c.channel_number}: ${c.name}</span>`
+    ).join('');
+
+    card.innerHTML = `
+      <div class="fixture-card-header">
+        <span class="fixture-card-name">${esc(f.name)}</span>
+        <span class="fixture-card-type">${esc(f.type_name)}</span>
+      </div>
+      <div class="fixture-card-meta">
+        <span>Universe ${f.universe}</span>
+        <span>Address ${f.address}–${f.address + f.channel_count - 1}</span>
+        <span>${f.channel_count}ch</span>
+        <span>${CATEGORY_LABELS[f.category]||f.category}</span>
+        <span class="ch-badge ${f.output_type === 'dmx_usb' ? 'dimmer' : 'color'}" style="font-size:10px">${f.output_type === 'dmx_usb' ? 'DMX USB' : 'Art-Net'}</span>
+      </div>
+      ${f.notes ? `<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">${esc(f.notes)}</div>` : ''}
+      <div class="fixture-card-channels">${chBadges}</div>
+      <div class="fixture-card-actions">
+        <button class="btn btn-secondary btn-sm" onclick="editFixture(${f.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteFixture(${f.id},'${esc(f.name).replace(/'/g,"\\'")}')">Delete</button>
+      </div>`;
+    grid.appendChild(card);
+  }
+}
+
+document.getElementById('btnAddFixture').addEventListener('click', () => openFixtureModal());
+
+async function openFixtureModal(fixtureId) {
+  if (fixtureTypesCache.length === 0) {
+    fixtureTypesCache = await fetch('/api/fixture-types').then(r=>r.json());
+  }
+  const sel = document.getElementById('fTypeId');
+  sel.innerHTML = fixtureTypesCache.map(t =>
+    `<option value="${t.id}">${esc(t.name)} (${t.channel_count}ch)</option>`
+  ).join('');
+
+  if (fixtureId) {
+    const f = await fetch(`/api/fixtures/${fixtureId}`).then(r=>r.json());
+    document.getElementById('fixtureModalTitle').textContent = 'Edit Fixture';
+    document.getElementById('fixtureEditId').value = f.id;
+    document.getElementById('fName').value = f.name;
+    document.getElementById('fTypeId').value = f.fixture_type_id;
+    document.getElementById('fOutputType').value = f.output_type || 'artnet';
+    document.getElementById('fUniverse').value = f.universe;
+    document.getElementById('fAddress').value = f.address;
+    document.getElementById('fNotes').value = f.notes || '';
+  } else {
+    document.getElementById('fixtureModalTitle').textContent = 'Add Fixture';
+    document.getElementById('fixtureEditId').value = '';
+    document.getElementById('fName').value = '';
+    document.getElementById('fOutputType').value = 'artnet';
+    document.getElementById('fUniverse').value = '1';
+    document.getElementById('fAddress').value = '1';
+    document.getElementById('fNotes').value = '';
+  }
+  document.getElementById('fixtureError').textContent = '';
+  document.getElementById('fixtureModal').classList.add('open');
+}
+
+window.editFixture = (id) => openFixtureModal(id);
+
+window.deleteFixture = async (id, name) => {
+  if (!confirm(`Delete fixture "${name}"?`)) return;
+  await fetch(`/api/fixtures/${id}`, { method: 'DELETE' });
+  loadFixtures();
+};
+
+document.getElementById('btnSaveFixture').addEventListener('click', async () => {
+  const editId = document.getElementById('fixtureEditId').value;
+  const body = {
+    name: document.getElementById('fName').value.trim(),
+    fixture_type_id: +document.getElementById('fTypeId').value,
+    output_type: document.getElementById('fOutputType').value,
+    universe: +document.getElementById('fUniverse').value,
+    address: +document.getElementById('fAddress').value,
+    notes: document.getElementById('fNotes').value.trim(),
+  };
+  if (!body.name) return showError('fixtureError', 'Name is required');
+
+  const url = editId ? `/api/fixtures/${editId}` : '/api/fixtures';
+  const method = editId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) return showError('fixtureError', data.error);
+  closeModal('fixtureModal');
+  loadFixtures();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Fixture Types CRUD
+// ═══════════════════════════════════════════════════════════════
+async function loadTypes() {
+  const types = await fetch('/api/fixture-types').then(r=>r.json());
+  fixtureTypesCache = types;
+  const list = document.getElementById('typesList');
+  list.innerHTML = '';
+  for (const t of types) {
+    const row = document.createElement('div');
+    row.className = 'type-row';
+    row.innerHTML = `
+      <span class="type-name">${esc(t.name)}</span>
+      <span class="type-meta">
+        <span>${esc(t.manufacturer||'—')}</span>
+        <span>${CATEGORY_LABELS[t.category]||t.category}</span>
+        <span>${t.channel_count}ch</span>
+        <span style="color:var(--text-dim)">${t.channels.map(c=>c.name).join(', ')}</span>
+      </span>
+      <span class="type-actions">
+        <button class="btn btn-secondary btn-sm" onclick="editType(${t.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id},'${esc(t.name).replace(/'/g,"\\'")}')">Delete</button>
+      </span>`;
+    list.appendChild(row);
+  }
+}
+
+document.getElementById('btnAddType').addEventListener('click', () => openTypeModal());
+
+let typeChannels = [];
+
+function renderChannelsEditor() {
+  const ed = document.getElementById('channelsEditor');
+  ed.innerHTML = '';
+  typeChannels.forEach((ch, i) => {
+    const row = document.createElement('div');
+    row.className = 'ch-row';
+    row.innerHTML = `
+      <span style="font-size:11px;color:var(--text-dim);width:20px">${i+1}</span>
+      <input class="ch-name" type="text" value="${esc(ch.name)}" placeholder="Channel name" data-idx="${i}" data-field="name">
+      <select data-idx="${i}" data-field="type">
+        ${CHANNEL_TYPES.map(t => `<option value="${t}" ${t===ch.type?'selected':''}>${t}</option>`).join('')}
+      </select>
+      <input type="number" value="${ch.default_value||0}" min="0" max="255" data-idx="${i}" data-field="default_value" title="Default value">
+      <button class="ch-remove" onclick="removeChannel(${i})">&times;</button>`;
+    ed.appendChild(row);
+  });
+  ed.querySelectorAll('input, select').forEach(el => {
+    el.addEventListener('change', () => {
+      const idx = +el.dataset.idx;
+      const field = el.dataset.field;
+      typeChannels[idx][field] = field === 'default_value' ? +el.value : el.value;
+    });
+  });
+}
+
+window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); };
+
+document.getElementById('btnAddChannel').addEventListener('click', () => {
+  const num = typeChannels.length + 1;
+  typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255 });
+  renderChannelsEditor();
+  updateDuplicateHint();
+});
+
+async function openTypeModal(typeId) {
+  if (typeId) {
+    const t = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json());
+    document.getElementById('typeModalTitle').textContent = 'Edit Fixture Type';
+    document.getElementById('typeEditId').value = t.id;
+    document.getElementById('tName').value = t.name;
+    document.getElementById('tManufacturer').value = t.manufacturer || '';
+    document.getElementById('tCategory').value = t.category;
+    typeChannels = t.channels.map(c => ({...c}));
+  } else {
+    document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
+    document.getElementById('typeEditId').value = '';
+    document.getElementById('tName').value = '';
+    document.getElementById('tManufacturer').value = '';
+    document.getElementById('tCategory').value = 'par';
+    typeChannels = [];
+  }
+  renderChannelsEditor();
+  // Reset duplicate section
+  document.getElementById('tDuplicateCount').value = '1';
+  document.getElementById('tDuplicateHint').textContent = '';
+  updateDuplicateHint();
+  document.getElementById('typeError').textContent = '';
+  document.getElementById('typeModal').classList.add('open');
+}
+
+window.editType = (id) => openTypeModal(id);
+
+window.deleteType = async (id, name) => {
+  if (!confirm(`Delete fixture type "${name}"?`)) return;
+  const res = await fetch(`/api/fixture-types/${id}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+  loadTypes();
+};
+
+document.getElementById('btnSaveType').addEventListener('click', async () => {
+  const editId = document.getElementById('typeEditId').value;
+  typeChannels.forEach((ch, i) => ch.channel_number = i + 1);
+  const body = {
+    name: document.getElementById('tName').value.trim(),
+    manufacturer: document.getElementById('tManufacturer').value.trim(),
+    category: document.getElementById('tCategory').value,
+    channels: typeChannels,
+  };
+  if (!body.name) return showError('typeError', 'Name is required');
+  if (body.channels.length === 0) return showError('typeError', 'Add at least one channel');
+
+  const url = editId ? `/api/fixture-types/${editId}` : '/api/fixture-types';
+  const method = editId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) return showError('typeError', data.error);
+  closeModal('typeModal');
+  loadTypes();
+});
+
+/* Duplicate channel pattern */
+function updateDuplicateHint() {
+  const count = Math.max(1, +document.getElementById('tDuplicateCount').value || 1);
+  const base = typeChannels.length;
+  const hint = document.getElementById('tDuplicateHint');
+  if (base === 0) {
+    hint.textContent = 'Add channels first, then duplicate the pattern.';
+    hint.style.color = 'var(--text-dim)';
+  } else if (count <= 1) {
+    hint.textContent = `${base} channels — set repeat > 1 to duplicate.`;
+    hint.style.color = 'var(--text-dim)';
+  } else {
+    const total = base * count;
+    hint.textContent = `${base} channels × ${count} = ${total} total channels`;
+    if (total > 512) { hint.style.color = 'var(--danger)'; hint.textContent += ' ⚠ exceeds 512'; }
+    else { hint.style.color = 'var(--text-dim)'; }
+  }
+}
+document.getElementById('tDuplicateCount').addEventListener('input', updateDuplicateHint);
+
+document.getElementById('btnDuplicateChannels').addEventListener('click', () => {
+  const count = Math.max(1, +document.getElementById('tDuplicateCount').value || 1);
+  if (typeChannels.length === 0) return showError('typeError', 'Add at least one channel first');
+  if (count <= 1) return showError('typeError', 'Set repeat to more than 1');
+  // Snapshot the current pattern as the base template
+  const pattern = typeChannels.map(ch => ({ name: ch.name, type: ch.type, default_value: ch.default_value, min_value: ch.min_value, max_value: ch.max_value }));
+  // Rename existing channels as group 1
+  typeChannels.forEach((ch, i) => {
+    ch.name = `${pattern[i].name} 1`;
+  });
+  // Append copies for groups 2..count
+  for (let g = 2; g <= count; g++) {
+    for (const tpl of pattern) {
+      typeChannels.push({
+        channel_number: 0,
+        name: `${tpl.name} ${g}`,
+        type: tpl.type,
+        default_value: 0,
+        min_value: tpl.min_value || 0,
+        max_value: tpl.max_value || 255,
+      });
+    }
+  }
+  // Renumber all channels sequentially and set sequential default values
+  typeChannels.forEach((ch, i) => { ch.channel_number = i + 1; ch.default_value = i + 1; });
+  renderChannelsEditor();
+  updateDuplicateHint();
+  document.getElementById('tDuplicateCount').value = '1';
+  document.getElementById('typeError').textContent = '';
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Universe Map
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('universeSelect').addEventListener('change', loadUniverse);
+
+async function loadUniverse() {
+  const univ = +document.getElementById('universeSelect').value;
+  const fixtures = await fetch(`/api/universe/${univ}`).then(r=>r.json());
+
+  const slotMap = {};
+  for (const f of fixtures) {
+    for (let ch = 0; ch < f.channel_count; ch++) {
+      slotMap[f.address + ch] = { name: f.name, type: f.type_name, start: f.address, end: f.address + f.channel_count - 1 };
+    }
+  }
+
+  const bar = document.getElementById('universeBar');
+  bar.innerHTML = '';
+  for (let addr = 1; addr <= 512; addr++) {
+    const slot = document.createElement('div');
+    slot.className = 'universe-slot' + (slotMap[addr] ? ' occupied' : '');
+    slot.textContent = addr;
+    if (slotMap[addr]) {
+      slot.title = `${slotMap[addr].name} (${slotMap[addr].type})\nCh ${slotMap[addr].start}–${slotMap[addr].end}`;
+    }
+    bar.appendChild(slot);
+  }
+
+  const info = document.getElementById('universeInfo');
+  const used = Object.keys(slotMap).length;
+  info.textContent = `Universe ${univ}: ${used}/512 channels used, ${fixtures.length} fixture(s)`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Config — Sub-tab Switching
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.config-sidebar-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.config-sub-page').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('cfgpage-' + btn.dataset.cfgtab).classList.add('active');
+    if (btn.dataset.cfgtab === 'os2l-subs') loadSubscriptions();
+    if (btn.dataset.cfgtab === 'artnet') loadArtnetNodes();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Config — Load All Settings
+// ═══════════════════════════════════════════════════════════════
+async function loadConfigPage() {
+  const config = await fetch('/api/config').then(r => r.json());
+
+  // DMX USB — fetch live status from worker
+  await refreshDmxUsbStatus();
+  document.getElementById('cfgDmxRefreshRate').value = config.dmx_refresh_rate || 40;
+  document.getElementById('cfgDmxBreakMethod').value = config.dmx_break_method || 'baud';
+
+  // Art-Net
+  document.getElementById('cfgArtnetRefreshRate').value = config.artnet_refresh_rate || 44;
+
+  // VDJ
+  document.getElementById('cfgOs2lPort').value = config.os2l_port || 8787;
+  document.getElementById('cfgOs2lServiceName').value = config.os2l_service_name || 'DMX-Controller';
+  document.getElementById('cfgWebPort').value = config.web_port || 3000;
+  document.getElementById('cfgFrequency').value = config.subscription_frequency || 25;
+  document.getElementById('cfgVdjDbPath').value = config.vdj_db_path || '';
+  document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
+  document.getElementById('cfgVdjAutoMeta').checked = config.vdj_auto_meta === '1';
+  document.getElementById('cfgVdjDecks').value = config.vdj_deck_count || '4';
+
+  // Load active sub-tab
+  const activeSubTab = document.querySelector('.config-sidebar-btn.active');
+  if (activeSubTab && activeSubTab.dataset.cfgtab === 'os2l-subs') loadSubscriptions();
+}
+
+function updateDmxUsbStatus(status) {
+  const el = document.getElementById('cfgDmxUsbStatus');
+  const connectBtn = document.getElementById('btnDmxUsbConnect');
+  const disconnectBtn = document.getElementById('btnDmxUsbDisconnect');
+  if (status.open) {
+    const devLabel = status.device ? (status.device.serial_number || status.device.description || 'Unknown') : 'Unknown';
+    el.textContent = `Connected: ${devLabel}`;
+    el.className = 'config-status ok';
+    connectBtn.disabled = true;
+    disconnectBtn.disabled = false;
+  } else if (status.running) {
+    el.textContent = 'Ready — no device connected';
+    el.className = 'config-status off';
+    connectBtn.disabled = false;
+    disconnectBtn.disabled = true;
+  } else {
+    el.textContent = 'Worker not running';
+    el.className = 'config-status off';
+    connectBtn.disabled = true;
+    disconnectBtn.disabled = true;
+  }
+}
+
+async function refreshDmxUsbStatus() {
+  try {
+    const status = await fetch('/api/dmx-usb/status').then(r => r.json());
+    updateDmxUsbStatus(status);
+  } catch {
+    updateDmxUsbStatus({ running: false, open: false });
+  }
+}
+
+// DMX enable toggle visual feedback
+// (removed — now using connect/disconnect buttons)
+
+// ═══════════════════════════════════════════════════════════════
+//  Config — Save Handlers
+// ═══════════════════════════════════════════════════════════════
+async function saveConfigBatch(pairs, btnId) {
+  const btn = document.getElementById(btnId);
+  const origText = btn.textContent;
+  try {
+    await Promise.all(pairs.map(([key, value]) =>
+      fetch(`/api/config/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: String(value) })
+      })
+    ));
+    btn.textContent = 'Saved!';
+    btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
+  } catch (e) {
+    btn.textContent = 'Error!';
+    btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)';
+  }
+  setTimeout(() => { btn.textContent = origText; btn.style.borderColor = ''; btn.style.color = ''; }, 1500);
+}
+
+document.getElementById('btnDmxUsbConnect').addEventListener('click', async () => {
+  const sel = document.getElementById('cfgDmxPort');
+  if (!sel.value) { alert('Select a device first.'); return; }
+  const btn = document.getElementById('btnDmxUsbConnect');
+  const selectedOpt = sel.options[sel.selectedIndex];
+  btn.textContent = 'Connecting...'; btn.disabled = true;
+
+  // Build identifier based on device source
+  let identifier;
+  if (selectedOpt.dataset.source === 'usb') {
+    // libusb device — send VID/PID/serial
+    identifier = {
+      source: 'usb',
+      vid: selectedOpt.dataset.vid,
+      pid: selectedOpt.dataset.pid,
+      serial_number: selectedOpt.dataset.serialNumber || '',
+    };
+  } else {
+    // FTDI D2XX device — send serial_number or description
+    identifier = selectedOpt.dataset.serialNumber
+      ? { serial_number: selectedOpt.dataset.serialNumber }
+      : { description: sel.value };
+  }
+
+  try {
+    const res = await fetch('/api/dmx-usb/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(identifier),
+    });
+    const data = await res.json();
+    if (data.error) alert('Failed: ' + data.error);
+  } catch (e) {
+    alert('Connection failed: ' + e.message);
+  }
+  await refreshDmxUsbStatus();
+  btn.textContent = 'Connect';
+  // Save config
+  saveConfigBatch([
+    ['dmx_refresh_rate', document.getElementById('cfgDmxRefreshRate').value],
+    ['dmx_break_method', document.getElementById('cfgDmxBreakMethod').value],
+  ], 'btnDmxUsbConnect');
+});
+
+document.getElementById('btnDmxUsbDisconnect').addEventListener('click', async () => {
+  await fetch('/api/dmx-usb/close', { method: 'POST' });
+  await refreshDmxUsbStatus();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Art-Net Node Management
+// ═══════════════════════════════════════════════════════════════
+async function loadArtnetNodes() {
+  const nodes = await fetch('/api/artnet-universes').then(r => r.json());
+  document.getElementById('artnetNodeCount').textContent = `${nodes.length} node(s)`;
+  const tbody = document.getElementById('artnetNodesBody');
+  tbody.innerHTML = '';
+  for (const n of nodes) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="artnet-toggle" data-id="${n.id}" ${n.enabled ? 'checked' : ''}></td>
+      <td>${n.local_universe}</td>
+      <td>${esc(n.label || '—')}</td>
+      <td>${esc(n.ip)}</td>
+      <td>${n.port}</td>
+      <td>${n.subnet}</td>
+      <td>${n.artnet_universe}</td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="editArtnetNode(${n.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteArtnetNode(${n.id})">Del</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('.artnet-toggle').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      await fetch(`/api/artnet-universes/${cb.dataset.id}/toggle`, { method: 'POST' });
+    });
+  });
+}
+
+function openArtnetNodeModal(node) {
+  document.getElementById('artnetNodeEditId').value = node ? node.id : '';
+  document.getElementById('artnetNodeModalTitle').textContent = node ? 'Edit Art-Net Node' : 'Add Art-Net Node';
+  document.getElementById('anLocalUniverse').value = node ? node.local_universe : 1;
+  document.getElementById('anLabel').value = node ? (node.label || '') : '';
+  document.getElementById('anIp').value = node ? node.ip : '255.255.255.255';
+  document.getElementById('anPort').value = node ? node.port : 6454;
+  document.getElementById('anSubnet').value = node ? node.subnet : 0;
+  document.getElementById('anArtnetUniverse').value = node ? node.artnet_universe : 0;
+  document.getElementById('artnetNodeError').textContent = '';
+  document.getElementById('artnetNodeModal').classList.add('open');
+}
+
+document.getElementById('btnAddArtnetNode').addEventListener('click', () => openArtnetNodeModal(null));
+
+document.getElementById('btnSaveArtnetNode').addEventListener('click', async () => {
+  const editId = document.getElementById('artnetNodeEditId').value;
+  const body = {
+    local_universe: +document.getElementById('anLocalUniverse').value,
+    label: document.getElementById('anLabel').value.trim(),
+    ip: document.getElementById('anIp').value.trim(),
+    port: +document.getElementById('anPort').value,
+    subnet: +document.getElementById('anSubnet').value,
+    artnet_universe: +document.getElementById('anArtnetUniverse').value,
+  };
+  if (!body.ip) return showError('artnetNodeError', 'IP address is required');
+  const url = editId ? `/api/artnet-universes/${editId}` : '/api/artnet-universes';
+  const method = editId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) return showError('artnetNodeError', data.error);
+  closeModal('artnetNodeModal');
+  loadArtnetNodes();
+});
+
+window.editArtnetNode = async (id) => {
+  const node = await fetch(`/api/artnet-universes/${id}`).then(r => r.json());
+  if (node) openArtnetNodeModal(node);
+};
+
+window.deleteArtnetNode = async (id) => {
+  if (!confirm('Delete this Art-Net node?')) return;
+  await fetch(`/api/artnet-universes/${id}`, { method: 'DELETE' });
+  loadArtnetNodes();
+};
+
+document.getElementById('btnArtnetBlackout').addEventListener('click', async () => {
+  await fetch('/api/artnet/blackout', { method: 'POST' });
+});
+
+document.getElementById('btnSaveArtnetRate').addEventListener('click', () => {
+  saveConfigBatch([
+    ['artnet_refresh_rate', document.getElementById('cfgArtnetRefreshRate').value],
+  ], 'btnSaveArtnetRate');
+});
+
+document.getElementById('btnSaveVdj').addEventListener('click', () => {
+  saveConfigBatch([
+    ['os2l_port', document.getElementById('cfgOs2lPort').value],
+    ['os2l_service_name', document.getElementById('cfgOs2lServiceName').value],
+    ['web_port', document.getElementById('cfgWebPort').value],
+    ['subscription_frequency', document.getElementById('cfgFrequency').value],
+    ['vdj_db_path', document.getElementById('cfgVdjDbPath').value],
+    ['vdj_folder', document.getElementById('cfgVdjFolder').value],
+    ['vdj_auto_meta', document.getElementById('cfgVdjAutoMeta').checked ? '1' : '0'],
+    ['vdj_deck_count', document.getElementById('cfgVdjDecks').value],
+  ], 'btnSaveVdj');
+});
+
+// DMX USB — scan for FTDI D2XX + libusb devices
+document.getElementById('btnDmxRefreshPorts').addEventListener('click', async () => {
+  const btn = document.getElementById('btnDmxRefreshPorts');
+  const info = document.getElementById('dmxPortInfo');
+  btn.innerHTML = '&#8987; Scanning...'; btn.disabled = true;
+  info.style.display = 'none';
+  try {
+    const result = await fetch('/api/serial-ports').then(r => r.json());
+    const ftdi = result.ftdi || [];
+    const usb  = result.usb  || [];
+    const sel = document.getElementById('cfgDmxPort');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— Select device —</option>';
+
+    // FTDI D2XX devices — directly usable for DMX output
+    if (ftdi.length > 0) {
+      const grp = document.createElement('optgroup');
+      grp.label = '⚡ FTDI D2XX (DMX-ready)';
+      for (const d of ftdi) {
+        const opt = document.createElement('option');
+        const label = d.description || d.serial_number || `Device ${d.index}`;
+        opt.value = d.description || d.serial_number || '';
+        opt.textContent = `${label}${d.serial_number ? ' [' + d.serial_number + ']' : ''}`;
+        if (d.serial_number) opt.dataset.serialNumber = d.serial_number;
+        opt.dataset.source = 'ftdi';
+        grp.appendChild(opt);
+      }
+      sel.appendChild(grp);
+    }
+
+    // libusb devices — DMX-related ones highlighted
+    const dmxUsb   = usb.filter(d => d.isDmxRelated);
+    const otherUsb = usb.filter(d => !d.isDmxRelated);
+
+    if (dmxUsb.length > 0) {
+      const grp = document.createElement('optgroup');
+      grp.label = '🔌 USB DMX Devices';
+      for (const d of dmxUsb) {
+        const opt = document.createElement('option');
+        opt.value = `usb:${d.vid}:${d.pid}:${d.serial_number}`;
+        opt.textContent = `${d.product}${d.serial_number ? ' [' + d.serial_number + ']' : ''} — ${d.manufacturer}`;
+        opt.dataset.source = 'usb';
+        opt.dataset.vid = d.vid;
+        opt.dataset.pid = d.pid;
+        if (d.serial_number) opt.dataset.serialNumber = d.serial_number;
+        grp.appendChild(opt);
+      }
+      sel.appendChild(grp);
+    }
+
+    if (otherUsb.length > 0) {
+      const grp = document.createElement('optgroup');
+      grp.label = 'Other USB Devices';
+      for (const d of otherUsb) {
+        const opt = document.createElement('option');
+        opt.value = `usb:${d.vid}:${d.pid}:${d.serial_number}`;
+        opt.textContent = `${d.product}${d.serial_number ? ' [' + d.serial_number + ']' : ''} — ${d.manufacturer}`;
+        opt.dataset.source = 'usb';
+        opt.dataset.vid = d.vid;
+        opt.dataset.pid = d.pid;
+        opt.disabled = true; // Not connectable via current driver
+        grp.appendChild(opt);
+      }
+      sel.appendChild(grp);
+    }
+
+    // Restore selection or auto-select first FTDI
+    if (current) {
+      sel.value = current;
+    } else if (ftdi.length > 0) {
+      sel.value = ftdi[0].description || ftdi[0].serial_number || '';
+    } else if (dmxUsb.length > 0) {
+      sel.value = `usb:${dmxUsb[0].vid}:${dmxUsb[0].pid}:${dmxUsb[0].serial_number}`;
+    }
+
+    // Show summary
+    info.style.display = 'block';
+    const total = ftdi.length + usb.length;
+    if (total === 0) {
+      info.innerHTML = '<span style="color:var(--amber)">No USB devices found. Is your adapter plugged in?</span>';
+    } else {
+      const parts = [];
+      if (ftdi.length > 0) parts.push(`<span style="color:var(--green)">${ftdi.length} FTDI D2XX</span>`);
+      if (dmxUsb.length > 0) parts.push(`<span style="color:var(--green)">${dmxUsb.length} USB DMX</span>`);
+      if (otherUsb.length > 0) parts.push(`<span style="opacity:0.6">${otherUsb.length} other USB</span>`);
+      info.innerHTML = 'Found: ' + parts.join(' · ');
+    }
+  } catch (e) {
+    info.style.display = 'block';
+    info.innerHTML = '<span style="color:#f44">Scan failed: ' + (e.message||e) + '</span>';
+  }
+  setTimeout(() => { btn.innerHTML = '&#128269; Scan'; btn.disabled = false; }, 1000);
+});
+
+// Show device details when selection changes
+document.getElementById('cfgDmxPort').addEventListener('change', () => {
+  const sel = document.getElementById('cfgDmxPort');
+  const info = document.getElementById('dmxPortInfo');
+  const opt = sel.options[sel.selectedIndex];
+  if (!sel.value || !opt) { info.style.display = 'none'; return; }
+  info.style.display = 'block';
+  if (opt.dataset.source === 'ftdi') {
+    info.innerHTML = '<span style="color:var(--green)">✓ FTDI D2XX</span> — Ready for DMX512 output';
+  } else if (opt.dataset.source === 'usb') {
+    const vid = opt.dataset.vid || ''; const pid = opt.dataset.pid || '';
+    info.innerHTML = `<span style="color:var(--cyan)">USB</span> VID:${vid} PID:${pid} — libusb device`;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Subscriptions CRUD
+// ═══════════════════════════════════════════════════════════════
+const SUB_CATEGORIES = {
+  track: 'Track', transport: 'Transport', mixer: 'Mixer',
+  loop: 'Loop', soundswitch: 'SoundSwitch', custom: 'Custom'
+};
+
+async function loadSubscriptions() {
+  const subs = await fetch('/api/subscriptions').then(r => r.json());
+
+  const enabled = subs.filter(s => s.enabled);
+  document.getElementById('subsEnabledCount').textContent = enabled.length;
+  document.getElementById('subsTotalCount').textContent = subs.length;
+
+  const tbody = document.getElementById('subsTableBody');
+  tbody.innerHTML = '';
+
+  for (const s of subs) {
+    const tr = document.createElement('tr');
+    if (!s.enabled) tr.className = 'sub-disabled';
+    tr.innerHTML = `
+      <td><input type="checkbox" class="sub-toggle" data-id="${s.id}" ${s.enabled ? 'checked' : ''}></td>
+      <td><span class="sub-cat ${s.category}">${SUB_CATEGORIES[s.category] || s.category}</span></td>
+      <td style="font-size:12px">${esc(s.label || '—')}</td>
+      <td class="sub-trigger">${esc(s.trigger)}</td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="editSubscription(${s.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSubscription(${s.id})">Del</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  // Bind toggle checkboxes
+  tbody.querySelectorAll('.sub-toggle').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      await fetch(`/api/subscriptions/${cb.dataset.id}/toggle`, { method: 'POST' });
+      loadSubscriptions();
+    });
+  });
+}
+
+document.getElementById('btnAddSub').addEventListener('click', () => openSubModal());
+
+async function openSubModal(subId) {
+  document.getElementById('subError').textContent = '';
+  if (subId) {
+    const subs = await fetch('/api/subscriptions').then(r => r.json());
+    const s = subs.find(x => x.id === subId);
+    if (!s) return;
+    document.getElementById('subModalTitle').textContent = 'Edit Subscription';
+    document.getElementById('subEditId').value = s.id;
+    document.getElementById('subTrigger').value = s.trigger;
+    document.getElementById('subLabel').value = s.label || '';
+    document.getElementById('subCategory').value = s.category || 'custom';
+  } else {
+    document.getElementById('subModalTitle').textContent = 'Add Subscription';
+    document.getElementById('subEditId').value = '';
+    document.getElementById('subTrigger').value = '';
+    document.getElementById('subLabel').value = '';
+    document.getElementById('subCategory').value = 'custom';
+  }
+  document.getElementById('subModal').classList.add('open');
+}
+
+window.editSubscription = (id) => openSubModal(id);
+
+window.deleteSubscription = async (id) => {
+  if (!confirm('Delete this subscription?')) return;
+  await fetch(`/api/subscriptions/${id}`, { method: 'DELETE' });
+  loadSubscriptions();
+};
+
+document.getElementById('btnSaveSub').addEventListener('click', async () => {
+  const editId = document.getElementById('subEditId').value;
+  const body = {
+    trigger: document.getElementById('subTrigger').value.trim(),
+    label: document.getElementById('subLabel').value.trim(),
+    category: document.getElementById('subCategory').value,
+  };
+  if (!body.trigger) return showError('subError', 'Trigger expression is required');
+
+  const url = editId ? `/api/subscriptions/${editId}` : '/api/subscriptions';
+  const method = editId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) return showError('subError', data.error);
+  closeModal('subModal');
+  loadSubscriptions();
+});
+
+// Re-send subscriptions to VDJ
+document.getElementById('btnResendSubs').addEventListener('click', async () => {
+  const res = await fetch('/api/subscriptions/resend', { method: 'POST' });
+  const data = await res.json();
+  const btn = document.getElementById('btnResendSubs');
+  if (data.connected) {
+    btn.textContent = `Sent ${data.count} triggers!`;
+  } else {
+    btn.textContent = 'VDJ not connected';
+  }
+  setTimeout(() => { btn.textContent = 'Re-send to VDJ'; }, 2000);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Tracks Page
+// ═══════════════════════════════════════════════════════════════
+let tracksPage = 0;
+const TRACKS_PER_PAGE = 100;
+let tracksGenresLoaded = false;
+
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return '--:--';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+async function loadTracksStats() {
+  try {
+    const res = await fetch('/api/tracks/stats');
+    const stats = await res.json();
+    document.getElementById('statTotal').textContent = stats.total.toLocaleString();
+    document.getElementById('statLocal').textContent = stats.local.toLocaleString();
+    document.getElementById('statNetsearch').textContent = stats.netsearch.toLocaleString();
+    document.getElementById('statBpm').textContent = stats.withBpm.toLocaleString();
+    document.getElementById('statGenres').textContent = stats.genres.toLocaleString();
+  } catch(e) { console.error('Failed to load track stats', e); }
+}
+
+async function loadTracksGenres() {
+  if (tracksGenresLoaded) return;
+  try {
+    const res = await fetch('/api/tracks/genres');
+    const genres = await res.json();
+    const sel = document.getElementById('tracksGenreFilter');
+    sel.innerHTML = '<option value="">All Genres</option>';
+    for (const g of genres) {
+      const opt = document.createElement('option');
+      opt.value = g.genre;
+      opt.textContent = `${g.genre} (${g.count})`;
+      sel.appendChild(opt);
+    }
+    tracksGenresLoaded = true;
+  } catch(e) { console.error('Failed to load genres', e); }
+}
+
+async function loadTracks() {
+  const search = document.getElementById('tracksSearch').value.trim();
+  const genre = document.getElementById('tracksGenreFilter').value;
+  const sourceType = document.getElementById('tracksSourceFilter').value;
+  const minBpm = document.getElementById('tracksBpmMin').value;
+  const maxBpm = document.getElementById('tracksBpmMax').value;
+
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (genre) params.set('genre', genre);
+  if (sourceType) params.set('sourceType', sourceType);
+  if (minBpm) params.set('minBpm', minBpm);
+  if (maxBpm) params.set('maxBpm', maxBpm);
+  params.set('limit', TRACKS_PER_PAGE);
+  params.set('offset', tracksPage * TRACKS_PER_PAGE);
+
+  try {
+    const res = await fetch('/api/tracks?' + params.toString());
+    const data = await res.json();
+    renderTracks(data.tracks, data.total);
+  } catch(e) {
+    console.error('Failed to load tracks', e);
+    document.getElementById('tracksBody').innerHTML =
+      '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-dim)">Failed to load tracks</td></tr>';
+  }
+}
+
+function renderTracks(tracks, total) {
+  const tbody = document.getElementById('tracksBody');
+  if (!tracks.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">' +
+      (total === 0 ? 'No tracks imported yet. Configure VDJ database path in Config &rarr; VirtualDJ, then click Re-import.' : 'No tracks match your filters.') +
+      '</td></tr>';
+    updateTracksPagination(0, 0);
+    return;
+  }
+
+  const startIdx = tracksPage * TRACKS_PER_PAGE;
+  let html = '';
+  for (let i = 0; i < tracks.length; i++) {
+    const t = tracks[i];
+    const bpmStr = t.bpm > 0 ? t.bpm.toFixed(1) : '';
+    html += `<tr>
+      <td style="color:var(--text-dim)">${startIdx + i + 1}</td>
+      <td class="trk-title" title="${esc(t.filepath)}">${esc(t.title || t.filename)}</td>
+      <td class="trk-artist">${esc(t.author)}</td>
+      <td class="trk-genre">${esc(t.genre)}</td>
+      <td class="trk-bpm">${bpmStr}</td>
+      <td class="trk-key">${esc(t.key)}</td>
+      <td class="trk-duration">${formatDuration(t.song_length)}</td>
+      <td><span class="trk-source ${t.source_type}">${t.source_type === 'local' ? 'Local' : 'Net'}</span></td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+  updateTracksPagination(total, startIdx);
+}
+
+function updateTracksPagination(total, startIdx) {
+  const totalPages = Math.ceil(total / TRACKS_PER_PAGE) || 1;
+  document.getElementById('tracksPageLabel').textContent = `Page ${tracksPage + 1} of ${totalPages}`;
+  document.getElementById('tracksPrev').disabled = tracksPage === 0;
+  document.getElementById('tracksNext').disabled = (tracksPage + 1) >= totalPages;
+  document.getElementById('tracksPageInfo').textContent =
+    total > 0 ? `${startIdx + 1}-${Math.min(startIdx + TRACKS_PER_PAGE, total)} of ${total.toLocaleString()} tracks` : '';
+}
+
+async function loadTracksPage() {
+  await Promise.all([loadTracksStats(), loadTracksGenres()]);
+  await loadTracks();
+}
+
+// Tracks event listeners
+let tracksSearchTimer = null;
+document.getElementById('tracksSearch').addEventListener('input', () => {
+  clearTimeout(tracksSearchTimer);
+  tracksSearchTimer = setTimeout(() => { tracksPage = 0; loadTracks(); }, 300);
+});
+document.getElementById('tracksGenreFilter').addEventListener('change', () => { tracksPage = 0; loadTracks(); });
+document.getElementById('tracksSourceFilter').addEventListener('change', () => { tracksPage = 0; loadTracks(); });
+document.getElementById('tracksBpmMin').addEventListener('change', () => { tracksPage = 0; loadTracks(); });
+document.getElementById('tracksBpmMax').addEventListener('change', () => { tracksPage = 0; loadTracks(); });
+document.getElementById('tracksPrev').addEventListener('click', () => { if (tracksPage > 0) { tracksPage--; loadTracks(); } });
+document.getElementById('tracksNext').addEventListener('click', () => { tracksPage++; loadTracks(); });
+
+document.getElementById('btnImportTracks').addEventListener('click', async () => {
+  const btn = document.getElementById('btnImportTracks');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  try {
+    const res = await fetch('/api/tracks/import', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      btn.textContent = 'Error!';
+      alert('Import error: ' + data.error);
+    } else {
+      btn.textContent = `Imported ${data.total} tracks!`;
+      tracksGenresLoaded = false;
+      tracksPage = 0;
+      await loadTracksPage();
+    }
+  } catch(e) {
+    btn.textContent = 'Error!';
+    alert('Import failed: ' + e.message);
+  }
+  setTimeout(() => { btn.disabled = false; btn.innerHTML = '&#8635; Re-import'; }, 2500);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  DMX Control Panel
+// ═══════════════════════════════════════════════════════════════
+const dmxValues = {};  // {universe: {channel: value}}
+let dmxFadersBuilt = false;
+let dmxOutputOn = false;
+let qaChannelMap = []; // cached fixture channel map for quick actions
+
+// ─── DMX Sub-tab switching ──────────────────────────────────────────────────
+document.querySelectorAll('.dmx-subtab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.dmx-subtab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.dmx-subpage').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`dmxsub-${btn.dataset.dmxsub}`).classList.add('active');
+    if (btn.dataset.dmxsub === 'quickactions') loadQuickActions();
+  });
+});
+
+function getDmxUniverse() {
+  return +document.getElementById('dmxCtrlUniverse').value;
+}
+
+function getDmxRange() {
+  const [s, e] = document.getElementById('dmxCtrlRange').value.split('-').map(Number);
+  return { start: s, end: e };
+}
+
+function ensureUniverse(u) {
+  if (!dmxValues[u]) {
+    dmxValues[u] = {};
+    for (let c = 1; c <= 512; c++) dmxValues[u][c] = 0;
+  }
+}
+
+function buildFaders() {
+  const { start, end } = getDmxRange();
+  const u = getDmxUniverse();
+  ensureUniverse(u);
+  const container = document.getElementById('dmxFaders');
+  container.innerHTML = '';
+  for (let ch = start; ch <= end; ch++) {
+    const val = dmxValues[u][ch] || 0;
+    const div = document.createElement('div');
+    div.className = 'dmx-fader' + (val > 0 ? ' nonzero' : '');
+    div.innerHTML = `
+      <span class="dmx-fader-label">${ch}</span>
+      <input type="range" min="0" max="255" value="${val}" data-ch="${ch}">
+      <span class="dmx-fader-val">${val}</span>`;
+    container.appendChild(div);
+  }
+  // Bind input events
+  container.querySelectorAll('input[type=range]').forEach(inp => {
+    const ch = +inp.dataset.ch;
+    inp.addEventListener('input', () => {
+      const v = +inp.value;
+      dmxValues[u][ch] = v;
+      const valEl = inp.parentElement.querySelector('.dmx-fader-val');
+      valEl.textContent = v;
+      inp.parentElement.classList.toggle('nonzero', v > 0);
+      sendDmxChannel(u, ch, v);
+    });
+  });
+  dmxFadersBuilt = true;
+}
+
+function sendDmxChannel(universe, channel, value) {
+  fetch('/api/dmx/channel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ universe, channel, value }),
+  });
+}
+
+function updateOutputToggle() {
+  const toggle = document.getElementById('outputToggle');
+  const sw = document.getElementById('outputSwitch');
+  const label = toggle.querySelector('.toggle-label');
+  toggle.className = 'output-toggle ' + (dmxOutputOn ? 'active' : 'inactive');
+  sw.className = 'toggle-switch' + (dmxOutputOn ? ' on' : '');
+  label.textContent = dmxOutputOn ? 'Output ON' : 'Output OFF';
+}
+
+document.getElementById('outputSwitch').addEventListener('click', async () => {
+  dmxOutputOn = !dmxOutputOn;
+  updateOutputToggle();
+  await fetch('/api/dmx/output', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: dmxOutputOn }),
+  });
+});
+
+document.getElementById('dmxCtrlRange').addEventListener('change', buildFaders);
+document.getElementById('dmxCtrlUniverse').addEventListener('change', buildFaders);
+
+document.getElementById('dmxCtrlZeroAll').addEventListener('click', async () => {
+  const u = getDmxUniverse();
+  const { start, end } = getDmxRange();
+  ensureUniverse(u);
+  const channels = [];
+  for (let ch = start; ch <= end; ch++) {
+    dmxValues[u][ch] = 0;
+    channels.push({ ch, val: 0 });
+  }
+  buildFaders();
+  await fetch('/api/dmx/channels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ universe: u, channels }),
+  });
+});
+
+document.getElementById('dmxCtrlFullAll').addEventListener('click', async () => {
+  const u = getDmxUniverse();
+  const { start, end } = getDmxRange();
+  ensureUniverse(u);
+  const channels = [];
+  for (let ch = start; ch <= end; ch++) {
+    dmxValues[u][ch] = 255;
+    channels.push({ ch, val: 255 });
+  }
+  buildFaders();
+  await fetch('/api/dmx/channels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ universe: u, channels }),
+  });
+});
+
+async function initDmxControl() {
+  // Fetch current output state
+  try {
+    const res = await fetch('/api/dmx/output').then(r => r.json());
+    dmxOutputOn = res.enabled;
+  } catch { dmxOutputOn = false; }
+  updateOutputToggle();
+  buildFaders();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Quick Actions
+// ═══════════════════════════════════════════════════════════════
+const QA_COLORS = [
+  { type: 'red',    label: 'Red',     bg: '#e53935', fg: '#fff', border: '#f44' },
+  { type: 'green',  label: 'Green',   bg: '#43a047', fg: '#fff', border: '#4c4' },
+  { type: 'blue',   label: 'Blue',    bg: '#1e88e5', fg: '#fff', border: '#48f' },
+  { type: 'white',  label: 'White',   bg: '#f5f5f5', fg: '#000', border: '#ccc' },
+  { type: 'amber',  label: 'Amber',   bg: '#ff8f00', fg: '#fff', border: '#ffa' },
+  { type: 'uv',     label: 'UV',      bg: '#7b1fa2', fg: '#fff', border: '#c4f' },
+  { type: 'rg',     label: 'Yellow',  bg: '#fdd835', fg: '#000', border: '#ff0', channels: ['red','green'] },
+  { type: 'rb',     label: 'Magenta', bg: '#d81b60', fg: '#fff', border: '#f4c', channels: ['red','blue'] },
+  { type: 'gb',     label: 'Cyan',    bg: '#00acc1', fg: '#fff', border: '#0dd', channels: ['green','blue'] },
+  { type: 'rgb',    label: 'White (RGB)', bg: '#eee', fg: '#000', border: '#fff', channels: ['red','green','blue'] },
+];
+
+const QA_EFFECTS = [
+  { type: 'strobe',  label: 'Strobe',  bg: '#ffeb3b', fg: '#000', border: '#ff0', channels: ['strobe'] },
+  { type: 'fog',     label: 'Smoke',   bg: '#78909c', fg: '#fff', border: '#90a4ae', channels: ['fog','smoke','haze','macro'] },
+];
+
+const QA_MOVEMENTS = [
+  { id: 'center',    label: 'Centre',    icon: '◎', pan: 128, tilt: 128 },
+  { id: 'up',        label: 'Up',        icon: '⬆', pan: 128, tilt: 0 },
+  { id: 'down',      label: 'Down',      icon: '⬇', pan: 128, tilt: 255 },
+  { id: 'left',      label: 'Left',      icon: '⬅', pan: 0,   tilt: 128 },
+  { id: 'right',     label: 'Right',     icon: '➡', pan: 255, tilt: 128 },
+  { id: 'top-left',  label: 'Top Left',  icon: '↖', pan: 0,   tilt: 0 },
+  { id: 'top-right', label: 'Top Right', icon: '↗', pan: 255, tilt: 0 },
+  { id: 'bot-left',  label: 'Bot Left',  icon: '↙', pan: 0,   tilt: 255 },
+  { id: 'bot-right', label: 'Bot Right', icon: '↘', pan: 255, tilt: 255 },
+  { id: 'sweep-h',   label: 'Sweep H',   icon: '↔', sweep: 'pan' },
+  { id: 'sweep-v',   label: 'Sweep V',   icon: '↕', sweep: 'tilt' },
+  { id: 'circle',    label: 'Circle',    icon: '⟳', sweep: 'circle' },
+];
+
+let qaMode = 'hold'; // 'hold' or 'toggle'
+const qaToggleState = {}; // track toggled-on buttons by key
+let qaCustomColors = []; // saved custom colour presets
+let qaSweepTimer = null; // movement animation timer
+
+document.getElementById('qaModeSelect').addEventListener('change', (e) => {
+  qaMode = e.target.value;
+  document.getElementById('qaColorTitle').textContent = qaMode === 'hold'
+    ? 'Colours' : 'Colours';
+  // Clear all toggle states when switching mode
+  for (const key of Object.keys(qaToggleState)) delete qaToggleState[key];
+  document.querySelectorAll('.qa-btn.toggled-on').forEach(b => b.classList.remove('toggled-on'));
+});
+
+// ─── Live Colour Picker ────────────────────────────────────────────────
+function updatePickerPreview() {
+  const r = +document.getElementById('qaPickerR').value;
+  const g = +document.getElementById('qaPickerG').value;
+  const b = +document.getElementById('qaPickerB').value;
+  document.getElementById('qaPickerPreview').style.background = `rgb(${r},${g},${b})`;
+  document.getElementById('qaPickerRVal').textContent = r;
+  document.getElementById('qaPickerGVal').textContent = g;
+  document.getElementById('qaPickerBVal').textContent = b;
+  document.getElementById('qaPickerWVal').textContent = document.getElementById('qaPickerW').value;
+}
+['qaPickerR','qaPickerG','qaPickerB','qaPickerW'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updatePickerPreview);
+});
+
+function getPickerTargets() {
+  const r = +document.getElementById('qaPickerR').value;
+  const g = +document.getElementById('qaPickerG').value;
+  const b = +document.getElementById('qaPickerB').value;
+  const w = +document.getElementById('qaPickerW').value;
+  const channelSets = [];
+  const filtered = getFilteredChannelMap();
+  for (const fix of filtered) {
+    for (const ch of fix.channels) {
+      if (ch.type === 'red')   channelSets.push({ universe: fix.universe, address: ch.dmx_address, val: r });
+      if (ch.type === 'green') channelSets.push({ universe: fix.universe, address: ch.dmx_address, val: g });
+      if (ch.type === 'blue')  channelSets.push({ universe: fix.universe, address: ch.dmx_address, val: b });
+      if (ch.type === 'white') channelSets.push({ universe: fix.universe, address: ch.dmx_address, val: w });
+    }
+  }
+  return channelSets;
+}
+
+function sendPickerColor() {
+  const targets = getPickerTargets();
+  const byUniverse = {};
+  for (const t of targets) {
+    if (!byUniverse[t.universe]) byUniverse[t.universe] = [];
+    byUniverse[t.universe].push({ ch: t.address, val: t.val });
+  }
+  for (const [u, channels] of Object.entries(byUniverse)) {
+    fetch('/api/dmx/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ universe: +u, channels }),
+    });
+  }
+}
+
+document.getElementById('qaPickerApply').addEventListener('click', sendPickerColor);
+
+document.getElementById('qaPickerOff').addEventListener('click', () => {
+  ['qaPickerR','qaPickerG','qaPickerB','qaPickerW'].forEach(id => { document.getElementById(id).value = 0; });
+  updatePickerPreview();
+  // Send zeros to all colour channels
+  const targets = getPickerTargets(); // all will be 0
+  const filtered = getFilteredChannelMap();
+  const byUniverse = {};
+  for (const fix of filtered) {
+    for (const ch of fix.channels) {
+      if (['red','green','blue','white'].includes(ch.type)) {
+        if (!byUniverse[fix.universe]) byUniverse[fix.universe] = [];
+        byUniverse[fix.universe].push({ ch: ch.dmx_address, val: 0 });
+      }
+    }
+  }
+  for (const [u, channels] of Object.entries(byUniverse)) {
+    fetch('/api/dmx/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ universe: +u, channels }) });
+  }
+});
+
+// ─── Custom Colour Presets ───────────────────────────────────────────
+async function loadCustomColors() {
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    qaCustomColors = cfg.qa_custom_colors ? JSON.parse(cfg.qa_custom_colors) : [];
+  } catch { qaCustomColors = []; }
+}
+
+async function saveCustomColors() {
+  await fetch('/api/config/qa_custom_colors', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: JSON.stringify(qaCustomColors) }),
+  });
+}
+
+function renderCustomColorGrid() {
+  const grid = document.getElementById('qaCustomGrid');
+  grid.innerHTML = '';
+  if (qaCustomColors.length === 0) {
+    grid.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">No custom presets yet. Use the colour picker and click Save Preset.</span>';
+    return;
+  }
+  qaCustomColors.forEach((preset, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'qa-btn';
+    btn.style.cssText = `background:rgb(${preset.r},${preset.g},${preset.b});color:${(preset.r+preset.g+preset.b) > 380 ? '#000' : '#fff'};border-color:rgb(${Math.min(255,preset.r+40)},${Math.min(255,preset.g+40)},${Math.min(255,preset.b+40)});position:relative`;
+    btn.textContent = preset.name;
+    btn.title = `R:${preset.r} G:${preset.g} B:${preset.b} W:${preset.w}`;
+    btn.dataset.qaCustomIdx = idx;
+
+    // Delete button
+    const del = document.createElement('span');
+    del.textContent = '×';
+    del.style.cssText = 'position:absolute;top:2px;right:6px;font-size:14px;cursor:pointer;opacity:0.6';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation(); e.preventDefault();
+      qaCustomColors.splice(idx, 1);
+      await saveCustomColors();
+      renderCustomColorGrid();
+      bindCustomColorButtons();
+    });
+    btn.appendChild(del);
+    grid.appendChild(btn);
+  });
+  bindCustomColorButtons();
+}
+
+function bindCustomColorButtons() {
+  document.querySelectorAll('#qaCustomGrid .qa-btn').forEach(btn => {
+    const idx = +btn.dataset.qaCustomIdx;
+    const preset = qaCustomColors[idx];
+    if (!preset) return;
+    const colorKey = `custom_${idx}`;
+
+    function applyPreset() {
+      const targets = [];
+      const filtered = getFilteredChannelMap();
+      for (const fix of filtered) {
+        for (const ch of fix.channels) {
+          if (ch.type === 'red')   targets.push({ universe: fix.universe, address: ch.dmx_address, val: preset.r });
+          if (ch.type === 'green') targets.push({ universe: fix.universe, address: ch.dmx_address, val: preset.g });
+          if (ch.type === 'blue')  targets.push({ universe: fix.universe, address: ch.dmx_address, val: preset.b });
+          if (ch.type === 'white') targets.push({ universe: fix.universe, address: ch.dmx_address, val: preset.w });
+        }
+      }
+      const byUniverse = {};
+      for (const t of targets) {
+        if (!byUniverse[t.universe]) byUniverse[t.universe] = [];
+        byUniverse[t.universe].push({ ch: t.address, val: t.val });
+      }
+      for (const [u, channels] of Object.entries(byUniverse)) {
+        fetch('/api/dmx/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ universe: +u, channels }) });
+      }
+    }
+
+    function clearPreset() {
+      const targets = [];
+      const filtered = getFilteredChannelMap();
+      for (const fix of filtered) {
+        for (const ch of fix.channels) {
+          if (['red','green','blue','white'].includes(ch.type))
+            targets.push({ universe: fix.universe, address: ch.dmx_address });
+        }
+      }
+      sendQaChannels(targets, 0);
+    }
+
+    // Hold mode
+    btn.addEventListener('mousedown', (e) => {
+      if (qaMode !== 'hold' || e.target.tagName === 'SPAN') return;
+      e.preventDefault(); btn.classList.add('pressed'); applyPreset();
+    });
+    btn.addEventListener('mouseup', (e) => {
+      if (qaMode !== 'hold') return;
+      e.preventDefault(); btn.classList.remove('pressed'); clearPreset();
+    });
+    btn.addEventListener('mouseleave', (e) => {
+      if (qaMode !== 'hold' || !btn.classList.contains('pressed')) return;
+      btn.classList.remove('pressed'); clearPreset();
+    });
+    // Toggle mode
+    btn.addEventListener('click', (e) => {
+      if (qaMode !== 'toggle' || e.target.tagName === 'SPAN') return;
+      e.preventDefault();
+      if (qaToggleState[colorKey]) {
+        delete qaToggleState[colorKey]; btn.classList.remove('toggled-on'); clearPreset();
+      } else {
+        qaToggleState[colorKey] = true; btn.classList.add('toggled-on'); applyPreset();
+      }
+    });
+    // Touch
+    btn.addEventListener('touchstart', (e) => { if (qaMode === 'hold') { e.preventDefault(); btn.classList.add('pressed'); applyPreset(); } }, { passive: false });
+    btn.addEventListener('touchend', (e) => { if (qaMode === 'hold') { e.preventDefault(); btn.classList.remove('pressed'); clearPreset(); } }, { passive: false });
+  });
+}
+
+document.getElementById('qaPickerSave').addEventListener('click', async () => {
+  const r = +document.getElementById('qaPickerR').value;
+  const g = +document.getElementById('qaPickerG').value;
+  const b = +document.getElementById('qaPickerB').value;
+  const w = +document.getElementById('qaPickerW').value;
+  const name = prompt('Preset name:', `Custom ${qaCustomColors.length + 1}`);
+  if (!name) return;
+  qaCustomColors.push({ name, r, g, b, w });
+  await saveCustomColors();
+  renderCustomColorGrid();
+});
+
+// ─── Movement Presets ─────────────────────────────────────────────────
+function getMoveTargets(type) {
+  const targets = [];
+  const filtered = getFilteredChannelMap();
+  for (const fix of filtered) {
+    for (const ch of fix.channels) {
+      if (ch.type === type) targets.push({ universe: fix.universe, address: ch.dmx_address });
+    }
+  }
+  return targets;
+}
+
+function sendMovePosition(panVal, tiltVal) {
+  const panTargets = getMoveTargets('pan');
+  const tiltTargets = getMoveTargets('tilt');
+  const speedTargets = getMoveTargets('speed');
+  const speed = +document.getElementById('qaMoveSpeed').value;
+  const allTargets = [];
+  for (const t of panTargets) allTargets.push({ ...t, val: panVal });
+  for (const t of tiltTargets) allTargets.push({ ...t, val: tiltVal });
+  for (const t of speedTargets) allTargets.push({ ...t, val: speed });
+
+  const byUniverse = {};
+  for (const t of allTargets) {
+    if (!byUniverse[t.universe]) byUniverse[t.universe] = [];
+    byUniverse[t.universe].push({ ch: t.address, val: t.val });
+  }
+  for (const [u, channels] of Object.entries(byUniverse)) {
+    fetch('/api/dmx/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ universe: +u, channels }) });
+  }
+}
+
+function stopSweep() {
+  if (qaSweepTimer) { clearInterval(qaSweepTimer); qaSweepTimer = null; }
+  document.querySelectorAll('.qa-move-btn.active').forEach(b => b.classList.remove('active'));
+}
+
+function startSweep(mode, btn) {
+  stopSweep();
+  btn.classList.add('active');
+  let angle = 0;
+  const speed = Math.max(10, 300 - +document.getElementById('qaMoveSpeed').value);
+  qaSweepTimer = setInterval(() => {
+    angle = (angle + 4) % 360;
+    const rad = angle * Math.PI / 180;
+    if (mode === 'pan') {
+      sendMovePosition(Math.round(127.5 + 127.5 * Math.sin(rad)), 128);
+    } else if (mode === 'tilt') {
+      sendMovePosition(128, Math.round(127.5 + 127.5 * Math.sin(rad)));
+    } else if (mode === 'circle') {
+      sendMovePosition(
+        Math.round(127.5 + 127.5 * Math.sin(rad)),
+        Math.round(127.5 + 127.5 * Math.cos(rad))
+      );
+    }
+  }, speed);
+}
+
+function buildMoveGrid() {
+  const grid = document.getElementById('qaMoveGrid');
+  grid.innerHTML = '';
+  const hasPan = getMoveTargets('pan').length > 0;
+  const hasTilt = getMoveTargets('tilt').length > 0;
+
+  QA_MOVEMENTS.forEach(m => {
+    const btn = document.createElement('button');
+    btn.className = 'qa-move-btn';
+    btn.innerHTML = `<span class="move-icon">${m.icon}</span>${m.label}`;
+    btn.dataset.moveId = m.id;
+
+    if (!hasPan && !hasTilt) {
+      btn.style.opacity = '0.3';
+      btn.title = 'No pan/tilt channels found';
+      grid.appendChild(btn);
+      return;
+    }
+
+    if (m.sweep) {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('active')) { stopSweep(); }
+        else { startSweep(m.sweep, btn); }
+      });
+    } else {
+      btn.addEventListener('click', () => {
+        stopSweep();
+        sendMovePosition(m.pan, m.tilt);
+      });
+    }
+    grid.appendChild(btn);
+  });
+}
+
+document.getElementById('qaMoveSpeed').addEventListener('input', () => {
+  document.getElementById('qaMoveSpeedVal').textContent = document.getElementById('qaMoveSpeed').value;
+});
+
+// ─── Load & Bind Quick Actions ───────────────────────────────────────
+async function loadQuickActions() {
+  try {
+    qaChannelMap = await fetch('/api/fixture-channel-map').then(r => r.json());
+  } catch { qaChannelMap = []; }
+
+  // Also refresh groups for the filter
+  try {
+    fixtureGroups = await fetch('/api/groups').then(r => r.json());
+  } catch { fixtureGroups = []; }
+  populateQaGroupFilter();
+
+  await loadCustomColors();
+
+  const filtered = getFilteredChannelMap();
+  buildQaGrid('qaColorGrid', QA_COLORS);
+  buildQaGrid('qaEffectsGrid', QA_EFFECTS);
+  renderCustomColorGrid();
+  buildMoveGrid();
+  bindQuickActionButtons();
+
+  const totalFixtures = filtered.length;
+  const totalChannels = filtered.reduce((s, f) => s + f.channels.length, 0);
+  const groupLabel = qaGroupFilter ? ` (filtered by group)` : '';
+  document.getElementById('qaStatus').textContent = totalFixtures > 0
+    ? `${totalFixtures} fixture(s), ${totalChannels} channel(s) mapped${groupLabel}.`
+    : 'No fixtures loaded. Add fixtures with colour channel types to use Quick Actions.';
+}
+
+function buildQaGrid(gridId, items) {
+  const grid = document.getElementById(gridId);
+  grid.innerHTML = '';
+  const filtered = getFilteredChannelMap();
+  items.forEach(color => {
+    const btn = document.createElement('button');
+    btn.className = 'qa-btn';
+    btn.style.cssText = `background:${color.bg};color:${color.fg};border-color:${color.border}`;
+    btn.textContent = color.label;
+    btn.dataset.qaColor = color.type;
+
+    const targetTypes = color.channels || [color.type];
+    const targets = [];
+    for (const fix of filtered) {
+      for (const ch of fix.channels) {
+        if (targetTypes.includes(ch.type)) {
+          targets.push({ universe: fix.universe, address: ch.dmx_address });
+        }
+      }
+    }
+    btn.dataset.qaTargets = JSON.stringify(targets);
+
+    if (targets.length === 0) {
+      btn.style.opacity = '0.3';
+      btn.title = 'No matching channels';
+    } else {
+      btn.title = `${targets.length} channel(s)`;
+    }
+    grid.appendChild(btn);
+  });
+}
+
+function sendQaChannels(targets, value) {
+  const byUniverse = {};
+  for (const t of targets) {
+    if (!byUniverse[t.universe]) byUniverse[t.universe] = [];
+    byUniverse[t.universe].push({ ch: t.address, val: value });
+  }
+  for (const [u, channels] of Object.entries(byUniverse)) {
+    fetch('/api/dmx/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ universe: +u, channels }),
+    });
+  }
+}
+
+function getQaTargetsForType(qaType, qaVal) {
+  const filtered = getFilteredChannelMap();
+  if (qaType === 'all') {
+    const t = [];
+    for (const fix of filtered) {
+      for (const ch of fix.channels) t.push({ universe: fix.universe, address: ch.dmx_address });
+    }
+    return { targets: t, val: qaVal };
+  }
+  if (qaType === 'dimmer') {
+    const t = [];
+    for (const fix of filtered) {
+      for (const ch of fix.channels) {
+        if (ch.type === 'dimmer') t.push({ universe: fix.universe, address: ch.dmx_address });
+      }
+    }
+    return { targets: t, val: qaVal };
+  }
+  return null;
+}
+
+function bindQuickActionButtons() {
+  // Colour and effect buttons (from dynamic grids)
+  document.querySelectorAll('#qaColorGrid .qa-btn, #qaEffectsGrid .qa-btn').forEach(btn => {
+    const targets = JSON.parse(btn.dataset.qaTargets || '[]');
+    if (targets.length === 0) return;
+    const colorKey = btn.dataset.qaColor;
+
+    function holdActivate(e) {
+      e.preventDefault();
+      btn.classList.add('pressed');
+      sendQaChannels(targets, 255);
+    }
+    function holdDeactivate(e) {
+      e.preventDefault();
+      btn.classList.remove('pressed');
+      sendQaChannels(targets, 0);
+    }
+    function toggleClick(e) {
+      e.preventDefault();
+      if (qaToggleState[colorKey]) {
+        delete qaToggleState[colorKey];
+        btn.classList.remove('toggled-on');
+        sendQaChannels(targets, 0);
+      } else {
+        qaToggleState[colorKey] = true;
+        btn.classList.add('toggled-on');
+        sendQaChannels(targets, 255);
+      }
+    }
+
+    // Mouse
+    btn.addEventListener('mousedown', (e) => { if (qaMode === 'hold') holdActivate(e); });
+    btn.addEventListener('mouseup', (e) => { if (qaMode === 'hold') holdDeactivate(e); });
+    btn.addEventListener('mouseleave', (e) => { if (qaMode === 'hold' && btn.classList.contains('pressed')) holdDeactivate(e); });
+    btn.addEventListener('click', (e) => { if (qaMode === 'toggle') toggleClick(e); });
+    // Touch
+    btn.addEventListener('touchstart', (e) => { if (qaMode === 'hold') holdActivate(e); }, { passive: false });
+    btn.addEventListener('touchend', (e) => { if (qaMode === 'hold') holdDeactivate(e); }, { passive: false });
+    btn.addEventListener('touchcancel', (e) => { if (qaMode === 'hold') holdDeactivate(e); }, { passive: false });
+  });
+
+  // Master buttons (dimmer, blackout) — always click-style
+  document.querySelectorAll('.qa-btn[data-qa-type]').forEach(btn => {
+    const qaType = btn.dataset.qaType;
+    const qaVal = +btn.dataset.qaVal;
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const result = getQaTargetsForType(qaType, qaVal);
+      if (!result) return;
+      sendQaChannels(result.targets, result.val);
+      btn.classList.add('pressed');
+      setTimeout(() => btn.classList.remove('pressed'), 200);
+      // Sync master dimmer slider
+      if (qaType === 'dimmer') {
+        document.getElementById('qaMasterDimmer').value = qaVal;
+        document.getElementById('qaMasterDimmerVal').textContent = qaVal;
+      }
+      // If blackout, clear all toggle states and reset slider
+      if (qaType === 'all' && qaVal === 0) {
+        for (const key of Object.keys(qaToggleState)) delete qaToggleState[key];
+        document.querySelectorAll('.qa-btn.toggled-on').forEach(b => b.classList.remove('toggled-on'));
+        document.getElementById('qaMasterDimmer').value = 0;
+        document.getElementById('qaMasterDimmerVal').textContent = '0';
+      }
+    });
+  });
+
+  // Master dimmer slider
+  const masterSlider = document.getElementById('qaMasterDimmer');
+  const masterVal = document.getElementById('qaMasterDimmerVal');
+  masterSlider.addEventListener('input', () => {
+    const val = +masterSlider.value;
+    masterVal.textContent = val;
+    const result = getQaTargetsForType('dimmer', val);
+    if (result) sendQaChannels(result.targets, result.val);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Emergency Blackout Button
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('btnEmergencyBlackout').addEventListener('click', async () => {
+  const btn = document.getElementById('btnEmergencyBlackout');
+  btn.classList.add('active');
+
+  // Kill output and blackout all universes
+  await fetch('/api/dmx/output', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: false }),
+  });
+  await fetch('/api/artnet/blackout', { method: 'POST' });
+
+  // Update local state
+  dmxOutputOn = false;
+  updateOutputToggle();
+
+  // Clear all QA toggle states
+  for (const key of Object.keys(qaToggleState)) delete qaToggleState[key];
+  document.querySelectorAll('.qa-btn.toggled-on').forEach(b => b.classList.remove('toggled-on'));
+
+  // Stop any sweep animations
+  if (typeof stopSweep === 'function') stopSweep();
+
+  setTimeout(() => btn.classList.remove('active'), 400);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Fixture Groups Management
+// ═══════════════════════════════════════════════════════════════
+let fixtureGroups = [];
+
+async function loadGroups() {
+  try {
+    fixtureGroups = await fetch('/api/groups').then(r => r.json());
+  } catch { fixtureGroups = []; }
+  renderGroupChips();
+  populateQaGroupFilter();
+}
+
+function renderGroupChips() {
+  const list = document.getElementById('groupsList');
+  if (fixtureGroups.length === 0) {
+    list.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">No groups yet. Click "+ New Group" to create one.</span>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const g of fixtureGroups) {
+    const chip = document.createElement('div');
+    chip.className = 'group-chip';
+    chip.innerHTML = `
+      <span class="group-dot" style="background:${g.color}"></span>
+      <span>${esc(g.name)}</span>
+      <span class="group-count">(${g.fixture_ids.length})</span>
+      <span class="group-chip-actions">
+        <button title="Assign fixtures" data-group-assign="${g.id}">&#9998;</button>
+        <button title="Delete group" data-group-delete="${g.id}">&#10005;</button>
+      </span>
+    `;
+    list.appendChild(chip);
+  }
+
+  // Bind assign buttons
+  list.querySelectorAll('[data-group-assign]').forEach(btn => {
+    btn.addEventListener('click', () => openGroupAssignModal(+btn.dataset.groupAssign));
+  });
+  // Bind delete buttons
+  list.querySelectorAll('[data-group-delete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const gid = +btn.dataset.groupDelete;
+      const g = fixtureGroups.find(x => x.id === gid);
+      if (!confirm(`Delete group "${g ? g.name : gid}"?`)) return;
+      await fetch(`/api/groups/${gid}`, { method: 'DELETE' });
+      loadGroups();
+    });
+  });
+}
+
+document.getElementById('btnAddGroup').addEventListener('click', async () => {
+  const name = prompt('Group name:');
+  if (!name || !name.trim()) return;
+  const colors = ['#e53935','#43a047','#1e88e5','#ff8f00','#7b1fa2','#00acc1','#fdd835','#d81b60','#78909c','#f5f5f5'];
+  const color = colors[fixtureGroups.length % colors.length];
+  await fetch('/api/groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name.trim(), color }),
+  });
+  loadGroups();
+});
+
+async function openGroupAssignModal(groupId) {
+  document.getElementById('groupAssignId').value = groupId;
+  const g = fixtureGroups.find(x => x.id === groupId);
+  document.getElementById('groupAssignTitle').textContent = `Assign Fixtures to "${g ? g.name : ''}"`;
+
+  // Fetch all fixtures
+  const fixtures = await fetch('/api/fixtures').then(r => r.json());
+  const assignedIds = new Set(g ? g.fixture_ids : []);
+
+  const list = document.getElementById('groupAssignList');
+  list.innerHTML = '';
+  if (fixtures.length === 0) {
+    list.innerHTML = '<div style="padding:10px;color:var(--text-dim);font-size:13px">No fixtures available.</div>';
+  } else {
+    for (const f of fixtures) {
+      const item = document.createElement('div');
+      item.className = 'group-assign-item';
+      item.innerHTML = `
+        <label>
+          <input type="checkbox" value="${f.id}" ${assignedIds.has(f.id) ? 'checked' : ''}>
+          <span>${esc(f.name)}</span>
+          <span style="font-size:11px;color:var(--text-dim)">(U${f.universe} A${f.address}, ${f.type_name})</span>
+        </label>
+      `;
+      list.appendChild(item);
+    }
+  }
+
+  document.getElementById('groupAssignError').textContent = '';
+  document.getElementById('groupAssignModal').classList.add('open');
+}
+
+document.getElementById('btnSaveGroupAssign').addEventListener('click', async () => {
+  const groupId = +document.getElementById('groupAssignId').value;
+  const checkboxes = document.querySelectorAll('#groupAssignList input[type=checkbox]:checked');
+  const fixtureIds = Array.from(checkboxes).map(cb => +cb.value);
+
+  const res = await fetch(`/api/groups/${groupId}/fixtures`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fixture_ids: fixtureIds }),
+  });
+  const data = await res.json();
+  if (data.error) return showError('groupAssignError', data.error);
+  closeModal('groupAssignModal');
+  loadGroups();
+  // Reload QA if on that page
+  if (typeof loadQuickActions === 'function') loadQuickActions();
+});
+
+// ─── QA Group Filter ────────────────────────────────────────────────
+let qaGroupFilter = ''; // '' = all fixtures, or group ID
+
+function populateQaGroupFilter() {
+  const sel = document.getElementById('qaGroupFilter');
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">All Fixtures</option>';
+  for (const g of fixtureGroups) {
+    sel.innerHTML += `<option value="${g.id}">${esc(g.name)} (${g.fixture_ids.length})</option>`;
+  }
+  sel.value = currentVal || '';
+}
+
+document.getElementById('qaGroupFilter').addEventListener('change', (e) => {
+  qaGroupFilter = e.target.value;
+  loadQuickActions();
+});
+
+function getFilteredChannelMap() {
+  if (!qaGroupFilter) return qaChannelMap;
+  const gid = +qaGroupFilter;
+  const g = fixtureGroups.find(x => x.id === gid);
+  if (!g) return qaChannelMap;
+  const idSet = new Set(g.fixture_ids);
+  return qaChannelMap.filter(f => idSet.has(f.id));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function showError(id, msg) { document.getElementById(id).textContent = msg; }
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('open'); });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Boot
+// ═══════════════════════════════════════════════════════════════
+loadGroups();
+connect();
+</script>
+</body>
+</html>
