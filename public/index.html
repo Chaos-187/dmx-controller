@@ -787,6 +787,190 @@
     .mover-preset-card-meta .mp-val { color: var(--cyan); font-variant-numeric: tabular-nums; }
 
     /* ═══════════════════════════════════════════════════════════════
+       Sequencer
+       ═══════════════════════════════════════════════════════════════ */
+    .seq-header {
+      display: flex; gap: 10px; align-items: center; margin-bottom: 10px;
+      padding: 10px 16px; background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px; flex-wrap: wrap;
+    }
+    .seq-header select, .seq-header input[type="text"] {
+      padding: 6px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 12px;
+    }
+    .seq-info { font-size: 12px; color: var(--text-dim); display: flex; gap: 14px; }
+    .seq-info .si-val { color: var(--yellow); font-weight: 500; }
+    .seq-transport {
+      display: flex; gap: 6px; align-items: center; margin-bottom: 10px;
+      padding: 8px 12px; background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px; flex-wrap: wrap;
+    }
+    .seq-transport .seq-btn {
+      width: 32px; height: 32px; border: 1px solid var(--panel-border); background: var(--input-bg);
+      color: var(--text); border-radius: 4px; cursor: pointer; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .seq-transport .seq-btn:hover { border-color: var(--accent); }
+    .seq-transport .seq-btn.active { background: var(--accent); border-color: var(--accent); }
+    .seq-zoom-group, .seq-snap-group { display: flex; align-items: center; gap: 6px; margin-left: 8px; }
+    .seq-zoom-group label, .seq-snap-group label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
+    .seq-zoom-group input[type="range"] { width: 100px; accent-color: var(--accent); }
+    .seq-snap-group select, .seq-deck-sel {
+      padding: 4px 6px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 11px;
+    }
+    .seq-deck-sel { margin-left: auto; }
+    .seq-time-display {
+      font-size: 14px; font-variant-numeric: tabular-nums; color: var(--green);
+      font-family: 'Consolas', monospace; min-width: 80px; text-align: center;
+    }
+    .seq-timeline-wrap {
+      position: relative; overflow: auto;
+      border: 1px solid var(--panel-border); border-radius: 8px;
+      background: #111122; max-height: calc(100vh - 380px); min-height: 200px;
+    }
+    .seq-timeline { position: relative; min-height: 200px; }
+    .seq-ruler {
+      position: sticky; top: 0; z-index: 5;
+      height: 28px; background: rgba(0,0,0,.5);
+      border-bottom: 1px solid var(--panel-border);
+      margin-left: 140px; cursor: pointer;
+    }
+    .seq-ruler-mark {
+      position: absolute; top: 0; height: 100%;
+      border-left: 1px solid #333; font-size: 9px; color: var(--text-dim);
+      padding: 2px 4px; white-space: nowrap; pointer-events: none;
+    }
+    .seq-ruler-mark.bar { border-left-color: #555; }
+    .seq-ruler-mark.bar .seq-rm-label { font-weight: 600; color: var(--text); }
+    .seq-lane { display: flex; min-height: 36px; border-bottom: 1px solid #1a1a2e; }
+    .seq-lane:hover { background: rgba(255,255,255,.01); }
+    .seq-lane-header {
+      width: 140px; min-width: 140px; padding: 4px 8px;
+      font-size: 11px; color: var(--text-dim);
+      background: rgba(0,0,0,.3); border-right: 1px solid var(--panel-border);
+      display: flex; align-items: center; gap: 6px;
+      position: sticky; left: 0; z-index: 3;
+    }
+    .seq-lane-header .seq-lh-color { width: 8px; height: 8px; border-radius: 50%; }
+    .seq-lane-track { flex: 1; position: relative; min-width: 0; cursor: crosshair; }
+    .seq-cue {
+      position: absolute; top: 2px; bottom: 2px;
+      border-radius: 3px; font-size: 9px; color: #fff;
+      padding: 1px 4px; overflow: hidden; cursor: pointer;
+      border: 1px solid rgba(255,255,255,.15);
+      white-space: nowrap; text-overflow: ellipsis;
+      user-select: none; min-width: 4px; z-index: 1;
+    }
+    .seq-cue:hover { filter: brightness(1.2); }
+    .seq-cue.selected { border: 2px solid #fff; box-shadow: 0 0 8px rgba(233,69,96,.5); z-index: 2; }
+    .seq-cue-resize {
+      position: absolute; right: -2px; top: 0; bottom: 0; width: 10px; cursor: ew-resize;
+      z-index: 3; background: transparent; transition: background .15s;
+    }
+    .seq-cue-resize:hover, .seq-cue-resize:active {
+      background: rgba(255,255,255,.35);
+      border-left: 2px solid rgba(255,255,255,.6);
+    }
+    .seq-cue:hover .seq-cue-resize {
+      background: rgba(255,255,255,.12);
+    }
+    .seq-playhead {
+      position: absolute; top: 0; bottom: 0; width: 2px;
+      background: var(--accent); z-index: 10; pointer-events: none;
+      box-shadow: 0 0 6px var(--accent); margin-left: 140px;
+    }
+    .seq-playhead::before {
+      content: ''; position: absolute; top: 0; left: -4px;
+      width: 0; height: 0;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 6px solid var(--accent);
+    }
+    .seq-empty {
+      display: flex; align-items: center; justify-content: center;
+      height: 200px; color: var(--text-dim); font-size: 14px;
+      flex-direction: column; gap: 12px;
+    }
+    .seq-properties {
+      margin-top: 10px; padding: 12px 16px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px; display: none;
+    }
+    .seq-properties.open { display: block; }
+    .seq-properties h4 { font-size: 12px; color: var(--accent); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .seq-prop-grid {
+      display: grid; grid-template-columns: 80px 1fr 80px 1fr; gap: 8px; align-items: center;
+    }
+    .seq-prop-grid label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
+    .seq-prop-grid input, .seq-prop-grid select {
+      padding: 4px 8px; background: var(--input-bg);
+      border: 1px solid var(--input-border); border-radius: 4px;
+      color: var(--text); font-size: 12px;
+    }
+    .seq-color-channels { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+    .seq-ch-slider { display: flex; align-items: center; gap: 6px; }
+    .seq-ch-slider label { font-size: 10px; width: 28px; font-weight: 600; text-transform: uppercase; }
+    .seq-ch-slider input[type="range"] { width: 80px; accent-color: var(--accent); }
+    .seq-ch-slider .seq-ch-val { font-size: 10px; width: 28px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+    .seq-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; pointer-events: none; z-index: 0; }
+    .seq-grid-line.beat { background: rgba(255,255,255,.04); }
+    .seq-grid-line.bar { background: rgba(255,255,255,.08); }
+    .seq-effects-panel {
+      margin-top: 10px; padding: 12px 16px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px;
+    }
+    .seq-effects-panel h4 { font-size: 12px; color: var(--accent); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .seq-effects-list {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 8px; margin-bottom: 10px; max-height: 200px; overflow-y: auto;
+    }
+    .seq-effect-card {
+      padding: 8px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 6px; font-size: 12px; cursor: pointer; display: flex;
+      align-items: center; gap: 8px; transition: border-color .15s;
+    }
+    .seq-effect-card:hover { border-color: var(--accent); }
+    .seq-effect-card .eff-type {
+      font-size: 9px; padding: 1px 5px; border-radius: 3px;
+      text-transform: uppercase; font-weight: 600;
+    }
+    .seq-effect-card .eff-type.pulse { background: #2a1a3a; color: #bf7fff; }
+    .seq-effect-card .eff-type.rainbow { background: #1a2a3a; color: #7fdfff; }
+    .seq-effect-card .eff-type.strobe { background: #3a2a1a; color: #ffbf7f; }
+    .seq-effect-card .eff-type.color_fade { background: #1a3a2a; color: #7fff9f; }
+    .seq-effect-card .eff-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .seq-effect-card .eff-actions { display: flex; gap: 4px; }
+    .seq-effect-card .eff-actions button {
+      background: none; border: none; cursor: pointer; font-size: 11px;
+      padding: 2px 4px; opacity: .5; color: var(--text);
+    }
+    .seq-effect-card .eff-actions button:hover { opacity: 1; }
+    .seq-fixture-picker {
+      margin-bottom: 10px; padding: 10px 14px;
+      background: var(--panel); border: 1px solid var(--panel-border);
+      border-radius: 8px;
+    }
+    .seq-fixture-picker h4 { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+    .seq-fix-grid {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .seq-fix-chip {
+      padding: 4px 10px; border: 1px solid var(--panel-border); background: var(--input-bg);
+      border-radius: 4px; font-size: 11px; cursor: pointer; user-select: none;
+      transition: border-color .15s, background .15s;
+    }
+    .seq-fix-chip:hover { border-color: var(--accent); }
+    .seq-fix-chip.active { border-color: var(--green); background: rgba(0,230,118,.1); color: var(--green); }
+    .trk-seq-btn {
+      padding: 3px 8px; border: 1px solid var(--accent-dim); background: transparent;
+      color: var(--accent); border-radius: 3px; cursor: pointer; font-size: 10px; white-space: nowrap;
+    }
+    .trk-seq-btn:hover { background: var(--accent); color: #fff; }
+    .trk-seq-btn.has-seq { border-color: var(--green); color: var(--green); }
+    .trk-seq-btn.has-seq:hover { background: var(--green); color: #000; }
+
+    /* ═══════════════════════════════════════════════════════════════
        Footer
        ═══════════════════════════════════════════════════════════════ */
     footer {
@@ -827,6 +1011,7 @@
   <button class="tab-btn" data-tab="types">Fixture Types</button>
   <button class="tab-btn" data-tab="universe">Universe</button>
   <button class="tab-btn" data-tab="dmxcontrol">DMX Control</button>
+  <button class="tab-btn" data-tab="sequencer">Sequencer</button>
   <button class="tab-btn" data-tab="tracks">Tracks</button>
   <button class="tab-btn" data-tab="config">Config</button>
 </div>
@@ -914,7 +1099,7 @@
     <div class="dmx-channel-range" style="margin-bottom:12px">
       <label>Universe:</label>
       <select id="dmxCtrlUniverse" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;">
-        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+        <option value="1">1</option>
       </select>
       <label>Channels:</label>
       <select id="dmxCtrlRange">
@@ -949,7 +1134,7 @@
       <select id="qaModeSelect">
         <option value="hold">Hold to Activate</option>
         <option value="toggle">Toggle On/Off</option>
-      </select>
+     </select>
       <span style="width:1px;height:20px;background:var(--panel-border);margin:0 4px"></span>
       <label>Group:</label>
       <select id="qaGroupFilter" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;min-width:120px">
@@ -987,6 +1172,10 @@
     <div class="qa-section">
       <h3>Effects</h3>
       <div class="qa-grid" id="qaEffectsGrid"></div>
+    </div>
+    <div class="qa-section">
+      <h3>Effects Library</h3>
+      <div class="qa-grid" id="qaEffectsLibraryGrid"></div>
     </div>
     <div class="qa-section">
       <h3>Strobe</h3>
@@ -1030,6 +1219,155 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════
+     TAB — SEQUENCER
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-sequencer">
+  <!-- Sequence selector & info -->
+  <div class="seq-header">
+    <select id="seqSelector" style="width:240px">
+      <option value="">-- Select Sequence --</option>
+    </select>
+    <button class="btn btn-primary btn-sm" id="seqNewBtn">+ New</button>
+    <button class="btn btn-danger btn-sm" id="seqDeleteBtn">Delete</button>
+    <span style="flex:1"></span>
+    <div class="seq-info">
+      <span>BPM: <span class="si-val" id="seqBpmDisplay">--</span></span>
+      <span>Duration: <span class="si-val" id="seqDurDisplay">--</span></span>
+      <span>Cues: <span class="si-val" id="seqCueCount">0</span></span>
+    </div>
+  </div>
+
+  <!-- Transport controls -->
+  <div class="seq-transport">
+    <button class="seq-btn" id="seqPlayBtn" title="Play">&#9654;</button>
+    <button class="seq-btn" id="seqPauseBtn" title="Pause">&#10074;&#10074;</button>
+    <button class="seq-btn" id="seqStopBtn" title="Stop">&#9632;</button>
+    <span class="seq-time-display" id="seqTimeDisplay">0:00.0</span>
+    <div class="seq-zoom-group">
+      <label>Zoom</label>
+      <input type="range" id="seqZoomSlider" min="10" max="200" value="50">
+    </div>
+    <div class="seq-snap-group">
+      <label>Snap</label>
+      <select id="seqSnapSel">
+        <option value="0">Off</option>
+        <option value="4" selected>1 Bar</option>
+        <option value="1">1 Beat</option>
+        <option value="0.5">1/2 Beat</option>
+        <option value="0.25">1/4 Beat</option>
+      </select>
+    </div>
+    <select class="seq-deck-sel" id="seqDeckSel">
+      <option value="1">Deck 1</option>
+      <option value="2">Deck 2</option>
+      <option value="3">Deck 3</option>
+      <option value="4">Deck 4</option>
+    </select>
+  </div>
+
+  <!-- Fixture Picker -->
+  <div class="seq-fixture-picker" id="seqFixturePicker" style="display:none">
+    <h4>Fixtures in Sequence <span style="font-weight:normal;color:var(--text-dim)">(click to toggle)</span></h4>
+    <div class="seq-fix-grid" id="seqFixGrid"></div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="seq-timeline-wrap" id="seqTimelineWrap">
+    <div class="seq-timeline" id="seqTimeline" style="display:none">
+      <div class="seq-ruler" id="seqRuler"></div>
+      <div class="seq-lanes-wrap" id="seqLanesWrap"></div>
+      <div class="seq-playhead" id="seqPlayhead" style="left:0;display:none"></div>
+    </div>
+    <div class="seq-empty" id="seqEmpty">
+      <div>No sequence loaded</div>
+      <div style="font-size:12px">Select a sequence above or create a new one</div>
+    </div>
+  </div>
+
+  <!-- Effects Library Panel -->
+  <div class="seq-effects-panel" id="seqEffectsPanel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h4 style="margin:0">Effects Library</h4>
+      <button class="btn btn-primary btn-sm" id="seqAddEffectBtn">+ New Effect</button>
+    </div>
+    <div class="seq-effects-list" id="seqEffectsList"></div>
+  </div>
+
+  <!-- Effect Edit Modal -->
+  <div class="modal-overlay" id="effectModal">
+    <div class="modal">
+      <h2 id="effectModalTitle">New Effect</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="effName" placeholder="My Effect">
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select id="effType">
+            <option value="pulse">Pulse</option>
+            <option value="rainbow">Rainbow</option>
+            <option value="strobe">Strobe</option>
+            <option value="color_fade">Color Fade</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Category</label>
+          <select id="effCategory">
+            <option value="color">Color</option>
+            <option value="intensity">Intensity</option>
+            <option value="movement">Movement</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Duration (beats)</label>
+          <input type="number" id="effDurBeats" value="4" min="0.25" step="0.25">
+        </div>
+      </div>
+      <div id="effParamsArea"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="document.getElementById('effectModal').classList.remove('open')">Cancel</button>
+        <button class="btn btn-primary" id="effSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cue Properties Panel -->
+  <div class="seq-properties" id="seqProperties">
+    <h4>Cue Properties</h4>
+    <div class="seq-prop-grid">
+      <label>Type</label>
+      <select id="seqPropType">
+        <option value="static">Static</option>
+        <option value="fade">Fade</option>
+        <option value="strobe">Strobe</option>
+        <option value="chase">Chase</option>
+        <option value="effect">Effect</option>
+      </select>
+      <label>Start (s)</label>
+      <input type="number" id="seqPropStart" step="0.001" min="0">
+      <label>Duration (s)</label>
+      <input type="number" id="seqPropDur" step="0.001" min="0.01">
+      <label>Label</label>
+      <input type="text" id="seqPropLabel">
+      <label>Color</label>
+      <input type="color" id="seqPropColor" value="#e94560">
+      <label>Effect</label>
+      <select id="seqPropEffect">
+        <option value="">None</option>
+      </select>
+    </div>
+    <div class="seq-color-channels" id="seqColorChannels"></div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" id="seqPropSave">Apply</button>
+      <button class="btn btn-danger btn-sm" id="seqPropDelete">Delete Cue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
      TAB 6 — TRACKS
      ══════════════════════════════════════════════════════════════ -->
 <div class="tab-page" id="page-tracks">
@@ -1066,6 +1404,7 @@
           <th style="width:50px">Key</th>
           <th style="width:70px;text-align:right">Duration</th>
           <th style="width:60px">Source</th>
+          <th style="width:50px">Seq</th>
         </tr>
       </thead>
       <tbody id="tracksBody"></tbody>
@@ -1718,6 +2057,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'types') loadTypes();
     if (btn.dataset.tab === 'universe') loadUniverse();
     if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
+    if (btn.dataset.tab === 'sequencer') loadSequencer();
     if (btn.dataset.tab === 'tracks') loadTracksPage();
     if (btn.dataset.tab === 'config') loadConfigPage();
   });
@@ -1788,6 +2128,8 @@ function connect() {
     else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); logEvent({ evtType: 'connection', raw: msg }); }
     else if (msg.type === 'beat') { handleBeat(msg.data); }
     else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
+    else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing') { handleSeqWsMessage(msg); }
+    else if (msg.type === 'seq_time') { handleSeqTimeUpdate(msg); }
     else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     else logEvent({ evtType: msg.type || 'event', raw: msg });
   };
@@ -1841,6 +2183,9 @@ function updateState(state) {
     else { ss.textContent = 'SS: —'; ss.title = ''; }
 
     document.getElementById(`genre-${d}`).textContent = dk.genre || '';
+
+    // Update sequencer playhead from VDJ time
+    if (typeof updateSeqPlayhead === 'function') updateSeqPlayhead(d, dk.time || 0);
   }
 
   // ─── Update Now Playing in header ───────────────────────────────────
@@ -2967,7 +3312,7 @@ async function loadTracks() {
 function renderTracks(tracks, total) {
   const tbody = document.getElementById('tracksBody');
   if (!tracks.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">' +
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-dim)">' +
       (total === 0 ? 'No tracks imported yet. Configure VDJ database path in Config &rarr; VirtualDJ, then click Re-import.' : 'No tracks match your filters.') +
       '</td></tr>';
     updateTracksPagination(0, 0);
@@ -2988,6 +3333,7 @@ function renderTracks(tracks, total) {
       <td class="trk-key">${esc(t.key)}</td>
       <td class="trk-duration">${formatDuration(t.song_length)}</td>
       <td><span class="trk-source ${t.source_type}">${t.source_type === 'local' ? 'Local' : 'Net'}</span></td>
+      <td><button class="trk-seq-btn" onclick="generateTrackSequence(${t.id}, this)">&#127917; Seq</button></td>
     </tr>`;
   }
   tbody.innerHTML = html;
@@ -3043,6 +3389,816 @@ document.getElementById('btnImportTracks').addEventListener('click', async () =>
   }
   setTimeout(() => { btn.disabled = false; btn.innerHTML = '&#8635; Re-import'; }, 2500);
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  Sequencer
+// ═══════════════════════════════════════════════════════════════
+let seqLoaded = false;
+let seqSequences = [];
+let seqCurrentId = null;
+let seqCurrentSeq = null;
+let seqCues = [];
+let seqFixtures = [];
+let seqEffects = [];
+let seqActiveLanes = new Set(); // fixture IDs active as lanes
+let seqZoomPxPerSec = 50;
+let seqSnapBeats = 4;
+let seqSelectedCueId = null;
+let seqDeck = 1;
+let seqPlayheadMs = 0;
+let seqIsPlaying = false;
+let seqDragState = null;
+let seqEditingEffectId = null;
+
+async function loadSequencer() {
+  if (!seqLoaded) {
+    seqLoaded = true;
+    setupSequencerEvents();
+  }
+  const [seqRes, fixRes, effRes] = await Promise.all([
+    fetch('/api/sequences').then(r => r.json()),
+    fetch('/api/fixture-channel-map').then(r => r.json()),
+    fetch('/api/effects').then(r => r.json()),
+  ]);
+  seqSequences = seqRes;
+  seqFixtures = fixRes;
+  seqEffects = effRes;
+
+  refreshEffectDropdown();
+  renderEffectsList();
+  renderSeqSelector();
+  if (seqCurrentId) {
+    document.getElementById('seqSelector').value = seqCurrentId;
+    await loadSequenceById(seqCurrentId);
+  }
+}
+
+function refreshEffectDropdown() {
+  const effSel = document.getElementById('seqPropEffect');
+  effSel.innerHTML = '<option value="">None</option>';
+  for (const eff of seqEffects) {
+    effSel.innerHTML += `<option value="${eff.id}">${esc(eff.name)} (${eff.type})</option>`;
+  }
+}
+
+function renderSeqSelector() {
+  const sel = document.getElementById('seqSelector');
+  sel.innerHTML = '<option value="">-- Select Sequence --</option>';
+  for (const s of seqSequences) {
+    sel.innerHTML += `<option value="${s.id}">${esc(s.name)}</option>`;
+  }
+  if (seqCurrentId) sel.value = seqCurrentId;
+}
+
+async function loadSequenceById(id) {
+  if (!id) {
+    seqCurrentId = null;
+    seqCurrentSeq = null;
+    seqCues = [];
+    seqActiveLanes = new Set();
+    seqSelectedCueId = null;
+    document.getElementById('seqBpmDisplay').textContent = '--';
+    document.getElementById('seqDurDisplay').textContent = '--';
+    document.getElementById('seqCueCount').textContent = '0';
+    document.getElementById('seqProperties').classList.remove('open');
+    document.getElementById('seqFixturePicker').style.display = 'none';
+    renderSequencerTimeline();
+    return;
+  }
+  const [seq, cues] = await Promise.all([
+    fetch(`/api/sequences/${id}`).then(r => r.json()),
+    fetch(`/api/sequences/${id}/cues`).then(r => r.json()),
+  ]);
+  seqCurrentId = seq.id;
+  seqCurrentSeq = seq;
+  seqCues = cues;
+  // Initialize active lanes from existing cues + let user add more
+  seqActiveLanes = new Set(cues.map(c => c.fixture_id).filter(Boolean));
+  document.getElementById('seqBpmDisplay').textContent = seq.bpm ? seq.bpm.toFixed(1) : '--';
+  document.getElementById('seqDurDisplay').textContent = formatDuration(seq.duration_ms / 1000);
+  document.getElementById('seqCueCount').textContent = cues.length;
+  renderFixturePicker();
+  renderSequencerTimeline();
+}
+
+function renderSequencerTimeline() {
+  const emptyEl = document.getElementById('seqEmpty');
+  const timelineEl = document.getElementById('seqTimeline');
+  const rulerEl = document.getElementById('seqRuler');
+  const lanesWrap = document.getElementById('seqLanesWrap');
+  const playhead = document.getElementById('seqPlayhead');
+
+  if (!seqCurrentSeq) {
+    emptyEl.style.display = 'flex';
+    timelineEl.style.display = 'none';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  timelineEl.style.display = 'block';
+
+  const durationMs = seqCurrentSeq.duration_ms || 180000;
+  const durationSec = durationMs / 1000;
+  const totalWidth = durationSec * seqZoomPxPerSec;
+  const bpm = seqCurrentSeq.bpm || 128;
+  const beatMs = 60000 / bpm;
+  const barMs = beatMs * 4;
+
+  timelineEl.style.width = (totalWidth + 140) + 'px';
+  rulerEl.style.width = totalWidth + 'px';
+
+  // Ruler marks
+  let rulerHtml = '';
+  let markTime = 0, beatCount = 0;
+  while (markTime < durationMs) {
+    const x = (markTime / 1000) * seqZoomPxPerSec;
+    const isBar = beatCount % 4 === 0;
+    const barNum = Math.floor(beatCount / 4) + 1;
+    const beatInBar = (beatCount % 4) + 1;
+    if (isBar || seqZoomPxPerSec >= 30) {
+      rulerHtml += `<div class="seq-ruler-mark${isBar ? ' bar' : ''}" style="left:${x}px">` +
+        `<span class="seq-rm-label">${isBar ? barNum : barNum + '.' + beatInBar}</span></div>`;
+    }
+    beatCount++;
+    markTime += beatMs;
+  }
+  rulerEl.innerHTML = rulerHtml;
+
+  // Build lanes from active fixtures
+  const laneFixes = [];
+  // First: fixtures with cues (in lane order)
+  const laneMap = new Map();
+  for (const cue of seqCues) {
+    if (cue.fixture_id && !laneMap.has(cue.fixture_id)) {
+      laneMap.set(cue.fixture_id, cue.lane);
+    }
+  }
+  const sortedFixes = [...laneMap.entries()].sort((a, b) => a[1] - b[1]);
+  for (const [fixId] of sortedFixes) {
+    const fix = seqFixtures.find(f => f.id === fixId);
+    if (fix) laneFixes.push(fix);
+  }
+  // Then: any additional fixtures the user has toggled on in the picker
+  for (const fixId of seqActiveLanes) {
+    if (!laneFixes.some(f => f.id === fixId)) {
+      const fix = seqFixtures.find(f => f.id === fixId);
+      if (fix) laneFixes.push(fix);
+    }
+  }
+  // Show message if no fixtures
+  if (laneFixes.length === 0) {
+    lanesWrap.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px">' +
+      'No fixtures added. Use the fixture picker above to add lights to this sequence.</div>';
+    updatePlayhead();
+    return;
+  }
+
+  // Render lanes
+  let lanesHtml = '';
+  for (let i = 0; i < laneFixes.length; i++) {
+    const fix = laneFixes[i];
+    const fixCues = seqCues.filter(c => c.fixture_id === fix.id);
+
+    let cuesHtml = '';
+    for (const cue of fixCues) {
+      const left = (cue.start_ms / 1000) * seqZoomPxPerSec;
+      const width = Math.max(4, (cue.duration_ms / 1000) * seqZoomPxPerSec);
+      const selected = cue.id === seqSelectedCueId ? ' selected' : '';
+      const bgColor = cue.color || '#e94560';
+      cuesHtml += `<div class="seq-cue${selected}" data-cue-id="${cue.id}" ` +
+        `style="left:${left}px;width:${width}px;background:${bgColor}" ` +
+        `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s - ${(cue.duration_ms/1000).toFixed(2)}s)">` +
+        `${esc(cue.label || cue.cue_type)}<div class="seq-cue-resize"></div></div>`;
+    }
+
+    // Grid lines
+    let gridHtml = '';
+    let gt = 0; beatCount = 0;
+    while (gt < durationMs) {
+      const gx = (gt / 1000) * seqZoomPxPerSec;
+      const isBar = beatCount % 4 === 0;
+      gridHtml += `<div class="seq-grid-line ${isBar ? 'bar' : 'beat'}" style="left:${gx}px"></div>`;
+      beatCount++;
+      gt += beatMs;
+    }
+
+    const hasRGB = fix.channels.some(c => c.type === 'red');
+    lanesHtml += `<div class="seq-lane" data-fixture-id="${fix.id}" data-lane="${i}">` +
+      `<div class="seq-lane-header">` +
+      `<div class="seq-lh-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
+      `<span>${esc(fix.name)}</span></div>` +
+      `<div class="seq-lane-track" data-fixture-id="${fix.id}">${gridHtml}${cuesHtml}</div></div>`;
+  }
+  lanesWrap.innerHTML = lanesHtml;
+  updatePlayhead();
+}
+
+function updatePlayhead() {
+  const ph = document.getElementById('seqPlayhead');
+  if (!seqCurrentSeq) { ph.style.display = 'none'; return; }
+  ph.style.display = 'block';
+  const x = (seqPlayheadMs / 1000) * seqZoomPxPerSec;
+  ph.style.left = (x + 140) + 'px';
+  const secs = seqPlayheadMs / 1000;
+  document.getElementById('seqTimeDisplay').textContent =
+    `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}.${String(Math.floor((secs % 1) * 10))}`;
+}
+
+function snapToGrid(ms) {
+  if (!seqSnapBeats || !seqCurrentSeq?.bpm) return ms;
+  const beatMs = 60000 / seqCurrentSeq.bpm;
+  const snapMs = beatMs * seqSnapBeats;
+  return Math.round(ms / snapMs) * snapMs;
+}
+
+function setupSequencerEvents() {
+  // Sequence selector
+  document.getElementById('seqSelector').addEventListener('change', (e) => {
+    loadSequenceById(+e.target.value || null);
+  });
+
+  // New sequence
+  document.getElementById('seqNewBtn').addEventListener('click', async () => {
+    const name = prompt('Sequence name:', 'New Sequence');
+    if (!name) return;
+    const bpm = +(prompt('BPM:', '128') || 128);
+    const durSec = +(prompt('Duration (seconds):', '180') || 180);
+    const res = await fetch('/api/sequences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, bpm, duration_ms: durSec * 1000 })
+    });
+    const seq = await res.json();
+    seqSequences.push(seq);
+    renderSeqSelector();
+    document.getElementById('seqSelector').value = seq.id;
+    await loadSequenceById(seq.id);
+  });
+
+  // Delete sequence
+  document.getElementById('seqDeleteBtn').addEventListener('click', async () => {
+    if (!seqCurrentId) return;
+    if (!confirm('Delete this sequence and all its cues?')) return;
+    await fetch(`/api/sequences/${seqCurrentId}`, { method: 'DELETE' });
+    seqSequences = seqSequences.filter(s => s.id !== seqCurrentId);
+    seqCurrentId = null;
+    seqCurrentSeq = null;
+    seqCues = [];
+    seqSelectedCueId = null;
+    renderSeqSelector();
+    renderSequencerTimeline();
+    document.getElementById('seqProperties').classList.remove('open');
+  });
+
+  // Transport
+  document.getElementById('seqPlayBtn').addEventListener('click', () => {
+    if (!seqCurrentId) return;
+    seqIsPlaying = true;
+    seqPlayheadMs = 0;
+    document.getElementById('seqPlayBtn').classList.add('active');
+    updatePlayhead();
+    ws.send(JSON.stringify({ type: 'sequence', action: 'load', deck: seqDeck, sequenceId: seqCurrentId }));
+    ws.send(JSON.stringify({ type: 'sequence', action: 'play', deck: seqDeck }));
+  });
+  document.getElementById('seqPauseBtn').addEventListener('click', () => {
+    seqIsPlaying = false;
+    document.getElementById('seqPlayBtn').classList.remove('active');
+    ws.send(JSON.stringify({ type: 'sequence', action: 'pause', deck: seqDeck }));
+  });
+  document.getElementById('seqStopBtn').addEventListener('click', () => {
+    seqIsPlaying = false;
+    seqPlayheadMs = 0;
+    document.getElementById('seqPlayBtn').classList.remove('active');
+    updatePlayhead();
+    ws.send(JSON.stringify({ type: 'sequence', action: 'unload', deck: seqDeck }));
+  });
+
+  // Deck selector
+  document.getElementById('seqDeckSel').addEventListener('change', (e) => { seqDeck = +e.target.value; });
+
+  // Zoom
+  document.getElementById('seqZoomSlider').addEventListener('input', (e) => {
+    seqZoomPxPerSec = +e.target.value;
+    renderSequencerTimeline();
+  });
+
+  // Snap
+  document.getElementById('seqSnapSel').addEventListener('change', (e) => { seqSnapBeats = +e.target.value; });
+
+  // Double-click on lane track to add cue
+  document.getElementById('seqLanesWrap').addEventListener('dblclick', async (e) => {
+    const track = e.target.closest('.seq-lane-track');
+    if (!track || !seqCurrentId) return;
+    if (e.target.closest('.seq-cue')) return; // don't add when double-clicking existing cue
+
+    const fixtureId = +track.dataset.fixtureId;
+    const rect = track.getBoundingClientRect();
+    const scrollWrap = document.getElementById('seqTimelineWrap');
+    const clickX = e.clientX - rect.left;
+    const clickMs = snapToGrid((clickX / seqZoomPxPerSec) * 1000);
+
+    const bpm = seqCurrentSeq.bpm || 128;
+    const durMs = (60000 / bpm) * 4; // default 1 bar
+    const lane = +e.target.closest('.seq-lane').dataset.lane;
+
+    const res = await fetch(`/api/sequences/${seqCurrentId}/cues`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
+        cue_type: 'static', fixture_id: fixtureId,
+        channel_values: { red: 255, green: 0, blue: 0 },
+        color: '#e94560', label: '',
+      })
+    });
+    const cue = await res.json();
+    seqCues.push(cue);
+    document.getElementById('seqCueCount').textContent = seqCues.length;
+    renderSequencerTimeline();
+    selectCue(cue.id);
+  });
+
+  // Click/mousedown on cue to select & start drag
+  document.getElementById('seqLanesWrap').addEventListener('mousedown', (e) => {
+    const cueEl = e.target.closest('.seq-cue');
+    if (!cueEl) return;
+
+    const cueId = +cueEl.dataset.cueId;
+    selectCue(cueId);
+    const cue = seqCues.find(c => c.id === cueId);
+    if (!cue) return;
+
+    if (e.target.classList.contains('seq-cue-resize')) {
+      seqDragState = {
+        type: 'resize', cueId, startX: e.clientX,
+        origWidth: parseFloat(cueEl.style.width), origDurMs: cue.duration_ms,
+      };
+    } else {
+      seqDragState = {
+        type: 'move', cueId, startX: e.clientX,
+        origLeft: parseFloat(cueEl.style.left), origStartMs: cue.start_ms,
+      };
+    }
+    e.preventDefault();
+  });
+
+  // Mouse move for drag/resize
+  document.addEventListener('mousemove', (e) => {
+    if (!seqDragState) return;
+    const dx = e.clientX - seqDragState.startX;
+    const cueEl = document.querySelector(`.seq-cue[data-cue-id="${seqDragState.cueId}"]`);
+    if (!cueEl) return;
+
+    if (seqDragState.type === 'move') {
+      cueEl.style.left = Math.max(0, seqDragState.origLeft + dx) + 'px';
+    } else {
+      cueEl.style.width = Math.max(4, seqDragState.origWidth + dx) + 'px';
+    }
+  });
+
+  // Mouse up to commit drag
+  document.addEventListener('mouseup', async (e) => {
+    if (!seqDragState) return;
+    const cueId = seqDragState.cueId;
+    const cue = seqCues.find(c => c.id === cueId);
+    const cueEl = document.querySelector(`.seq-cue[data-cue-id="${cueId}"]`);
+    if (!cue || !cueEl) { seqDragState = null; return; }
+
+    if (seqDragState.type === 'move') {
+      const newLeft = parseFloat(cueEl.style.left);
+      cue.start_ms = Math.round(snapToGrid((newLeft / seqZoomPxPerSec) * 1000));
+      await fetch(`/api/cues/${cueId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_ms: cue.start_ms })
+      });
+    } else {
+      const newWidth = parseFloat(cueEl.style.width);
+      cue.duration_ms = Math.max(100, Math.round(snapToGrid((newWidth / seqZoomPxPerSec) * 1000)));
+      await fetch(`/api/cues/${cueId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration_ms: cue.duration_ms })
+      });
+    }
+    seqDragState = null;
+    renderSequencerTimeline();
+    if (seqSelectedCueId === cueId) selectCue(cueId);
+  });
+
+  // Apply cue properties
+  document.getElementById('seqPropSave').addEventListener('click', async () => {
+    if (!seqSelectedCueId) return;
+    const cue = seqCues.find(c => c.id === seqSelectedCueId);
+    if (!cue) return;
+
+    const type = document.getElementById('seqPropType').value;
+    const startMs = parseFloat(document.getElementById('seqPropStart').value) * 1000;
+    const durMs = parseFloat(document.getElementById('seqPropDur').value) * 1000;
+    const label = document.getElementById('seqPropLabel').value;
+    const color = document.getElementById('seqPropColor').value;
+    const effectId = document.getElementById('seqPropEffect').value || null;
+
+    const channelValues = {};
+    document.querySelectorAll('#seqColorChannels .seq-ch-start .seq-ch-slider').forEach(sl => {
+      channelValues[sl.dataset.chType] = +sl.querySelector('input[type="range"]').value;
+    });
+
+    let endChannelValues = null;
+    if (type === 'fade') {
+      endChannelValues = {};
+      document.querySelectorAll('#seqColorChannels .seq-ch-end .seq-ch-slider').forEach(sl => {
+        endChannelValues[sl.dataset.chType] = +sl.querySelector('input[type="range"]').value;
+      });
+    }
+
+    if (type === 'strobe') {
+      const hzEl = document.querySelector('#seqColorChannels .seq-ch-slider[data-ch-type="strobe_hz"] input[type="range"]');
+      if (hzEl) channelValues.strobe_hz = +hzEl.value;
+    }
+
+    const update = {
+      cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs),
+      label, color, channel_values: channelValues,
+      end_channel_values: endChannelValues, effect_id: effectId ? +effectId : null,
+    };
+
+    await fetch(`/api/cues/${seqSelectedCueId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update)
+    });
+    Object.assign(cue, update);
+    renderSequencerTimeline();
+  });
+
+  // Delete cue
+  document.getElementById('seqPropDelete').addEventListener('click', async () => {
+    if (!seqSelectedCueId) return;
+    await fetch(`/api/cues/${seqSelectedCueId}`, { method: 'DELETE' });
+    seqCues = seqCues.filter(c => c.id !== seqSelectedCueId);
+    seqSelectedCueId = null;
+    document.getElementById('seqProperties').classList.remove('open');
+    document.getElementById('seqCueCount').textContent = seqCues.length;
+    renderSequencerTimeline();
+  });
+
+  // Type change — re-render channel sliders without resetting dropdown
+  document.getElementById('seqPropType').addEventListener('change', () => {
+    if (seqSelectedCueId) {
+      const newType = document.getElementById('seqPropType').value;
+      renderCueChannelSliders(seqSelectedCueId, newType);
+    }
+  });
+
+  // Click on ruler to set playhead
+  document.getElementById('seqRuler').addEventListener('click', (e) => {
+    const rect = document.getElementById('seqRuler').getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    seqPlayheadMs = (x / seqZoomPxPerSec) * 1000;
+    updatePlayhead();
+  });
+
+  // Effects management
+  document.getElementById('seqAddEffectBtn').addEventListener('click', () => openEffectModal(null));
+  document.getElementById('effSaveBtn').addEventListener('click', saveEffect);
+  document.getElementById('effType').addEventListener('change', (e) => {
+    renderEffectParams(e.target.value, {});
+  });
+}
+
+function selectCue(cueId) {
+  seqSelectedCueId = cueId;
+  const cue = seqCues.find(c => c.id === cueId);
+
+  document.querySelectorAll('.seq-cue.selected').forEach(el => el.classList.remove('selected'));
+  const cueEl = document.querySelector(`.seq-cue[data-cue-id="${cueId}"]`);
+  if (cueEl) cueEl.classList.add('selected');
+
+  if (!cue) { document.getElementById('seqProperties').classList.remove('open'); return; }
+
+  const propsEl = document.getElementById('seqProperties');
+  propsEl.classList.add('open');
+
+  const cueType = cue.cue_type || 'static';
+
+  document.getElementById('seqPropType').value = cueType;
+  document.getElementById('seqPropStart').value = (cue.start_ms / 1000).toFixed(3);
+  document.getElementById('seqPropDur').value = (cue.duration_ms / 1000).toFixed(3);
+  document.getElementById('seqPropLabel').value = cue.label || '';
+  document.getElementById('seqPropColor').value = cue.color || '#e94560';
+  document.getElementById('seqPropEffect').value = cue.effect_id || '';
+
+  // Build channel sliders based on stored type
+  renderCueChannelSliders(cueId, cueType);
+}
+
+function renderCueChannelSliders(cueId, cueType) {
+  const cue = seqCues.find(c => c.id === cueId);
+  if (!cue) return;
+
+  const fix = seqFixtures.find(f => f.id === cue.fixture_id);
+  const chContainer = document.getElementById('seqColorChannels');
+  const chVals = cue.channel_values || {};
+
+  if (!fix) { chContainer.innerHTML = '<div style="color:var(--text-dim);font-size:11px">No fixture assigned</div>'; return; }
+
+  const chColorMap = {
+    red: '#f44', green: '#4f4', blue: '#44f', white: '#fff',
+    dimmer: '#ff0', amber: '#fa0', uv: '#a0f',
+  };
+
+  let html = '<div class="seq-ch-start" style="margin-bottom:6px"><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">' +
+    (cueType === 'fade' ? 'START VALUES' : 'CHANNEL VALUES') + '</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+  for (const ch of fix.channels) {
+    const val = chVals[ch.type] !== undefined ? chVals[ch.type] : 0;
+    const color = chColorMap[ch.type] || '#888';
+    html += `<div class="seq-ch-slider" data-ch-type="${ch.type}">` +
+      `<label style="color:${color}">${ch.type.substring(0, 4).toUpperCase()}</label>` +
+      `<input type="range" min="0" max="255" value="${val}" oninput="this.nextElementSibling.textContent=this.value">` +
+      `<span class="seq-ch-val">${val}</span></div>`;
+  }
+  html += '</div></div>';
+
+  if (cueType === 'fade') {
+    const endVals = cue.end_channel_values || {};
+    html += '<div class="seq-ch-end"><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">END VALUES</div>' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+    for (const ch of fix.channels) {
+      const val = endVals[ch.type] !== undefined ? endVals[ch.type] : 0;
+      const color = chColorMap[ch.type] || '#888';
+      html += `<div class="seq-ch-slider" data-ch-type="${ch.type}">` +
+        `<label style="color:${color}">${ch.type.substring(0, 4).toUpperCase()}</label>` +
+        `<input type="range" min="0" max="255" value="${val}" oninput="this.nextElementSibling.textContent=this.value">` +
+        `<span class="seq-ch-val">${val}</span></div>`;
+    }
+    html += '</div></div>';
+  }
+
+  if (cueType === 'strobe') {
+    const hz = chVals.strobe_hz || 10;
+    html += '<div style="margin-top:6px"><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">STROBE RATE</div>' +
+      `<div class="seq-ch-slider" data-ch-type="strobe_hz"><label>Hz</label>` +
+      `<input type="range" min="1" max="30" value="${hz}" oninput="this.nextElementSibling.textContent=this.value">` +
+      `<span class="seq-ch-val">${hz}</span></div></div>`;
+  }
+
+  if (cueType === 'effect') {
+    // Show a hint that the effect is selected from the Effect dropdown
+    html += '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Effect parameters are controlled by the selected effect above.</div>';
+  }
+
+  chContainer.innerHTML = html;
+}
+
+// ─── Fixture Picker ──────────────────────────────────────────────────────────
+
+function renderFixturePicker() {
+  const picker = document.getElementById('seqFixturePicker');
+  const grid = document.getElementById('seqFixGrid');
+  if (!seqCurrentSeq) { picker.style.display = 'none'; return; }
+  picker.style.display = 'block';
+
+  let html = '';
+  for (const fix of seqFixtures) {
+    const active = seqActiveLanes.has(fix.id) ? ' active' : '';
+    const hasRGB = fix.channels.some(c => c.type === 'red');
+    html += `<div class="seq-fix-chip${active}" data-fix-id="${fix.id}">` +
+      `${hasRGB ? '&#127912; ' : '&#9881; '}${esc(fix.name)}</div>`;
+  }
+  if (seqFixtures.length === 0) {
+    html = '<div style="color:var(--text-dim);font-size:11px">No fixtures configured. Add fixtures in the Fixtures tab first.</div>';
+  }
+  grid.innerHTML = html;
+
+  // Click handlers
+  grid.querySelectorAll('.seq-fix-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const fixId = +chip.dataset.fixId;
+      if (seqActiveLanes.has(fixId)) {
+        // Only allow removing if no cues use this fixture
+        const hasCues = seqCues.some(c => c.fixture_id === fixId);
+        if (hasCues) {
+          alert('Cannot remove — this fixture has cues in the sequence. Delete the cues first.');
+          return;
+        }
+        seqActiveLanes.delete(fixId);
+        chip.classList.remove('active');
+      } else {
+        seqActiveLanes.add(fixId);
+        chip.classList.add('active');
+      }
+      renderSequencerTimeline();
+    });
+  });
+}
+
+// ─── Effects Library ─────────────────────────────────────────────────────────
+
+function renderEffectsList() {
+  const list = document.getElementById('seqEffectsList');
+  if (seqEffects.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects yet. Click "+ New Effect" to create one.</div>';
+    return;
+  }
+  let html = '';
+  for (const eff of seqEffects) {
+    html += `<div class="seq-effect-card" data-eff-id="${eff.id}">` +
+      `<span class="eff-type ${eff.type}">${eff.type.replace('_', ' ')}</span>` +
+      `<span class="eff-name">${esc(eff.name)}</span>` +
+      `<span style="font-size:9px;color:var(--text-dim)">${eff.duration_beats}b</span>` +
+      `<span class="eff-actions">` +
+      `<button onclick="editEffect(${eff.id})" title="Edit">&#9998;</button>` +
+      `<button onclick="deleteEffect(${eff.id})" title="Delete" style="color:var(--danger)">&#10006;</button>` +
+      `</span></div>`;
+  }
+  list.innerHTML = html;
+}
+
+function openEffectModal(eff) {
+  seqEditingEffectId = eff ? eff.id : null;
+  document.getElementById('effectModalTitle').textContent = eff ? 'Edit Effect' : 'New Effect';
+  document.getElementById('effName').value = eff ? eff.name : '';
+  document.getElementById('effType').value = eff ? eff.type : 'pulse';
+  document.getElementById('effCategory').value = eff ? (eff.category || 'color') : 'color';
+  document.getElementById('effDurBeats').value = eff ? eff.duration_beats : 4;
+  renderEffectParams(eff ? eff.type : 'pulse', eff ? eff.effect_data : {});
+  document.getElementById('effectModal').classList.add('open');
+}
+
+function renderEffectParams(type, data) {
+  const area = document.getElementById('effParamsArea');
+  let html = '';
+  if (type === 'pulse') {
+    const freq = data.frequency || 1;
+    html = `<div class="form-group"><label>Frequency (cycles per duration)</label>` +
+      `<input type="number" id="effParamFreq" value="${freq}" min="0.1" step="0.1"></div>`;
+  } else if (type === 'rainbow') {
+    const cycles = data.cycles || 1;
+    html = `<div class="form-group"><label>Hue Cycles</label>` +
+      `<input type="number" id="effParamCycles" value="${cycles}" min="0.25" step="0.25"></div>`;
+  } else if (type === 'strobe') {
+    const freq = data.frequency || 10;
+    html = `<div class="form-group"><label>Strobe Frequency (Hz)</label>` +
+      `<input type="number" id="effParamFreq" value="${freq}" min="1" max="50" step="1"></div>`;
+  } else if (type === 'color_fade') {
+    const sc = data.start_color || { red: 255, green: 0, blue: 0 };
+    const ec = data.end_color || { red: 0, green: 0, blue: 255 };
+    const startHex = '#' + [sc.red, sc.green, sc.blue].map(v => (v||0).toString(16).padStart(2,'0')).join('');
+    const endHex = '#' + [ec.red, ec.green, ec.blue].map(v => (v||0).toString(16).padStart(2,'0')).join('');
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Start Color</label><input type="color" id="effParamStartColor" value="${startHex}"></div>` +
+      `<div class="form-group"><label>End Color</label><input type="color" id="effParamEndColor" value="${endHex}"></div></div>`;
+  }
+  area.innerHTML = html;
+}
+
+function getEffectDataFromForm(type) {
+  if (type === 'pulse') {
+    return { frequency: +(document.getElementById('effParamFreq')?.value || 1) };
+  } else if (type === 'rainbow') {
+    return { cycles: +(document.getElementById('effParamCycles')?.value || 1) };
+  } else if (type === 'strobe') {
+    return { frequency: +(document.getElementById('effParamFreq')?.value || 10) };
+  } else if (type === 'color_fade') {
+    const startHex = document.getElementById('effParamStartColor')?.value || '#ff0000';
+    const endHex = document.getElementById('effParamEndColor')?.value || '#0000ff';
+    const hexToRgb = (h) => ({ red: parseInt(h.slice(1,3),16), green: parseInt(h.slice(3,5),16), blue: parseInt(h.slice(5,7),16) });
+    return { start_color: hexToRgb(startHex), end_color: hexToRgb(endHex) };
+  }
+  return {};
+}
+
+async function saveEffect() {
+  const name = document.getElementById('effName').value.trim();
+  if (!name) { alert('Name is required'); return; }
+  const type = document.getElementById('effType').value;
+  const category = document.getElementById('effCategory').value;
+  const duration_beats = +(document.getElementById('effDurBeats').value || 4);
+  const effect_data = getEffectDataFromForm(type);
+
+  const body = { name, type, category, effect_data, duration_beats };
+  let result;
+  if (seqEditingEffectId) {
+    const res = await fetch(`/api/effects/${seqEditingEffectId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    result = await res.json();
+    const idx = seqEffects.findIndex(e => e.id === seqEditingEffectId);
+    if (idx >= 0) seqEffects[idx] = result;
+  } else {
+    const res = await fetch('/api/effects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    result = await res.json();
+    seqEffects.push(result);
+  }
+
+  document.getElementById('effectModal').classList.remove('open');
+  renderEffectsList();
+  refreshEffectDropdown();
+}
+
+async function editEffect(id) {
+  const eff = seqEffects.find(e => e.id === id);
+  if (eff) openEffectModal(eff);
+}
+
+async function deleteEffect(id) {
+  if (!confirm('Delete this effect?')) return;
+  await fetch(`/api/effects/${id}`, { method: 'DELETE' });
+  seqEffects = seqEffects.filter(e => e.id !== id);
+  renderEffectsList();
+  refreshEffectDropdown();
+}
+
+// Handle sequence-related WS messages
+function handleSeqWsMessage(msg) {
+  if (msg.type === 'seq_loaded') {
+    if (msg.deck === seqDeck && msg.sequence) {
+      // Could auto-select the sequence in the UI
+    }
+  } else if (msg.type === 'seq_unloaded') {
+    if (msg.deck === seqDeck) {
+      seqIsPlaying = false;
+      document.getElementById('seqPlayBtn').classList.remove('active');
+    }
+  } else if (msg.type === 'seq_playing') {
+    if (msg.deck === seqDeck) {
+      seqIsPlaying = msg.playing;
+      document.getElementById('seqPlayBtn').classList.toggle('active', msg.playing);
+    }
+  }
+}
+
+// Handle playhead time updates from standalone playback timer
+function handleSeqTimeUpdate(msg) {
+  if (msg.deck === seqDeck && seqIsPlaying && seqCurrentSeq) {
+    seqPlayheadMs = msg.timeMs;
+    updatePlayhead();
+    // Auto-scroll to keep playhead visible
+    const wrap = document.getElementById('seqTimelineWrap');
+    if (wrap) {
+      const phX = (seqPlayheadMs / 1000) * seqZoomPxPerSec + 140;
+      const scrollLeft = wrap.scrollLeft;
+      const viewWidth = wrap.clientWidth;
+      if (phX < scrollLeft + 140 || phX > scrollLeft + viewWidth - 40) {
+        wrap.scrollLeft = Math.max(0, phX - viewWidth / 2);
+      }
+    }
+  }
+}
+
+// Update playhead from VDJ state (time is in ms)
+function updateSeqPlayhead(deckNum, timeMs) {
+  if (deckNum === seqDeck && seqCurrentSeq && seqIsPlaying) {
+    seqPlayheadMs = timeMs;
+    updatePlayhead();
+    // Auto-scroll to keep playhead visible
+    const wrap = document.getElementById('seqTimelineWrap');
+    if (wrap) {
+      const phX = (seqPlayheadMs / 1000) * seqZoomPxPerSec + 140;
+      const scrollLeft = wrap.scrollLeft;
+      const viewWidth = wrap.clientWidth;
+      if (phX < scrollLeft + 140 || phX > scrollLeft + viewWidth - 40) {
+        wrap.scrollLeft = Math.max(0, phX - viewWidth / 2);
+      }
+    }
+  }
+}
+
+// Track page: generate/open sequence for a track
+async function generateTrackSequence(trackId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Working...';
+  try {
+    const res = await fetch(`/api/sequences/generate/${trackId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overwrite: false })
+    });
+    const data = await res.json();
+    if (data.error === 'Sequence already exists') {
+      // Open existing sequence
+      openSequenceInEditor(data.sequence_id);
+    } else {
+      // New sequence generated, open it
+      openSequenceInEditor(data.id);
+    }
+  } catch (err) {
+    btn.textContent = 'Error!';
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = '&#127917; Seq'; }, 2000);
+    return;
+  }
+  btn.disabled = false;
+  btn.innerHTML = '&#127917; Seq';
+}
+
+function openSequenceInEditor(seqId) {
+  seqCurrentId = seqId;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="sequencer"]').classList.add('active');
+  document.getElementById('page-sequencer').classList.add('active');
+  loadSequencer();
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  DMX Control Panel
@@ -3181,6 +4337,31 @@ async function initDmxControl() {
     dmxOutputOn = res.enabled;
   } catch { dmxOutputOn = false; }
   updateOutputToggle();
+
+  // Dynamically populate universe selector from Art-Net config + fixtures
+  try {
+    const [artnetUniverses, fixtures] = await Promise.all([
+      fetch('/api/artnet-universes').then(r => r.json()),
+      fetch('/api/fixtures').then(r => r.json()),
+    ]);
+    const sel = document.getElementById('dmxCtrlUniverse');
+    const currentVal = sel.value;
+    // Collect all universe numbers from Art-Net config and patched fixtures
+    const universeSet = new Set();
+    for (const u of artnetUniverses) universeSet.add(u.local_universe);
+    for (const f of fixtures) universeSet.add(f.universe);
+    if (universeSet.size === 0) universeSet.add(1);
+    const sorted = [...universeSet].sort((a, b) => a - b);
+    sel.innerHTML = '';
+    for (const u of sorted) {
+      const artnet = artnetUniverses.find(a => a.local_universe === u);
+      const label = artnet && artnet.label ? `${u} — ${artnet.label}` : `${u}`;
+      sel.innerHTML += `<option value="${u}">${label}</option>`;
+    }
+    // Restore previous selection if still valid
+    if (sorted.includes(+currentVal)) sel.value = currentVal;
+  } catch { /* keep default */ }
+
   buildFaders();
 }
 
@@ -3661,6 +4842,7 @@ async function loadQuickActions() {
   const filtered = getFilteredChannelMap();
   buildQaGrid('qaColorGrid', QA_COLORS);
   buildQaGrid('qaEffectsGrid', QA_EFFECTS);
+  await buildEffectsLibraryGrid();
   renderCustomColorGrid();
   buildMoveGrid();
   await loadStrobeConfig();
@@ -3672,8 +4854,10 @@ async function loadQuickActions() {
   const totalFixtures = filtered.length;
   const totalChannels = filtered.reduce((s, f) => s + f.channels.length, 0);
   const groupLabel = qaGroupFilter ? ` (filtered by group)` : '';
+  const universeSet = new Set(filtered.map(f => f.universe));
+  const universeLabel = universeSet.size > 0 ? `, ${universeSet.size} universe(s): ${[...universeSet].sort((a,b)=>a-b).join(', ')}` : '';
   document.getElementById('qaStatus').textContent = totalFixtures > 0
-    ? `${totalFixtures} fixture(s), ${totalChannels} channel(s) mapped${groupLabel}.`
+    ? `${totalFixtures} fixture(s), ${totalChannels} channel(s) mapped${universeLabel}${groupLabel}.`
     : 'No fixtures loaded. Add fixtures with colour channel types to use Quick Actions.';
 }
 
@@ -3707,6 +4891,91 @@ function buildQaGrid(gridId, items) {
     }
     grid.appendChild(btn);
   });
+}
+
+// ─── Effects Library Grid for Quick Actions ───────────────────────────
+let qaActiveEffectId = null; // currently running effect ID
+
+const EFFECT_STYLE = {
+  pulse:      { bg: '#7c4dff', fg: '#fff', border: '#b388ff', icon: '💜' },
+  rainbow:    { bg: 'linear-gradient(135deg,#f44,#ff0,#0f0,#0ff,#00f,#f0f)', fg: '#fff', border: '#fff', icon: '🌈' },
+  strobe:     { bg: '#ffeb3b', fg: '#000', border: '#fff176', icon: '⚡' },
+  color_fade: { bg: 'linear-gradient(135deg,#e53935,#1e88e5)', fg: '#fff', border: '#ce93d8', icon: '🎨' },
+};
+
+async function buildEffectsLibraryGrid() {
+  const grid = document.getElementById('qaEffectsLibraryGrid');
+  grid.innerHTML = '';
+
+  let effects = [];
+  try {
+    effects = await fetch('/api/effects').then(r => r.json());
+  } catch { return; }
+
+  if (effects.length === 0) {
+    grid.innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects created yet. Use the Sequencer → Effects tab to create effects.</span>';
+    return;
+  }
+
+  const filtered = getFilteredChannelMap();
+  const fixtureIds = filtered.map(f => f.id);
+
+  effects.forEach(effect => {
+    const style = EFFECT_STYLE[effect.type] || { bg: '#555', fg: '#fff', border: '#777', icon: '✨' };
+    const btn = document.createElement('button');
+    btn.className = 'qa-btn qa-effect-lib-btn';
+    if (style.bg.includes('gradient')) {
+      btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border};font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.5)`;
+    } else {
+      btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border}`;
+    }
+    btn.textContent = effect.name;
+    btn.title = `${effect.type} effect`;
+    btn.dataset.effectId = effect.id;
+
+    if (fixtureIds.length === 0) {
+      btn.style.opacity = '0.3';
+      btn.title = 'No fixtures available';
+    }
+
+    // Toggle behavior: click to start/stop
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (fixtureIds.length === 0) return;
+
+      if (qaActiveEffectId === effect.id) {
+        // Stop the running effect
+        await fetch('/api/effects/stop', { method: 'POST' });
+        qaActiveEffectId = null;
+        document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+      } else {
+        // Stop any previous, start this one
+        await fetch('/api/effects/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ effectId: effect.id, fixtureIds }),
+        });
+        qaActiveEffectId = effect.id;
+        document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+        btn.classList.add('toggled-on');
+      }
+    });
+
+    grid.appendChild(btn);
+  });
+
+  // Add a "Stop Effect" button at the end
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'qa-btn';
+  stopBtn.style.cssText = 'background:#c62828;color:#fff;border-color:#ef5350';
+  stopBtn.textContent = '⏹ Stop Effect';
+  stopBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await fetch('/api/effects/stop', { method: 'POST' });
+    qaActiveEffectId = null;
+    document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+  });
+  grid.appendChild(stopBtn);
 }
 
 function sendQaChannels(targets, value) {

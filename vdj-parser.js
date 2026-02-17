@@ -46,7 +46,9 @@ function parseSong(song) {
 
   // Scan
   const scan = song.Scan || {};
-  const bpm      = parseFloat(scan['@_Bpm'] || '0');
+  // VDJ stores beat interval (seconds between beats), convert to BPM: 60 / interval
+  const rawBpm   = parseFloat(scan['@_Bpm'] || '0');
+  const bpm      = rawBpm > 0 ? Math.round((60 / rawBpm) * 1000) / 1000 : 0;
   const key      = scan['@_Key'] || '';
   const volume   = parseFloat(scan['@_Volume'] || '0');
   const audioSig = scan['@_AudioSig'] || '';

@@ -153,6 +153,50 @@ function init() {
       sort_order  INTEGER DEFAULT 0,
       created_at  TEXT    DEFAULT (datetime('now'))
     );
+
+    -- Effects library
+    CREATE TABLE IF NOT EXISTS effects (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      name            TEXT    NOT NULL,
+      type            TEXT    NOT NULL DEFAULT 'static',
+      category        TEXT    DEFAULT 'color',
+      effect_data     TEXT    DEFAULT '{}',
+      duration_beats  REAL    DEFAULT 4,
+      created_at      TEXT    DEFAULT (datetime('now'))
+    );
+
+    -- Light sequences (linked to tracks)
+    CREATE TABLE IF NOT EXISTS light_sequences (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      track_id    INTEGER DEFAULT NULL,
+      bpm         REAL    DEFAULT 120,
+      duration_ms INTEGER DEFAULT 0,
+      loop        INTEGER DEFAULT 0,
+      created_at  TEXT    DEFAULT (datetime('now')),
+      updated_at  TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_light_sequences_track ON light_sequences(track_id);
+
+    -- Sequence cues (individual blocks on the timeline)
+    CREATE TABLE IF NOT EXISTS sequence_cues (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      sequence_id         INTEGER NOT NULL REFERENCES light_sequences(id) ON DELETE CASCADE,
+      lane                INTEGER NOT NULL DEFAULT 0,
+      start_ms            REAL    NOT NULL DEFAULT 0,
+      duration_ms         REAL    NOT NULL DEFAULT 1000,
+      cue_type            TEXT    NOT NULL DEFAULT 'static',
+      fixture_id          INTEGER DEFAULT NULL,
+      group_id            INTEGER DEFAULT NULL,
+      channel_values      TEXT    DEFAULT '{}',
+      end_channel_values  TEXT    DEFAULT NULL,
+      effect_id           INTEGER DEFAULT NULL,
+      effect_params       TEXT    DEFAULT '{}',
+      color               TEXT    DEFAULT '#e94560',
+      label               TEXT    DEFAULT '',
+      sort_order          INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_sequence_cues_seq ON sequence_cues(sequence_id);
   `);
 
   // Migrate: add toggle_mode column if missing (existing databases)
@@ -213,8 +257,41 @@ function init() {
     seedDefaults();
   }
 
-  console.log(`[DB] Opened ${DB_PATH}  (${subCount > 0 ? subCount + ' subscriptions' : 'seeded subs'}, ${count > 0 ? count + ' fixture types' : 'seeded defaults'})`);
+  // Seed default effects if empty
+  const effectCount = db.prepare('SELECT COUNT(*) as c FROM effects').get().c;
+  if (effectCount === 0) {
+    seedDefaultEffects();
+  }
+
+  console.log(`[DB] Opened ${DB_PATH}  (${subCount > 0 ? subCount + ' subscriptions' : 'seeded subs'}, ${count > 0 ? count + ' fixture types' : 'seeded defaults'}, ${effectCount > 0 ? effectCount + ' effects' : 'seeded effects'})`);
   return db;
+}
+
+// ─── Seed Default Effects ────────────────────────────────────────────────────
+
+function seedDefaultEffects() {
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?)'
+  );
+  const seed = db.transaction(() => {
+    ins.run('Slow Pulse', 'pulse', 'color', JSON.stringify({ frequency: 0.5 }), 4);
+    ins.run('Fast Pulse', 'pulse', 'color', JSON.stringify({ frequency: 2 }), 2);
+    ins.run('Heartbeat Pulse', 'pulse', 'color', JSON.stringify({ frequency: 1.2 }), 4);
+    ins.run('Rainbow Cycle', 'rainbow', 'color', JSON.stringify({ cycles: 1 }), 8);
+    ins.run('Fast Rainbow', 'rainbow', 'color', JSON.stringify({ cycles: 4 }), 4);
+    ins.run('Double Rainbow', 'rainbow', 'color', JSON.stringify({ cycles: 2 }), 8);
+    ins.run('Slow Strobe', 'strobe', 'intensity', JSON.stringify({ frequency: 4 }), 4);
+    ins.run('Medium Strobe', 'strobe', 'intensity', JSON.stringify({ frequency: 10 }), 2);
+    ins.run('Fast Strobe', 'strobe', 'intensity', JSON.stringify({ frequency: 20 }), 1);
+    ins.run('Police Strobe', 'strobe', 'intensity', JSON.stringify({ frequency: 8 }), 4);
+    ins.run('Red to Blue Fade', 'color_fade', 'color', JSON.stringify({ start_color: { red: 255, green: 0, blue: 0 }, end_color: { red: 0, green: 0, blue: 255 } }), 8);
+    ins.run('Blue to Green Fade', 'color_fade', 'color', JSON.stringify({ start_color: { red: 0, green: 0, blue: 255 }, end_color: { red: 0, green: 255, blue: 0 } }), 8);
+    ins.run('Warm to Cool Fade', 'color_fade', 'color', JSON.stringify({ start_color: { red: 255, green: 100, blue: 0 }, end_color: { red: 0, green: 100, blue: 255 } }), 8);
+    ins.run('Sunset Fade', 'color_fade', 'color', JSON.stringify({ start_color: { red: 255, green: 60, blue: 0 }, end_color: { red: 128, green: 0, blue: 255 } }), 8);
+    ins.run('White Flash', 'pulse', 'intensity', JSON.stringify({ frequency: 1 }), 1);
+  });
+  seed();
+  console.log('[DB] Seeded 15 default effects');
 }
 
 // ─── Seed Default Subscriptions ─────────────────────────────────────────────
@@ -1014,6 +1091,244 @@ function toggleButtonMap(id) {
   return db.prepare('SELECT * FROM os2l_button_maps WHERE id = ?').get(id);
 }
 
+// ─── Effects CRUD ───────────────────────────────────────────────────────────
+
+function getEffects() {
+  const rows = db.prepare('SELECT * FROM effects ORDER BY category, name').all();
+  return rows.map(r => ({ ...r, effect_data: JSON.parse(r.effect_data || '{}') }));
+}
+
+function getEffect(id) {
+  const r = db.prepare('SELECT * FROM effects WHERE id = ?').get(id);
+  if (!r) return null;
+  return { ...r, effect_data: JSON.parse(r.effect_data || '{}') };
+}
+
+function createEffect({ name, type, category, effect_data, duration_beats }) {
+  if (!name || !name.trim()) return { error: 'Name is required' };
+  const dataJson = typeof effect_data === 'string' ? effect_data : JSON.stringify(effect_data || {});
+  const result = db.prepare(
+    'INSERT INTO effects (name, type, category, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?)'
+  ).run(name.trim(), type || 'static', category || 'color', dataJson, duration_beats || 4);
+  return getEffect(result.lastInsertRowid);
+}
+
+function updateEffect(id, { name, type, category, effect_data, duration_beats }) {
+  const existing = db.prepare('SELECT * FROM effects WHERE id = ?').get(id);
+  if (!existing) return null;
+  const dataJson = effect_data !== undefined
+    ? (typeof effect_data === 'string' ? effect_data : JSON.stringify(effect_data))
+    : existing.effect_data;
+  db.prepare(
+    'UPDATE effects SET name=?, type=?, category=?, effect_data=?, duration_beats=? WHERE id=?'
+  ).run(
+    name !== undefined ? name.trim() : existing.name,
+    type !== undefined ? type : existing.type,
+    category !== undefined ? category : existing.category,
+    dataJson,
+    duration_beats !== undefined ? duration_beats : existing.duration_beats,
+    id
+  );
+  return getEffect(id);
+}
+
+function deleteEffect(id) {
+  db.prepare('DELETE FROM effects WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+// ─── Light Sequences CRUD ───────────────────────────────────────────────────
+
+function getSequences() {
+  return db.prepare(`
+    SELECT ls.*, t.title as track_title, t.author as track_author, t.filename as track_filename
+    FROM light_sequences ls
+    LEFT JOIN tracks t ON ls.track_id = t.id
+    ORDER BY ls.updated_at DESC
+  `).all();
+}
+
+function getSequence(id) {
+  const seq = db.prepare(`
+    SELECT ls.*, t.title as track_title, t.author as track_author, t.filename as track_filename,
+           t.bpm as track_bpm, t.song_length as track_duration
+    FROM light_sequences ls
+    LEFT JOIN tracks t ON ls.track_id = t.id
+    WHERE ls.id = ?
+  `).get(id);
+  if (!seq) return null;
+  seq.cues = db.prepare('SELECT * FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms').all(seq.id);
+  seq.cues = seq.cues.map(c => ({
+    ...c,
+    channel_values: JSON.parse(c.channel_values || '{}'),
+    end_channel_values: c.end_channel_values ? JSON.parse(c.end_channel_values) : null,
+    effect_params: JSON.parse(c.effect_params || '{}'),
+  }));
+  return seq;
+}
+
+function getSequenceByTrackId(trackId) {
+  const seq = db.prepare('SELECT * FROM light_sequences WHERE track_id = ?').get(trackId);
+  if (!seq) return null;
+  return getSequence(seq.id);
+}
+
+function createSequence({ name, track_id, bpm, duration_ms, loop }) {
+  if (!name || !name.trim()) return { error: 'Name is required' };
+  const result = db.prepare(
+    'INSERT INTO light_sequences (name, track_id, bpm, duration_ms, loop) VALUES (?, ?, ?, ?, ?)'
+  ).run(name.trim(), track_id || null, bpm || 120, duration_ms || 0, loop ? 1 : 0);
+  return getSequence(result.lastInsertRowid);
+}
+
+function updateSequence(id, { name, track_id, bpm, duration_ms, loop }) {
+  const existing = db.prepare('SELECT * FROM light_sequences WHERE id = ?').get(id);
+  if (!existing) return null;
+  db.prepare(
+    "UPDATE light_sequences SET name=?, track_id=?, bpm=?, duration_ms=?, loop=?, updated_at=datetime('now') WHERE id=?"
+  ).run(
+    name !== undefined ? name.trim() : existing.name,
+    track_id !== undefined ? track_id : existing.track_id,
+    bpm !== undefined ? bpm : existing.bpm,
+    duration_ms !== undefined ? duration_ms : existing.duration_ms,
+    loop !== undefined ? (loop ? 1 : 0) : existing.loop,
+    id
+  );
+  return getSequence(id);
+}
+
+function deleteSequence(id) {
+  db.prepare('DELETE FROM light_sequences WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+// ─── Sequence Cues CRUD ─────────────────────────────────────────────────────
+
+function getSequenceCues(sequenceId) {
+  const cues = db.prepare('SELECT * FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms').all(sequenceId);
+  return cues.map(c => ({
+    ...c,
+    channel_values: JSON.parse(c.channel_values || '{}'),
+    end_channel_values: c.end_channel_values ? JSON.parse(c.end_channel_values) : null,
+    effect_params: JSON.parse(c.effect_params || '{}'),
+  }));
+}
+
+function createCue(sequenceId, cue) {
+  const channelJson = typeof cue.channel_values === 'string' ? cue.channel_values : JSON.stringify(cue.channel_values || {});
+  const endChannelJson = cue.end_channel_values
+    ? (typeof cue.end_channel_values === 'string' ? cue.end_channel_values : JSON.stringify(cue.end_channel_values))
+    : null;
+  const effectParamsJson = typeof cue.effect_params === 'string' ? cue.effect_params : JSON.stringify(cue.effect_params || {});
+  const result = db.prepare(`
+    INSERT INTO sequence_cues (sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, group_id,
+      channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sequenceId,
+    cue.lane || 0,
+    cue.start_ms || 0,
+    cue.duration_ms || 1000,
+    cue.cue_type || 'static',
+    cue.fixture_id || null,
+    cue.group_id || null,
+    channelJson,
+    endChannelJson,
+    cue.effect_id || null,
+    effectParamsJson,
+    cue.color || '#e94560',
+    cue.label || '',
+    cue.sort_order || 0
+  );
+  // Update sequence timestamp
+  db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);
+  return getCue(result.lastInsertRowid);
+}
+
+function getCue(id) {
+  const c = db.prepare('SELECT * FROM sequence_cues WHERE id = ?').get(id);
+  if (!c) return null;
+  return {
+    ...c,
+    channel_values: JSON.parse(c.channel_values || '{}'),
+    end_channel_values: c.end_channel_values ? JSON.parse(c.end_channel_values) : null,
+    effect_params: JSON.parse(c.effect_params || '{}'),
+  };
+}
+
+function updateCue(id, updates) {
+  const existing = db.prepare('SELECT * FROM sequence_cues WHERE id = ?').get(id);
+  if (!existing) return null;
+  const channelJson = updates.channel_values !== undefined
+    ? (typeof updates.channel_values === 'string' ? updates.channel_values : JSON.stringify(updates.channel_values))
+    : existing.channel_values;
+  const endChannelJson = updates.end_channel_values !== undefined
+    ? (updates.end_channel_values ? (typeof updates.end_channel_values === 'string' ? updates.end_channel_values : JSON.stringify(updates.end_channel_values)) : null)
+    : existing.end_channel_values;
+  const effectParamsJson = updates.effect_params !== undefined
+    ? (typeof updates.effect_params === 'string' ? updates.effect_params : JSON.stringify(updates.effect_params))
+    : existing.effect_params;
+  db.prepare(`
+    UPDATE sequence_cues SET lane=?, start_ms=?, duration_ms=?, cue_type=?, fixture_id=?, group_id=?,
+      channel_values=?, end_channel_values=?, effect_id=?, effect_params=?, color=?, label=?, sort_order=?
+    WHERE id=?
+  `).run(
+    updates.lane !== undefined ? updates.lane : existing.lane,
+    updates.start_ms !== undefined ? updates.start_ms : existing.start_ms,
+    updates.duration_ms !== undefined ? updates.duration_ms : existing.duration_ms,
+    updates.cue_type !== undefined ? updates.cue_type : existing.cue_type,
+    updates.fixture_id !== undefined ? updates.fixture_id : existing.fixture_id,
+    updates.group_id !== undefined ? updates.group_id : existing.group_id,
+    channelJson,
+    endChannelJson,
+    updates.effect_id !== undefined ? updates.effect_id : existing.effect_id,
+    effectParamsJson,
+    updates.color !== undefined ? updates.color : existing.color,
+    updates.label !== undefined ? updates.label : existing.label,
+    updates.sort_order !== undefined ? updates.sort_order : existing.sort_order,
+    id
+  );
+  // Update sequence timestamp
+  db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(existing.sequence_id);
+  return getCue(id);
+}
+
+function deleteCue(id) {
+  const c = db.prepare('SELECT sequence_id FROM sequence_cues WHERE id = ?').get(id);
+  db.prepare('DELETE FROM sequence_cues WHERE id = ?').run(id);
+  if (c) db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(c.sequence_id);
+  return { deleted: true };
+}
+
+function bulkUpdateCues(sequenceId, cues) {
+  const txn = db.transaction(() => {
+    // Delete existing cues
+    db.prepare('DELETE FROM sequence_cues WHERE sequence_id = ?').run(sequenceId);
+    // Insert all cues
+    const ins = db.prepare(`
+      INSERT INTO sequence_cues (sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, group_id,
+        channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const cue of cues) {
+      const channelJson = typeof cue.channel_values === 'string' ? cue.channel_values : JSON.stringify(cue.channel_values || {});
+      const endChannelJson = cue.end_channel_values
+        ? (typeof cue.end_channel_values === 'string' ? cue.end_channel_values : JSON.stringify(cue.end_channel_values))
+        : null;
+      const effectParamsJson = typeof cue.effect_params === 'string' ? cue.effect_params : JSON.stringify(cue.effect_params || {});
+      ins.run(
+        sequenceId, cue.lane || 0, cue.start_ms || 0, cue.duration_ms || 1000,
+        cue.cue_type || 'static', cue.fixture_id || null, cue.group_id || null,
+        channelJson, endChannelJson, cue.effect_id || null, effectParamsJson,
+        cue.color || '#e94560', cue.label || '', cue.sort_order || 0
+      );
+    }
+    db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);
+  });
+  txn();
+  return getSequenceCues(sequenceId);
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -1029,4 +1344,7 @@ module.exports = {
   getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks,
   getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,
   getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset,
+  getEffects, getEffect, createEffect, updateEffect, deleteEffect,
+  getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,
+  getSequenceCues, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,
 };
