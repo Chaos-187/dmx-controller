@@ -878,7 +878,7 @@
     .seq-playhead {
       position: absolute; top: 0; bottom: 0; width: 2px;
       background: var(--accent); z-index: 10; pointer-events: none;
-      box-shadow: 0 0 6px var(--accent); margin-left: 140px;
+      box-shadow: 0 0 6px var(--accent);
     }
     .seq-playhead::before {
       content: ''; position: absolute; top: 0; left: -4px;
@@ -3708,7 +3708,7 @@ function setupSequencerEvents() {
         lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
         cue_type: 'static', fixture_id: fixtureId,
         channel_values: { red: 255, green: 0, blue: 0 },
-        color: '#e94560', label: '',
+        color: '#ff0000', label: '',
       })
     });
     const cue = await res.json();
@@ -3794,13 +3794,17 @@ function setupSequencerEvents() {
     const startMs = parseFloat(document.getElementById('seqPropStart').value) * 1000;
     const durMs = parseFloat(document.getElementById('seqPropDur').value) * 1000;
     const label = document.getElementById('seqPropLabel').value;
-    const color = document.getElementById('seqPropColor').value;
     const effectId = document.getElementById('seqPropEffect').value || null;
 
     const channelValues = {};
     document.querySelectorAll('#seqColorChannels .seq-ch-start .seq-ch-slider').forEach(sl => {
       channelValues[sl.dataset.chType] = +sl.querySelector('input[type="range"]').value;
     });
+
+    // Derive color from RGB channels so timeline bar matches
+    const color = (channelValues.red !== undefined || channelValues.green !== undefined || channelValues.blue !== undefined)
+      ? colorFromChannelValues(channelValues)
+      : document.getElementById('seqPropColor').value;
 
     let endChannelValues = null;
     if (type === 'fade') {
@@ -3883,11 +3887,33 @@ function selectCue(cueId) {
   document.getElementById('seqPropStart').value = (cue.start_ms / 1000).toFixed(3);
   document.getElementById('seqPropDur').value = (cue.duration_ms / 1000).toFixed(3);
   document.getElementById('seqPropLabel').value = cue.label || '';
-  document.getElementById('seqPropColor').value = cue.color || '#e94560';
+  // Derive color from RGB channel values if available
+  const chV = cue.channel_values || {};
+  if (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined) {
+    document.getElementById('seqPropColor').value = colorFromChannelValues(chV);
+  } else {
+    document.getElementById('seqPropColor').value = cue.color || '#e94560';
+  }
   document.getElementById('seqPropEffect').value = cue.effect_id || '';
 
   // Build channel sliders based on stored type
   renderCueChannelSliders(cueId, cueType);
+}
+
+function colorFromChannelValues(chVals) {
+  const r = chVals.red !== undefined ? chVals.red : 0;
+  const g = chVals.green !== undefined ? chVals.green : 0;
+  const b = chVals.blue !== undefined ? chVals.blue : 0;
+  return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+}
+
+function updateCueColorFromSliders() {
+  const sliders = document.querySelectorAll('#seqColorChannels .seq-ch-start .seq-ch-slider');
+  const vals = {};
+  sliders.forEach(sl => { vals[sl.dataset.chType] = +sl.querySelector('input[type="range"]').value; });
+  if (vals.red !== undefined || vals.green !== undefined || vals.blue !== undefined) {
+    document.getElementById('seqPropColor').value = colorFromChannelValues(vals);
+  }
 }
 
 function renderCueChannelSliders(cueId, cueType) {
@@ -3912,7 +3938,7 @@ function renderCueChannelSliders(cueId, cueType) {
     const color = chColorMap[ch.type] || '#888';
     html += `<div class="seq-ch-slider" data-ch-type="${ch.type}">` +
       `<label style="color:${color}">${ch.type.substring(0, 4).toUpperCase()}</label>` +
-      `<input type="range" min="0" max="255" value="${val}" oninput="this.nextElementSibling.textContent=this.value">` +
+      `<input type="range" min="0" max="255" value="${val}" oninput="this.nextElementSibling.textContent=this.value;updateCueColorFromSliders()">` +
       `<span class="seq-ch-val">${val}</span></div>`;
   }
   html += '</div></div>';
