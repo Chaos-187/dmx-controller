@@ -1408,7 +1408,7 @@ app.post('/api/effects/run', (req, res) => {
         }
 
         const baseValues = { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
-        const channelCtx = { channel_number: ch.channel_number, total_channels: fix.channels.length };
+        const channelCtx = buildChannelCtx(ch, fix);
         const value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
 
         if (value !== null && value !== undefined) {
@@ -1841,6 +1841,31 @@ function mapValueToRange(value, channel, rangeType) {
  * @param {number} deckNum - Deck number
  * @param {number} timeMs - Current playback position in milliseconds
  */
+/**
+ * Build a channel context object for effect computation.
+ * Includes explicit cell metadata when available so effects can
+ * correctly resolve cell index and count rather than guessing via stride.
+ */
+function buildChannelCtx(ch, fix) {
+  const ctx = {
+    channel_number: ch.channel_number,
+    total_channels: fix.channels.length,
+  };
+  if (fix.cell_count > 0) {
+    ctx.cell_count = fix.cell_count;
+    ctx.cell = ch.cell || null;
+    // Compute index of this channel within its cell (0-based)
+    if (ch.cell) {
+      const cellChannels = fix.channels.filter(c => c.cell === ch.cell);
+      ctx.cell_channel_index = cellChannels.indexOf(ch);
+      if (ctx.cell_channel_index === -1) {
+        ctx.cell_channel_index = cellChannels.findIndex(c => c.channel_number === ch.channel_number);
+      }
+    }
+  }
+  return ctx;
+}
+
 function processSequenceAtTime(deckNum, timeMs) {
   const deckSeq = activeSequences[deckNum];
   if (!deckSeq || !deckSeq.playing || !deckSeq.sequence) return;
@@ -1876,8 +1901,17 @@ function processSequenceAtTime(deckNum, timeMs) {
   // Find all active cues at this time position
   const channelUpdates = {}; // { universe: { channel: value } }
 
+  // Sort active cues so master cues (cell=null) are processed first,
+  // then cell-specific cues overwrite. This ensures cell cues always
+  // take priority over master cues on the same fixture.
+  const activeCues = [];
   for (const cue of cues) {
     if (timeMs < cue.start_ms || timeMs >= cue.start_ms + cue.duration_ms) continue;
+    activeCues.push(cue);
+  }
+  activeCues.sort((a, b) => (a.cell ? 1 : 0) - (b.cell ? 1 : 0));
+
+  for (const cue of activeCues) {
 
     // This cue is active
     const fixtureId = cue.fixture_id;
@@ -1945,7 +1979,7 @@ function processSequenceAtTime(deckNum, timeMs) {
       } else if (cue.cue_type === 'effect' && cue.effect_id) {
         const effect = db.getEffect(cue.effect_id);
         if (effect) {
-          const channelCtx = { channel_number: ch.channel_number, total_channels: fixMap.channels.length };
+          const channelCtx = buildChannelCtx(ch, fixMap);
           value = computeEffectValue(effect, ch.type, progress, channelVals, cue.effect_params || {}, channelCtx);
         }
       }
@@ -2001,8 +2035,30 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
   const type = effect.type;
   channelCtx = channelCtx || { channel_number: 1, total_channels: 1 };
 
-  // Helper: resolve channels-per-cell
+  // Helper: resolve channels-per-cell (legacy heuristic)
   const getCpp = () => params.channels_per_cell || data.channels_per_cell || 3;
+
+  /**
+   * Resolve cell index (0-based) and total cell count.
+   * Uses explicit cell metadata when available (from multi-cell fixtures),
+   * otherwise falls back to the channels_per_cell stride heuristic.
+   * Master channels (cell=null) on multi-cell fixtures are flagged as isMaster.
+   */
+  function resolveCellInfo() {
+    if (channelCtx.cell_count > 0 && channelCtx.cell) {
+      return { cellIndex: channelCtx.cell - 1, cellCount: channelCtx.cell_count, isMaster: false };
+    }
+    if (channelCtx.cell_count > 0 && !channelCtx.cell) {
+      // Master channel on a multi-cell fixture — treat as cell 0 (always-on)
+      return { cellIndex: 0, cellCount: channelCtx.cell_count, isMaster: true };
+    }
+    const cpp = getCpp();
+    return {
+      cellIndex: Math.floor((channelCtx.channel_number - 1) / cpp),
+      cellCount: Math.max(1, Math.floor(channelCtx.total_channels / cpp)),
+      isMaster: false,
+    };
+  }
 
   switch (type) {
     case 'pulse': {
@@ -2038,9 +2094,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Chase: sequential pattern across cells ──────────────────────────
     case 'chase': {
-      const cpp = getCpp();
-      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
       const tail  = params.tail  || data.tail  || 0;
@@ -2080,9 +2135,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Comet: directional chase with long trailing tail ────────────────
     case 'comet': {
-      const cpp = getCpp();
-      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const speed = params.speed || data.speed || 1;
       const tail  = params.tail  || data.tail  || 10;
       const dir   = params.direction || data.direction || 'left';
@@ -2106,9 +2160,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Scanner: bouncing Larson-scanner style ─────────────────────────
     case 'scanner': {
-      const cpp = getCpp();
-      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 1;
       const tail  = params.tail  || data.tail  || 5;
@@ -2128,8 +2181,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Sparkle: random cells flash and fade ───────────────────────────
     case 'sparkle': {
-      const cpp = getCpp();
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const density  = params.density    || data.density    || 0.1;
       const fadeSpd  = params.fade_speed || data.fade_speed || 6;
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
@@ -2145,9 +2198,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Color Wave: rainbow distributed across cells ───────────────────
     case 'color_wave': {
-      const cpp = getCpp();
-      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const wavelength = params.wavelength || data.wavelength || 20;
       const speed = params.speed || data.speed || 1;
 
@@ -2162,8 +2214,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Fire: flickering warm light simulation ─────────────────────────
     case 'fire': {
-      const cpp = getCpp();
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const intensity = params.intensity || data.intensity || 0.8;
       const cooling   = params.cooling   || data.cooling   || 0.3;
 
@@ -2182,9 +2234,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Buildup: progressive fill across cells ─────────────────────────
     case 'buildup': {
-      const cpp = getCpp();
-      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
-      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const dir = params.direction || data.direction || 'left';
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
 

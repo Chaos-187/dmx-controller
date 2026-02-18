@@ -208,8 +208,8 @@ const sectionStyles = {
   chorus:    { intensity: [0.8, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.2,  strobeDurationBeats: 0.5,  cuePerBars: 1 },
   bridge:    { intensity: [0.4, 0.65],  beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
   breakdown: { intensity: [0.1, 0.35],  beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
-  buildup:   { intensity: [0.25, 0.95], beatColorChange: true,  beatColorBars: 1, strobeChance: 0.15, strobeDurationBeats: 0.25, cuePerBars: 1, rampIntensity: true },
-  drop:      { intensity: [0.9, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.3,  strobeDurationBeats: 0.5,  cuePerBars: 1 },
+  buildup:   { intensity: [0.25, 0.95], beatColorChange: true,  beatColorBars: 1, strobeChance: 0.15, strobeDurationBeats: 0.25, cuePerBars: 1, rampIntensity: true, buildEnergy: true },
+  drop:      { intensity: [0.9, 1.0],   beatColorChange: true,  beatColorBars: 0.5, strobeChance: 0.35, strobeDurationBeats: 0.5, cuePerBars: 0.5, dropEnergy: true },
   outro:     { intensity: [0.5, 0.1],   beatColorChange: false, strobeChance: 0,    cuePerBars: 4, fadeOut: true },
 };
 
@@ -371,7 +371,81 @@ function generateSequence(opts) {
     generateEffectCues(cues, regularFixtures, ledBars, effects, sections, ctx);
   }
 
+  // ── Resolve master ↔ cell cue conflicts on multi-cell fixtures ────────
+  // If a multi-cell fixture has cell-specific cues in a time range, remove
+  // any master (cell=null) cues that overlap so they don't fight each other.
+  if (multiCellFixtures.length > 0) {
+    resolveMultiCellConflicts(cues, multiCellFixtures);
+  }
+
   return { cues, bpm, durationMs, palette: paletteKey, genrePreset: genreKey };
+}
+
+// ─── Multi-Cell Conflict Resolution ─────────────────────────────────────────
+/**
+ * For each multi-cell fixture, detect time ranges where both master cues
+ * (cell=null/undefined) and cell-specific cues (cell=1,2,...) exist.
+ * Remove the master cues from those overlapping ranges so only one
+ * control path drives the fixture at any given moment.
+ *
+ * Mutates the cues array in place (splices out conflicting cues).
+ */
+function resolveMultiCellConflicts(cues, multiCellFixtures) {
+  const multiCellIds = new Set(multiCellFixtures.map(f => f.id));
+
+  for (const fixId of multiCellIds) {
+    // Separate master and cell-targeted cues for this fixture
+    const masterCues = [];
+    const cellCues = [];
+    for (const cue of cues) {
+      if (cue.fixture_id !== fixId) continue;
+      if (cue.cell) {
+        cellCues.push(cue);
+      } else {
+        masterCues.push(cue);
+      }
+    }
+
+    if (cellCues.length === 0 || masterCues.length === 0) continue;
+
+    // Build a merged timeline of cell-covered intervals
+    // Sort cell cues by start time, merge overlapping ranges
+    const intervals = cellCues
+      .map(c => [c.start_ms, c.start_ms + c.duration_ms])
+      .sort((a, b) => a[0] - b[0]);
+
+    const merged = [intervals[0].slice()];
+    for (let i = 1; i < intervals.length; i++) {
+      const last = merged[merged.length - 1];
+      if (intervals[i][0] <= last[1]) {
+        last[1] = Math.max(last[1], intervals[i][1]);
+      } else {
+        merged.push(intervals[i].slice());
+      }
+    }
+
+    // Mark master cues that overlap with any cell-covered interval for removal
+    const toRemove = new Set();
+    for (const mc of masterCues) {
+      const mcStart = mc.start_ms;
+      const mcEnd = mc.start_ms + mc.duration_ms;
+      for (const [iStart, iEnd] of merged) {
+        if (mcStart < iEnd && mcEnd > iStart) {
+          toRemove.add(mc);
+          break;
+        }
+      }
+    }
+
+    // Splice out conflicting master cues
+    if (toRemove.size > 0) {
+      for (let i = cues.length - 1; i >= 0; i--) {
+        if (toRemove.has(cues[i])) {
+          cues.splice(i, 1);
+        }
+      }
+    }
+  }
 }
 
 // ─── Section-based generation ───────────────────────────────────────────────
@@ -441,6 +515,19 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         if (style.fadeOut) {
           startIntensity = style.intensity[0] * (1 - secProgress * 0.7);
           endIntensity = style.intensity[0] * (1 - Math.min(1, secProgress + 1 / numCues) * 0.7);
+        }
+
+        // Drop energy boost: max intensity with high contrast
+        if (style.dropEnergy) {
+          startIntensity = Math.min(1, startIntensity * 1.15);
+          endIntensity = Math.min(1, endIntensity * 1.15);
+        }
+
+        // Build energy: ramp saturation/contrast as section progresses
+        if (style.buildEnergy && secProgress > 0.7) {
+          const boost = 1 + (secProgress - 0.7) * 1.0;  // up to 1.3× at end
+          startIntensity = Math.min(1, startIntensity * boost);
+          endIntensity = Math.min(1, endIntensity * boost);
         }
 
         const startColor = applyIntensity(palette[0], startIntensity);
@@ -700,8 +787,8 @@ const MOVEMENT_STYLES = {
   chorus:    { barsPerMove: 2, range: 0.8, speed: 'fast' },
   bridge:    { barsPerMove: 4, range: 0.5, speed: 'medium' },
   breakdown: { barsPerMove: 8, range: 0.3, speed: 'slow' },
-  buildup:   { barsPerMove: 2, range: 0.7, speed: 'fast' },
-  drop:      { barsPerMove: 1, range: 1.0, speed: 'fast' },
+  buildup:   { barsPerMove: 1, range: 0.8, speed: 'fast' },
+  drop:      { barsPerMove: 0.5, range: 1.0, speed: 'fast' },
   outro:     { barsPerMove: 8, range: 0.3, speed: 'slow' },
 };
 const DEFAULT_MOVEMENT = { barsPerMove: 4, range: 0.5, speed: 'medium' };
@@ -830,7 +917,7 @@ const SECTION_EFFECT_TYPES = {
   bridge:    { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'sparkle'] },
   breakdown: { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
   buildup:   { regular: ['pulse', 'strobe'],                cellAware: ['buildup', 'comet', 'chase'] },
-  drop:      { regular: ['rainbow', 'strobe', 'pulse'],     cellAware: ['chase', 'scanner', 'sparkle', 'comet'] },
+  drop:      { regular: ['rainbow', 'strobe', 'pulse'],     cellAware: ['chase', 'scanner', 'sparkle', 'comet', 'buildup'] },
   outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
 };
 
@@ -904,7 +991,7 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
   // Effect density per section type, scaled by genre preset
   const sectionEffectChance = {
     intro: 0.3, verse: 0.4, chorus: 0.8, bridge: 0.35,
-    breakdown: 0.35, buildup: 0.6, drop: 0.85, outro: 0.25,
+    breakdown: 0.35, buildup: 0.7, drop: 0.95, outro: 0.25,
   };
 
   /**
@@ -1031,6 +1118,421 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
   // Re-sort after adding effect cues
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+}
+
+// ─── Multi-Cell Pattern Generation ──────────────────────────────────────────
+//
+// Creates per-cell cues with the `cell` property set on multi-cell fixtures.
+// Different song sections get different patterns. Drop sections are tuned
+// to be fast, high-contrast, and energetic.
+
+const CELL_PATTERN_MAP = {
+  intro:     ['fill_sweep', 'color_wave'],
+  verse:     ['chase_slow', 'alternate', 'color_wave'],
+  chorus:    ['chase', 'alternate', 'scatter'],
+  bridge:    ['color_wave', 'alternate'],
+  breakdown: ['fill_sweep', 'breathe'],
+  buildup:   ['build_reveal', 'chase_accel'],
+  drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
+  outro:     ['fill_sweep', 'color_wave'],
+};
+
+/**
+ * Main multi-cell pattern orchestrator.
+ * For each multi-cell fixture and section, picks a pattern type and generates
+ * per-cell cues.
+ */
+function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
+  const { barMs, beatMs, rand, paletteKey, preset } = ctx;
+
+  for (const fix of multiCellFixtures) {
+    const cellCount = fix.cell_count || 0;
+    if (cellCount < 2) continue;
+
+    // Find existing lane for this fixture
+    const existingCue = cues.find(c => c.fixture_id === fix.id);
+    const lane = existingCue ? existingCue.lane : 0;
+    const hasDimmer = fix.channels.some(ch => ch.type === 'dimmer');
+    const hasWhite = fix.channels.some(ch => ch.type === 'white');
+
+    for (const section of sections) {
+      const label = section.label || 'verse';
+      const secStartMs = Math.round(section.start_ms);
+      const secEndMs = Math.round(section.end_ms);
+      const secDurMs = secEndMs - secStartMs;
+      if (secDurMs < barMs) continue;
+
+      const patterns = CELL_PATTERN_MAP[label] || CELL_PATTERN_MAP.verse;
+      const pattern = patterns[Math.floor(rand() * patterns.length)];
+
+      const palettes = getSectionPalettes(paletteKey, label);
+      const style = sectionStyles[label] || defaultStyle;
+      const baseIntensity = Math.min(1, ((style.intensity[0] + style.intensity[1]) / 2) * preset.intensityMult);
+
+      const patternCtx = {
+        fix, lane, cellCount, secStartMs, secEndMs, secDurMs,
+        palettes, baseIntensity, hasDimmer, hasWhite, label,
+        ...ctx,
+      };
+
+      switch (pattern) {
+        case 'chase_slow':    cellPatternChase(cues, patternCtx, 'slow'); break;
+        case 'chase':         cellPatternChase(cues, patternCtx, 'medium'); break;
+        case 'chase_fast':    cellPatternChase(cues, patternCtx, 'fast'); break;
+        case 'chase_accel':   cellPatternChaseAccel(cues, patternCtx); break;
+        case 'alternate':     cellPatternAlternate(cues, patternCtx, 'normal'); break;
+        case 'alternate_fast': cellPatternAlternate(cues, patternCtx, 'fast'); break;
+        case 'color_wave':    cellPatternColorWave(cues, patternCtx); break;
+        case 'scatter':       cellPatternScatter(cues, patternCtx, false); break;
+        case 'scatter_strobe': cellPatternScatter(cues, patternCtx, true); break;
+        case 'fill_sweep':    cellPatternFillSweep(cues, patternCtx); break;
+        case 'build_reveal':  cellPatternBuildReveal(cues, patternCtx); break;
+        case 'all_flash':     cellPatternAllFlash(cues, patternCtx); break;
+        case 'breathe':       cellPatternBreathe(cues, patternCtx); break;
+      }
+    }
+  }
+
+  cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+}
+
+/**
+ * Helper: create a per-cell cue.
+ */
+function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, label) {
+  const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
+  const endVals = endColor ? { red: endColor.r, green: endColor.g, blue: endColor.b } : {};
+  if (p.hasDimmer) {
+    startVals.dimmer = Math.round(Math.max(startColor.r, startColor.g, startColor.b));
+    if (endColor) endVals.dimmer = Math.round(Math.max(endColor.r, endColor.g, endColor.b));
+  }
+  if (p.hasWhite) {
+    startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.15);
+    if (endColor) endVals.white = Math.round((endColor.r + endColor.g + endColor.b) / 3 * 0.15);
+  }
+  cues.push({
+    lane: p.lane,
+    start_ms: Math.round(startMs),
+    duration_ms: Math.round(Math.max(10, durMs)),
+    cue_type: cueType || 'static',
+    fixture_id: p.fix.id,
+    cell,
+    channel_values: startVals,
+    end_channel_values: endVals,
+    color: rgbToHex(startColor.r, startColor.g, startColor.b),
+    label: label || '',
+  });
+}
+
+/**
+ * Chase pattern: cells light up one after another in sequence.
+ * Speed: slow = 1 bar per cycle, medium = 2 beats, fast = 1 beat.
+ */
+function cellPatternChase(cues, p, speed) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+
+  const cycleDur = speed === 'fast' ? beatMs
+    : speed === 'medium' ? beatMs * 2
+    : barMs;
+  const cellDur = cycleDur / cellCount;
+
+  // Pick two contrasting colors for on/off
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const onColor = applyIntensity(pal[0], Math.min(1, baseIntensity * 1.2));
+  const offColor = applyIntensity(pal[1], baseIntensity * 0.15);
+
+  let t = secStartMs;
+  let direction = 1;
+  while (t < secEndMs) {
+    for (let step = 0; step < cellCount; step++) {
+      const cellIdx = direction > 0 ? step : (cellCount - 1 - step);
+      const cell = cellIdx + 1;
+      const cueStart = t + step * cellDur;
+      if (cueStart >= secEndMs) break;
+      const dur = Math.min(cellDur, secEndMs - cueStart);
+
+      // Active cell gets bright color, decays to dim
+      cellCue(cues, p, cell, cueStart, dur, onColor, offColor, 'static', 'chase');
+    }
+    t += cycleDur;
+    // Bounce direction every cycle for variety
+    if (rand() > 0.6) direction *= -1;
+  }
+}
+
+/**
+ * Accelerating chase for buildup sections.
+ * Starts slow and progressively speeds up toward the end.
+ */
+function cellPatternChaseAccel(cues, p) {
+  const { cellCount, secStartMs, secEndMs, secDurMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const color = applyIntensity(pal[0], Math.min(1, baseIntensity * 1.3));
+  const dimColor = applyIntensity(pal[1], baseIntensity * 0.1);
+
+  // Start with slow cycle (1 bar) and accelerate to fast (half beat)
+  const startCycleDur = barMs;
+  const endCycleDur = beatMs * 0.5;
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const progress = Math.min(1, (t - secStartMs) / secDurMs);
+    const cycleDur = startCycleDur + (endCycleDur - startCycleDur) * (progress * progress); // quadratic ease
+    const cellDur = cycleDur / cellCount;
+    const intensity = Math.min(1, baseIntensity * (0.5 + progress * 0.8));
+    const c = applyIntensity(pal[0], intensity);
+
+    for (let step = 0; step < cellCount; step++) {
+      const cell = step + 1;
+      const cueStart = t + step * cellDur;
+      if (cueStart >= secEndMs) break;
+      const dur = Math.min(cellDur, secEndMs - cueStart);
+      cellCue(cues, p, cell, cueStart, dur, c, dimColor, 'static', 'build');
+    }
+    t += cycleDur;
+  }
+}
+
+/**
+ * Alternating pattern: even and odd cells swap between two colors.
+ * 'fast' mode swaps every beat, 'normal' swaps every 2 beats.
+ */
+function cellPatternAlternate(cues, p, speed) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+
+  const swapInterval = speed === 'fast' ? beatMs : beatMs * 2;
+
+  // Pick two distinct palettes for the two groups
+  const pal1 = palettes[Math.floor(rand() * palettes.length)];
+  const pal2 = palettes[(Math.floor(rand() * palettes.length) + 1) % palettes.length] || pal1;
+  const colorA = applyIntensity(pal1[0], baseIntensity);
+  const colorB = applyIntensity(pal2[1], baseIntensity);
+
+  let t = secStartMs;
+  let swapState = false;
+  while (t < secEndMs) {
+    const dur = Math.min(swapInterval, secEndMs - t);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const isOdd = cell % 2 === 1;
+      const useA = isOdd ? !swapState : swapState;
+      cellCue(cues, p, cell, t, dur, useA ? colorA : colorB, null, 'static', 'alt');
+    }
+    t += swapInterval;
+    swapState = !swapState;
+  }
+}
+
+/**
+ * Color wave: all cells show the same color palette but offset in time,
+ * creating a ripple/wave effect across the fixture.
+ */
+function cellPatternColorWave(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, rand } = p;
+
+  const waveDur = barMs * 2; // full wave cycle
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const color1 = applyIntensity(pal[0], baseIntensity);
+  const color2 = applyIntensity(pal[1], baseIntensity);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const offset = (cell - 1) / cellCount;
+      const cellStart = t + offset * waveDur * 0.5;
+      const dur = Math.min(waveDur, secEndMs - cellStart);
+      if (cellStart >= secEndMs || dur <= 0) continue;
+      cellCue(cues, p, cell, cellStart, dur, color1, color2, 'fade', 'wave');
+    }
+    t += waveDur;
+  }
+}
+
+/**
+ * Scatter: random cells flash independently at random intervals.
+ * High energy — good for chorus. strobe mode adds strobe cue type for drops.
+ */
+function cellPatternScatter(cues, p, strobeMode) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand, noStrobes } = p;
+
+  const flashInterval = strobeMode ? beatMs * 0.5 : beatMs;
+  const flashDur = strobeMode ? beatMs * 0.25 : beatMs * 0.5;
+  const intensity = strobeMode ? 1.0 : baseIntensity;
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    // Pick 1-3 random cells to flash
+    const numFlashes = Math.floor(rand() * Math.min(3, cellCount)) + 1;
+    const pal = palettes[Math.floor(rand() * palettes.length)];
+    const color = applyIntensity(pal[0], intensity);
+
+    for (let f = 0; f < numFlashes; f++) {
+      const cell = Math.floor(rand() * cellCount) + 1;
+      const dur = Math.min(flashDur, secEndMs - t);
+      if (dur <= 0) break;
+
+      if (strobeMode && !noStrobes) {
+        // Strobe flash
+        const strobeVals = { red: color.r, green: color.g, blue: color.b, strobe_hz: 15 };
+        if (p.hasDimmer) strobeVals.dimmer = 255;
+        if (p.hasWhite) strobeVals.white = 200;
+        cues.push({
+          lane: p.lane, start_ms: Math.round(t), duration_ms: Math.round(dur),
+          cue_type: 'strobe', fixture_id: p.fix.id, cell,
+          channel_values: strobeVals, end_channel_values: {},
+          color: '#ffffff', label: 'scatter',
+        });
+      } else {
+        const dimColor = { r: 0, g: 0, b: 0 };
+        cellCue(cues, p, cell, t, dur, color, dimColor, 'static', 'scatter');
+      }
+    }
+    t += flashInterval + rand() * flashInterval * 0.5;
+  }
+}
+
+/**
+ * Fill sweep: cells turn on one by one from left to right,
+ * then all hold, creating a progressive reveal. Gentle — for intros/outros.
+ */
+function cellPatternFillSweep(cues, p) {
+  const { cellCount, secStartMs, secEndMs, secDurMs, palettes, baseIntensity, barMs, rand } = p;
+
+  const sweepDur = Math.min(barMs * 4, secDurMs * 0.6);
+  const holdDur = secDurMs - sweepDur;
+  const cellDelay = sweepDur / cellCount;
+
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const color = applyIntensity(pal[0], baseIntensity * 0.8);
+  const dimColor = applyIntensity(pal[0], baseIntensity * 0.1);
+
+  for (let cell = 1; cell <= cellCount; cell++) {
+    const onTime = secStartMs + (cell - 1) * cellDelay;
+
+    // Fade in phase
+    const fadeInDur = Math.min(cellDelay * 1.5, secEndMs - onTime);
+    if (fadeInDur > 0 && onTime < secEndMs) {
+      cellCue(cues, p, cell, onTime, fadeInDur, dimColor, color, 'fade', 'sweep');
+    }
+
+    // Hold phase  
+    const holdStart = secStartMs + sweepDur;
+    if (holdStart < secEndMs && holdDur > 0) {
+      cellCue(cues, p, cell, holdStart, Math.min(holdDur, secEndMs - holdStart), color, null, 'static', 'hold');
+    }
+  }
+}
+
+/**
+ * Build reveal for buildup sections: progressively more cells light up,
+ * culminating in all cells at full brightness.
+ */
+function cellPatternBuildReveal(cues, p) {
+  const { cellCount, secStartMs, secEndMs, secDurMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const numStages = Math.min(cellCount, Math.max(4, Math.floor(secDurMs / barMs)));
+  const stageDur = secDurMs / numStages;
+
+  for (let stage = 0; stage < numStages; stage++) {
+    const stageStart = secStartMs + stage * stageDur;
+    const dur = Math.min(stageDur, secEndMs - stageStart);
+    if (dur <= 0) break;
+
+    const progress = (stage + 1) / numStages;
+    const intensity = Math.min(1, baseIntensity * (0.3 + progress * 0.9));
+    const color = applyIntensity(pal[0], intensity);
+
+    // Number of cells active grows with progress
+    const activeCells = Math.max(1, Math.ceil(cellCount * progress));
+
+    for (let i = 0; i < activeCells; i++) {
+      const cell = i + 1;
+      cellCue(cues, p, cell, stageStart, dur, color, null, 'static', 'build');
+    }
+  }
+
+  // Final stage: all cells at max
+  const finalStart = secEndMs - Math.min(beatMs * 2, secDurMs * 0.2);
+  if (finalStart > secStartMs) {
+    const maxColor = applyIntensity(pal[0], Math.min(1, baseIntensity * 1.4));
+    for (let cell = 1; cell <= cellCount; cell++) {
+      cellCue(cues, p, cell, finalStart, secEndMs - finalStart, maxColor, null, 'static', 'peak');
+    }
+  }
+}
+
+/**
+ * All-flash: all cells simultaneously flash contrasting colors rapidly.
+ * Maximum energy — designed for drops.
+ */
+function cellPatternAllFlash(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, beatMs, rand, noStrobes } = p;
+
+  const flashDur = beatMs; // 1 beat per flash
+  let t = secStartMs;
+  let palIdx = 0;
+
+  while (t < secEndMs) {
+    const pal = palettes[palIdx % palettes.length];
+    const color1 = applyIntensity(pal[0], 1.0);
+    const color2 = applyIntensity(pal[1], 1.0);
+    const dur = Math.min(flashDur, secEndMs - t);
+    if (dur <= 0) break;
+
+    for (let cell = 1; cell <= cellCount; cell++) {
+      // Alternate cells get opposite colors for maximum contrast
+      const useColor = cell % 2 === 0 ? color1 : color2;
+      cellCue(cues, p, cell, t, dur, useColor, null, 'static', 'flash');
+    }
+
+    // Add strobe burst every 4 beats in drop
+    if (!noStrobes && palIdx % 4 === 3) {
+      for (let cell = 1; cell <= cellCount; cell++) {
+        const strobeVals = { red: 255, green: 255, blue: 255, strobe_hz: 18 };
+        if (p.hasDimmer) strobeVals.dimmer = 255;
+        cues.push({
+          lane: p.lane, start_ms: Math.round(t), duration_ms: Math.round(Math.min(beatMs * 0.5, dur)),
+          cue_type: 'strobe', fixture_id: p.fix.id, cell,
+          channel_values: strobeVals, end_channel_values: {},
+          color: '#ffffff', label: 'strobe',
+        });
+      }
+    }
+
+    t += flashDur;
+    palIdx++;
+  }
+}
+
+/**
+ * Breathe: all cells gently pulse in and out together.
+ * Calm — for breakdowns.
+ */
+function cellPatternBreathe(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, rand } = p;
+
+  const breatheCycle = barMs * 2;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const brightColor = applyIntensity(pal[0], baseIntensity * 0.7);
+  const dimColor = applyIntensity(pal[0], baseIntensity * 0.1);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const dur = Math.min(breatheCycle, secEndMs - t);
+    if (dur <= 0) break;
+    const halfDur = dur / 2;
+
+    for (let cell = 1; cell <= cellCount; cell++) {
+      // Fade up
+      cellCue(cues, p, cell, t, halfDur, dimColor, brightColor, 'fade', 'breathe');
+      // Fade down
+      if (t + halfDur < secEndMs) {
+        cellCue(cues, p, cell, t + halfDur, Math.min(halfDur, secEndMs - t - halfDur), brightColor, dimColor, 'fade', 'breathe');
+      }
+    }
+    t += breatheCycle;
+  }
 }
 
 /**

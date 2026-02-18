@@ -11,7 +11,7 @@ let seqCues = [];
 let seqFixtures = [];
 let seqEffects = [];
 let seqActiveLanes = new Set(); // fixture IDs active as lanes
-let seqZoomPxPerSec = 50;
+let seqZoomPxPerSec = 5;
 let seqSnapBeats = 4;
 let seqSelectedCueId = null;
 let seqDeck = 1;
@@ -309,6 +309,9 @@ function renderSequencerTimeline() {
   if (wfAnalysisData && wfWaveformData && typeof drawTimelineWaveform === 'function') {
     requestAnimationFrame(() => drawTimelineWaveform());
   }
+
+  // Default scroll to left edge
+  document.getElementById('seqTimelineWrap').scrollLeft = 0;
 
   updatePlayhead();
 }
