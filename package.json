@@ -3,9 +3,35 @@
   "version": "1.0.0",
   "description": "DMX Light Controller with VirtualDJ OS2L integration",
   "main": "server.js",
+  "bin": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "build": "node build.js"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "node_modules/waveform-data/dist/**/*",
+      "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "node_modules/better-sqlite3/build/Release/test_extension.node",
+      "node_modules/ftdi-d2xx/build/Release/*.node",
+      "node_modules/usb/prebuilds/win32-x64/*.node"
+    ],
+    "scripts": [
+      "db.js",
+      "artnet-server.js",
+      "artnet-worker.js",
+      "dmx-usb-server.js",
+      "dmx-usb-worker.js",
+      "audio-analyzer.js",
+      "sequence-generator.js",
+      "vdj-parser.js"
+    ],
+    "targets": [
+      "node22-win-x64"
+    ],
+    "outputPath": "dist"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
@@ -17,5 +43,8 @@
     "usb": "^2.17.0",
     "waveform-data": "^4.5.2",
     "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.14.0"
   }
 }

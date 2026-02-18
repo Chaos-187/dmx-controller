@@ -7,10 +7,33 @@
  *   fixtures         – placed fixture instances with DMX universe/address
  */
 
-const Database = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'dmx-controller.db');
+// In pkg mode, __dirname points to the read-only snapshot; use the exe directory instead
+const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+
+// In pkg mode, better-sqlite3's 'bindings' module can't find the native addon
+// in the snapshot.  Pre-load it from the directory next to the exe so the
+// subsequent require('better-sqlite3') picks it up from the module cache.
+if (process.pkg) {
+  try {
+    const addonPath = path.join(APP_DIR, 'better_sqlite3.node');
+    const m = { exports: {} };
+    process.dlopen(m, addonPath);
+    // Inject into require cache under the key bindings would use
+    const cacheKey = path.join(__dirname, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
+    require.cache[cacheKey] = { id: cacheKey, filename: cacheKey, loaded: true, exports: m.exports };
+    // Also cache under the path bindings may try without Release
+    const cacheKey2 = path.join(__dirname, 'node_modules', 'better-sqlite3', 'build', 'better_sqlite3.node');
+    require.cache[cacheKey2] = { id: cacheKey2, filename: cacheKey2, loaded: true, exports: m.exports };
+  } catch (e) {
+    console.warn('[DB] Failed to pre-load better_sqlite3.node from exe dir:', e.message);
+  }
+}
+
+const Database = require('better-sqlite3');
+
+const DB_PATH = path.join(APP_DIR, 'dmx-controller.db');
 
 let db;
 

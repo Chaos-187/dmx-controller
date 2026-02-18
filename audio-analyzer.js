@@ -67,7 +67,8 @@ function hpFilter(sample, alpha, state) {
 
 // ─── Resolve ffmpeg path ────────────────────────────────────────────────────
 
-const PROJECT_DIR = __dirname;
+// In pkg mode, __dirname points to the read-only snapshot; use the exe directory instead
+const PROJECT_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
 
 /**
  * Return the path to ffmpeg — prefer a local copy in the project directory.
