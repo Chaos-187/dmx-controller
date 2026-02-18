@@ -48,15 +48,22 @@
     .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
 
     /* Now-Playing bar in header */
-    .now-playing { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; justify-content: center; }
-    .now-playing-info { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-dim); overflow: hidden; }
-    .now-playing-info .np-track { color: var(--text); font-weight: 500; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .now-playing-info .np-bpm { color: var(--cyan); font-weight: 600; font-size: 13px; }
-    .now-playing-info .np-state { font-size: 10px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
-    .now-playing-info .np-state.playing { background: var(--green); color: #000; }
-    .now-playing-info .np-state.paused { background: var(--amber); color: #000; }
-    .now-playing-info .np-state.stopped { background: #555; color: #aaa; }
-    .now-playing-info .np-divider { width: 1px; height: 18px; background: var(--panel-border); }
+    .now-playing { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; justify-content: center; }
+    .np-deck {
+      display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim);
+      overflow: hidden; padding: 4px 10px; border-radius: 6px; background: rgba(255,255,255,.04);
+      border: 1px solid transparent; transition: border-color .3s, background .3s; min-width: 0; flex: 1;
+    }
+    .np-deck.np-playing { border-color: var(--accent); background: rgba(233,69,96,.06); }
+    .np-deck .np-label { font-size: 10px; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+    .np-deck .np-track { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    .np-deck .np-track.empty { color: var(--text-dim); font-style: italic; }
+    .np-deck .np-bpm { color: var(--cyan); font-weight: 600; font-size: 12px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .np-deck .np-state { font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; flex-shrink: 0; }
+    .np-deck .np-state.playing { background: var(--green); color: #000; }
+    .np-deck .np-state.paused { background: var(--amber); color: #000; }
+    .np-deck .np-state.stopped { background: #555; color: #aaa; }
+    .np-divider { width: 1px; height: 22px; background: var(--panel-border); flex-shrink: 0; }
 
     /* Header controls */
     .header-controls { display: flex; align-items: center; gap: 10px; }
@@ -938,13 +945,7 @@
 <!-- ══════ Header ══════ -->
 <header>
   <h1>DMX Controller</h1>
-  <div class="now-playing" id="nowPlaying">
-    <div class="now-playing-info" id="nowPlayingInfo">
-      <span class="np-state stopped" id="npState">Stopped</span>
-      <span class="np-track" id="npTrack">No track loaded</span>
-      <span class="np-bpm" id="npBpm"></span>
-    </div>
-  </div>
+  <div class="now-playing" id="nowPlaying"></div>
   <div class="header-controls">
     <div class="output-toggle inactive" id="outputToggle">
       <span class="toggle-label">OFF</span>
@@ -2301,6 +2302,7 @@ function buildDeckPanels(count) {
   } catch {
     buildDeckPanels(4);
   }
+  buildNowPlayingBar();
 })();
 
 // ═══════════════════════════════════════════════════════════════
@@ -2429,39 +2431,45 @@ function updateDeckSeqUI(d) {
   if (!info.playing) timeEl.textContent = '';
 }
 
+function buildNowPlayingBar() {
+  const np = document.getElementById('nowPlaying');
+  np.innerHTML = '';
+  for (let d = 1; d <= deckCount; d++) {
+    if (d > 1) { const div = document.createElement('span'); div.className = 'np-divider'; np.appendChild(div); }
+    const el = document.createElement('div');
+    el.className = 'np-deck'; el.id = `np-deck-${d}`;
+    el.innerHTML = `
+      <span class="np-label">${d}</span>
+      <span class="np-state stopped" id="np-state-${d}">Stop</span>
+      <span class="np-track empty" id="np-track-${d}">No track</span>
+      <span class="np-bpm" id="np-bpm-${d}"></span>`;
+    np.appendChild(el);
+  }
+}
+
 function updateNowPlaying(state) {
-  // Find the first playing deck (prefer deck 1)
-  let activeDeck = null;
   for (let d = 1; d <= deckCount; d++) {
     const dk = state.decks[d];
-    if (dk && dk.play > 0 && dk.filename) { activeDeck = dk; break; }
-  }
-  // If nothing playing, show first deck with a loaded track
-  if (!activeDeck) {
-    for (let d = 1; d <= deckCount; d++) {
-      const dk = state.decks[d];
-      if (dk && dk.filename) { activeDeck = dk; break; }
-    }
-  }
+    const deckEl = document.getElementById(`np-deck-${d}`);
+    const stateEl = document.getElementById(`np-state-${d}`);
+    const trackEl = document.getElementById(`np-track-${d}`);
+    const bpmEl = document.getElementById(`np-bpm-${d}`);
+    if (!deckEl || !stateEl) continue;
 
-  const npState = document.getElementById('npState');
-  const npTrack = document.getElementById('npTrack');
-  const npBpm = document.getElementById('npBpm');
+    const hasTrack = dk && dk.filename;
+    const isPlaying = dk && dk.play > 0;
+    const isPaused = hasTrack && !isPlaying;
 
-  if (!activeDeck || !activeDeck.filename) {
-    npState.textContent = 'Stopped';
-    npState.className = 'np-state stopped';
-    npTrack.textContent = 'No track loaded';
-    npBpm.textContent = '';
-    return;
+    deckEl.classList.toggle('np-playing', isPlaying);
+
+    stateEl.textContent = isPlaying ? 'Play' : (isPaused ? 'Pause' : 'Stop');
+    stateEl.className = 'np-state ' + (isPlaying ? 'playing' : (isPaused ? 'paused' : 'stopped'));
+
+    if (hasTrack) { trackEl.textContent = dk.filename; trackEl.title = dk.filename; trackEl.classList.remove('empty'); }
+    else { trackEl.textContent = 'No track'; trackEl.title = ''; trackEl.classList.add('empty'); }
+
+    bpmEl.textContent = (dk && dk.bpm > 0) ? dk.bpm.toFixed(1) : '';
   }
-
-  const isPlaying = activeDeck.play > 0;
-  npState.textContent = isPlaying ? 'Playing' : 'Paused';
-  npState.className = 'np-state ' + (isPlaying ? 'playing' : 'paused');
-  npTrack.textContent = activeDeck.filename;
-  npTrack.title = activeDeck.filename;
-  npBpm.textContent = activeDeck.bpm > 0 ? activeDeck.bpm.toFixed(1) + ' BPM' : '';
 }
 
 function updateConnection(connected, address) {

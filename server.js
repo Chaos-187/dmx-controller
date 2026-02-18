@@ -155,6 +155,18 @@ function handleMessage(data) {
       state.decks[deck][key] = value;
     }
 
+    // Update track beatgrid_pos from live firstbeat if the track exists and has no beatgrid
+    if (key === 'firstbeat' && typeof value === 'number' && value > 0) {
+      const fbSecs = value > 60 ? value / 1000 : value; // normalise ms → s
+      const fbPath = state.decks[deck].filepath;
+      if (fbPath) {
+        const fbTrack = db.getTrackByPath(fbPath);
+        if (fbTrack && (!fbTrack.beatgrid_pos || fbTrack.beatgrid_pos === 0)) {
+          db.updateTrackBeatgridPos(fbTrack.id, fbSecs);
+        }
+      }
+    }
+
     // Extract filename from filepath
     if (key === 'filepath' && typeof value === 'string' && value) {
       const parts = value.replace(/\\\\/g, '\\').split('\\');
@@ -176,14 +188,19 @@ function handleMessage(data) {
               const fixtures = db.getFixtureChannelMap();
               let analysis = db.getTrackAnalysis(track.id);
 
-              // Auto-analyze if needed
+              // Auto-analyze if needed (use live firstbeat as fallback)
               if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
                 try {
                   const ffmpegOk = await audioAnalyzer.checkFfmpeg();
                   if (ffmpegOk) {
+                    const liveFirstbeatForAnalysis = state.decks[deck] && state.decks[deck].firstbeat;
+                    let analysisBeatgridPos = track.beatgrid_pos || 0;
+                    if (!analysisBeatgridPos && liveFirstbeatForAnalysis > 0) {
+                      analysisBeatgridPos = liveFirstbeatForAnalysis > 60 ? liveFirstbeatForAnalysis / 1000 : liveFirstbeatForAnalysis;
+                    }
                     const result = await audioAnalyzer.analyzeTrack(track.filepath, {
                       bpm: track.bpm || 0,
-                      beatgridPos: track.beatgrid_pos || 0,
+                      beatgridPos: analysisBeatgridPos,
                       config: getAnalysisConfig(),
                     });
                     db.upsertTrackAnalysis(track.id, result);
@@ -195,8 +212,14 @@ function handleMessage(data) {
                 }
               }
 
+              // Use live firstbeat from OS2L as fallback for beatgridPos
+              const liveFirstbeat = state.decks[deck] && state.decks[deck].firstbeat;
+              let fbPos = track.beatgrid_pos || 0;
+              if (!fbPos && liveFirstbeat > 0) {
+                fbPos = liveFirstbeat > 60 ? liveFirstbeat / 1000 : liveFirstbeat;
+              }
               const genResult = sequenceGenerator.generateSequence({
-                track, fixtures, analysis,
+                track: { ...track, beatgrid_pos: fbPos }, fixtures, analysis,
                 effects: db.getEffects(),
                 noStrobes: db.getConfig('seq_no_strobes') === '1',
               });

@@ -1046,6 +1046,10 @@ function getTrackByPath(filepath) {
   return db.prepare('SELECT * FROM tracks WHERE filepath = ?').get(filepath);
 }
 
+function updateTrackBeatgridPos(trackId, beatgridPos) {
+  return db.prepare('UPDATE tracks SET beatgrid_pos = ? WHERE id = ? AND (beatgrid_pos IS NULL OR beatgrid_pos = 0)').run(beatgridPos, trackId);
+}
+
 function getTrackGenres() {
   return db.prepare(
     `SELECT genre, COUNT(*) as count FROM tracks WHERE genre != '' GROUP BY genre ORDER BY count DESC`
@@ -1698,7 +1702,7 @@ module.exports = {
   getArtNetUniverses, getArtNetUniverse, createArtNetUniverse, updateArtNetUniverse, deleteArtNetUniverse, toggleArtNetUniverse,
   getSubscriptions, getEnabledSubscriptions, createSubscription, updateSubscription, deleteSubscription, toggleSubscription,
   getConfig, setConfig, getAllConfig,
-  getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks,
+  getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks, updateTrackBeatgridPos,
   getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,
   getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset,
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,

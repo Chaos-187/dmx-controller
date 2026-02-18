@@ -285,6 +285,9 @@ function generateSequence(opts) {
   const beatMs = 60000 / bpm;
   const barMs = beatMs * 4;
 
+  // First beat offset: align cue timing to actual musical bars
+  const firstBeatMs = (track.beatgrid_pos || 0) * 1000;
+
   // Resolve genre preset
   const genreKey = opts.genre || resolveGenrePreset(track.genre);
   const preset = genrePresets[genreKey] || genrePresets.default;
@@ -348,7 +351,7 @@ function generateSequence(opts) {
   const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
 
   const cues = [];
-  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes };
+  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs };
 
   // Multi-cell fixtures get dedicated per-cell patterns, so exclude them
   // from the main section/bar generator to avoid master cues competing.
@@ -687,18 +690,21 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
 // ─── Bar-based fallback generation ──────────────────────────────────────────
 
 function generateBarBased(cues, fixtures, ctx) {
-  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes } = ctx;
+  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs } = ctx;
 
   // BPM-adaptive
   const useFades = bpmFactor < 0.5;
   const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
+
+  // Offset bar grid by first beat so cues align to musical bars
+  const barOffset = firstBeatMs || 0;
 
   // Use verse/chorus palettes from the selected theme
   const versePalettes = getSectionPalettes(paletteKey, 'verse');
   const chorusPalettes = getSectionPalettes(paletteKey, 'chorus');
   const allPalettes = [...versePalettes, ...chorusPalettes];
 
-  const totalBars = Math.floor(durationMs / barMs);
+  const totalBars = Math.floor((durationMs - barOffset) / barMs);
   const sectionBars = Math.max(1, Math.round(2 / (preset.cueDensityMult * bpmDensityScale)));
 
   for (let fiIdx = 0; fiIdx < fixtures.length; fiIdx++) {
@@ -710,7 +716,7 @@ function generateBarBased(cues, fixtures, ctx) {
     for (let bar = 0; bar < totalBars; bar += sectionBars) {
       const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
       const palette = allPalettes[(paletteIdx + fiIdx) % allPalettes.length];
-      const startMs = bar * barMs;
+      const startMs = barOffset + bar * barMs;
       const durMs = Math.min(sectionBars * barMs, durationMs - startMs);
       if (durMs <= 0) break;
 

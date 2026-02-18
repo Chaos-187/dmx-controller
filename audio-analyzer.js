@@ -175,9 +175,10 @@ const SECTION_COLORS = {
  * @param {number} durationMs
  * @param {number} bpm
  * @param {object} [cfg]          – { SECTION_MIN_BARS, SECTION_WINDOW_BARS, SECTION_SENSITIVITY }
+ * @param {number} [firstBeatMs=0] – first beat offset in ms (aligns bar grid to musical phrases)
  * @returns {Array} sections – [{start_ms, end_ms, label, color, energy, bars}, ...]
  */
-function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
+function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstBeatMs = 0) {
   const SECTION_MIN_BARS    = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
   const SECTION_WINDOW_BARS = cfg.SECTION_WINDOW_BARS || DEFAULTS.SECTION_WINDOW_BARS;
   const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
@@ -185,16 +186,20 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
+  // Offset: align bar grid to the first beat position so section boundaries
+  // fall on actual musical phrase boundaries rather than absolute time = 0.
+  const barOffset = firstBeatMs || 0;
+
   const beatMs = 60000 / bpm;
   const barMs  = beatMs * 4;
-  const totalBars = Math.floor(durationMs / barMs);
+  const totalBars = Math.floor((durationMs - barOffset) / barMs);
   if (totalBars < SECTION_MIN_BARS * 2) return [];
 
-  // ── 1. Per-bar energy averages ────────────────────────────────────────
+  // ── 1. Per-bar energy averages (offset by first beat) ─────────────────
   function barAverages(field) {
     const arr = [];
     for (let bar = 0; bar < totalBars; bar++) {
-      const barStart = bar * barMs;
+      const barStart = barOffset + bar * barMs;
       const barEnd   = barStart + barMs;
       const inBar = energySegments.filter(s => s.time_ms >= barStart && s.time_ms < barEnd);
       arr.push(inBar.length > 0
@@ -389,8 +394,8 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
   for (let s = 0; s < finalBoundaries.length; s++) {
     const startBar = finalBoundaries[s];
     const endBar   = s + 1 < finalBoundaries.length ? finalBoundaries[s + 1] : totalBars;
-    const startMs  = Math.round(startBar * barMs);
-    const endMs    = Math.round(endBar * barMs);
+    const startMs  = Math.round(barOffset + startBar * barMs);
+    const endMs    = Math.round(barOffset + endBar * barMs);
     const numBars  = (endBar - startBar) || 1;
 
     // Average energies in this section
@@ -701,8 +706,9 @@ function analyzeTrack(filePath, opts = {}) {
         }
       }
 
-      // Detect structural sections (pass multi-band energy)
-      const sections = detectSections(energySegments, beats, durationMs, bpm, cfg);
+      // Detect structural sections (pass multi-band energy, offset by first beat)
+      const firstBeatMs = (opts.beatgridPos || 0) * 1000;
+      const sections = detectSections(energySegments, beats, durationMs, bpm, cfg, firstBeatMs);
 
       resolve({
         waveform_peaks: waveformPeaks,
