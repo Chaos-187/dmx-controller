@@ -197,6 +197,39 @@ function init() {
       sort_order          INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_sequence_cues_seq ON sequence_cues(sequence_id);
+
+    -- Known USB DMX adapters with universe assignment
+    CREATE TABLE IF NOT EXISTS usb_devices (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      label           TEXT    NOT NULL DEFAULT '',
+      source          TEXT    NOT NULL DEFAULT 'ftdi',
+      vid             TEXT    DEFAULT NULL,
+      pid             TEXT    DEFAULT NULL,
+      serial_number   TEXT    DEFAULT '',
+      description     TEXT    DEFAULT '',
+      local_universe  INTEGER NOT NULL DEFAULT 1,
+      auto_connect    INTEGER NOT NULL DEFAULT 1,
+      refresh_rate    INTEGER NOT NULL DEFAULT 40,
+      enabled         INTEGER NOT NULL DEFAULT 1,
+      created_at      TEXT    DEFAULT (datetime('now'))
+    );
+
+    -- Waveform / energy analysis data per track
+    CREATE TABLE IF NOT EXISTS track_analysis (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      track_id          INTEGER NOT NULL UNIQUE,
+      waveform_peaks    TEXT    DEFAULT '[]',
+      energy_levels     TEXT    DEFAULT '[]',
+      beats             TEXT    DEFAULT '[]',
+      sections          TEXT    DEFAULT '[]',
+      sample_rate       INTEGER DEFAULT 0,
+      channels          INTEGER DEFAULT 0,
+      duration_ms       INTEGER DEFAULT 0,
+      peak_count        INTEGER DEFAULT 0,
+      analysis_version  INTEGER DEFAULT 1,
+      analyzed_at       TEXT    DEFAULT (datetime('now')),
+      FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    );
   `);
 
   // Migrate: add toggle_mode column if missing (existing databases)
@@ -213,6 +246,14 @@ function init() {
   } catch (e) {
     db.exec("ALTER TABLE fixture_type_channels ADD COLUMN ranges TEXT DEFAULT NULL");
     console.log('[DB] Migrated fixture_type_channels: added ranges column');
+  }
+
+  // Migrate: add sections column to track_analysis if missing
+  try {
+    db.prepare("SELECT sections FROM track_analysis LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE track_analysis ADD COLUMN sections TEXT DEFAULT '[]'");
+    console.log('[DB] Migrated track_analysis: added sections column');
   }
 
   // Seed subscriptions if empty
@@ -1141,7 +1182,8 @@ function deleteEffect(id) {
 
 function getSequences() {
   return db.prepare(`
-    SELECT ls.*, t.title as track_title, t.author as track_author, t.filename as track_filename
+    SELECT ls.*, t.title as track_title, t.author as track_author, t.filename as track_filename,
+           (SELECT COUNT(*) FROM sequence_cues sc WHERE sc.sequence_id = ls.id) as cue_count
     FROM light_sequences ls
     LEFT JOIN tracks t ON ls.track_id = t.id
     ORDER BY ls.updated_at DESC
@@ -1200,6 +1242,66 @@ function updateSequence(id, { name, track_id, bpm, duration_ms, loop }) {
 function deleteSequence(id) {
   db.prepare('DELETE FROM light_sequences WHERE id = ?').run(id);
   return { deleted: true };
+}
+
+// ─── Sequence Cues CRUD ─────────────────────────────────────────────────────
+
+// ─── USB Devices CRUD ────────────────────────────────────────────────────────
+
+function getUsbDevices() {
+  return db.prepare('SELECT * FROM usb_devices ORDER BY local_universe, label').all();
+}
+
+function getEnabledUsbDevices() {
+  return db.prepare('SELECT * FROM usb_devices WHERE enabled = 1 AND auto_connect = 1 ORDER BY local_universe').all();
+}
+
+function getUsbDevice(id) {
+  return db.prepare('SELECT * FROM usb_devices WHERE id = ?').get(id);
+}
+
+function createUsbDevice({ label, source, vid, pid, serial_number, description, local_universe, auto_connect, refresh_rate }) {
+  const info = db.prepare(
+    `INSERT INTO usb_devices (label, source, vid, pid, serial_number, description, local_universe, auto_connect, refresh_rate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    label || '', source || 'ftdi', vid || null, pid || null,
+    serial_number || '', description || '',
+    local_universe || 1, auto_connect !== undefined ? (auto_connect ? 1 : 0) : 1,
+    refresh_rate || 40
+  );
+  return getUsbDevice(info.lastInsertRowid);
+}
+
+function updateUsbDevice(id, updates) {
+  const existing = getUsbDevice(id);
+  if (!existing) return null;
+  const fields = ['label', 'source', 'vid', 'pid', 'serial_number', 'description', 'local_universe', 'auto_connect', 'refresh_rate', 'enabled'];
+  const sets = [];
+  const vals = [];
+  for (const f of fields) {
+    if (updates[f] !== undefined) {
+      sets.push(`${f} = ?`);
+      if (f === 'auto_connect' || f === 'enabled') {
+        vals.push(updates[f] ? 1 : 0);
+      } else {
+        vals.push(updates[f]);
+      }
+    }
+  }
+  if (sets.length === 0) return existing;
+  vals.push(id);
+  db.prepare(`UPDATE usb_devices SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  return getUsbDevice(id);
+}
+
+function deleteUsbDevice(id) {
+  db.prepare('DELETE FROM usb_devices WHERE id = ?').run(id);
+}
+
+function toggleUsbDevice(id) {
+  db.prepare('UPDATE usb_devices SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE id = ?').run(id);
+  return getUsbDevice(id);
 }
 
 // ─── Sequence Cues CRUD ─────────────────────────────────────────────────────
@@ -1329,6 +1431,94 @@ function bulkUpdateCues(sequenceId, cues) {
   return getSequenceCues(sequenceId);
 }
 
+// ─── Track Analysis CRUD ─────────────────────────────────────────────────────
+
+function getTrackAnalysis(trackId) {
+  return db.prepare('SELECT * FROM track_analysis WHERE track_id = ?').get(trackId) || null;
+}
+
+function upsertTrackAnalysis(trackId, data) {
+  const existing = getTrackAnalysis(trackId);
+  if (existing) {
+    db.prepare(`
+      UPDATE track_analysis SET
+        waveform_peaks=?, energy_levels=?, beats=?, sections=?,
+        sample_rate=?, channels=?, duration_ms=?, peak_count=?,
+        analysis_version=?, analyzed_at=datetime('now')
+      WHERE track_id=?
+    `).run(
+      JSON.stringify(data.waveform_peaks || []),
+      JSON.stringify(data.energy_levels || []),
+      JSON.stringify(data.beats || []),
+      JSON.stringify(data.sections || []),
+      data.sample_rate || 0,
+      data.channels || 0,
+      data.duration_ms || 0,
+      data.peak_count || 0,
+      data.analysis_version || 1,
+      trackId
+    );
+    return getTrackAnalysis(trackId);
+  }
+  db.prepare(`
+    INSERT INTO track_analysis (track_id, waveform_peaks, energy_levels, beats, sections,
+      sample_rate, channels, duration_ms, peak_count, analysis_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    trackId,
+    JSON.stringify(data.waveform_peaks || []),
+    JSON.stringify(data.energy_levels || []),
+    JSON.stringify(data.beats || []),
+    JSON.stringify(data.sections || []),
+    data.sample_rate || 0,
+    data.channels || 0,
+    data.duration_ms || 0,
+    data.peak_count || 0,
+    data.analysis_version || 1
+  );
+  return getTrackAnalysis(trackId);
+}
+
+function deleteTrackAnalysis(trackId) {
+  db.prepare('DELETE FROM track_analysis WHERE track_id = ?').run(trackId);
+  return { deleted: true };
+}
+
+function deleteAllAnalysis() {
+  const count = db.prepare('SELECT COUNT(*) as cnt FROM track_analysis').get().cnt;
+  db.prepare('DELETE FROM track_analysis').run();
+  return { deleted: count };
+}
+
+function deleteAllSequences() {
+  const count = db.prepare('SELECT COUNT(*) as cnt FROM light_sequences').get().cnt;
+  db.prepare('DELETE FROM sequence_cues WHERE sequence_id IN (SELECT id FROM light_sequences)').run();
+  db.prepare('DELETE FROM light_sequences').run();
+  return { deleted: count };
+}
+
+function getDbStats() {
+  return {
+    tracks: db.prepare('SELECT COUNT(*) as cnt FROM tracks').get().cnt,
+    sequences: db.prepare('SELECT COUNT(*) as cnt FROM light_sequences').get().cnt,
+    cues: db.prepare('SELECT COUNT(*) as cnt FROM sequence_cues').get().cnt,
+    analyses: db.prepare('SELECT COUNT(*) as cnt FROM track_analysis').get().cnt,
+    fixtures: db.prepare('SELECT COUNT(*) as cnt FROM fixtures').get().cnt,
+    effects: db.prepare('SELECT COUNT(*) as cnt FROM effects').get().cnt,
+  };
+}
+
+function getTracksWithAnalysis() {
+  return db.prepare(`
+    SELECT t.id, t.title, t.author, t.filename, t.bpm, t.song_length,
+           CASE WHEN ta.id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+           ta.analyzed_at, ta.peak_count
+    FROM tracks t
+    LEFT JOIN track_analysis ta ON ta.track_id = t.id
+    ORDER BY t.title
+  `).all();
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -1347,4 +1537,7 @@ module.exports = {
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,
   getSequenceCues, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,
+  getUsbDevices, getEnabledUsbDevices, getUsbDevice, createUsbDevice, updateUsbDevice, deleteUsbDevice, toggleUsbDevice,
+  getTrackAnalysis, upsertTrackAnalysis, deleteTrackAnalysis, deleteAllAnalysis,
+  deleteAllSequences, getDbStats, getTracksWithAnalysis,
 };

@@ -15,9 +15,11 @@ const fs = require('fs');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const Bonjour = require('bonjour-service').Bonjour;
+const mdns = require('multicast-dns');
 const db = require('./db');
 const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
+const audioAnalyzer = require('./audio-analyzer');
 const { WebUSB } = require('usb');
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -25,6 +27,7 @@ const { WebUSB } = require('usb');
 const OS2L_PORT = 8787;
 const WEB_PORT = 3000;
 const SERVICE_NAME = 'DMX-Controller';
+const MDNS_HOSTNAME_DEFAULT = 'dmxcontrol';
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -156,6 +159,35 @@ function handleMessage(data) {
     if (key === 'filepath' && typeof value === 'string' && value) {
       const parts = value.replace(/\\\\/g, '\\').split('\\');
       state.decks[deck].filename = parts[parts.length - 1] || value;
+
+      // ─── Sequencer auto-load / auto-play ──────────────────────
+      const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
+      const seqAutoUnload = db.getConfig('seq_auto_unload') === '1';
+      if (seqAutoLoad || seqAutoUnload) {
+        const track = db.getTrackByPath(value);
+        const seq = track ? db.getSequenceByTrackId(track.id) : null;
+        if (seq) {
+          // Auto-load the matched sequence onto this deck
+          stopPlaybackTimer(deck);
+          activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+          broadcast({ type: 'seq_loaded', deck, sequence: seq });
+          console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} for "${state.decks[deck].filename}"`);
+
+          const seqAutoPlay = db.getConfig('seq_auto_play') === '1';
+          if (seqAutoPlay) {
+            activeSequences[deck].playing = true;
+            startPlaybackTimer(deck);
+            broadcast({ type: 'seq_playing', deck, playing: true });
+            console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
+          }
+        } else if (seqAutoUnload && activeSequences[deck]) {
+          // No matching sequence — unload the current one
+          stopPlaybackTimer(deck);
+          delete activeSequences[deck];
+          broadcast({ type: 'seq_unloaded', deck });
+          console.log(`[SEQ] Auto-unloaded sequence from deck ${deck} (no match)`);
+        }
+      }
     }
 
     // Drive sequence playback engine on VDJ time updates (VDJ sends time in ms)
@@ -311,13 +343,13 @@ function executeMapAction(map, activate) {
       if (activate) {
         // Save current DMX state then blackout
         artnetServer.saveBuffers();
-        if (dmxUsbServer.isOpen) dmxUsbServer.saveBuffers();
+        dmxUsbServer.saveBuffers();
         artnetServer.blackout();
-        if (dmxUsbServer.isOpen) dmxUsbServer.blackout();
+        dmxUsbServer.blackout();
       } else {
         // Restore pre-blackout DMX state
         artnetServer.restoreBuffers();
-        if (dmxUsbServer.isOpen) dmxUsbServer.restoreBuffers();
+        dmxUsbServer.restoreBuffers();
       }
       broadcast({ type: 'os2l_action', action: 'blackout', map: map.name, active: activate });
       break;
@@ -329,12 +361,12 @@ function executeMapAction(map, activate) {
       if (channels.length && dmxOutputEnabled) {
         if (activate) {
           artnetServer.setChannels(universe, channels);
-          if (universe === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(channels);
+          dmxUsbServer.setChannels(universe, channels);
         } else {
           // Deactivate: set those channels to 0
           const offChannels = channels.map(c => ({ ch: c.ch, val: 0 }));
           artnetServer.setChannels(universe, offChannels);
-          if (universe === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(offChannels);
+          dmxUsbServer.setChannels(universe, offChannels);
         }
       }
       broadcast({ type: 'os2l_action', action: 'set_channels', map: map.name, active: activate });
@@ -348,7 +380,7 @@ function executeMapAction(map, activate) {
       for (let i = 1; i <= 512; i++) ch.push({ ch: i, val });
       if (dmxOutputEnabled) {
         artnetServer.setChannels(universe, ch);
-        if (universe === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(ch);
+        dmxUsbServer.setChannels(universe, ch);
       }
       broadcast({ type: 'os2l_action', action: 'full_on', map: map.name, active: activate });
       break;
@@ -362,11 +394,11 @@ function executeMapAction(map, activate) {
         if (f.channels && f.channels.length && dmxOutputEnabled) {
           if (activate) {
             artnetServer.setChannels(u, f.channels);
-            if (u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(f.channels);
+            dmxUsbServer.setChannels(u, f.channels);
           } else {
             const offChannels = f.channels.map(c => ({ ch: c.ch, val: 0 }));
             artnetServer.setChannels(u, offChannels);
-            if (u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(offChannels);
+            dmxUsbServer.setChannels(u, offChannels);
           }
         }
       }
@@ -401,7 +433,7 @@ function executeMapAction(map, activate) {
       if (dmxOutputEnabled) {
         for (const [u, channels] of Object.entries(channelUpdates)) {
           artnetServer.setChannels(+u, channels);
-          if (+u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(channels);
+          dmxUsbServer.setChannels(+u, channels);
         }
       }
       broadcast({ type: 'os2l_action', action: 'strobe', map: map.name, active: activate });
@@ -417,6 +449,7 @@ function executeMapAction(map, activate) {
 
 const app = express();
 app.use(express.json());
+app.use('/lib', express.static(path.join(__dirname, 'node_modules/waveform-data/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Fixture Type API ───────────────────────────────────────────────────────
@@ -598,6 +631,44 @@ app.put('/api/config/:key', (req, res) => {
   res.json({ key: req.params.key, value: req.body.value });
 });
 
+// ─── mDNS Status / Restart API ──────────────────────────────────────────────
+
+app.get('/api/mdns/status', (req, res) => {
+  const hostname = getMdnsHostname();
+  res.json({
+    enabled: db.getConfig('mdns_enabled') !== '0',
+    hostname: hostname,
+    fqdn: hostname + '.local',
+    ip: getLocalIPv4(),
+    web_port: WEB_PORT,
+    os2l_port: OS2L_PORT,
+    responder_active: !!mdnsResponder,
+  });
+});
+
+app.post('/api/mdns/restart', (req, res) => {
+  try {
+    // Stop existing responder
+    if (mdnsResponder) {
+      mdnsResponder.destroy();
+      mdnsResponder = null;
+    }
+    const enabled = db.getConfig('mdns_enabled') !== '0';
+    if (enabled) {
+      startMdnsResponder();
+      const hostname = getMdnsHostname();
+      console.log(`[mDNS] Restarted — responding to ${hostname}.local`);
+      res.json({ ok: true, hostname: hostname + '.local', ip: getLocalIPv4() });
+    } else {
+      console.log('[mDNS] Disabled — responder stopped');
+      res.json({ ok: true, hostname: null, ip: null });
+    }
+  } catch(e) {
+    console.error('[mDNS] Restart failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Known DMX USB Vendor/Product IDs ───────────────────────────────────────
 
 const KNOWN_DMX_VENDORS = {
@@ -692,39 +763,71 @@ app.get('/api/dmx-usb/status', (req, res) => {
   res.json(dmxUsbServer.getStatus());
 });
 
-app.post('/api/dmx-usb/open', async (req, res) => {
-  const { serial_number, description, source, vid, pid } = req.body;
-  let success = false;
-  let identifier;
-
-  if (source === 'usb') {
-    // libusb bulk device (e.g. SoundSwitch DMX Micro)
-    if (!vid || !pid) return res.status(400).json({ error: 'Provide vid and pid for USB devices' });
-    identifier = { source: 'usb', vid, pid, serial_number: serial_number || '' };
-    success = await dmxUsbServer.openUsb(identifier);
-  } else {
-    // FTDI D2XX device
-    identifier = serial_number ? { serial_number } : description ? { description } : null;
-    if (!identifier) return res.status(400).json({ error: 'Provide serial_number or description' });
-    success = await dmxUsbServer.open(identifier);
-  }
-
-  if (success) {
-    const rate = parseInt(db.getConfig('dmx_refresh_rate') || '40', 10);
-    dmxUsbServer.startTx(rate);
-    res.json({ ok: true, identifier });
-  } else {
-    res.status(500).json({ error: 'Failed to open device' });
-  }
-});
-
-app.post('/api/dmx-usb/close', (req, res) => {
-  dmxUsbServer.close();
+app.post('/api/dmx-usb/blackout', (req, res) => {
+  dmxUsbServer.blackout();
   res.json({ ok: true });
 });
 
-app.post('/api/dmx-usb/blackout', (req, res) => {
-  dmxUsbServer.blackout();
+// ─── USB Devices CRUD ───────────────────────────────────────────────────────
+
+app.get('/api/usb-devices', (req, res) => {
+  const devices = db.getUsbDevices();
+  // Augment with live connection status
+  const result = devices.map(d => ({
+    ...d,
+    connected: !!dmxUsbServer.getDeviceStatus(d.id)?.open,
+  }));
+  res.json(result);
+});
+
+app.get('/api/usb-devices/:id', (req, res) => {
+  const device = db.getUsbDevice(+req.params.id);
+  if (!device) return res.status(404).json({ error: 'Not found' });
+  const status = dmxUsbServer.getDeviceStatus(device.id);
+  res.json({ ...device, connected: !!status?.open });
+});
+
+app.post('/api/usb-devices', (req, res) => {
+  try {
+    const result = db.createUsbDevice(req.body);
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/usb-devices/:id', (req, res) => {
+  const result = db.updateUsbDevice(+req.params.id, req.body);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.delete('/api/usb-devices/:id', async (req, res) => {
+  // Disconnect if currently open
+  await dmxUsbServer.closeDevice(+req.params.id);
+  db.deleteUsbDevice(+req.params.id);
+  res.json({ deleted: true });
+});
+
+app.post('/api/usb-devices/:id/toggle', (req, res) => {
+  const result = db.toggleUsbDevice(+req.params.id);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.post('/api/usb-devices/:id/connect', async (req, res) => {
+  const device = db.getUsbDevice(+req.params.id);
+  if (!device) return res.status(404).json({ error: 'Not found' });
+  const success = await dmxUsbServer.openDevice(device);
+  if (success) {
+    res.json({ ok: true, device: dmxUsbServer.getDeviceStatus(device.id) });
+  } else {
+    res.status(500).json({ error: 'Failed to connect device' });
+  }
+});
+
+app.post('/api/usb-devices/:id/disconnect', async (req, res) => {
+  await dmxUsbServer.closeDevice(+req.params.id);
   res.json({ ok: true });
 });
 
@@ -805,10 +908,7 @@ app.post('/api/dmx/channel', (req, res) => {
   const { universe, channel, value } = req.body;
   if (!dmxOutputEnabled) return res.json({ ok: true, outputOff: true });
   artnetServer.setChannel(universe, channel, value);
-  // Also send to USB DMX (universe 1 maps to the single USB output)
-  if (universe === 1 && dmxUsbServer.isOpen) {
-    dmxUsbServer.setChannel(channel, value);
-  }
+  dmxUsbServer.setChannel(universe, channel, value);
   res.json({ ok: true });
 });
 
@@ -816,10 +916,7 @@ app.post('/api/dmx/channels', (req, res) => {
   const { universe, channels } = req.body;  // channels: [{ch, val}]
   if (!dmxOutputEnabled) return res.json({ ok: true, outputOff: true });
   artnetServer.setChannels(universe, channels);
-  // Also send to USB DMX (universe 1 maps to the single USB output)
-  if (universe === 1 && dmxUsbServer.isOpen) {
-    dmxUsbServer.setChannels(channels);
-  }
+  dmxUsbServer.setChannels(universe, channels);
   res.json({ ok: true });
 });
 
@@ -924,6 +1021,165 @@ app.delete('/api/tracks', (req, res) => {
   res.json({ cleared: true });
 });
 
+// Stream audio file for browser playback (supports Range requests)
+app.get('/api/tracks/:id/audio', (req, res) => {
+  const track = db.getTrack(+req.params.id);
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+  const filePath = track.filepath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Audio file not found on disk' });
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac',
+    '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+    '.wma': 'audio/x-ms-wma', '.aiff': 'audio/aiff', '.aif': 'audio/aiff',
+  };
+  const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+  const range = req.headers.range;
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+    const readStream = fs.createReadStream(filePath, { start, end });
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': contentType,
+    });
+    readStream.pipe(res);
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    });
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
+
+// ─── Track Analysis API ─────────────────────────────────────────────────────
+
+// Check if ffmpeg is available
+app.get('/api/analysis/status', async (req, res) => {
+  const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+  res.json({ ffmpeg_available: ffmpegOk, analysis_version: audioAnalyzer.ANALYSIS_VERSION });
+});
+
+// Get analysis for a track
+app.get('/api/tracks/:id/analysis', (req, res) => {
+  const analysis = db.getTrackAnalysis(+req.params.id);
+  if (!analysis) return res.status(404).json({ error: 'No analysis found' });
+  // Parse JSON fields
+  analysis.waveform_peaks = JSON.parse(analysis.waveform_peaks || '[]');
+  analysis.energy_levels = JSON.parse(analysis.energy_levels || '[]');
+  analysis.beats = JSON.parse(analysis.beats || '[]');
+  analysis.sections = JSON.parse(analysis.sections || '[]');
+  res.json(analysis);
+});
+
+// Trigger analysis for a track
+const analysisInProgress = new Map(); // trackId -> true
+
+app.post('/api/tracks/:id/analyze', async (req, res) => {
+  const trackId = +req.params.id;
+  const track = db.getTrack(trackId);
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+
+  if (analysisInProgress.has(trackId)) {
+    return res.status(409).json({ error: 'Analysis already in progress for this track' });
+  }
+
+  // Check ffmpeg
+  const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+  if (!ffmpegOk) {
+    return res.status(500).json({ error: 'ffmpeg not found. Install ffmpeg and ensure it is in PATH.' });
+  }
+
+  // Check file exists
+  const filePath = track.filepath;
+  if (!filePath || !require('fs').existsSync(filePath)) {
+    return res.status(400).json({ error: 'Audio file not found on disk', filepath: filePath });
+  }
+
+  analysisInProgress.set(trackId, true);
+
+  // Return immediately, analyze in background
+  res.json({ status: 'started', track_id: trackId });
+
+  try {
+    console.log(`[Analysis] Starting analysis for track ${trackId}: ${track.title || track.filename}`);
+    const result = await audioAnalyzer.analyzeTrack(filePath, {
+      bpm: track.bpm || 0,
+      beatgridPos: track.beatgrid_pos || 0,
+    });
+    db.upsertTrackAnalysis(trackId, result);
+    console.log(`[Analysis] Completed track ${trackId}: ${result.peak_count} peaks, ${result.energy_levels.length} energy segments, ${result.beats.length} beats, ${(result.sections || []).length} sections`);
+
+    // Notify WebSocket clients
+    broadcast({ type: 'analysis_complete', track_id: trackId });
+  } catch (e) {
+    console.error(`[Analysis] Error for track ${trackId}: ${e.message}`);
+    broadcast({ type: 'analysis_error', track_id: trackId, error: e.message });
+  } finally {
+    analysisInProgress.delete(trackId);
+  }
+});
+
+// Batch analyze multiple tracks
+app.post('/api/tracks/analyze-batch', async (req, res) => {
+  const { track_ids } = req.body;
+  if (!Array.isArray(track_ids) || track_ids.length === 0) {
+    return res.status(400).json({ error: 'track_ids array required' });
+  }
+
+  const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+  if (!ffmpegOk) {
+    return res.status(500).json({ error: 'ffmpeg not found. Install ffmpeg and ensure it is in PATH.' });
+  }
+
+  // Return immediately, process in background
+  res.json({ status: 'started', count: track_ids.length });
+
+  let completed = 0;
+  let failed = 0;
+  for (const trackId of track_ids) {
+    if (analysisInProgress.has(trackId)) { failed++; continue; }
+    const track = db.getTrack(trackId);
+    if (!track || !track.filepath || !require('fs').existsSync(track.filepath)) { failed++; continue; }
+
+    analysisInProgress.set(trackId, true);
+    try {
+      const result = await audioAnalyzer.analyzeTrack(track.filepath, {
+        bpm: track.bpm || 0,
+        beatgridPos: track.beatgrid_pos || 0,
+      });
+      db.upsertTrackAnalysis(trackId, result);
+      completed++;
+      broadcast({ type: 'analysis_complete', track_id: trackId, progress: { completed, failed, total: track_ids.length } });
+    } catch (e) {
+      failed++;
+      console.error(`[Analysis] Batch error for track ${trackId}: ${e.message}`);
+    } finally {
+      analysisInProgress.delete(trackId);
+    }
+  }
+  console.log(`[Analysis] Batch complete: ${completed} succeeded, ${failed} failed out of ${track_ids.length}`);
+  broadcast({ type: 'analysis_batch_complete', completed, failed, total: track_ids.length });
+});
+
+// Delete analysis for a track
+app.delete('/api/tracks/:id/analysis', (req, res) => {
+  db.deleteTrackAnalysis(+req.params.id);
+  res.json({ deleted: true });
+});
+
 // ─── Effects API ────────────────────────────────────────────────────────────
 
 app.get('/api/effects', (req, res) => {
@@ -976,7 +1232,7 @@ function stopRunningEffect() {
       const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
       if (channels.length > 0) {
         artnetServer.setChannels(+u, channels);
-        if (+u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(channels);
+        dmxUsbServer.setChannels(+u, channels);
       }
     }
     clearInterval(runningQaEffect.timer);
@@ -1028,7 +1284,7 @@ app.post('/api/effects/run', (req, res) => {
       const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
       if (channels.length > 0) {
         artnetServer.setChannels(+u, channels);
-        if (+u === 1 && dmxUsbServer.isOpen) dmxUsbServer.setChannels(channels);
+        dmxUsbServer.setChannels(+u, channels);
       }
     }
   }, 25); // ~40 Hz
@@ -1048,18 +1304,39 @@ app.post('/api/effects/stop', (req, res) => {
 
 // ─── Sequences API ──────────────────────────────────────────────────────────
 
+// ─── Database Stats & Bulk Delete ───────────────────────────────────────────
+
+app.get('/api/db/stats', (req, res) => {
+  res.json(db.getDbStats());
+});
+
+app.delete('/api/db/analysis', (req, res) => {
+  const result = db.deleteAllAnalysis();
+  console.log(`[DB] Deleted all analysis data (${result.deleted} rows)`);
+  res.json(result);
+});
+
+app.delete('/api/db/sequences', (req, res) => {
+  const result = db.deleteAllSequences();
+  console.log(`[DB] Deleted all sequences (${result.deleted} sequences)`);
+  res.json(result);
+});
+
+// ─── Sequence CRUD ──────────────────────────────────────────────────────────
+
 app.get('/api/sequences', (req, res) => {
   res.json(db.getSequences());
+});
+
+// Literal path routes MUST come before parameterized :id routes
+app.get('/api/sequences/by-track/:trackId', (req, res) => {
+  const s = db.getSequenceByTrackId(+req.params.trackId);
+  s ? res.json(s) : res.status(404).json({ error: 'No sequence for this track' });
 });
 
 app.get('/api/sequences/:id', (req, res) => {
   const s = db.getSequence(+req.params.id);
   s ? res.json(s) : res.status(404).json({ error: 'Not found' });
-});
-
-app.get('/api/sequences/by-track/:trackId', (req, res) => {
-  const s = db.getSequenceByTrackId(+req.params.trackId);
-  s ? res.json(s) : res.status(404).json({ error: 'No sequence for this track' });
 });
 
 app.post('/api/sequences', (req, res) => {
@@ -1111,6 +1388,8 @@ app.put('/api/sequences/:id/cues/bulk', (req, res) => {
 
 // ─── Auto-Generate Sequence ─────────────────────────────────────────────────
 
+const sequenceGenerator = require('./sequence-generator');
+
 app.post('/api/sequences/generate/:trackId', (req, res) => {
   const track = db.getTrack(+req.params.trackId);
   if (!track) return res.status(404).json({ error: 'Track not found' });
@@ -1124,10 +1403,14 @@ app.post('/api/sequences/generate/:trackId', (req, res) => {
     db.deleteSequence(existing.id);
   }
 
-  const bpm = track.bpm || 128;
-  const durationMs = (track.song_length || 180) * 1000;
-  const beatMs = 60000 / bpm;
-  const barMs = beatMs * 4;
+  const fixtures = db.getFixtureChannelMap();
+  const analysis = db.getTrackAnalysis(track.id);
+
+  const { cues, bpm, durationMs } = sequenceGenerator.generateSequence({
+    track,
+    fixtures,
+    analysis,
+  });
 
   // Create sequence
   const seq = db.createSequence({
@@ -1137,63 +1420,7 @@ app.post('/api/sequences/generate/:trackId', (req, res) => {
     duration_ms: durationMs,
   });
 
-  // Get fixtures to assign to lanes
-  const fixtures = db.getFixtureChannelMap();
-  if (fixtures.length === 0) {
-    return res.json(seq); // Empty sequence, no fixtures to populate
-  }
-
-  // Color palettes for variety
-  const palettes = [
-    [{ red: 255, green: 0, blue: 0 }, { red: 0, green: 0, blue: 255 }],
-    [{ red: 0, green: 255, blue: 0 }, { red: 255, green: 0, blue: 255 }],
-    [{ red: 255, green: 128, blue: 0 }, { red: 0, green: 128, blue: 255 }],
-    [{ red: 255, green: 0, blue: 128 }, { red: 0, green: 255, blue: 128 }],
-    [{ red: 128, green: 0, blue: 255 }, { red: 255, green: 255, blue: 0 }],
-    [{ red: 0, green: 255, blue: 255 }, { red: 255, green: 0, blue: 0 }],
-  ];
-
-  const cueColors = ['#e53935', '#43a047', '#1e88e5', '#ff8f00', '#7b1fa2', '#00acc1', '#fdd835', '#d81b60'];
-  const cues = [];
-
-  // Generate cues: color changes every 4 bars, alternating patterns per fixture
-  const totalBars = Math.floor(durationMs / barMs);
-  const sectionBars = 4; // change every 4 bars
-
-  for (let fiIdx = 0; fiIdx < fixtures.length; fiIdx++) {
-    const fix = fixtures[fiIdx];
-    const hasRGB = fix.channels.some(ch => ch.type === 'red') &&
-                   fix.channels.some(ch => ch.type === 'green') &&
-                   fix.channels.some(ch => ch.type === 'blue');
-    if (!hasRGB) continue; // skip non-color fixtures for auto-gen
-
-    const lane = fiIdx;
-
-    for (let bar = 0; bar < totalBars; bar += sectionBars) {
-      const paletteIdx = Math.floor(bar / sectionBars) % palettes.length;
-      const colorIdx = (fiIdx + Math.floor(bar / sectionBars)) % 2;
-      const palette = palettes[(paletteIdx + fiIdx) % palettes.length];
-      const color = palette[colorIdx];
-      const startMs = bar * barMs;
-      const durMs = Math.min(sectionBars * barMs, durationMs - startMs);
-
-      if (durMs <= 0) break;
-
-      // Static color cue
-      cues.push({
-        lane,
-        start_ms: Math.round(startMs),
-        duration_ms: Math.round(durMs),
-        cue_type: 'static',
-        fixture_id: fix.id,
-        channel_values: color,
-        color: cueColors[(paletteIdx + fiIdx) % cueColors.length],
-        label: `${fix.name}`,
-      });
-    }
-  }
-
-  // Bulk insert
+  // Bulk insert generated cues
   if (cues.length > 0) {
     db.bulkUpdateCues(seq.id, cues);
   }
@@ -1286,6 +1513,23 @@ function handleSequenceCommand(ws, msg) {
 }
 
 /**
+ * Map a logical 0-255 value to the appropriate DMX sub-range for a channel.
+ * For channels with ranges defined (e.g. dimmer 8-134, strobe 135-239),
+ * this scales the logical value into the matching range.
+ * @param {number} value - Logical value 0-255
+ * @param {Object} channel - Channel object with optional ranges array
+ * @param {string} rangeType - The range type to map into ('dimmer', 'strobe', etc.)
+ * @returns {number} The mapped DMX value
+ */
+function mapValueToRange(value, channel, rangeType) {
+  if (!channel.ranges || channel.ranges.length === 0) return value;
+  const range = channel.ranges.find(r => r.type === rangeType);
+  if (!range) return value;
+  // Map 0-255 logical value to range.min..range.max
+  return Math.round(range.min + (value / 255) * (range.max - range.min));
+}
+
+/**
  * Called on each time update to drive the sequence engine.
  * Finds active cues at the current position and sends DMX values.
  * @param {number} deckNum - Deck number
@@ -1321,25 +1565,46 @@ function processSequenceAtTime(deckNum, timeMs) {
 
     for (const ch of fixMap.channels) {
       let value = null;
+      let skipRangeMap = false; // true when value is already mapped to a specific range
 
-      if (cue.cue_type === 'static') {
-        value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
-      } else if (cue.cue_type === 'fade' && endVals) {
-        const startVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : 0;
-        const endVal = endVals[ch.type] !== undefined ? endVals[ch.type] : 0;
-        value = Math.round(startVal + (endVal - startVal) * progress);
+      if (cue.cue_type === 'static' || cue.cue_type === 'fade') {
+        // All cues support start→end transitions; if no end values, hold start
+        const startVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
+        if (startVal === null) { value = null; }
+        else if (endVals && endVals[ch.type] !== undefined) {
+          const endVal = endVals[ch.type];
+          value = Math.round(startVal + (endVal - startVal) * progress);
+        } else {
+          value = startVal;
+        }
       } else if (cue.cue_type === 'strobe') {
         const strobeHz = channelVals.strobe_hz || 10;
-        const period = 1000 / strobeHz;
-        const phase = ((timeMs - cue.start_ms) % period) / period;
-        value = phase < 0.5 ? 255 : 0;
-        // Apply to all color channels
-        if (['red', 'green', 'blue', 'white', 'dimmer'].includes(ch.type)) {
-          // Use the channel value as the "on" value, strobe between that and 0
-          const onVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : 255;
-          value = phase < 0.5 ? onVal : 0;
+        // Check if this channel has a hardware strobe range
+        const strobeRange = ch.ranges ? ch.ranges.find(r => r.type === 'strobe') : null;
+
+        if (strobeRange) {
+          // Hardware strobe: map strobe speed into the strobe range
+          const strobeSpeed = Math.min(255, Math.round((strobeHz / 20) * 255));
+          value = Math.round(strobeRange.min + (strobeSpeed / 255) * (strobeRange.max - strobeRange.min));
+          skipRangeMap = true; // already mapped to strobe range
         } else {
-          value = null;
+          // Check if the fixture has hardware strobe on another channel
+          const fixtureHasHwStrobe = fixMap.channels.some(c =>
+            c.ranges && c.ranges.some(r => r.type === 'strobe')
+          );
+
+          if (fixtureHasHwStrobe && ['red', 'green', 'blue', 'white', 'dimmer'].includes(ch.type)) {
+            // Fixture handles strobe in hardware; send steady on value (range-mapped below)
+            value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : 255;
+          } else if (['red', 'green', 'blue', 'white', 'dimmer'].includes(ch.type)) {
+            // Software strobe: toggle between on/off at strobe frequency
+            const period = 1000 / strobeHz;
+            const phase = ((timeMs - cue.start_ms) % period) / period;
+            const onVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : 255;
+            value = phase < 0.5 ? onVal : 0;
+          } else {
+            value = null;
+          }
         }
       } else if (cue.cue_type === 'chase') {
         // Chase: cycle through fixtures in the group
@@ -1355,7 +1620,12 @@ function processSequenceAtTime(deckNum, timeMs) {
       if (value !== null && value !== undefined) {
         const universe = fixMap.universe;
         if (!channelUpdates[universe]) channelUpdates[universe] = {};
-        channelUpdates[universe][ch.dmx_address] = Math.max(0, Math.min(255, Math.round(value)));
+        let finalValue = Math.max(0, Math.min(255, Math.round(value)));
+        // Map through channel sub-ranges (e.g. dimmer 0-255 → DMX 8-134)
+        if (!skipRangeMap) {
+          finalValue = mapValueToRange(finalValue, ch, ch.type);
+        }
+        channelUpdates[universe][ch.dmx_address] = Math.max(0, Math.min(255, finalValue));
       }
     }
   }
@@ -1365,9 +1635,7 @@ function processSequenceAtTime(deckNum, timeMs) {
     const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
     if (channels.length > 0) {
       artnetServer.setChannels(+u, channels);
-      if (+u === 1 && dmxUsbServer.isOpen) {
-        dmxUsbServer.setChannels(channels);
-      }
+      dmxUsbServer.setChannels(+u, channels);
     }
   }
 
@@ -1479,9 +1747,21 @@ wss.on('connection', (ws) => {
 
 // ─── Bonjour/mDNS Registration ─────────────────────────────────────────────
 
+function getLocalIPv4() {
+  const os = require('os');
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
 function registerBonjour() {
   try {
     const bonjour = new Bonjour();
+    // Advertise OS2L service for VirtualDJ discovery
     bonjour.publish({
       name: SERVICE_NAME,
       type: 'os2l',
@@ -1490,10 +1770,60 @@ function registerBonjour() {
       txt: { txtvers: '1' },
     });
     console.log(`[mDNS] Registered "${SERVICE_NAME}" as _os2l._tcp on port ${OS2L_PORT}`);
+
+    // Advertise HTTP service
+    bonjour.publish({
+      name: SERVICE_NAME,
+      type: 'http',
+      protocol: 'tcp',
+      port: WEB_PORT,
+      txt: { path: '/' },
+    });
+    console.log(`[mDNS] Registered "${SERVICE_NAME}" as _http._tcp on port ${WEB_PORT}`);
+
     return bonjour;
   } catch (err) {
-    console.error(`[mDNS] Failed to register: ${err.message}`);
+    console.error(`[mDNS] Failed to register Bonjour: ${err.message}`);
     return null;
+  }
+}
+
+function getMdnsHostname() {
+  return (db.getConfig('mdns_hostname') || MDNS_HOSTNAME_DEFAULT).replace(/\.local$/i, '').trim() || MDNS_HOSTNAME_DEFAULT;
+}
+
+// Custom mDNS responder for <hostname>.local
+let mdnsResponder = null;
+function startMdnsResponder() {
+  const enabled = db.getConfig('mdns_enabled') !== '0';
+  if (!enabled) {
+    console.log('[mDNS] Disabled by config');
+    return;
+  }
+  try {
+    const ip = getLocalIPv4();
+    const fqdn = getMdnsHostname() + '.local';
+    mdnsResponder = mdns({ reuseAddr: true });
+    mdnsResponder.on('query', (query) => {
+      for (const q of query.questions) {
+        if (q.name === fqdn && q.type === 'A') {
+          mdnsResponder.respond({
+            answers: [{
+              name: fqdn,
+              type: 'A',
+              ttl: 120,
+              data: ip
+            }]
+          });
+        }
+      }
+    });
+    mdnsResponder.on('error', (err) => {
+      console.error(`[mDNS] Responder error: ${err.message}`);
+    });
+    console.log(`[mDNS] Responding to ${fqdn} → ${ip}`);
+  } catch (err) {
+    console.error(`[mDNS] Failed to start responder: ${err.message}`);
   }
 }
 
@@ -1508,9 +1838,27 @@ const artnetNodes = db.getArtNetUniverses();
 const artnetRate = parseInt(db.getConfig('artnet_refresh_rate') || '44', 10);
 artnetServer.start(artnetNodes, artnetRate);
 
-// Start DMX USB output server (worker thread)
+// Start DMX USB output server (multi-device manager)
 const dmxUsbServer = new DmxUsbServer();
-dmxUsbServer.start();
+
+// Auto-connect enabled USB devices
+(async function autoConnectUsbDevices() {
+  const devices = db.getEnabledUsbDevices();
+  if (!devices.length) {
+    console.log('[DMX-USB] No enabled USB devices to auto-connect');
+    return;
+  }
+  for (const device of devices) {
+    if (!device.auto_connect) continue;
+    try {
+      console.log(`[DMX-USB] Auto-connecting "${device.label}" → universe ${device.local_universe}...`);
+      const ok = await dmxUsbServer.openDevice(device);
+      if (!ok) console.warn(`[DMX-USB] Failed to auto-connect "${device.label}"`);
+    } catch (e) {
+      console.error(`[DMX-USB] Error auto-connecting "${device.label}": ${e.message}`);
+    }
+  }
+})();
 
 // Auto-import VDJ database if configured
 (function loadVdjDatabase() {
@@ -1539,12 +1887,14 @@ httpServer.listen(WEB_PORT, () => {
 });
 
 const bonjour = registerBonjour();
+startMdnsResponder();
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('\nShutting down...');
   artnetServer.shutdown();
-  dmxUsbServer.shutdown();
+  await dmxUsbServer.shutdownAll();
+  if (mdnsResponder) mdnsResponder.destroy();
   if (bonjour) bonjour.destroy();
   os2lServer.close();
   httpServer.close();
@@ -1557,6 +1907,7 @@ console.log(`
 ║                                              ║
 ║  OS2L:  port ${OS2L_PORT}                          ║
 ║  Web:   http://localhost:${WEB_PORT}              ║
+║  mDNS:  http://${getMdnsHostname()}.local:${WEB_PORT}        ║
 ║                                              ║
 ║  Waiting for VirtualDJ connection...         ║
 ╚══════════════════════════════════════════════╝
