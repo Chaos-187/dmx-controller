@@ -1637,6 +1637,13 @@
                 <span style="font-size:12px">Unload the current sequence from a deck when a new track is loaded (even if no sequence matches)</span>
               </label>
             </div>
+            <div class="config-row">
+              <label>Auto-Generate Sequence</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgSeqAutoGenerate" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Automatically generate a sequence when a song is loaded to a deck and no existing sequence is found</span>
+              </label>
+            </div>
           </div>
 
           <div style="margin-top:12px;display:flex;gap:8px">
@@ -3202,6 +3209,7 @@ async function loadSequencerConfig() {
   document.getElementById('cfgSeqAutoLoad').checked = config.seq_auto_load === '1';
   document.getElementById('cfgSeqAutoPlay').checked = config.seq_auto_play === '1';
   document.getElementById('cfgSeqAutoUnload').checked = config.seq_auto_unload === '1';
+  document.getElementById('cfgSeqAutoGenerate').checked = config.seq_auto_generate === '1';
 
   // Load linked sequences
   const seqs = await fetch('/api/sequences').then(r => r.json());
@@ -3227,6 +3235,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_auto_load', document.getElementById('cfgSeqAutoLoad').checked ? '1' : '0'],
     ['seq_auto_play', document.getElementById('cfgSeqAutoPlay').checked ? '1' : '0'],
     ['seq_auto_unload', document.getElementById('cfgSeqAutoUnload').checked ? '1' : '0'],
+    ['seq_auto_generate', document.getElementById('cfgSeqAutoGenerate').checked ? '1' : '0'],
   ], 'btnSaveSeqConfig');
 });
 
@@ -3412,6 +3421,20 @@ async function loadNetworkConfig() {
 }
 
 function updateMdnsStatus(s) {
+  if (s.responder_active && s.enabled) {
+    document.getElementById('mdnsStatusBadge').innerHTML =
+      '<span style="color:var(--green)">&#9679; Active</span>';
+    document.getElementById('mdnsStatusAddr').innerHTML =
+      `<a href="http://${s.fqdn}:${s.web_port}" style="color:var(--accent)" target="_blank">http://${s.fqdn}:${s.web_port}</a>`;
+  } else {
+    document.getElementById('mdnsStatusBadge').innerHTML =
+      '<span style="color:var(--text-dim)">&#9679; Inactive</span>';
+    document.getElementById('mdnsStatusAddr').textContent = '—';
+  }
+  document.getElementById('mdnsStatusIP').textContent = s.ip || '—';
+  document.getElementById('mdnsStatusWebPort').textContent = s.web_port || '—';
+  document.getElementById('mdnsStatusOs2lPort').textContent = s.os2l_port || '—';
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Config — App Settings
@@ -3470,21 +3493,6 @@ document.getElementById('settingDmxOnStartup').addEventListener('change', async 
     }
   });
 });
-
-  if (s.responder_active && s.enabled) {
-    document.getElementById('mdnsStatusBadge').innerHTML =
-      '<span style="color:var(--green)">&#9679; Active</span>';
-    document.getElementById('mdnsStatusAddr').innerHTML =
-      `<a href="http://${s.fqdn}:${s.web_port}" style="color:var(--accent)" target="_blank">http://${s.fqdn}:${s.web_port}</a>`;
-  } else {
-    document.getElementById('mdnsStatusBadge').innerHTML =
-      '<span style="color:var(--text-dim)">&#9679; Inactive</span>';
-    document.getElementById('mdnsStatusAddr').textContent = '—';
-  }
-  document.getElementById('mdnsStatusIP').textContent = s.ip || '—';
-  document.getElementById('mdnsStatusWebPort').textContent = s.web_port || '—';
-  document.getElementById('mdnsStatusOs2lPort').textContent = s.os2l_port || '—';
-}
 
 document.getElementById('btnSaveMdnsConfig').addEventListener('click', async () => {
   const btn = document.getElementById('btnSaveMdnsConfig');
@@ -4447,6 +4455,13 @@ const EFFECT_STYLE = {
   rainbow:    { bg: 'linear-gradient(135deg,#f44,#ff0,#0f0,#0ff,#00f,#f0f)', fg: '#fff', border: '#fff', icon: '🌈' },
   strobe:     { bg: '#ffeb3b', fg: '#000', border: '#fff176', icon: '⚡' },
   color_fade: { bg: 'linear-gradient(135deg,#e53935,#1e88e5)', fg: '#fff', border: '#ce93d8', icon: '🎨' },
+  chase:      { bg: 'linear-gradient(135deg,#00c853,#1565c0)', fg: '#fff', border: '#4caf50', icon: '🏃' },
+  comet:      { bg: 'linear-gradient(135deg,#ff6f00,#f50057)', fg: '#fff', border: '#ff9800', icon: '☄️' },
+  scanner:    { bg: 'linear-gradient(135deg,#e040fb,#536dfe)', fg: '#fff', border: '#e040fb', icon: '🔦' },
+  sparkle:    { bg: 'linear-gradient(135deg,#ffd54f,#ffab40)', fg: '#000', border: '#ffc107', icon: '✨' },
+  color_wave: { bg: 'linear-gradient(135deg,#00bcd4,#7c4dff)', fg: '#fff', border: '#00bcd4', icon: '🌊' },
+  fire:       { bg: 'linear-gradient(135deg,#ff5722,#ff9800)', fg: '#fff', border: '#ff5722', icon: '🔥' },
+  buildup:    { bg: 'linear-gradient(135deg,#4caf50,#8bc34a)', fg: '#fff', border: '#4caf50', icon: '📈' },
 };
 
 async function buildEffectsLibraryGrid() {

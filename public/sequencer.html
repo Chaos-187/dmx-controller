@@ -476,6 +476,13 @@
             <option value="rainbow">Rainbow</option>
             <option value="strobe">Strobe</option>
             <option value="color_fade">Color Fade</option>
+            <option value="chase">Chase</option>
+            <option value="comet">Comet</option>
+            <option value="scanner">Scanner</option>
+            <option value="sparkle">Sparkle</option>
+            <option value="color_wave">Color Wave</option>
+            <option value="fire">Fire</option>
+            <option value="buildup">Buildup</option>
           </select>
         </div>
       </div>
@@ -1141,8 +1148,8 @@ async function loadAndShowWaveform(trackId) {
     wfCurrentTrackId = trackId;
     wfAnalysisData = data;
 
-    // Auto re-analyze if sections are missing (old analysis version)
-    if ((!data.sections || data.sections.length === 0) && (data.analysis_version || 0) < 2) {
+    // Auto re-analyze if analysis is old (v2→v3 added 3-band data + better sections)
+    if ((data.analysis_version || 0) < 4) {
       console.log('[WF] Stale analysis (v' + (data.analysis_version||0) + '), triggering re-analysis for track', trackId);
       fetch(`/api/tracks/${trackId}/analyze`, { method: 'POST' }).catch(() => {});
     }

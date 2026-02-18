@@ -160,13 +160,81 @@ function handleMessage(data) {
       const parts = value.replace(/\\\\/g, '\\').split('\\');
       state.decks[deck].filename = parts[parts.length - 1] || value;
 
-      // ─── Sequencer auto-load / auto-play ──────────────────────
+      // ─── Sequencer auto-load / auto-play / auto-generate ─────
       const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
       const seqAutoUnload = db.getConfig('seq_auto_unload') === '1';
-      if (seqAutoLoad || seqAutoUnload) {
+      const seqAutoGenerate = db.getConfig('seq_auto_generate') === '1';
+      if (seqAutoLoad || seqAutoUnload || seqAutoGenerate) {
         const track = db.getTrackByPath(value);
-        const seq = track ? db.getSequenceByTrackId(track.id) : null;
-        if (seq) {
+        let seq = track ? db.getSequenceByTrackId(track.id) : null;
+
+        // Auto-generate sequence if none exists and feature is enabled
+        if (!seq && track && seqAutoGenerate) {
+          (async () => {
+            try {
+              console.log(`[SEQ] Auto-generating sequence for track ${track.id} ("${track.title || track.filename}")...`);
+              const fixtures = db.getFixtureChannelMap();
+              let analysis = db.getTrackAnalysis(track.id);
+
+              // Auto-analyze if needed
+              if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
+                try {
+                  const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+                  if (ffmpegOk) {
+                    const result = await audioAnalyzer.analyzeTrack(track.filepath, {
+                      bpm: track.bpm || 0,
+                      beatgridPos: track.beatgrid_pos || 0,
+                      config: getAnalysisConfig(),
+                    });
+                    db.upsertTrackAnalysis(track.id, result);
+                    analysis = db.getTrackAnalysis(track.id);
+                    broadcast({ type: 'analysis_complete', track_id: track.id });
+                  }
+                } catch (ae) {
+                  console.warn(`[SEQ] Auto-analysis failed for auto-gen: ${ae.message}`);
+                }
+              }
+
+              const genResult = sequenceGenerator.generateSequence({
+                track, fixtures, analysis,
+                effects: db.getEffects(),
+              });
+              const newSeq = db.createSequence({
+                name: track.title || track.filename || 'Untitled',
+                track_id: track.id,
+                bpm: genResult.bpm,
+                duration_ms: genResult.durationMs,
+              });
+              if (genResult.cues.length > 0) db.bulkUpdateCues(newSeq.id, genResult.cues);
+              const generatedSeq = db.getSequence(newSeq.id);
+              broadcast({ type: 'seq_generated', track_id: track.id, sequence: generatedSeq });
+              console.log(`[SEQ] Auto-generated sequence "${generatedSeq.name}" (${genResult.cues.length} cues) for deck ${deck}`);
+
+              // Now auto-load if enabled
+              if (seqAutoLoad) {
+                stopPlaybackTimer(deck);
+                activeSequences[deck] = { sequence: generatedSeq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+                broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
+                console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck}`);
+
+                const seqAutoPlay = db.getConfig('seq_auto_play') === '1';
+                if (seqAutoPlay) {
+                  activeSequences[deck].playing = true;
+                  startPlaybackTimer(deck);
+                  broadcast({ type: 'seq_playing', deck, playing: true });
+                  console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
+                }
+              }
+            } catch (ge) {
+              console.error(`[SEQ] Auto-generate failed for track ${track ? track.id : '?'}: ${ge.message}`);
+            }
+          })();
+          // Async block handles load/play after generation completes
+          scheduleBroadcast();
+          return;
+        }
+
+        if (seq && seqAutoLoad) {
           // Auto-load the matched sequence onto this deck
           stopPlaybackTimer(deck);
           activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
@@ -467,6 +535,16 @@ app.get('/api/fixture-types/:id', (req, res) => {
 app.post('/api/fixture-types', (req, res) => {
   try {
     const result = db.createFixtureType(req.body);
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Create an LED Bar fixture type with a cell-repeat pattern
+app.post('/api/fixture-types/led-bar', (req, res) => {
+  try {
+    const result = db.createLedBarFixtureType(req.body);
     res.status(201).json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1288,7 +1366,8 @@ app.post('/api/effects/run', (req, res) => {
         }
 
         const baseValues = { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
-        const value = computeEffectValue(effect, ch.type, progress, baseValues, {});
+        const channelCtx = { channel_number: ch.channel_number, total_channels: fix.channels.length };
+        const value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
@@ -1463,6 +1542,7 @@ app.post('/api/sequences/generate/:trackId', async (req, res) => {
     analysis,
     palette: palKey || undefined,
     genre: genKey || undefined,
+    effects: db.getEffects(),
   });
 
   // Create sequence
@@ -1495,6 +1575,7 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
   res.json({ status: 'started', count: track_ids.length });
 
   const fixtures = db.getFixtureChannelMap();
+  const allEffects = db.getEffects();
   let completed = 0, failed = 0, skipped = 0;
 
   for (const trackId of track_ids) {
@@ -1530,6 +1611,7 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
         track, fixtures, analysis,
         palette: palette || undefined,
         genre: genre || undefined,
+        effects: allEffects,
       });
 
       const seq = db.createSequence({
@@ -1666,6 +1748,20 @@ function handleSequenceCommand(ws, msg) {
         broadcast({ type: 'seq_playing', deck, playing: false });
       }
       break;
+    case 'seek': {
+      const seekMs = Math.max(0, msg.timeMs || 0);
+      if (activeSequences[deck]) {
+        activeSequences[deck].currentTimeMs = seekMs;
+        if (activeSequences[deck].playing) {
+          // Reset the wall-clock reference so the timer continues from the new position
+          activeSequences[deck].startWall = Date.now();
+          activeSequences[deck].startOffset = seekMs;
+        }
+        processSequenceAtTime(deck, seekMs);
+        broadcast({ type: 'seq_time', deck, timeMs: seekMs });
+      }
+      break;
+    }
   }
 }
 
@@ -1770,7 +1866,8 @@ function processSequenceAtTime(deckNum, timeMs) {
       } else if (cue.cue_type === 'effect' && cue.effect_id) {
         const effect = db.getEffect(cue.effect_id);
         if (effect) {
-          value = computeEffectValue(effect, ch.type, progress, channelVals, cue.effect_params || {});
+          const channelCtx = { channel_number: ch.channel_number, total_channels: fixMap.channels.length };
+          value = computeEffectValue(effect, ch.type, progress, channelVals, cue.effect_params || {}, channelCtx);
         }
       }
 
@@ -1800,11 +1897,29 @@ function processSequenceAtTime(deckNum, timeMs) {
 }
 
 /**
- * Compute the value for a channel from an effect definition.
+ * Deterministic pseudo-random for sparkle / fire effects.
  */
-function computeEffectValue(effect, channelType, progress, baseValues, params) {
+function pseudoRandom(seed) {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/**
+ * Compute the value for a channel from an effect definition.
+ * @param {Object} effect       - Effect row from DB (with type, effect_data)
+ * @param {string} channelType  - Channel type ('red','green','blue','dimmer', etc.)
+ * @param {number} progress     - 0-1 normalised progress through the cue
+ * @param {Object} baseValues   - Base channel values from the cue
+ * @param {Object} params       - Per-cue effect_params overrides
+ * @param {Object} [channelCtx] - { channel_number, total_channels } for cell-aware effects
+ */
+function computeEffectValue(effect, channelType, progress, baseValues, params, channelCtx) {
   const data = effect.effect_data || {};
   const type = effect.type;
+  channelCtx = channelCtx || { channel_number: 1, total_channels: 1 };
+
+  // Helper: resolve channels-per-cell
+  const getCpp = () => params.channels_per_cell || data.channels_per_cell || 3;
 
   switch (type) {
     case 'pulse': {
@@ -1837,6 +1952,168 @@ function computeEffectValue(effect, channelType, progress, baseValues, params) {
       const endVal = endColor[channelType] !== undefined ? endColor[channelType] : 0;
       return Math.round(startVal + (endVal - startVal) * progress);
     }
+
+    // ── Chase: sequential pattern across cells ──────────────────────────
+    case 'chase': {
+      const cpp = getCpp();
+      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const speed = params.speed || data.speed || 1;
+      const width = params.width || data.width || 3;
+      const tail  = params.tail  || data.tail  || 0;
+      const dir   = params.direction || data.direction || 'left';
+      const halfW = width / 2;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const cycle = (progress * speed) % 1;
+
+      const bright = (dist) => {
+        if (dist <= halfW) return 1;
+        if (tail > 0 && dist <= halfW + tail) return 1 - (dist - halfW) / tail;
+        return 0;
+      };
+
+      if (dir === 'center') {
+        const mid = (cellCount - 1) / 2;
+        const spread = cycle * mid;
+        return val * bright(Math.min(Math.abs(cellIndex - (mid - spread)), Math.abs(cellIndex - (mid + spread))));
+      }
+      if (dir === 'outside') {
+        const mid = (cellCount - 1) / 2;
+        const spread = (1 - cycle) * mid;
+        return val * bright(Math.min(Math.abs(cellIndex - (mid - spread)), Math.abs(cellIndex - (mid + spread))));
+      }
+      if (dir === 'bounce') {
+        const headPos = cycle < 0.5
+          ? cycle * 2 * (cellCount - 1)
+          : (1 - cycle) * 2 * (cellCount - 1);
+        return val * bright(Math.abs(cellIndex - headPos));
+      }
+      // left / right — wrapping chase
+      const headPos = dir === 'right' ? (1 - cycle) * cellCount : cycle * cellCount;
+      let dist = Math.abs(cellIndex - headPos);
+      dist = Math.min(dist, cellCount - dist);
+      return val * bright(dist);
+    }
+
+    // ── Comet: directional chase with long trailing tail ────────────────
+    case 'comet': {
+      const cpp = getCpp();
+      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const speed = params.speed || data.speed || 1;
+      const tail  = params.tail  || data.tail  || 10;
+      const dir   = params.direction || data.direction || 'left';
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const cycle = (progress * speed) % 1;
+      const headPos = dir === 'right' ? (1 - cycle) * cellCount : cycle * cellCount;
+
+      // Distance behind the head (directional)
+      let behind;
+      if (dir === 'right') {
+        behind = cellIndex - headPos;
+        if (behind < 0) behind += cellCount;
+      } else {
+        behind = headPos - cellIndex;
+        if (behind < 0) behind += cellCount;
+      }
+      if (behind <= 1) return val;
+      if (behind <= tail + 1) return val * (1 - (behind - 1) / tail);
+      return 0;
+    }
+
+    // ── Scanner: bouncing Larson-scanner style ─────────────────────────
+    case 'scanner': {
+      const cpp = getCpp();
+      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const speed = params.speed || data.speed || 1;
+      const width = params.width || data.width || 1;
+      const tail  = params.tail  || data.tail  || 5;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const halfW = width / 2;
+
+      const cycle = (progress * speed) % 1;
+      const headPos = cycle < 0.5
+        ? cycle * 2 * (cellCount - 1)
+        : (1 - cycle) * 2 * (cellCount - 1);
+
+      const dist = Math.abs(cellIndex - headPos);
+      if (dist <= halfW) return val;
+      if (tail > 0 && dist <= halfW + tail) return val * (1 - (dist - halfW) / tail);
+      return 0;
+    }
+
+    // ── Sparkle: random cells flash and fade ───────────────────────────
+    case 'sparkle': {
+      const cpp = getCpp();
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const density  = params.density    || data.density    || 0.1;
+      const fadeSpd  = params.fade_speed || data.fade_speed || 6;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const t = progress * fadeSpd;
+      const phase = pseudoRandom(cellIndex * 137);
+      const t2 = t + phase * 10;
+      const slot = Math.floor(t2);
+      const frac = t2 - slot;
+      const on = pseudoRandom(cellIndex * 9973 + slot) < density;
+      return on ? val * (1 - frac) : 0;
+    }
+
+    // ── Color Wave: rainbow distributed across cells ───────────────────
+    case 'color_wave': {
+      const cpp = getCpp();
+      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const wavelength = params.wavelength || data.wavelength || 20;
+      const speed = params.speed || data.speed || 1;
+
+      const hue = ((cellIndex / wavelength + progress * speed) * 360) % 360;
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      if (channelType === 'red') return r;
+      if (channelType === 'green') return g;
+      if (channelType === 'blue') return b;
+      if (channelType === 'dimmer') return 255;
+      return null;
+    }
+
+    // ── Fire: flickering warm light simulation ─────────────────────────
+    case 'fire': {
+      const cpp = getCpp();
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const intensity = params.intensity || data.intensity || 0.8;
+      const cooling   = params.cooling   || data.cooling   || 0.3;
+
+      const t = progress * 20;
+      const flicker  = pseudoRandom(cellIndex * 137 + Math.floor(t * 3));
+      const flicker2 = pseudoRandom(cellIndex * 251 + Math.floor(t * 7));
+      const heat = Math.max(0, Math.min(1, intensity * (0.5 + 0.5 * flicker) - cooling * flicker2));
+
+      if (channelType === 'red')    return 255 * heat;
+      if (channelType === 'green')  return Math.round(100 * heat * flicker);
+      if (channelType === 'blue')   return Math.round(10 * heat * flicker2);
+      if (channelType === 'white')  return 0;
+      if (channelType === 'dimmer') return 255 * heat;
+      return null;
+    }
+
+    // ── Buildup: progressive fill across cells ─────────────────────────
+    case 'buildup': {
+      const cpp = getCpp();
+      const cellCount = Math.max(1, Math.floor(channelCtx.total_channels / cpp));
+      const cellIndex = Math.floor((channelCtx.channel_number - 1) / cpp);
+      const dir = params.direction || data.direction || 'left';
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const litCells = Math.round(progress * cellCount);
+      if (dir === 'center') {
+        const mid = (cellCount - 1) / 2;
+        return Math.abs(cellIndex - mid) <= litCells / 2 ? val : 0;
+      }
+      if (dir === 'right') return cellIndex >= cellCount - litCells ? val : 0;
+      return cellIndex < litCells ? val : 0;  // left (default)
+    }
+
     default:
       return baseValues[channelType] !== undefined ? baseValues[channelType] : null;
   }

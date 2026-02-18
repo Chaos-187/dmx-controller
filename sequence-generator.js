@@ -275,10 +275,11 @@ function getSectionPalettes(paletteName, sectionLabel) {
  * @param {Object} [opts.analysis]  - Track analysis (with sections, beats, energy_levels)
  * @param {string} [opts.palette]   - Color palette key (default: auto from genre or 'vibrant')
  * @param {string} [opts.genre]     - Genre preset key (default: auto-detect from track.genre)
+ * @param {Array}  [opts.effects]   - Effects library from DB (used for effect-based cues)
  * @returns {Object} { cues, bpm, durationMs, palette, genrePreset }
  */
 function generateSequence(opts) {
-  const { track, fixtures, analysis } = opts;
+  const { track, fixtures, analysis, effects } = opts;
   const bpm = track.bpm || 128;
   const durationMs = (track.song_length || 180) * 1000;
   const beatMs = 60000 / bpm;
@@ -315,6 +316,27 @@ function generateSequence(opts) {
 
   if (rgbFixtures.length === 0) return { cues: [], bpm, durationMs, palette: paletteKey, genrePreset: genreKey };
 
+  // Classify fixtures: movers (pan+tilt), LED bars (many cells), regular pars
+  const movers = rgbFixtures.filter(fix =>
+    fix.channels.some(ch => ch.type === 'pan') &&
+    fix.channels.some(ch => ch.type === 'tilt')
+  );
+  const moverIds = new Set(movers.map(m => m.id));
+
+  // Non-mover RGB fixtures get standard color cues and effects
+  const nonMoverFixtures = rgbFixtures.filter(fix => !moverIds.has(fix.id));
+
+  // LED bars: category='led_bar' or fixtures with many repeated RGB cells (>= 6 RGB channels)
+  const ledBars = nonMoverFixtures.filter(fix => {
+    if (fix.category === 'led_bar') return true;
+    const rgbCount = fix.channels.filter(ch => ch.type === 'red' || ch.type === 'green' || ch.type === 'blue').length;
+    return rgbCount >= 6;  // at least 2 cells of RGB
+  });
+  const ledBarIds = new Set(ledBars.map(b => b.id));
+
+  // Regular fixtures (pars, etc.) — not movers, not LED bars
+  const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
+
   const cues = [];
   const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset };
 
@@ -324,13 +346,14 @@ function generateSequence(opts) {
     generateBarBased(cues, rgbFixtures, ctx);
   }
 
-  // ── Mover movement generation ──────────────────────────────────────────
-  const movers = rgbFixtures.filter(fix =>
-    fix.channels.some(ch => ch.type === 'pan') &&
-    fix.channels.some(ch => ch.type === 'tilt')
-  );
+  // ── Mover movement generation (movers only) ───────────────────────────
   if (movers.length > 0) {
     generateMoverMovement(cues, movers, sections, beats, ctx);
+  }
+
+  // ── Effects generation (non-movers only) ──────────────────────────────
+  if (effects && effects.length > 0 && nonMoverFixtures.length > 0) {
+    generateEffectCues(cues, regularFixtures, ledBars, effects, sections, ctx);
   }
 
   return { cues, bpm, durationMs, palette: paletteKey, genrePreset: genreKey };
@@ -762,6 +785,247 @@ function generateMoverMovement(cues, movers, sections, beats, ctx) {
 
   // Re-sort after adding movement cues
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+}
+
+// ─── Effect Cue Generation (non-movers only) ───────────────────────────────
+
+/**
+ * Maps section labels to appropriate effect types.
+ * Cell-aware types are preferred for LED bars.
+ */
+const SECTION_EFFECT_TYPES = {
+  intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'] },
+  verse:     { regular: ['pulse', 'color_fade', 'rainbow'], cellAware: ['color_wave', 'sparkle'] },
+  chorus:    { regular: ['rainbow', 'pulse', 'strobe'],     cellAware: ['chase', 'scanner', 'sparkle'] },
+  bridge:    { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'sparkle'] },
+  breakdown: { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
+  buildup:   { regular: ['pulse', 'strobe'],                cellAware: ['buildup', 'comet', 'chase'] },
+  drop:      { regular: ['rainbow', 'strobe', 'pulse'],     cellAware: ['chase', 'scanner', 'sparkle', 'comet'] },
+  outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
+};
+
+const DEFAULT_EFFECT_TYPES = {
+  regular: ['pulse', 'color_fade', 'rainbow'],
+  cellAware: ['chase', 'color_wave', 'sparkle'],
+};
+
+/** EFFECT_COLORS matches EFFECT_STYLE in index.html */
+const EFFECT_COLORS = {
+  pulse:      '#1e88e5',
+  rainbow:    '#ff6f00',
+  strobe:     '#f44336',
+  color_fade: '#8e24aa',
+  chase:      '#00897b',
+  comet:      '#e65100',
+  scanner:    '#00838f',
+  sparkle:    '#fdd835',
+  color_wave: '#7b1fa2',
+  fire:       '#bf360c',
+  buildup:    '#2e7d32',
+};
+
+/**
+ * Generate effect cues for non-mover fixtures.
+ * Fixtures are grouped by type_name so each type gets a consistent effect.
+ * Cascade effects stagger start times across fixtures of the same type.
+ */
+function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, ctx) {
+  const { bpm, durationMs, barMs, rand, paletteKey, preset } = ctx;
+  const beatMs = 60000 / bpm;
+
+  // Index effects by type for quick lookup
+  const effectsByType = {};
+  for (const eff of effects) {
+    if (!effectsByType[eff.type]) effectsByType[eff.type] = [];
+    effectsByType[eff.type].push(eff);
+  }
+
+  /** Pick a random effect that matches one of the desired types. */
+  function pickEffect(desiredTypes) {
+    const candidates = [];
+    for (const t of desiredTypes) {
+      if (effectsByType[t]) candidates.push(...effectsByType[t]);
+    }
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(rand() * candidates.length)];
+  }
+
+  // ── Group fixtures by type_name ───────────────────────────────────────
+  // Each group = fixtures of the same model, which get the same effect and can cascade.
+  const allNonMovers = [...regularFixtures, ...ledBars];
+  const fixtureGroups = {};  // { type_name: { fixtures: [...], isLedBar: bool } }
+  const ledBarIds = new Set(ledBars.map(b => b.id));
+
+  for (const fix of allNonMovers) {
+    const key = fix.type_name || `unknown_${fix.id}`;
+    if (!fixtureGroups[key]) {
+      fixtureGroups[key] = { fixtures: [], isLedBar: ledBarIds.has(fix.id) };
+    }
+    fixtureGroups[key].fixtures.push(fix);
+  }
+
+  // Determine base lane offset (after existing lanes)
+  const existingMaxLane = cues.reduce((mx, c) => Math.max(mx, c.lane || 0), 0);
+  let laneCounter = existingMaxLane + 1;
+
+  // Cascade-friendly effect types: stagger start times across fixtures in a group
+  const CASCADE_TYPES = new Set(['chase', 'comet', 'scanner', 'sparkle', 'color_wave', 'pulse', 'rainbow', 'buildup']);
+
+  // Effect density per section type, scaled by genre preset
+  const sectionEffectChance = {
+    intro: 0.3, verse: 0.4, chorus: 0.8, bridge: 0.35,
+    breakdown: 0.35, buildup: 0.6, drop: 0.85, outro: 0.25,
+  };
+
+  /**
+   * Emit effect cues for a fixture group across a time range.
+   * @param {Object} group       - { fixtures, isLedBar }
+   * @param {Object} effect      - Effect record from DB
+   * @param {number} startMs     - Start time in ms
+   * @param {number} durationMs  - Duration in ms
+   * @param {Object} baseColor   - { r, g, b }
+   * @param {number} lane        - Sequencer lane
+   * @param {boolean} cascade    - Whether to stagger start times across fixtures
+   */
+  function emitGroupCues(group, effect, startMs, durationMs, baseColor, lane, cascade) {
+    const fixtureCount = group.fixtures.length;
+    // Cascade offset: spread fixtures across half a beat (so they ripple)
+    const cascadeSpreadMs = cascade && fixtureCount > 1
+      ? Math.min(beatMs * 0.5, durationMs * 0.15)  // max 15% of duration or half a beat
+      : 0;
+    const cascadeStepMs = fixtureCount > 1 ? cascadeSpreadMs / (fixtureCount - 1) : 0;
+
+    for (let i = 0; i < fixtureCount; i++) {
+      const fix = group.fixtures[i];
+      const offset = Math.round(cascadeStepMs * i);
+      const cueStart = startMs + offset;
+      const cueDur = durationMs - offset;
+      if (cueDur < barMs * 0.5) continue;
+
+      const params = {};
+      if (group.isLedBar) {
+        const channelsPerCell = detectChannelsPerCell(fix);
+        if (channelsPerCell > 1) params.channels_per_cell = channelsPerCell;
+      }
+
+      cues.push({
+        lane,
+        start_ms: cueStart,
+        duration_ms: Math.round(cueDur),
+        cue_type: 'effect',
+        fixture_id: fix.id,
+        effect_id: effect.id,
+        effect_params: params,
+        channel_values: { red: baseColor.r, green: baseColor.g, blue: baseColor.b, dimmer: 255 },
+        color: EFFECT_COLORS[effect.type] || '#607d8b',
+        label: effect.name,
+      });
+    }
+  }
+
+  // ── Section-based effect generation ───────────────────────────────────
+  if (sections.length > 0) {
+    // Assign one lane per fixture-type group
+    const groupEntries = Object.entries(fixtureGroups);
+    const groupLanes = {};
+    for (const [typeName] of groupEntries) {
+      groupLanes[typeName] = laneCounter++;
+    }
+
+    for (const section of sections) {
+      const label = section.label || 'verse';
+      const sectionStart = Math.round(section.start * 1000);
+      const sectionEnd = Math.round(section.end * 1000);
+      const sectionDuration = sectionEnd - sectionStart;
+      if (sectionDuration < barMs) continue;
+
+      const chance = (sectionEffectChance[label] || 0.3) * preset.cueDensityMult;
+      if (rand() > Math.min(chance, 0.95)) continue;
+
+      const typesMap = SECTION_EFFECT_TYPES[label] || DEFAULT_EFFECT_TYPES;
+      const sectionPalette = getSectionPalettes(paletteKey, label);
+      const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
+
+      // Each fixture-type group picks its own effect but stays consistent within the group
+      for (const [typeName, group] of groupEntries) {
+        const desiredTypes = group.isLedBar ? typesMap.cellAware : typesMap.regular;
+        const effect = pickEffect(desiredTypes);
+        if (!effect) continue;
+
+        const useCascade = CASCADE_TYPES.has(effect.type) && group.fixtures.length > 1;
+        const maxDur = Math.min(sectionDuration, barMs * 8);
+        const effectDurationMs = Math.max(barMs * 2, maxDur);
+        let t = sectionStart;
+
+        while (t < sectionEnd) {
+          const dur = Math.min(effectDurationMs, sectionEnd - t);
+          if (dur < barMs) break;
+          emitGroupCues(group, effect, t, dur, baseColor, groupLanes[typeName], useCascade);
+          t += effectDurationMs;
+        }
+      }
+    }
+  } else {
+    // ── Bar-based fallback: effects every N bars, grouped by type ───────
+    const totalBars = Math.floor(durationMs / barMs);
+    const effectEveryBars = Math.max(2, Math.round(4 / preset.cueDensityMult));
+    const effectDurationBars = Math.max(2, effectEveryBars);
+    const defaultTypes = DEFAULT_EFFECT_TYPES;
+
+    const groupEntries = Object.entries(fixtureGroups);
+    const groupLanes = {};
+    for (const [typeName] of groupEntries) {
+      groupLanes[typeName] = laneCounter++;
+    }
+
+    for (let bar = 0; bar < totalBars; bar += effectEveryBars) {
+      if (rand() > 0.5 * preset.cueDensityMult) continue;
+
+      const startMs = bar * barMs;
+      const dur = Math.min(effectDurationBars * barMs, durationMs - startMs);
+      if (dur < barMs) break;
+
+      const sectionPalette = getSectionPalettes(paletteKey, 'verse');
+      const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
+
+      for (const [typeName, group] of groupEntries) {
+        const desiredTypes = group.isLedBar ? defaultTypes.cellAware : defaultTypes.regular;
+        const effect = pickEffect(desiredTypes);
+        if (!effect) continue;
+
+        const useCascade = CASCADE_TYPES.has(effect.type) && group.fixtures.length > 1;
+        emitGroupCues(group, effect, startMs, dur, baseColor, groupLanes[typeName], useCascade);
+      }
+    }
+  }
+
+  // Re-sort after adding effect cues
+  cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+}
+
+/**
+ * Detect channels_per_cell for LED bar fixtures based on repeating channel patterns.
+ * Returns 3 for RGB, 4 for RGBW, etc.
+ */
+function detectChannelsPerCell(fixture) {
+  const channels = fixture.channels;
+  if (!channels || channels.length < 3) return 1;
+
+  // Look for repeating RGB(W) pattern
+  const firstType = channels[0].type;
+  for (let stride = 3; stride <= 5; stride++) {
+    if (channels.length % stride !== 0) continue;
+    // Check if pattern repeats
+    let repeats = true;
+    for (let i = stride; i < channels.length; i++) {
+      if (channels[i].type !== channels[i % stride].type) {
+        repeats = false;
+        break;
+      }
+    }
+    if (repeats) return stride;
+  }
+  return 3; // default to RGB
 }
 
 // ─── Export ─────────────────────────────────────────────────────────────────

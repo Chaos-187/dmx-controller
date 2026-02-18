@@ -17,7 +17,7 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 3;
+const ANALYSIS_VERSION = 4;
 const DEFAULTS = {
   TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
@@ -158,14 +158,17 @@ const SECTION_COLORS = {
 /**
  * Detect structural sections from multi-band energy data and beat grid.
  *
- * Algorithm  (v3 — multi-band novelty):
+ * Algorithm  (v3.1 — multi-scale novelty + mandatory splits):
  * 1. Compute per-bar average energy for bass, mid, treble and total.
- * 2. Smooth each band with a moving window.
- * 3. Compute a multi-band novelty function using cosine distance between
- *    consecutive bar energy vectors [bass, mid, treble].
- * 4. Pick peaks above an adaptive threshold as section boundaries
- *    (snapped to 4-bar or 8-bar grid).
- * 5. Label each section using energy ratios + bass content + position.
+ * 2. Light smoothing (1-bar half-window) to remove noise but keep contrast.
+ * 3. Multi-scale novelty: combine short-term (bar-to-bar), phrase-level
+ *    (4-bar lookahead/behind) and spectral (cosine distance) signals.
+ * 4. Pick peaks, snap to 4/8-bar grid, enforce max section length of 16 bars
+ *    by splitting oversized sections at their strongest sub-boundary.
+ * 5. Classify using percentile-based energy zones (p25/p50/p75) + bass ratio
+ *    + position + neighbour contrast.
+ * 6. Merge only tiny (<4 bar) same-label neighbours — never merge sections
+ *    that are individually longer.
  *
  * @param {Array} energySegments  – [{time_ms, energy, bass, mid, treble}, ...]
  * @param {Array} beats           – [beatMs, ...]
@@ -175,23 +178,24 @@ const SECTION_COLORS = {
  * @returns {Array} sections – [{start_ms, end_ms, label, color, energy, bars}, ...]
  */
 function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
-  const SECTION_MIN_BARS   = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
+  const SECTION_MIN_BARS    = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
   const SECTION_WINDOW_BARS = cfg.SECTION_WINDOW_BARS || DEFAULTS.SECTION_WINDOW_BARS;
   const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
+  const MAX_SECTION_BARS    = 16;   // force-split any section longer than this
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
   const beatMs = 60000 / bpm;
-  const barMs = beatMs * 4;
+  const barMs  = beatMs * 4;
   const totalBars = Math.floor(durationMs / barMs);
   if (totalBars < SECTION_MIN_BARS * 2) return [];
 
-  // Helper: per-bar average of a field
+  // ── 1. Per-bar energy averages ────────────────────────────────────────
   function barAverages(field) {
     const arr = [];
     for (let bar = 0; bar < totalBars; bar++) {
       const barStart = bar * barMs;
-      const barEnd = barStart + barMs;
+      const barEnd   = barStart + barMs;
       const inBar = energySegments.filter(s => s.time_ms >= barStart && s.time_ms < barEnd);
       arr.push(inBar.length > 0
         ? inBar.reduce((sum, s) => sum + (s[field] || s.energy || 0), 0) / inBar.length
@@ -200,94 +204,194 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
     return arr;
   }
 
-  // 1. Per-bar energy for each band
   const barTotal = barAverages('energy');
   const hasBands = energySegments[0] && energySegments[0].bass !== undefined;
-  const barBass   = hasBands ? barAverages('bass')   : barTotal;
-  const barMid    = hasBands ? barAverages('mid')     : barTotal;
-  const barTreble = hasBands ? barAverages('treble')  : barTotal;
+  const barBass   = hasBands ? barAverages('bass')   : barTotal.map(v => v);
+  const barMid    = hasBands ? barAverages('mid')     : barTotal.map(v => v);
+  const barTreble = hasBands ? barAverages('treble')  : barTotal.map(v => v);
 
-  // 2. Smooth each band
-  const windowSize = Math.max(1, Math.min(SECTION_WINDOW_BARS, Math.floor(totalBars / 8)));
-  function smooth(arr) {
+  // ── 2. Light smoothing (half-window = 1 bar) so we keep contrast ─────
+  function smooth(arr, halfW) {
     const out = [];
     for (let i = 0; i < arr.length; i++) {
       let sum = 0, n = 0;
-      for (let j = Math.max(0, i - windowSize); j <= Math.min(arr.length - 1, i + windowSize); j++) {
+      for (let j = Math.max(0, i - halfW); j <= Math.min(arr.length - 1, i + halfW); j++) {
         sum += arr[j]; n++;
       }
       out.push(sum / n);
     }
     return out;
   }
-  const smTotal  = smooth(barTotal);
-  const smBass   = smooth(barBass);
-  const smMid    = smooth(barMid);
-  const smTreble = smooth(barTreble);
+  const smTotal  = smooth(barTotal,  1);
+  const smBass   = smooth(barBass,   1);
+  const smMid    = smooth(barMid,    1);
+  const smTreble = smooth(barTreble, 1);
 
-  // 3. Multi-band novelty: cosine distance between consecutive 3-vectors
+  // ── 3. Multi-scale novelty ────────────────────────────────────────────
+  //   a) Short-term: absolute energy difference bar-to-bar
+  //   b) Phrase-level: compare bar i energy to mean of bars [i-phraseK .. i-1]
+  //      vs mean of bars [i .. i+phraseK-1]
+  //   c) Spectral: cosine distance of [bass, mid, treble] vectors
+
+  const phraseK = Math.min(4, Math.floor(totalBars / 4)); // 4-bar context each side
+
+  function meanRange(arr, lo, hi) {
+    lo = Math.max(0, lo);
+    hi = Math.min(arr.length - 1, hi);
+    if (lo > hi) return 0;
+    let s = 0;
+    for (let i = lo; i <= hi; i++) s += arr[i];
+    return s / (hi - lo + 1);
+  }
+
   function cosineDist(a, b) {
-    const dot = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    const dot  = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
     const magA = Math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]) || 1e-9;
     const magB = Math.sqrt(b[0]*b[0] + b[1]*b[1] + b[2]*b[2]) || 1e-9;
     return 1 - (dot / (magA * magB));
   }
 
-  const novelty = [0];
+  // Energy range for normalising magnitude differences
+  const eSorted = [...smTotal].sort((a, b) => a - b);
+  const eMin = eSorted[Math.floor(eSorted.length * 0.05)] || 0;
+  const eMax = eSorted[Math.floor(eSorted.length * 0.95)] || 1;
+  const eRange = (eMax - eMin) || 1;
+
+  const novelty = new Float64Array(totalBars);
   for (let i = 1; i < totalBars; i++) {
+    // Short-term magnitude change (normalised)
+    const shortDiff = Math.abs(smTotal[i] - smTotal[i - 1]) / eRange;
+
+    // Phrase-level contrast
+    const leftMean  = meanRange(smTotal, i - phraseK, i - 1);
+    const rightMean = meanRange(smTotal, i, i + phraseK - 1);
+    const phraseDiff = Math.abs(rightMean - leftMean) / eRange;
+
+    // Spectral change
     const vecPrev = [smBass[i-1], smMid[i-1], smTreble[i-1]];
     const vecCurr = [smBass[i],   smMid[i],   smTreble[i]];
-    // Combine cosine distance with magnitude change for robustness
-    const cd = cosineDist(vecPrev, vecCurr);
-    const magDiff = Math.abs(smTotal[i] - smTotal[i-1]);
-    novelty.push(cd + magDiff * 2);
+    const specDiff = cosineDist(vecPrev, vecCurr);
+
+    // Phrase-level spectral contrast (average band energy left vs right)
+    const lBass  = meanRange(smBass,   i - phraseK, i - 1);
+    const rBass  = meanRange(smBass,   i, i + phraseK - 1);
+    const lMid   = meanRange(smMid,    i - phraseK, i - 1);
+    const rMid   = meanRange(smMid,    i, i + phraseK - 1);
+    const lTreb  = meanRange(smTreble, i - phraseK, i - 1);
+    const rTreb  = meanRange(smTreble, i, i + phraseK - 1);
+    const phraseSpec = cosineDist([lBass, lMid, lTreb], [rBass, rMid, rTreb]);
+
+    // Weighted combination
+    novelty[i] = shortDiff * 0.15 + phraseDiff * 0.35 + specDiff * 0.15 + phraseSpec * 0.35;
   }
 
-  // Adaptive threshold for novelty peaks
-  const novMean = novelty.reduce((s, v) => s + v, 0) / novelty.length;
-  const novStd = Math.sqrt(novelty.reduce((s, v) => s + (v - novMean) ** 2, 0) / novelty.length);
+  // Adaptive threshold
+  let novSum = 0, novSq = 0;
+  for (let i = 0; i < totalBars; i++) { novSum += novelty[i]; novSq += novelty[i] * novelty[i]; }
+  const novMean = novSum / totalBars;
+  const novStd  = Math.sqrt(novSq / totalBars - novMean * novMean);
   const novThreshold = novMean + SECTION_SENSITIVITY * novStd;
 
-  // 4. Find boundaries (snap to nearest 4-bar grid when close)
+  // ── 4. Pick boundaries & snap to 4-bar grid ──────────────────────────
   const boundaries = [0];
   let lastBoundary = 0;
-  for (let i = 1; i < novelty.length; i++) {
+
+  for (let i = 1; i < totalBars; i++) {
     if (novelty[i] > novThreshold && (i - lastBoundary) >= SECTION_MIN_BARS) {
-      // Snap to nearest 4-bar boundary if within 2 bars
-      const nearest4 = Math.round(i / 4) * 4;
-      const snapped = (Math.abs(nearest4 - i) <= 2 && nearest4 > lastBoundary && nearest4 < totalBars)
-        ? nearest4 : i;
-      if (snapped > lastBoundary) {
-        boundaries.push(snapped);
-        lastBoundary = snapped;
+      // Local peak check: must be highest within ±1 bar
+      if ((i === 1 || novelty[i] >= novelty[i - 1]) &&
+          (i === totalBars - 1 || novelty[i] >= novelty[i + 1])) {
+        // Snap to nearest 4-bar boundary if within 2 bars
+        const nearest4 = Math.round(i / 4) * 4;
+        const snapped = (Math.abs(nearest4 - i) <= 2 && nearest4 > lastBoundary && nearest4 < totalBars)
+          ? nearest4 : i;
+        if (snapped > lastBoundary) {
+          boundaries.push(snapped);
+          lastBoundary = snapped;
+        }
       }
     }
   }
-  // Fallback: 8-bar segments if detection produced nothing
-  if (boundaries.length < 2) {
-    boundaries.length = 0;
-    for (let i = 0; i < totalBars; i += 8) boundaries.push(i);
+
+  // Force-split any section longer than MAX_SECTION_BARS
+  const splitBoundaries = [boundaries[0]];
+  for (let b = 1; b <= boundaries.length; b++) {
+    const start = splitBoundaries[splitBoundaries.length - 1];
+    const end   = b < boundaries.length ? boundaries[b] : totalBars;
+    if ((end - start) > MAX_SECTION_BARS) {
+      // Find the highest novelty point inside this oversized section
+      // aligned to 4-bar or 8-bar grid
+      let bestBar = -1, bestNov = -1;
+      for (let j = start + SECTION_MIN_BARS; j <= end - SECTION_MIN_BARS; j++) {
+        if (j % 4 === 0 && novelty[j] > bestNov) {
+          bestNov = novelty[j];
+          bestBar = j;
+        }
+      }
+      if (bestBar > start) {
+        splitBoundaries.push(bestBar);
+      }
+    }
+    if (b < boundaries.length) {
+      splitBoundaries.push(boundaries[b]);
+    }
+  }
+  // Sort & dedupe after splitting
+  const finalBoundaries = [...new Set(splitBoundaries)].sort((a, b) => a - b);
+
+  // Repeat force-split pass until no section exceeds max (handles very long gaps)
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let b = 0; b < finalBoundaries.length; b++) {
+      const start = finalBoundaries[b];
+      const end   = b + 1 < finalBoundaries.length ? finalBoundaries[b + 1] : totalBars;
+      if ((end - start) > MAX_SECTION_BARS) {
+        let bestBar = -1, bestNov = -1;
+        for (let j = start + SECTION_MIN_BARS; j <= end - SECTION_MIN_BARS; j++) {
+          if (j % 4 === 0 && novelty[j] > bestNov) {
+            bestNov = novelty[j];
+            bestBar = j;
+          }
+        }
+        if (bestBar > start && !finalBoundaries.includes(bestBar)) {
+          finalBoundaries.push(bestBar);
+          finalBoundaries.sort((a, b) => a - b);
+          changed = true;
+          break; // restart scan
+        }
+      }
+    }
   }
 
-  // Median energy for classification
-  const sorted = [...smTotal].sort((a, b) => a - b);
-  const medianEnergy = sorted[Math.floor(sorted.length / 2)];
-  const p75Energy = sorted[Math.floor(sorted.length * 0.75)];
+  // Fallback: 8-bar segments if detection produced nothing
+  if (finalBoundaries.length < 2) {
+    finalBoundaries.length = 0;
+    for (let i = 0; i < totalBars; i += 8) finalBoundaries.push(i);
+  }
 
-  // Median bass ratio
+  // ── 5. Classify each section ──────────────────────────────────────────
+  // Use percentile-based energy zones for clearer separation
+  const p25 = eSorted[Math.floor(eSorted.length * 0.25)];
+  const p50 = eSorted[Math.floor(eSorted.length * 0.50)];
+  const p75 = eSorted[Math.floor(eSorted.length * 0.75)];
+  const p90 = eSorted[Math.floor(eSorted.length * 0.90)];
+
+  // Bass ratio percentiles
   const bassRatios = smBass.map((b, i) => smTotal[i] > 0 ? b / smTotal[i] : 0);
   const sortedBR = [...bassRatios].sort((a, b) => a - b);
-  const medianBassRatio = sortedBR[Math.floor(sortedBR.length / 2)];
+  const brP50 = sortedBR[Math.floor(sortedBR.length * 0.50)];
+  const brP75 = sortedBR[Math.floor(sortedBR.length * 0.75)];
 
-  // 5. Classify each section
   const sections = [];
   let verseCount = 0, chorusCount = 0;
 
-  for (let s = 0; s < boundaries.length; s++) {
-    const startBar = boundaries[s];
-    const endBar = s + 1 < boundaries.length ? boundaries[s + 1] : totalBars;
-    const startMs = Math.round(startBar * barMs);
-    const endMs = Math.round(endBar * barMs);
+  for (let s = 0; s < finalBoundaries.length; s++) {
+    const startBar = finalBoundaries[s];
+    const endBar   = s + 1 < finalBoundaries.length ? finalBoundaries[s + 1] : totalBars;
+    const startMs  = Math.round(startBar * barMs);
+    const endMs    = Math.round(endBar * barMs);
+    const numBars  = (endBar - startBar) || 1;
 
     // Average energies in this section
     let secTotal = 0, secBass = 0;
@@ -295,74 +399,78 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
       secTotal += smTotal[b] || 0;
       secBass  += smBass[b]  || 0;
     }
-    const numBars = (endBar - startBar) || 1;
     secTotal /= numBars;
     secBass  /= numBars;
     const secBassRatio = secTotal > 0 ? secBass / secTotal : 0;
 
-    // Next section energy (for buildup detection)
-    let nextSectionEnergy = 0;
-    if (s + 1 < boundaries.length) {
-      const nextEnd = s + 2 < boundaries.length ? boundaries[s + 2] : totalBars;
-      for (let b = boundaries[s + 1]; b < nextEnd; b++) nextSectionEnergy += smTotal[b] || 0;
-      nextSectionEnergy /= (nextEnd - boundaries[s + 1]) || 1;
+    // Neighbour energies
+    let nextEnergy = 0, prevEnergy = 0;
+    if (s + 1 < finalBoundaries.length) {
+      const nEnd = s + 2 < finalBoundaries.length ? finalBoundaries[s + 2] : totalBars;
+      for (let b = finalBoundaries[s + 1]; b < nEnd; b++) nextEnergy += smTotal[b] || 0;
+      nextEnergy /= (nEnd - finalBoundaries[s + 1]) || 1;
     }
-
-    // Prev section energy (for contrast)
-    let prevSectionEnergy = 0;
     if (s > 0) {
-      const prevStart = boundaries[s - 1];
-      for (let b = prevStart; b < startBar; b++) prevSectionEnergy += smTotal[b] || 0;
-      prevSectionEnergy /= (startBar - prevStart) || 1;
+      const pStart = finalBoundaries[s - 1];
+      for (let b = pStart; b < startBar; b++) prevEnergy += smTotal[b] || 0;
+      prevEnergy /= (startBar - pStart) || 1;
     }
 
-    const ratio = medianEnergy > 0 ? secTotal / medianEnergy : 1;
-    const position = startMs / durationMs;
-    const bassHigh = secBassRatio > medianBassRatio * 1.15;
+    const position  = startMs / durationMs;
+    const bassHigh  = secBassRatio > brP75;
 
+    // Classify
     let label;
-    if (position < 0.06 && ratio < 1.1) {
+    if (position < 0.06 && secTotal < p75) {
       label = 'intro';
-    } else if (position > 0.88 && ratio < 1.1) {
+    } else if (position > 0.88 && secTotal < p75) {
       label = 'outro';
-    } else if (ratio < 0.45 && nextSectionEnergy > medianEnergy * 1.2) {
+    } else if (secTotal <= p25 && nextEnergy > p50) {
       label = 'buildup';
-    } else if (ratio < 0.45 && prevSectionEnergy > medianEnergy * 1.2) {
+    } else if (secTotal <= p25 && prevEnergy > p50) {
       label = 'breakdown';
-    } else if (ratio < 0.55) {
-      label = (nextSectionEnergy > medianEnergy * 1.2) ? 'buildup' : 'breakdown';
-    } else if (ratio < 0.85) {
+    } else if (secTotal <= p25) {
+      label = 'breakdown';
+    } else if (secTotal < p50) {
+      // Below-median energy  →  verse or bridge
       verseCount++;
-      label = verseCount % 3 === 0 ? 'bridge' : 'verse';
-    } else if (ratio >= 1.4 && bassHigh) {
-      // Heavy bass + high energy → drop
+      label = (verseCount > 1 && verseCount % 2 === 0) ? 'bridge' : 'verse';
+    } else if (secTotal >= p90 && bassHigh) {
       label = 'drop';
-    } else if (ratio >= 1.15) {
+    } else if (secTotal >= p75) {
+      // High energy → chorus or drop
       chorusCount++;
-      label = (bassHigh && ratio >= 1.5) ? 'drop' : 'chorus';
+      label = (bassHigh && secTotal >= p90) ? 'drop' : 'chorus';
     } else {
-      chorusCount++;
-      label = 'chorus';
+      // p50..p75  →  verse or chorus depending on neighbour contrast
+      const aboveNeighbours = secTotal > prevEnergy * 1.1 || secTotal > nextEnergy * 1.1;
+      if (aboveNeighbours) {
+        chorusCount++;
+        label = 'chorus';
+      } else {
+        verseCount++;
+        label = 'verse';
+      }
     }
 
     sections.push({
       start_ms: startMs,
-      end_ms: Math.min(endMs, durationMs),
+      end_ms:   Math.min(endMs, durationMs),
       label,
-      color: SECTION_COLORS[label] || SECTION_COLORS.unknown,
+      color:  SECTION_COLORS[label] || SECTION_COLORS.unknown,
       energy: parseFloat(secTotal.toFixed(4)),
-      bars: numBars,
+      bars:   numBars,
     });
   }
 
-  // Post-process: merge tiny adjacent same-label sections
+  // ── 6. Conservative merge: only merge tiny (<= 4 bar) same-label neighbours
   if (sections.length === 0) return [];
   const merged = [sections[0]];
   for (let i = 1; i < sections.length; i++) {
     const prev = merged[merged.length - 1];
-    if (sections[i].label === prev.label) {
+    if (sections[i].label === prev.label && prev.bars <= 4 && sections[i].bars <= 4) {
       prev.end_ms = sections[i].end_ms;
-      prev.bars += sections[i].bars;
+      prev.bars  += sections[i].bars;
       prev.energy = (prev.energy + sections[i].energy) / 2;
     } else {
       merged.push(sections[i]);

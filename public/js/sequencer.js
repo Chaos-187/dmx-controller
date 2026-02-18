@@ -272,6 +272,25 @@ function snapToGrid(ms) {
   return Math.round(ms / snapMs) * snapMs;
 }
 
+// ─── Seek / Audio Sync Helpers ───────────────────────────────────────────────
+
+function syncAudioToPlayhead() {
+  const audioEl = document.getElementById('audioElement');
+  if (audioEl && audioEl.src && !isNaN(audioEl.duration)) {
+    audioEl.currentTime = seqPlayheadMs / 1000;
+  }
+}
+
+function seekSequence(timeMs) {
+  seqPlayheadMs = timeMs;
+  updatePlayhead();
+  syncAudioToPlayhead();
+  // Tell the server to jump to this position if a sequence is loaded
+  if (seqCurrentId) {
+    ws.send(JSON.stringify({ type: 'sequence', action: 'seek', deck: seqDeck, timeMs: seqPlayheadMs }));
+  }
+}
+
 // ─── Event Handlers ──────────────────────────────────────────────────────────
 
 function setupSequencerEvents() {
@@ -322,11 +341,24 @@ function setupSequencerEvents() {
     updatePlayhead();
     ws.send(JSON.stringify({ type: 'sequence', action: 'load', deck: seqDeck, sequenceId: seqCurrentId }));
     ws.send(JSON.stringify({ type: 'sequence', action: 'play', deck: seqDeck }));
+    // Also start audio playback
+    const audioEl = document.getElementById('audioElement');
+    if (audioEl && audioEl.src) {
+      audioEl.currentTime = 0;
+      audioEl.play().catch(() => {});
+      document.getElementById('audioPlayBtn').innerHTML = '\u{23F8}';
+    }
   });
   document.getElementById('seqPauseBtn').addEventListener('click', () => {
     seqIsPlaying = false;
     document.getElementById('seqPlayBtn').classList.remove('active');
     ws.send(JSON.stringify({ type: 'sequence', action: 'pause', deck: seqDeck }));
+    // Also pause audio
+    const audioEl = document.getElementById('audioElement');
+    if (audioEl && !audioEl.paused) {
+      audioEl.pause();
+      document.getElementById('audioPlayBtn').innerHTML = '&#9654;';
+    }
   });
   document.getElementById('seqStopBtn').addEventListener('click', () => {
     seqIsPlaying = false;
@@ -334,6 +366,13 @@ function setupSequencerEvents() {
     document.getElementById('seqPlayBtn').classList.remove('active');
     updatePlayhead();
     ws.send(JSON.stringify({ type: 'sequence', action: 'unload', deck: seqDeck }));
+    // Also stop and reset audio
+    const audioEl = document.getElementById('audioElement');
+    if (audioEl) {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+      document.getElementById('audioPlayBtn').innerHTML = '&#9654;';
+    }
   });
 
   // Deck selector
@@ -533,12 +572,44 @@ function setupSequencerEvents() {
     });
   });
 
-  // Click on ruler to set playhead
+  // Click on ruler to set playhead (and seek server + audio)
   document.getElementById('seqRuler').addEventListener('click', (e) => {
     const rect = document.getElementById('seqRuler').getBoundingClientRect();
     const x = e.clientX - rect.left;
-    seqPlayheadMs = (x / seqZoomPxPerSec) * 1000;
+    seekSequence(Math.max(0, (x / seqZoomPxPerSec) * 1000));
+  });
+
+  // ─── Playhead drag to seek ────────────────────────────────────────────────
+  const phEl = document.getElementById('seqPlayhead');
+  phEl.addEventListener('mousedown', (e) => {
+    if (!seqCurrentSeq) return;
+    seqIsDraggingPlayhead = true;
+    e.preventDefault();
+    e.stopPropagation();
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!seqIsDraggingPlayhead) return;
+    const wrap = document.getElementById('seqTimelineWrap');
+    const rect = wrap.getBoundingClientRect();
+    const x = e.clientX - rect.left + wrap.scrollLeft - 140;
+    const maxMs = seqCurrentSeq?.duration_ms || Infinity;
+    seqPlayheadMs = Math.max(0, Math.min((x / seqZoomPxPerSec) * 1000, maxMs));
     updatePlayhead();
+    syncAudioToPlayhead();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!seqIsDraggingPlayhead) return;
+    seqIsDraggingPlayhead = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Commit seek to server
+    if (seqCurrentId) {
+      ws.send(JSON.stringify({ type: 'sequence', action: 'seek', deck: seqDeck, timeMs: seqPlayheadMs }));
+    }
   });
 
   // Effects management
@@ -753,6 +824,11 @@ function openEffectModal(eff) {
 function renderEffectParams(type, data) {
   const area = document.getElementById('effParamsArea');
   let html = '';
+
+  // Shared channels-per-cell row for cell-aware effects
+  const cellRow = (d) => `<div class="form-group"><label>Channels per Cell</label>` +
+    `<input type="number" id="effParamCpp" value="${d.channels_per_cell || 3}" min="1" max="20" step="1"></div>`;
+
   if (type === 'pulse') {
     const freq = data.frequency || 1;
     html = `<div class="form-group"><label>Frequency (cycles per duration)</label>` +
@@ -773,6 +849,74 @@ function renderEffectParams(type, data) {
     html = `<div class="form-row">` +
       `<div class="form-group"><label>Start Color</label><input type="color" id="effParamStartColor" value="${startHex}"></div>` +
       `<div class="form-group"><label>End Color</label><input type="color" id="effParamEndColor" value="${endHex}"></div></div>`;
+  } else if (type === 'chase') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Direction</label><select id="effParamDir">` +
+        `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option>` +
+        `<option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
+        `<option value="bounce" ${data.direction==='bounce'?'selected':''}>Bounce</option>` +
+        `<option value="center" ${data.direction==='center'?'selected':''}>Center Out</option>` +
+        `<option value="outside" ${data.direction==='outside'?'selected':''}>Outside In</option>` +
+      `</select></div>` +
+      `<div class="form-group"><label>Speed (cycles)</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Width (cells)</label>` +
+        `<input type="number" id="effParamWidth" value="${data.width||3}" min="1" max="50" step="1"></div>` +
+      `<div class="form-group"><label>Tail (cells)</label>` +
+        `<input type="number" id="effParamTail" value="${data.tail||0}" min="0" max="50" step="1"></div></div>` +
+      `<div class="form-row">${cellRow(data)}</div>`;
+  } else if (type === 'comet') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Direction</label><select id="effParamDir">` +
+        `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option>` +
+        `<option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
+      `</select></div>` +
+      `<div class="form-group"><label>Speed (cycles)</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Tail Length (cells)</label>` +
+        `<input type="number" id="effParamTail" value="${data.tail||10}" min="1" max="50" step="1"></div>` +
+      `${cellRow(data)}</div>`;
+  } else if (type === 'scanner') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed (cycles)</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
+      `<div class="form-group"><label>Width (cells)</label>` +
+        `<input type="number" id="effParamWidth" value="${data.width||1}" min="1" max="50" step="1"></div></div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Tail (cells)</label>` +
+        `<input type="number" id="effParamTail" value="${data.tail||5}" min="0" max="50" step="1"></div>` +
+      `${cellRow(data)}</div>`;
+  } else if (type === 'sparkle') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Density (0-1)</label>` +
+        `<input type="number" id="effParamDensity" value="${data.density||0.1}" min="0.01" max="1" step="0.01"></div>` +
+      `<div class="form-group"><label>Fade Speed</label>` +
+        `<input type="number" id="effParamFadeSpd" value="${data.fade_speed||6}" min="1" max="20" step="1"></div></div>` +
+      `<div class="form-row">${cellRow(data)}</div>`;
+  } else if (type === 'color_wave') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Wavelength (cells)</label>` +
+        `<input type="number" id="effParamWavelength" value="${data.wavelength||20}" min="2" max="200" step="1"></div>` +
+      `<div class="form-group"><label>Speed (cycles)</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div></div>` +
+      `<div class="form-row">${cellRow(data)}</div>`;
+  } else if (type === 'fire') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Intensity (0-1)</label>` +
+        `<input type="number" id="effParamIntensity" value="${data.intensity||0.8}" min="0.1" max="1" step="0.05"></div>` +
+      `<div class="form-group"><label>Cooling (0-1)</label>` +
+        `<input type="number" id="effParamCooling" value="${data.cooling||0.3}" min="0" max="1" step="0.05"></div></div>` +
+      `<div class="form-row">${cellRow(data)}</div>`;
+  } else if (type === 'buildup') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Direction</label><select id="effParamDir">` +
+        `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option>` +
+        `<option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
+        `<option value="center" ${data.direction==='center'?'selected':''}>Center Out</option>` +
+      `</select></div>` +
+      `${cellRow(data)}</div>`;
   }
   area.innerHTML = html;
 }
@@ -789,6 +933,51 @@ function getEffectDataFromForm(type) {
     const endHex = document.getElementById('effParamEndColor')?.value || '#0000ff';
     const hexToRgb = (h) => ({ red: parseInt(h.slice(1,3),16), green: parseInt(h.slice(3,5),16), blue: parseInt(h.slice(5,7),16) });
     return { start_color: hexToRgb(startHex), end_color: hexToRgb(endHex) };
+  } else if (type === 'chase') {
+    return {
+      direction: document.getElementById('effParamDir')?.value || 'left',
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      width: +(document.getElementById('effParamWidth')?.value || 3),
+      tail: +(document.getElementById('effParamTail')?.value || 0),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'comet') {
+    return {
+      direction: document.getElementById('effParamDir')?.value || 'left',
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      tail: +(document.getElementById('effParamTail')?.value || 10),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'scanner') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      width: +(document.getElementById('effParamWidth')?.value || 1),
+      tail: +(document.getElementById('effParamTail')?.value || 5),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'sparkle') {
+    return {
+      density: +(document.getElementById('effParamDensity')?.value || 0.1),
+      fade_speed: +(document.getElementById('effParamFadeSpd')?.value || 6),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'color_wave') {
+    return {
+      wavelength: +(document.getElementById('effParamWavelength')?.value || 20),
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'fire') {
+    return {
+      intensity: +(document.getElementById('effParamIntensity')?.value || 0.8),
+      cooling: +(document.getElementById('effParamCooling')?.value || 0.3),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'buildup') {
+    return {
+      direction: document.getElementById('effParamDir')?.value || 'left',
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
   }
   return {};
 }
@@ -857,7 +1046,7 @@ function handleSeqWsMessage(msg) {
 }
 
 function handleSeqTimeUpdate(msg) {
-  if (msg.deck === seqDeck && seqIsPlaying && seqCurrentSeq) {
+  if (msg.deck === seqDeck && seqIsPlaying && seqCurrentSeq && !seqIsDraggingPlayhead) {
     seqPlayheadMs = msg.timeMs;
     updatePlayhead();
     // Auto-scroll to keep playhead visible
@@ -874,7 +1063,7 @@ function handleSeqTimeUpdate(msg) {
 }
 
 function updateSeqPlayhead(deckNum, timeMs) {
-  if (deckNum === seqDeck && seqCurrentSeq && seqIsPlaying) {
+  if (deckNum === seqDeck && seqCurrentSeq && seqIsPlaying && !seqIsDraggingPlayhead) {
     seqPlayheadMs = timeMs;
     updatePlayhead();
     // Auto-scroll to keep playhead visible

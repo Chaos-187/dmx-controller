@@ -304,6 +304,9 @@ function init() {
     seedDefaultEffects();
   }
 
+  // Always run migration to add new effect types to existing databases
+  seedNewEffectsV2();
+
   console.log(`[DB] Opened ${DB_PATH}  (${subCount > 0 ? subCount + ' subscriptions' : 'seeded subs'}, ${count > 0 ? count + ' fixture types' : 'seeded defaults'}, ${effectCount > 0 ? effectCount + ' effects' : 'seeded effects'})`);
   return db;
 }
@@ -333,6 +336,102 @@ function seedDefaultEffects() {
   });
   seed();
   console.log('[DB] Seeded 15 default effects');
+}
+
+// ─── Seed New Effects (v2 migration — adds missing effects to existing DBs) ─
+
+function seedNewEffectsV2() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // ── Chase effects ───────────────────────────────────────────────────
+    ['Left Chase',        'chase', 'movement', J({ direction:'left',    width:3, tail:5, speed:1 }), 4],
+    ['Right Chase',       'chase', 'movement', J({ direction:'right',   width:3, tail:5, speed:1 }), 4],
+    ['Bounce Chase',      'chase', 'movement', J({ direction:'bounce',  width:3, tail:5, speed:1 }), 4],
+    ['Center Out Chase',  'chase', 'movement', J({ direction:'center',  width:3, tail:3, speed:1 }), 4],
+    ['Outside In Chase',  'chase', 'movement', J({ direction:'outside', width:3, tail:3, speed:1 }), 4],
+    ['Fast Chase',        'chase', 'movement', J({ direction:'left',    width:2, tail:3, speed:4 }), 2],
+    ['Wide Chase',        'chase', 'movement', J({ direction:'left',    width:10,tail:8, speed:0.5 }), 8],
+    ['Theater Chase',     'chase', 'movement', J({ direction:'left',    width:1, tail:0, speed:2, gap:3 }), 4],
+    // ── Comet effects ───────────────────────────────────────────────────
+    ['Comet Left',        'comet', 'movement', J({ direction:'left',  tail:10, speed:1 }), 4],
+    ['Comet Right',       'comet', 'movement', J({ direction:'right', tail:10, speed:1 }), 4],
+    ['Fast Comet',        'comet', 'movement', J({ direction:'left',  tail:6,  speed:3 }), 2],
+    // ── Scanner effects ─────────────────────────────────────────────────
+    ['Scanner',           'scanner', 'movement', J({ width:1, tail:5, speed:1 }), 4],
+    ['Fast Scanner',      'scanner', 'movement', J({ width:1, tail:3, speed:4 }), 2],
+    ['Wide Scanner',      'scanner', 'movement', J({ width:5, tail:8, speed:0.5 }), 8],
+    // ── Sparkle effects ─────────────────────────────────────────────────
+    ['Sparkle',           'sparkle', 'color', J({ density:0.1, fade_speed:6 }), 4],
+    ['Heavy Sparkle',     'sparkle', 'color', J({ density:0.3, fade_speed:4 }), 4],
+    ['Twinkle',           'sparkle', 'color', J({ density:0.05, fade_speed:2 }), 8],
+    // ── Color Wave effects ──────────────────────────────────────────────
+    ['Rainbow Wave',      'color_wave', 'color', J({ wavelength:20, speed:1 }), 8],
+    ['Short Rainbow Wave','color_wave', 'color', J({ wavelength:8,  speed:2 }), 4],
+    ['Slow Color Wave',   'color_wave', 'color', J({ wavelength:30, speed:0.5 }), 16],
+    // ── Fire effects ────────────────────────────────────────────────────
+    ['Fire',              'fire', 'color', J({ intensity:0.8, cooling:0.3 }), 4],
+    ['Intense Fire',      'fire', 'color', J({ intensity:1.0, cooling:0.2 }), 4],
+    ['Campfire',          'fire', 'color', J({ intensity:0.5, cooling:0.5 }), 8],
+    // ── Buildup effects ─────────────────────────────────────────────────
+    ['Left Buildup',      'buildup', 'intensity', J({ direction:'left' }), 8],
+    ['Right Buildup',     'buildup', 'intensity', J({ direction:'right' }), 8],
+    ['Center Buildup',    'buildup', 'intensity', J({ direction:'center' }), 8],
+    // ── Additional basic effects ────────────────────────────────────────
+    ['Gentle Pulse',      'pulse', 'color', J({ frequency:0.25 }), 8],
+    ['Breathing',         'pulse', 'color', J({ frequency:0.15 }), 16],
+    ['Quick Flash',       'pulse', 'intensity', J({ frequency:4 }), 1],
+    ['Green to Purple',   'color_fade', 'color', J({ start_color:{red:0,green:255,blue:0}, end_color:{red:128,green:0,blue:255} }), 8],
+    ['Cyan to Magenta',   'color_fade', 'color', J({ start_color:{red:0,green:255,blue:255}, end_color:{red:255,green:0,blue:255} }), 8],
+    ['Fire Fade',         'color_fade', 'color', J({ start_color:{red:255,green:80,blue:0}, end_color:{red:255,green:200,blue:0} }), 4],
+    ['Ice Fade',          'color_fade', 'color', J({ start_color:{red:0,green:100,blue:255}, end_color:{red:200,green:240,blue:255} }), 4],
+    ['Triple Rainbow',    'rainbow', 'color', J({ cycles:3 }), 8],
+    ['Lightning Strobe',  'strobe', 'intensity', J({ frequency:15 }), 1],
+    ['Blinder',           'pulse', 'intensity', J({ frequency:0.5 }), 2],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v2 migration)`);
+}
+
+// ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
+
+/**
+ * Create a multi-cell LED bar fixture type with a repeating per-cell channel pattern.
+ * @param {Object} opts
+ * @param {string}   opts.name           - Fixture type name (default: "LED Bar <n> Cell")
+ * @param {string}   opts.manufacturer   - Manufacturer (default: "Generic")
+ * @param {number}   opts.cellCount      - Number of cells (required)
+ * @param {string[]} opts.channelPattern - Channel types per cell (default: ['red','green','blue'])
+ */
+function createLedBarFixtureType({ name, manufacturer, cellCount, channelPattern }) {
+  if (!cellCount || cellCount < 1) throw new Error('cellCount is required and must be >= 1');
+  const pattern = channelPattern || ['red', 'green', 'blue'];
+  const channels = [];
+  for (let cell = 1; cell <= cellCount; cell++) {
+    for (const type of pattern) {
+      const label = type.charAt(0).toUpperCase() + type.slice(1);
+      channels.push({ name: `Cell ${cell} ${label}`, type, default_value: 0 });
+    }
+  }
+  return createFixtureType({
+    name: name || `LED Bar ${cellCount} Cell`,
+    manufacturer: manufacturer || 'Generic',
+    category: 'led_bar',
+    channels,
+  });
 }
 
 // ─── Seed Default Subscriptions ─────────────────────────────────────────────
@@ -951,7 +1050,7 @@ function clearTracks() {
 
 function getFixtureChannelMap() {
   const fixtures = db.prepare(`
-    SELECT f.id, f.name, f.universe, f.address, ft.channel_count, ft.name as type_name
+    SELECT f.id, f.name, f.universe, f.address, ft.channel_count, ft.name as type_name, ft.category
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
     ORDER BY f.universe, f.address
@@ -1524,6 +1623,7 @@ function getTracksWithAnalysis() {
 module.exports = {
   init,
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
+  createLedBarFixtureType,
   getFixtures, getFixture, createFixture, updateFixture, deleteFixture,
   getUniverseMap,
   getFixtureChannelMap,
