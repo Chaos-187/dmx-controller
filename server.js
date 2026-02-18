@@ -183,6 +183,7 @@ function handleMessage(data) {
         } else if (seqAutoUnload && activeSequences[deck]) {
           // No matching sequence — unload the current one
           stopPlaybackTimer(deck);
+          blackoutDeckFixtures(deck);
           delete activeSequences[deck];
           broadcast({ type: 'seq_unloaded', deck });
           console.log(`[SEQ] Auto-unloaded sequence from deck ${deck} (no match)`);
@@ -1084,6 +1085,20 @@ app.get('/api/tracks/:id/analysis', (req, res) => {
   res.json(analysis);
 });
 
+// Build analysis config object from persisted settings
+function getAnalysisConfig() {
+  const cfg = {};
+  const tp = db.getConfig('analysis_target_peaks');
+  if (tp) cfg.TARGET_PEAKS = parseInt(tp, 10) || undefined;
+  const sr = db.getConfig('analysis_sample_rate');
+  if (sr) cfg.DECODE_SAMPLE_RATE = parseInt(sr, 10) || undefined;
+  const ss = db.getConfig('analysis_section_sensitivity');
+  if (ss) cfg.SECTION_SENSITIVITY = parseFloat(ss) || undefined;
+  const np = db.getConfig('analysis_normalize_pct');
+  if (np) cfg.NORMALIZE_PERCENTILE = parseInt(np, 10) || undefined;
+  return cfg;
+}
+
 // Trigger analysis for a track
 const analysisInProgress = new Map(); // trackId -> true
 
@@ -1118,6 +1133,7 @@ app.post('/api/tracks/:id/analyze', async (req, res) => {
     const result = await audioAnalyzer.analyzeTrack(filePath, {
       bpm: track.bpm || 0,
       beatgridPos: track.beatgrid_pos || 0,
+      config: getAnalysisConfig(),
     });
     db.upsertTrackAnalysis(trackId, result);
     console.log(`[Analysis] Completed track ${trackId}: ${result.peak_count} peaks, ${result.energy_levels.length} energy segments, ${result.beats.length} beats, ${(result.sections || []).length} sections`);
@@ -1159,6 +1175,7 @@ app.post('/api/tracks/analyze-batch', async (req, res) => {
       const result = await audioAnalyzer.analyzeTrack(track.filepath, {
         bpm: track.bpm || 0,
         beatgridPos: track.beatgrid_pos || 0,
+        config: getAnalysisConfig(),
       });
       db.upsertTrackAnalysis(trackId, result);
       completed++;
@@ -1390,7 +1407,19 @@ app.put('/api/sequences/:id/cues/bulk', (req, res) => {
 
 const sequenceGenerator = require('./sequence-generator');
 
-app.post('/api/sequences/generate/:trackId', (req, res) => {
+// Expose palette/genre options for the UI
+app.get('/api/sequences/generate-options', (req, res) => {
+  const palettes = sequenceGenerator.PALETTE_KEYS.map(k => ({
+    key: k, label: sequenceGenerator.colorPalettes[k].label,
+  }));
+  palettes.push({ key: 'random', label: 'Random' });
+  const genres = Object.entries(sequenceGenerator.genrePresets).map(([k, v]) => ({
+    key: k, label: v.label,
+  }));
+  res.json({ palettes, genres });
+});
+
+app.post('/api/sequences/generate/:trackId', async (req, res) => {
   const track = db.getTrack(+req.params.trackId);
   if (!track) return res.status(404).json({ error: 'Track not found' });
 
@@ -1404,12 +1433,36 @@ app.post('/api/sequences/generate/:trackId', (req, res) => {
   }
 
   const fixtures = db.getFixtureChannelMap();
-  const analysis = db.getTrackAnalysis(track.id);
+  let analysis = db.getTrackAnalysis(track.id);
 
-  const { cues, bpm, durationMs } = sequenceGenerator.generateSequence({
+  // Auto-analyze if no analysis exists
+  if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
+    try {
+      const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+      if (ffmpegOk) {
+        console.log(`[Generate] Auto-analyzing track ${track.id} before sequence generation...`);
+        const result = await audioAnalyzer.analyzeTrack(track.filepath, {
+          bpm: track.bpm || 0,
+          beatgridPos: track.beatgrid_pos || 0,
+          config: getAnalysisConfig(),
+        });
+        db.upsertTrackAnalysis(track.id, result);
+        analysis = db.getTrackAnalysis(track.id);
+        broadcast({ type: 'analysis_complete', track_id: track.id });
+        console.log(`[Generate] Auto-analysis complete for track ${track.id}`);
+      }
+    } catch (e) {
+      console.warn(`[Generate] Auto-analysis failed for track ${track.id}: ${e.message}`);
+    }
+  }
+
+  const { palette: palKey, genre: genKey } = req.body || {};
+  const { cues, bpm, durationMs, palette, genrePreset } = sequenceGenerator.generateSequence({
     track,
     fixtures,
     analysis,
+    palette: palKey || undefined,
+    genre: genKey || undefined,
   });
 
   // Create sequence
@@ -1425,7 +1478,76 @@ app.post('/api/sequences/generate/:trackId', (req, res) => {
     db.bulkUpdateCues(seq.id, cues);
   }
 
-  res.json(db.getSequence(seq.id));
+  const result = db.getSequence(seq.id);
+  result.palette = palette;
+  result.genrePreset = genrePreset;
+  res.json(result);
+});
+
+// Bulk generate sequences for multiple tracks
+app.post('/api/sequences/generate-batch', async (req, res) => {
+  const { track_ids, palette, genre, overwrite } = req.body || {};
+  if (!Array.isArray(track_ids) || track_ids.length === 0) {
+    return res.status(400).json({ error: 'track_ids array required' });
+  }
+
+  // Return immediately, process in background
+  res.json({ status: 'started', count: track_ids.length });
+
+  const fixtures = db.getFixtureChannelMap();
+  let completed = 0, failed = 0, skipped = 0;
+
+  for (const trackId of track_ids) {
+    try {
+      const track = db.getTrack(trackId);
+      if (!track) { failed++; continue; }
+
+      const existing = db.getSequenceByTrackId(track.id);
+      if (existing && !overwrite) { skipped++; continue; }
+      if (existing) db.deleteSequence(existing.id);
+
+      let analysis = db.getTrackAnalysis(track.id);
+
+      // Auto-analyze if no analysis exists
+      if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
+        try {
+          const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+          if (ffmpegOk) {
+            const result = await audioAnalyzer.analyzeTrack(track.filepath, {
+              bpm: track.bpm || 0, beatgridPos: track.beatgrid_pos || 0,
+              config: getAnalysisConfig(),
+            });
+            db.upsertTrackAnalysis(track.id, result);
+            analysis = db.getTrackAnalysis(track.id);
+            broadcast({ type: 'analysis_complete', track_id: track.id });
+          }
+        } catch (e) {
+          console.warn(`[BulkGen] Auto-analysis failed for track ${trackId}: ${e.message}`);
+        }
+      }
+
+      const { cues, bpm, durationMs } = sequenceGenerator.generateSequence({
+        track, fixtures, analysis,
+        palette: palette || undefined,
+        genre: genre || undefined,
+      });
+
+      const seq = db.createSequence({
+        name: track.title || track.filename || 'Untitled',
+        track_id: track.id, bpm, duration_ms: durationMs,
+      });
+      if (cues.length > 0) db.bulkUpdateCues(seq.id, cues);
+
+      completed++;
+      broadcast({ type: 'seq_batch_progress', completed, failed, skipped, total: track_ids.length, track_id: trackId });
+    } catch (e) {
+      failed++;
+      console.error(`[BulkGen] Error for track ${trackId}: ${e.message}`);
+    }
+  }
+
+  console.log(`[BulkGen] Complete: ${completed} generated, ${skipped} skipped, ${failed} failed out of ${track_ids.length}`);
+  broadcast({ type: 'seq_batch_complete', completed, failed, skipped, total: track_ids.length });
 });
 
 // ─── Sequence Playback Engine ───────────────────────────────────────────────
@@ -1470,6 +1592,39 @@ function stopPlaybackTimer(deck) {
   }
 }
 
+/**
+ * Set all channels used by the deck's active sequence fixtures to 0.
+ */
+function blackoutDeckFixtures(deck) {
+  if (!dmxOutputEnabled) return;
+  const deckSeq = activeSequences[deck];
+  if (!deckSeq || !deckSeq.sequence) return;
+
+  const cues = deckSeq.sequence.cues || [];
+  const fixtureIds = [...new Set(cues.map(c => c.fixture_id).filter(Boolean))];
+  const allFixtures = db.getFixtureChannelMap();
+  const channelUpdates = {};
+
+  for (const fid of fixtureIds) {
+    const fixMap = allFixtures.find(f => f.id === fid);
+    if (!fixMap) continue;
+    const u = fixMap.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    for (const ch of fixMap.channels) {
+      channelUpdates[u][ch.dmx_address] = 0;
+    }
+  }
+
+  for (const [u, chMap] of Object.entries(channelUpdates)) {
+    const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
+    if (channels.length > 0) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+  console.log(`[SEQ] Blackout deck ${deck} fixtures (${fixtureIds.length} fixtures)`);
+}
+
 // Handle sequence playback commands from WebSocket
 function handleSequenceCommand(ws, msg) {
   const { action, deck, sequenceId } = msg;
@@ -1486,6 +1641,7 @@ function handleSequenceCommand(ws, msg) {
     }
     case 'unload':
       stopPlaybackTimer(deck);
+      blackoutDeckFixtures(deck);
       delete activeSequences[deck];
       broadcast({ type: 'seq_unloaded', deck });
       console.log(`[SEQ] Unloaded sequence from deck ${deck}`);
@@ -1506,6 +1662,7 @@ function handleSequenceCommand(ws, msg) {
           ds.currentTimeMs = ds.startOffset + (Date.now() - ds.startWall);
         }
         stopPlaybackTimer(deck);
+        blackoutDeckFixtures(deck);
         broadcast({ type: 'seq_playing', deck, playing: false });
       }
       break;
@@ -1831,6 +1988,15 @@ function startMdnsResponder() {
 
 // Initialise database
 db.init();
+
+// Apply "DMX output on startup" setting
+(function applyStartupDmxSetting() {
+  const val = db.getConfig('dmx_output_on_startup');
+  if (val === '1' || val === 'true') {
+    dmxOutputEnabled = true;
+    console.log('[DMX] Output auto-enabled on startup (app setting)');
+  }
+})();
 
 // Start Art-Net output server (worker thread)
 const artnetServer = new ArtNetServer();

@@ -126,6 +126,20 @@
     .form-row .form-group { flex: 1; }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 
+    /* Generate Options Modal extras */
+    .gen-opt-row { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+    .gen-opt-row label { min-width: 80px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+    .gen-opt-row select { flex: 1; padding: 8px 10px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 4px; color: var(--text); font-size: 13px; }
+    .gen-opt-row select:focus { border-color: var(--accent); outline: none; }
+    .gen-opt-hint { font-size: 11px; color: var(--text-dim); margin-top: -6px; margin-bottom: 10px; padding-left: 92px; }
+    .gen-track-info { padding: 10px; margin-bottom: 14px; background: rgba(255,255,255,.04); border-radius: 6px; font-size: 12px; }
+    .gen-track-info strong { color: var(--accent); }
+    .gen-progress-bar { height: 6px; background: var(--input-bg); border-radius: 3px; overflow: hidden; margin-top: 12px; }
+    .gen-progress-bar .fill { height: 100%; background: var(--accent); transition: width .3s; width: 0; }
+    .gen-progress-text { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-align: center; }
+    .btn-bulk-gen { padding: 4px 10px; font-size: 11px; white-space: nowrap; background: var(--panel); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; cursor: pointer; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; transition: all .15s; }
+    .btn-bulk-gen:hover { background: var(--accent); color: #fff; }
+
     /* ═══════════════════════════════════════════════════════════════
        Tabs
        ═══════════════════════════════════════════════════════════════ */
@@ -518,6 +532,7 @@
         </select>
         <input type="number" class="tracks-select" id="tracksBpmMin" placeholder="BPM min" style="width:70px">
         <input type="number" class="tracks-select" id="tracksBpmMax" placeholder="BPM max" style="width:70px">
+        <button class="btn-bulk-gen" id="btnBulkGenerate" onclick="openBulkGenerateModal()">&#127917; Bulk Generate</button>
       </div>
       <div class="tracks-table-wrap">
         <table class="tracks-table">
@@ -548,6 +563,32 @@
 
   </div><!-- /tabLibrary -->
 
+</div>
+
+<!-- Generate Sequence Options Modal -->
+<div class="modal-overlay" id="genModal">
+  <div class="modal" style="max-width:440px">
+    <h2 id="genModalTitle">&#127917; Generate Sequence</h2>
+    <div class="gen-track-info" id="genTrackInfo"></div>
+    <div class="gen-opt-row">
+      <label>Palette</label>
+      <select id="genPalette"><option value="random">Random</option></select>
+    </div>
+    <div class="gen-opt-hint">Color theme for light cues</div>
+    <div class="gen-opt-row">
+      <label>Genre</label>
+      <select id="genGenre"><option value="auto">Auto-detect</option></select>
+    </div>
+    <div class="gen-opt-hint" id="genGenreHint">Uses track genre tag to pick behaviour preset</div>
+    <div id="genBulkProgress" style="display:none">
+      <div class="gen-progress-bar"><div class="fill" id="genBulkFill"></div></div>
+      <div class="gen-progress-text" id="genBulkText"></div>
+    </div>
+    <div class="modal-actions" id="genModalActions">
+      <button class="btn btn-secondary" onclick="closeModal('genModal')">Cancel</button>
+      <button class="btn btn-primary" id="genConfirmBtn">Generate</button>
+    </div>
+  </div>
 </div>
 
 <footer>&copy; Eyup Events &mdash; DMX Sequencer &middot; OS2L &middot; VirtualDJ</footer>
@@ -596,6 +637,7 @@ function connect() {
     else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing') handleSeqWsMessage(msg);
     else if (msg.type === 'seq_time') handleSeqTimeUpdate(msg);
     else if (msg.type === 'analysis_complete' || msg.type === 'analysis_error' || msg.type === 'analysis_batch_complete') handleAnalysisWsMessage(msg);
+    else if (msg.type === 'seq_batch_progress' || msg.type === 'seq_batch_complete') handleBulkGenWsMessage(msg);
     else if (msg.type === 'dmxOutput') { seqDmxOutputOn = msg.enabled; updateSeqOutputToggle(); }
   };
   ws.onclose = () => {
@@ -748,63 +790,239 @@ async function checkTracksWithSequences(trackIds) {
   return map;
 }
 
+// ─── Generate Options Cache ────────────────────────────────
+let _genOptions = null;
+async function loadGenOptions() {
+  if (_genOptions && _genOptions.palettes.length > 0) return _genOptions;
+  try {
+    const r = await fetch('/api/sequences/generate-options');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.palettes && data.palettes.length > 0) {
+      _genOptions = data;
+    } else {
+      _genOptions = data;
+    }
+  } catch(e) {
+    console.warn('Failed to load generate options, using defaults', e);
+    _genOptions = { palettes: [], genres: [] };
+  }
+  return _genOptions;
+}
+
+function populateGenSelects(opts) {
+  const palSel = document.getElementById('genPalette');
+  const genSel = document.getElementById('genGenre');
+  palSel.innerHTML = '<option value="random">Random</option>';
+  (opts.palettes || []).filter(p => p.key !== 'random').forEach(p => {
+    palSel.innerHTML += `<option value="${p.key}">${esc(p.label)}</option>`;
+  });
+  genSel.innerHTML = '<option value="auto">Auto-detect from track</option>';
+  (opts.genres || []).forEach(g => {
+    genSel.innerHTML += `<option value="${g.key}">${esc(g.label)}</option>`;
+  });
+}
+
+// Show the generate options modal for a single track
+let _genPendingTrackId = null;
+let _genPendingBtn = null;
+let _genBulkMode = false;
+
 async function generateTrackSequence(trackId, btn) {
   if (btn.disabled) return;
-  btn.disabled = true;
-  const origHtml = btn.innerHTML;
-  btn.innerHTML = '&#8987;...';
+
+  // If track already has a sequence, just load it
+  const checkRes = await fetch(`/api/sequences/by-track/${trackId}`);
+  if (checkRes.ok) {
+    const existing = await checkRes.json();
+    const seqListRes = await fetch('/api/sequences');
+    seqSequences = await seqListRes.json();
+    renderSeqSelector();
+    btn.classList.add('has-seq');
+    btn.innerHTML = '&#9835; Edit';
+    btn.dataset.seqId = existing.id;
+    document.getElementById('seqSelector').value = existing.id;
+    await loadSequenceById(existing.id);
+    document.getElementById('tracksPanel').classList.add('collapsed');
+    return;
+  }
+
+  // Show generate options modal
+  _genPendingTrackId = trackId;
+  _genPendingBtn = btn;
+  _genBulkMode = false;
+
+  const opts = await loadGenOptions();
+  populateGenSelects(opts);
+
+  // Track info
+  try {
+    const tr = await fetch(`/api/tracks/${trackId}`).then(r => r.json());
+    document.getElementById('genTrackInfo').innerHTML = `<strong>${esc(tr.title || tr.filename)}</strong><br>${esc(tr.author || '')}${tr.genre ? ' &middot; ' + esc(tr.genre) : ''}`;
+    if (tr.genre) {
+      document.getElementById('genGenreHint').textContent = `Track genre: "${tr.genre}" — auto-detect will map this automatically`;
+    } else {
+      document.getElementById('genGenreHint').textContent = 'No genre tag on track — select a preset or use default';
+    }
+  } catch(e) {
+    document.getElementById('genTrackInfo').textContent = `Track #${trackId}`;
+  }
+
+  document.getElementById('genModalTitle').innerHTML = '&#127917; Generate Sequence';
+  document.getElementById('genBulkProgress').style.display = 'none';
+  document.getElementById('genModalActions').style.display = 'flex';
+  document.getElementById('genConfirmBtn').textContent = 'Generate';
+  document.getElementById('genConfirmBtn').onclick = () => confirmGenerateSingle();
+  document.getElementById('genModal').classList.add('open');
+}
+
+async function confirmGenerateSingle() {
+  const trackId = _genPendingTrackId;
+  const btn = _genPendingBtn;
+  const palette = document.getElementById('genPalette').value;
+  const genre = document.getElementById('genGenre').value;
+  closeModal('genModal');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '&#8987;...';
+  }
 
   try {
-    // Check if sequence already exists
-    const checkRes = await fetch(`/api/sequences/by-track/${trackId}`);
-    if (checkRes.ok) {
-      const existing = await checkRes.json();
-      // Sequence exists — refresh list and load it into the sequencer
-      const seqListRes = await fetch('/api/sequences');
-      seqSequences = await seqListRes.json();
-      renderSeqSelector();
-      btn.classList.add('has-seq');
-      btn.innerHTML = '&#9835; Edit';
-      btn.dataset.seqId = existing.id;
-      document.getElementById('seqSelector').value = existing.id;
-      await loadSequenceById(existing.id);
-      // Collapse tracks panel to show sequencer
-      document.getElementById('tracksPanel').classList.add('collapsed');
-      btn.disabled = false;
-      return;
-    }
-
-    // Generate a new sequence for this track
     const genRes = await fetch(`/api/sequences/generate/${trackId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ overwrite: true })
+      body: JSON.stringify({
+        overwrite: true,
+        palette: palette === 'random' ? undefined : palette,
+        genre: genre === 'auto' ? undefined : genre,
+      })
     });
     if (!genRes.ok) {
       const err = await genRes.json().catch(() => ({}));
       throw new Error(err.error || `Server error ${genRes.status}`);
     }
     const seq = await genRes.json();
-
-    // Reload sequence list and select the new one
     const seqListRes = await fetch('/api/sequences');
     seqSequences = await seqListRes.json();
     renderSeqSelector();
     document.getElementById('seqSelector').value = seq.id;
     await loadSequenceById(seq.id);
-
-    btn.classList.add('has-seq');
-    btn.innerHTML = '&#9835; Edit';
-    btn.dataset.seqId = seq.id;
-
-    // Collapse tracks panel to show sequencer
+    if (btn) {
+      btn.classList.add('has-seq');
+      btn.innerHTML = '&#9835; Edit';
+      btn.dataset.seqId = seq.id;
+    }
     document.getElementById('tracksPanel').classList.add('collapsed');
   } catch(e) {
     console.error('Failed to generate sequence', e);
     alert('Failed: ' + e.message);
-    btn.innerHTML = origHtml;
+    if (btn) btn.innerHTML = '&#127917; Seq';
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ─── Bulk Generate ─────────────────────────────────────────────
+async function openBulkGenerateModal() {
+  _genBulkMode = true;
+  _genPendingTrackId = null;
+  _genPendingBtn = null;
+
+  const opts = await loadGenOptions();
+  populateGenSelects(opts);
+
+  // Count visible tracks (from current filter)
+  const params = buildTracksQueryParams();
+  params.set('limit', '1');
+  const countRes = await fetch('/api/tracks?' + params.toString());
+  const countData = await countRes.json();
+  const totalFiltered = countData.total || 0;
+
+  document.getElementById('genModalTitle').innerHTML = '&#127917; Bulk Generate Sequences';
+  document.getElementById('genTrackInfo').innerHTML = `Will generate sequences for <strong>${totalFiltered}</strong> tracks matching current filter.<br><span style="font-size:11px;color:var(--text-dim)">Tracks without existing analysis will be auto-analyzed first.</span>`;
+  document.getElementById('genGenreHint').textContent = 'Auto-detect uses each track\'s genre tag individually';
+  document.getElementById('genBulkProgress').style.display = 'none';
+  document.getElementById('genModalActions').style.display = 'flex';
+  document.getElementById('genConfirmBtn').textContent = 'Generate All';
+  document.getElementById('genConfirmBtn').onclick = () => confirmBulkGenerate();
+  document.getElementById('genModal').classList.add('open');
+}
+
+function buildTracksQueryParams() {
+  const params = new URLSearchParams();
+  const q = document.getElementById('tracksSearch').value.trim();
+  const genre = document.getElementById('tracksGenreFilter').value;
+  const source = document.getElementById('tracksSourceFilter').value;
+  const bpmMin = document.getElementById('tracksBpmMin').value;
+  const bpmMax = document.getElementById('tracksBpmMax').value;
+  if (q) params.set('q', q);
+  if (genre) params.set('genre', genre);
+  if (source) params.set('source', source);
+  if (bpmMin) params.set('bpm_min', bpmMin);
+  if (bpmMax) params.set('bpm_max', bpmMax);
+  return params;
+}
+
+async function confirmBulkGenerate() {
+  const palette = document.getElementById('genPalette').value;
+  const genre = document.getElementById('genGenre').value;
+
+  // Fetch all track IDs matching filter
+  const params = buildTracksQueryParams();
+  params.set('limit', '10000');
+  params.set('offset', '0');
+  const res = await fetch('/api/tracks?' + params.toString());
+  const data = await res.json();
+  const trackIds = (data.tracks || []).map(t => t.id);
+
+  if (trackIds.length === 0) {
+    alert('No tracks match the current filter.');
+    return;
+  }
+
+  // Show progress
+  document.getElementById('genConfirmBtn').disabled = true;
+  document.getElementById('genConfirmBtn').textContent = 'Generating...';
+  document.getElementById('genBulkProgress').style.display = 'block';
+  document.getElementById('genBulkFill').style.width = '0%';
+  document.getElementById('genBulkText').textContent = `0 / ${trackIds.length}`;
+
+  // Fire request
+  try {
+    await fetch('/api/sequences/generate-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        track_ids: trackIds,
+        palette: palette === 'random' ? undefined : palette,
+        genre: genre === 'auto' ? undefined : genre,
+        overwrite: false,
+      })
+    });
+    // Progress is tracked via WebSocket messages
+  } catch(e) {
+    alert('Bulk generate failed: ' + e.message);
+    document.getElementById('genConfirmBtn').disabled = false;
+    document.getElementById('genConfirmBtn').textContent = 'Generate All';
+  }
+}
+
+// Handle batch generation WebSocket messages
+function handleBulkGenWsMessage(msg) {
+  if (msg.type === 'seq_batch_progress') {
+    const pct = Math.round(((msg.completed + msg.failed + msg.skipped) / msg.total) * 100);
+    document.getElementById('genBulkFill').style.width = pct + '%';
+    document.getElementById('genBulkText').textContent = `${msg.completed + msg.failed + msg.skipped} / ${msg.total} (${msg.completed} generated, ${msg.skipped} skipped, ${msg.failed} failed)`;
+  }
+  if (msg.type === 'seq_batch_complete') {
+    document.getElementById('genBulkFill').style.width = '100%';
+    document.getElementById('genBulkText').textContent = `Done! ${msg.completed} generated, ${msg.skipped} skipped, ${msg.failed} failed`;
+    document.getElementById('genConfirmBtn').disabled = false;
+    document.getElementById('genConfirmBtn').textContent = 'Close';
+    document.getElementById('genConfirmBtn').onclick = () => { closeModal('genModal'); loadTracks(); };
+    // Refresh sequences list
+    fetch('/api/sequences').then(r => r.json()).then(seqs => { seqSequences = seqs; renderSeqSelector(); });
   }
 }
 
@@ -865,6 +1083,7 @@ document.getElementById('btnImportTracks').addEventListener('click', async () =>
 let wfCurrentTrackId = null;
 let wfAnalysisData = null;
 let wfWaveformData = null;   // WaveformData instance for resampling
+let wfRawPeaks = null;       // raw peak array with bass/mid/treble bands
 let wfTrackInfo = null;      // track title/author for lane header
 
 async function checkTracksWithAnalysis(trackIds) {
@@ -944,8 +1163,11 @@ async function loadAndShowWaveform(trackId) {
         samples_per_pixel: spp, bits: 8,
         length: peaks.length, data: wfArr
       });
+      // Store raw peaks for 3-band colored rendering
+      wfRawPeaks = peaks;
     } else {
       wfWaveformData = null;
+      wfRawPeaks = null;
     }
 
     // Get track info for lane header
@@ -981,7 +1203,6 @@ function drawTimelineWaveform() {
   ctx.clearRect(0, 0, totalWidth, H);
 
   const sections = data.sections || [];
-  const midY = H / 2;
   const sectionLabelH = 14;
   const waveH = H - sectionLabelH;
   const waveMidY = waveH / 2;
@@ -1001,54 +1222,150 @@ function drawTimelineWaveform() {
     ctx.stroke();
   }
 
-  // Get min/max arrays — resample when zoomed out, stretch when zoomed in
-  let minArr, maxArr, drawLen, xScale;
-  const origLen = wfWaveformData.length;
+  // Check if we have 3-band data
+  const hasBands = wfRawPeaks && wfRawPeaks.length > 0 && wfRawPeaks[0].bass !== undefined;
 
-  if (totalWidth <= origLen) {
-    // Zoomed out: downsample via waveform-data library
-    const resampled = wfWaveformData.resample({ width: totalWidth });
-    const channel = resampled.channel(0);
-    minArr = channel.min_array();
-    maxArr = channel.max_array();
-    drawLen = maxArr.length;
-    xScale = 1;
+  if (hasBands) {
+    // ── 3-band coloured waveform (VDJ-style) ──
+    // Resample raw peaks to fit totalWidth using simple bin averaging
+    const rawLen = wfRawPeaks.length;
+    let drawPeaks, xScale;
+
+    if (totalWidth <= rawLen) {
+      // Downsample: bin average
+      const binSize = rawLen / totalWidth;
+      drawPeaks = [];
+      for (let px = 0; px < totalWidth; px++) {
+        const start = Math.floor(px * binSize);
+        const end = Math.min(Math.floor((px + 1) * binSize), rawLen);
+        let pMax = 0, bMax = 0, mMax = 0, tMax = 0, rmsSum = 0, cnt = 0;
+        for (let j = start; j < end; j++) {
+          const p = wfRawPeaks[j];
+          if (p.peak > pMax) pMax = p.peak;
+          if (p.bass > bMax) bMax = p.bass;
+          if (p.mid > mMax) mMax = p.mid;
+          if (p.treble > tMax) tMax = p.treble;
+          rmsSum += p.rms; cnt++;
+        }
+        drawPeaks.push({ peak: pMax, bass: bMax, mid: mMax, treble: tMax, rms: cnt > 0 ? rmsSum/cnt : 0 });
+      }
+      xScale = 1;
+    } else {
+      // Zoomed in: use raw peaks, stretch
+      drawPeaks = wfRawPeaks;
+      xScale = totalWidth / rawLen;
+    }
+
+    const drawLen = drawPeaks.length;
+    const halfH = waveMidY;
+
+    // Draw layered bands — bass (bottom), mid, treble (top)
+    // Bass: blue
+    ctx.fillStyle = 'rgba(40, 120, 255, 0.55)';
+    ctx.beginPath();
+    ctx.moveTo(0, waveMidY);
+    for (let i = 0; i < drawLen; i++) {
+      const h = drawPeaks[i].bass * halfH;
+      ctx.lineTo(i * xScale, waveMidY - h);
+    }
+    for (let i = drawLen - 1; i >= 0; i--) {
+      const h = drawPeaks[i].bass * halfH;
+      ctx.lineTo(i * xScale, waveMidY + h);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Mid: green
+    ctx.fillStyle = 'rgba(0, 200, 100, 0.50)';
+    ctx.beginPath();
+    ctx.moveTo(0, waveMidY);
+    for (let i = 0; i < drawLen; i++) {
+      const h = drawPeaks[i].mid * halfH;
+      ctx.lineTo(i * xScale, waveMidY - h);
+    }
+    for (let i = drawLen - 1; i >= 0; i--) {
+      const h = drawPeaks[i].mid * halfH;
+      ctx.lineTo(i * xScale, waveMidY + h);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Treble: pink/red (on top, most visible)
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.50)';
+    ctx.beginPath();
+    ctx.moveTo(0, waveMidY);
+    for (let i = 0; i < drawLen; i++) {
+      const h = drawPeaks[i].treble * halfH;
+      ctx.lineTo(i * xScale, waveMidY - h);
+    }
+    for (let i = drawLen - 1; i >= 0; i--) {
+      const h = drawPeaks[i].treble * halfH;
+      ctx.lineTo(i * xScale, waveMidY + h);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Bright inner RMS envelope
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.beginPath();
+    ctx.moveTo(0, waveMidY);
+    for (let i = 0; i < drawLen; i++) {
+      const h = drawPeaks[i].rms * halfH * 0.9;
+      ctx.lineTo(i * xScale, waveMidY - h);
+    }
+    for (let i = drawLen - 1; i >= 0; i--) {
+      const h = drawPeaks[i].rms * halfH * 0.9;
+      ctx.lineTo(i * xScale, waveMidY + h);
+    }
+    ctx.closePath();
+    ctx.fill();
+
   } else {
-    // Zoomed in: use original data, stretch across totalWidth
-    const channel = wfWaveformData.channel(0);
-    minArr = channel.min_array();
-    maxArr = channel.max_array();
-    drawLen = maxArr.length;
-    xScale = totalWidth / drawLen;
-  }
+    // ── Fallback: single-colour waveform (legacy data) ──
+    let minArr, maxArr, drawLen, xScale;
+    const origLen = wfWaveformData.length;
 
-  const scale = waveH / 256; // 8-bit: -128..127
+    if (totalWidth <= origLen) {
+      const resampled = wfWaveformData.resample({ width: totalWidth });
+      const channel = resampled.channel(0);
+      minArr = channel.min_array();
+      maxArr = channel.max_array();
+      drawLen = maxArr.length;
+      xScale = 1;
+    } else {
+      const channel = wfWaveformData.channel(0);
+      minArr = channel.min_array();
+      maxArr = channel.max_array();
+      drawLen = maxArr.length;
+      xScale = totalWidth / drawLen;
+    }
 
-  // Draw waveform filled shape
-  ctx.fillStyle = 'rgba(233, 69, 96, 0.55)';
-  ctx.beginPath();
-  ctx.moveTo(0, waveMidY);
-  for (let i = 0; i < drawLen; i++) {
-    ctx.lineTo(i * xScale, waveMidY - maxArr[i] * scale);
-  }
-  for (let i = drawLen - 1; i >= 0; i--) {
-    ctx.lineTo(i * xScale, waveMidY - minArr[i] * scale);
-  }
-  ctx.closePath();
-  ctx.fill();
+    const scale = waveH / 256;
 
-  // Bright inner (RMS-like, use 60% of peaks for inner fill)
-  ctx.fillStyle = 'rgba(233, 69, 96, 0.85)';
-  ctx.beginPath();
-  ctx.moveTo(0, waveMidY);
-  for (let i = 0; i < drawLen; i++) {
-    ctx.lineTo(i * xScale, waveMidY - maxArr[i] * scale * 0.55);
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.55)';
+    ctx.beginPath();
+    ctx.moveTo(0, waveMidY);
+    for (let i = 0; i < drawLen; i++) {
+      ctx.lineTo(i * xScale, waveMidY - maxArr[i] * scale);
+    }
+    for (let i = drawLen - 1; i >= 0; i--) {
+      ctx.lineTo(i * xScale, waveMidY - minArr[i] * scale);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.85)';
+    ctx.beginPath();
+    ctx.moveTo(0, waveMidY);
+    for (let i = 0; i < drawLen; i++) {
+      ctx.lineTo(i * xScale, waveMidY - maxArr[i] * scale * 0.55);
+    }
+    for (let i = drawLen - 1; i >= 0; i--) {
+      ctx.lineTo(i * xScale, waveMidY - minArr[i] * scale * 0.55);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
-  for (let i = drawLen - 1; i >= 0; i--) {
-    ctx.lineTo(i * xScale, waveMidY - minArr[i] * scale * 0.55);
-  }
-  ctx.closePath();
-  ctx.fill();
 
   // Center line
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';

@@ -69,6 +69,7 @@ async function loadSequenceById(id) {
     seqSelectedCueId = null;
     wfAnalysisData = null;
     wfWaveformData = null;
+    wfRawPeaks = null;
     wfTrackInfo = null;
     wfCurrentTrackId = null;
     if (typeof loadAudioForTrack === 'function') loadAudioForTrack(null);
@@ -90,6 +91,7 @@ async function loadSequenceById(id) {
   // Clear previous waveform so stale data doesn't show during fetch
   wfAnalysisData = null;
   wfWaveformData = null;
+  wfRawPeaks = null;
   wfTrackInfo = null;
   wfCurrentTrackId = null;
   // Initialize active lanes from existing cues + let user add more

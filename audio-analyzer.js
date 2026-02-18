@@ -1,11 +1,11 @@
 /**
- * Audio Waveform Analyzer
+ * Audio Waveform Analyzer  (v3 — multi-band, improved sections)
  *
  * Uses ffmpeg to decode audio files to raw PCM, then computes:
- *   - Waveform peaks (downsampled overview)
- *   - RMS energy levels over time
+ *   - Waveform peaks with per-band (bass / mid / treble) energy
+ *   - True RMS energy levels over time (per-band)
  *   - Beat positions derived from BPM + beatgrid
- *   - Structural sections (intro, verse, chorus, bridge, breakdown, outro, etc.)
+ *   - Structural sections with multi-band novelty detection
  *
  * Looks for a local ffmpeg.exe in the project directory first, then falls back
  * to system PATH.  No ffprobe dependency — metadata is parsed from ffmpeg stderr.
@@ -15,17 +15,55 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 2;
-const TARGET_PEAKS = 1000;          // number of waveform overview points
-const ENERGY_SEGMENT_MS = 100;      // energy computed every N ms
-const DECODE_SAMPLE_RATE = 22050;   // downsample to this for analysis (mono)
-const BYTES_PER_SAMPLE = 2;         // 16-bit signed LE
+const ANALYSIS_VERSION = 3;
+const DEFAULTS = {
+  TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
+  ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
+  DECODE_SAMPLE_RATE:   22050,    // downsample for analysis (mono)
+  SECTION_MIN_BARS:     4,        // minimum section length in bars
+  SECTION_WINDOW_BARS:  4,        // energy smoothing window in bars
+  SECTION_SENSITIVITY:  1.2,      // novelty threshold multiplier (mean + X*std)
+  NORMALIZE_PERCENTILE: 99,       // percentile for peak normalisation (avoids spike squash)
+};
+const BYTES_PER_SAMPLE = 2;       // 16-bit signed LE
 
-// Section detection tuning
-const SECTION_MIN_BARS = 4;         // minimum section length in bars
-const SECTION_WINDOW_BARS = 4;      // energy smoothing window in bars
+// ─── Simple IIR filter helpers for 3-band frequency split ───────────────────
+
+/**
+ * First-order low-pass coefficient  α = dt / (RC + dt)
+ * where RC = 1 / (2π · cutoff), dt = 1 / sampleRate
+ */
+function lpCoeff(cutoffHz, sampleRate) {
+  const rc = 1.0 / (2.0 * Math.PI * cutoffHz);
+  const dt = 1.0 / sampleRate;
+  return dt / (rc + dt);
+}
+
+/**
+ * Create a simple first-order IIR state object
+ */
+function iirState() { return { prev: 0, prevIn: 0 }; }
+
+/**
+ * Low-pass filter: y[n] = α·x[n] + (1-α)·y[n-1]
+ */
+function lpFilter(sample, alpha, state) {
+  const out = alpha * sample + (1 - alpha) * state.prev;
+  state.prev = out;
+  return out;
+}
+
+/**
+ * High-pass filter: y[n] = (1-α)·(y[n-1] + x[n] − x[n-1])
+ */
+function hpFilter(sample, alpha, state) {
+  const out = (1 - alpha) * (state.prev + sample - state.prevIn);
+  state.prevIn = sample;
+  state.prev = out;
+  return out;
+}
 
 // ─── Resolve ffmpeg path ────────────────────────────────────────────────────
 
@@ -118,28 +156,29 @@ const SECTION_COLORS = {
 };
 
 /**
- * Detect structural sections from energy data and beat grid.
+ * Detect structural sections from multi-band energy data and beat grid.
  *
- * Algorithm:
- * 1. Compute bar-level average energy (each bar = 4 beats).
- * 2. Smooth the energy curve and compute a novelty function (absolute
- *    difference between consecutive bar energies).
- * 3. Pick peaks in the novelty function as section boundaries.
- * 4. Label each section by comparing its average energy to the track median:
- *    - Very low at start → intro
- *    - Very low at end → outro
- *    - Low followed by high → buildup
- *    - Sudden drop from high → breakdown
- *    - Below median → verse / bridge (alternating)
- *    - Above median → chorus / drop
+ * Algorithm  (v3 — multi-band novelty):
+ * 1. Compute per-bar average energy for bass, mid, treble and total.
+ * 2. Smooth each band with a moving window.
+ * 3. Compute a multi-band novelty function using cosine distance between
+ *    consecutive bar energy vectors [bass, mid, treble].
+ * 4. Pick peaks above an adaptive threshold as section boundaries
+ *    (snapped to 4-bar or 8-bar grid).
+ * 5. Label each section using energy ratios + bass content + position.
  *
- * @param {Array} energySegments  – [{time_ms, energy}, ...]
+ * @param {Array} energySegments  – [{time_ms, energy, bass, mid, treble}, ...]
  * @param {Array} beats           – [beatMs, ...]
  * @param {number} durationMs
  * @param {number} bpm
+ * @param {object} [cfg]          – { SECTION_MIN_BARS, SECTION_WINDOW_BARS, SECTION_SENSITIVITY }
  * @returns {Array} sections – [{start_ms, end_ms, label, color, energy, bars}, ...]
  */
-function detectSections(energySegments, beats, durationMs, bpm) {
+function detectSections(energySegments, beats, durationMs, bpm, cfg = {}) {
+  const SECTION_MIN_BARS   = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
+  const SECTION_WINDOW_BARS = cfg.SECTION_WINDOW_BARS || DEFAULTS.SECTION_WINDOW_BARS;
+  const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
+
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
   const beatMs = 60000 / bpm;
@@ -147,57 +186,98 @@ function detectSections(energySegments, beats, durationMs, bpm) {
   const totalBars = Math.floor(durationMs / barMs);
   if (totalBars < SECTION_MIN_BARS * 2) return [];
 
-  // 1. Per-bar average energy
-  const barEnergy = [];
-  for (let bar = 0; bar < totalBars; bar++) {
-    const barStart = bar * barMs;
-    const barEnd = barStart + barMs;
-    const segsInBar = energySegments.filter(s => s.time_ms >= barStart && s.time_ms < barEnd);
-    const avg = segsInBar.length > 0
-      ? segsInBar.reduce((sum, s) => sum + s.energy, 0) / segsInBar.length
-      : 0;
-    barEnergy.push(avg);
-  }
-
-  // 2. Smooth with a moving window
-  const windowSize = Math.max(1, Math.min(SECTION_WINDOW_BARS, Math.floor(totalBars / 8)));
-  const smoothed = [];
-  for (let i = 0; i < barEnergy.length; i++) {
-    let sum = 0, count = 0;
-    for (let j = Math.max(0, i - windowSize); j <= Math.min(barEnergy.length - 1, i + windowSize); j++) {
-      sum += barEnergy[j]; count++;
+  // Helper: per-bar average of a field
+  function barAverages(field) {
+    const arr = [];
+    for (let bar = 0; bar < totalBars; bar++) {
+      const barStart = bar * barMs;
+      const barEnd = barStart + barMs;
+      const inBar = energySegments.filter(s => s.time_ms >= barStart && s.time_ms < barEnd);
+      arr.push(inBar.length > 0
+        ? inBar.reduce((sum, s) => sum + (s[field] || s.energy || 0), 0) / inBar.length
+        : 0);
     }
-    smoothed.push(sum / count);
+    return arr;
   }
 
-  // 3. Novelty function (absolute difference)
+  // 1. Per-bar energy for each band
+  const barTotal = barAverages('energy');
+  const hasBands = energySegments[0] && energySegments[0].bass !== undefined;
+  const barBass   = hasBands ? barAverages('bass')   : barTotal;
+  const barMid    = hasBands ? barAverages('mid')     : barTotal;
+  const barTreble = hasBands ? barAverages('treble')  : barTotal;
+
+  // 2. Smooth each band
+  const windowSize = Math.max(1, Math.min(SECTION_WINDOW_BARS, Math.floor(totalBars / 8)));
+  function smooth(arr) {
+    const out = [];
+    for (let i = 0; i < arr.length; i++) {
+      let sum = 0, n = 0;
+      for (let j = Math.max(0, i - windowSize); j <= Math.min(arr.length - 1, i + windowSize); j++) {
+        sum += arr[j]; n++;
+      }
+      out.push(sum / n);
+    }
+    return out;
+  }
+  const smTotal  = smooth(barTotal);
+  const smBass   = smooth(barBass);
+  const smMid    = smooth(barMid);
+  const smTreble = smooth(barTreble);
+
+  // 3. Multi-band novelty: cosine distance between consecutive 3-vectors
+  function cosineDist(a, b) {
+    const dot = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    const magA = Math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]) || 1e-9;
+    const magB = Math.sqrt(b[0]*b[0] + b[1]*b[1] + b[2]*b[2]) || 1e-9;
+    return 1 - (dot / (magA * magB));
+  }
+
   const novelty = [0];
-  for (let i = 1; i < smoothed.length; i++) {
-    novelty.push(Math.abs(smoothed[i] - smoothed[i - 1]));
+  for (let i = 1; i < totalBars; i++) {
+    const vecPrev = [smBass[i-1], smMid[i-1], smTreble[i-1]];
+    const vecCurr = [smBass[i],   smMid[i],   smTreble[i]];
+    // Combine cosine distance with magnitude change for robustness
+    const cd = cosineDist(vecPrev, vecCurr);
+    const magDiff = Math.abs(smTotal[i] - smTotal[i-1]);
+    novelty.push(cd + magDiff * 2);
   }
 
-  // Median energy for classification
-  const sorted = [...smoothed].sort((a, b) => a - b);
-  const medianEnergy = sorted[Math.floor(sorted.length / 2)];
-
-  // Novelty threshold (mean + 1.2 * std)
+  // Adaptive threshold for novelty peaks
   const novMean = novelty.reduce((s, v) => s + v, 0) / novelty.length;
   const novStd = Math.sqrt(novelty.reduce((s, v) => s + (v - novMean) ** 2, 0) / novelty.length);
-  const novThreshold = novMean + 1.2 * novStd;
+  const novThreshold = novMean + SECTION_SENSITIVITY * novStd;
 
-  // 4. Find section boundaries
+  // 4. Find boundaries (snap to nearest 4-bar grid when close)
   const boundaries = [0];
   let lastBoundary = 0;
   for (let i = 1; i < novelty.length; i++) {
     if (novelty[i] > novThreshold && (i - lastBoundary) >= SECTION_MIN_BARS) {
-      boundaries.push(i);
-      lastBoundary = i;
+      // Snap to nearest 4-bar boundary if within 2 bars
+      const nearest4 = Math.round(i / 4) * 4;
+      const snapped = (Math.abs(nearest4 - i) <= 2 && nearest4 > lastBoundary && nearest4 < totalBars)
+        ? nearest4 : i;
+      if (snapped > lastBoundary) {
+        boundaries.push(snapped);
+        lastBoundary = snapped;
+      }
     }
   }
+  // Fallback: 8-bar segments if detection produced nothing
   if (boundaries.length < 2) {
     boundaries.length = 0;
     for (let i = 0; i < totalBars; i += 8) boundaries.push(i);
   }
+
+  // Median energy for classification
+  const sorted = [...smTotal].sort((a, b) => a - b);
+  const medianEnergy = sorted[Math.floor(sorted.length / 2)];
+  const p75Energy = sorted[Math.floor(sorted.length * 0.75)];
+
+  // Median bass ratio
+  const bassRatios = smBass.map((b, i) => smTotal[i] > 0 ? b / smTotal[i] : 0);
+  const sortedBR = [...bassRatios].sort((a, b) => a - b);
+  const medianBassRatio = sortedBR[Math.floor(sortedBR.length / 2)];
 
   // 5. Classify each section
   const sections = [];
@@ -209,35 +289,57 @@ function detectSections(energySegments, beats, durationMs, bpm) {
     const startMs = Math.round(startBar * barMs);
     const endMs = Math.round(endBar * barMs);
 
-    // Average energy of this section
-    let sectionEnergy = 0;
-    for (let b = startBar; b < endBar; b++) sectionEnergy += smoothed[b] || 0;
-    sectionEnergy /= (endBar - startBar) || 1;
+    // Average energies in this section
+    let secTotal = 0, secBass = 0;
+    for (let b = startBar; b < endBar; b++) {
+      secTotal += smTotal[b] || 0;
+      secBass  += smBass[b]  || 0;
+    }
+    const numBars = (endBar - startBar) || 1;
+    secTotal /= numBars;
+    secBass  /= numBars;
+    const secBassRatio = secTotal > 0 ? secBass / secTotal : 0;
 
     // Next section energy (for buildup detection)
     let nextSectionEnergy = 0;
     if (s + 1 < boundaries.length) {
       const nextEnd = s + 2 < boundaries.length ? boundaries[s + 2] : totalBars;
-      for (let b = boundaries[s + 1]; b < nextEnd; b++) nextSectionEnergy += smoothed[b] || 0;
+      for (let b = boundaries[s + 1]; b < nextEnd; b++) nextSectionEnergy += smTotal[b] || 0;
       nextSectionEnergy /= (nextEnd - boundaries[s + 1]) || 1;
     }
 
-    const ratio = medianEnergy > 0 ? sectionEnergy / medianEnergy : 1;
+    // Prev section energy (for contrast)
+    let prevSectionEnergy = 0;
+    if (s > 0) {
+      const prevStart = boundaries[s - 1];
+      for (let b = prevStart; b < startBar; b++) prevSectionEnergy += smTotal[b] || 0;
+      prevSectionEnergy /= (startBar - prevStart) || 1;
+    }
+
+    const ratio = medianEnergy > 0 ? secTotal / medianEnergy : 1;
     const position = startMs / durationMs;
+    const bassHigh = secBassRatio > medianBassRatio * 1.15;
 
     let label;
-    if (position < 0.08 && ratio < 1.1) {
+    if (position < 0.06 && ratio < 1.1) {
       label = 'intro';
-    } else if (position > 0.85 && ratio < 1.1) {
+    } else if (position > 0.88 && ratio < 1.1) {
       label = 'outro';
-    } else if (ratio < 0.5) {
-      label = (nextSectionEnergy > medianEnergy * 1.3) ? 'buildup' : 'breakdown';
-    } else if (ratio < 0.9) {
+    } else if (ratio < 0.45 && nextSectionEnergy > medianEnergy * 1.2) {
+      label = 'buildup';
+    } else if (ratio < 0.45 && prevSectionEnergy > medianEnergy * 1.2) {
+      label = 'breakdown';
+    } else if (ratio < 0.55) {
+      label = (nextSectionEnergy > medianEnergy * 1.2) ? 'buildup' : 'breakdown';
+    } else if (ratio < 0.85) {
       verseCount++;
       label = verseCount % 3 === 0 ? 'bridge' : 'verse';
-    } else if (ratio >= 1.3) {
+    } else if (ratio >= 1.4 && bassHigh) {
+      // Heavy bass + high energy → drop
+      label = 'drop';
+    } else if (ratio >= 1.15) {
       chorusCount++;
-      label = (chorusCount <= 1 || ratio >= 1.6) ? 'drop' : 'chorus';
+      label = (bassHigh && ratio >= 1.5) ? 'drop' : 'chorus';
     } else {
       chorusCount++;
       label = 'chorus';
@@ -248,12 +350,13 @@ function detectSections(energySegments, beats, durationMs, bpm) {
       end_ms: Math.min(endMs, durationMs),
       label,
       color: SECTION_COLORS[label] || SECTION_COLORS.unknown,
-      energy: parseFloat(sectionEnergy.toFixed(4)),
-      bars: endBar - startBar,
+      energy: parseFloat(secTotal.toFixed(4)),
+      bars: numBars,
     });
   }
 
   // Post-process: merge tiny adjacent same-label sections
+  if (sections.length === 0) return [];
   const merged = [sections[0]];
   for (let i = 1; i < sections.length; i++) {
     const prev = merged[merged.length - 1];
@@ -274,14 +377,23 @@ function detectSections(energySegments, beats, durationMs, bpm) {
 /**
  * Analyze an audio file and return waveform + energy + section data.
  *
+ * v3 improvements:
+ *   - 3-band frequency split (bass / mid / treble) via IIR filters
+ *   - True RMS peak calculation
+ *   - Percentile-based normalisation (avoids transient spikes squashing waveform)
+ *   - Configurable constants via opts.config
+ *
  * @param {string} filePath  – absolute path to audio file
  * @param {object} opts
- * @param {number} [opts.bpm]           – BPM (for beat grid & section detection)
- * @param {number} [opts.beatgridPos]   – first beat offset in seconds
- * @param {function} [opts.onProgress]  – callback(percent 0-100)
+ * @param {number}  [opts.bpm]           – BPM (for beat grid & section detection)
+ * @param {number}  [opts.beatgridPos]   – first beat offset in seconds
+ * @param {function}[opts.onProgress]    – callback(percent 0-100)
+ * @param {object}  [opts.config]        – override DEFAULTS (TARGET_PEAKS, DECODE_SAMPLE_RATE, etc.)
  * @returns {Promise<object>} analysis result
  */
 function analyzeTrack(filePath, opts = {}) {
+  const cfg = Object.assign({}, DEFAULTS, opts.config || {});
+
   return new Promise(async (resolve, reject) => {
     // Verify file exists
     if (!fs.existsSync(filePath)) {
@@ -299,6 +411,10 @@ function analyzeTrack(filePath, opts = {}) {
     const durationSec = probe.duration;
     if (durationSec <= 0) return reject(new Error('Cannot determine audio duration'));
     const durationMs = Math.round(durationSec * 1000);
+
+    const DECODE_SAMPLE_RATE = cfg.DECODE_SAMPLE_RATE;
+    const TARGET_PEAKS       = cfg.TARGET_PEAKS;
+    const ENERGY_SEGMENT_MS  = cfg.ENERGY_SEGMENT_MS;
 
     // Spawn ffmpeg to decode to raw PCM (mono, 16-bit signed LE, downsampled)
     const ffmpegBin = getFfmpegPath();
@@ -321,16 +437,26 @@ function analyzeTrack(filePath, opts = {}) {
     const samplesPerPeak = Math.max(1, Math.floor(totalSamples / TARGET_PEAKS));
     const samplesPerEnergy = Math.max(1, Math.floor((ENERGY_SEGMENT_MS / 1000) * DECODE_SAMPLE_RATE));
 
-    // Accumulators
+    // ─── IIR filter setup for 3-band split ──────────────────────────────
+    const bassAlpha   = lpCoeff(200,  DECODE_SAMPLE_RATE);   // bass < 200 Hz
+    const midLpAlpha  = lpCoeff(2000, DECODE_SAMPLE_RATE);   // mid  200–2000 Hz
+    const midHpAlpha  = lpCoeff(200,  DECODE_SAMPLE_RATE);
+    const trebAlpha   = lpCoeff(2000, DECODE_SAMPLE_RATE);   // treble > 2000 Hz
+
+    const bassState   = iirState();
+    const midLpState  = iirState();
+    const midHpState  = iirState();
+    const trebState   = iirState();
+
+    // Accumulators — waveform peaks
     const peaks = [];
+    let peakMax = 0, peakRmsAccum = 0, peakSampleCount = 0;
+    let peakBassMax = 0, peakMidMax = 0, peakTrebMax = 0;
+
+    // Accumulators — energy segments
     const energySegments = [];
-
-    let peakMax = 0;
-    let peakSampleCount = 0;
-    let peakAccum = 0;
-
-    let energyAccum = 0;
-    let energySampleCount = 0;
+    let energyAccum = 0, energySampleCount = 0;
+    let eBassAccum = 0, eMidAccum = 0, eTrebAccum = 0;
 
     let totalSamplesRead = 0;
     let leftover = Buffer.alloc(0);
@@ -348,36 +474,58 @@ function analyzeTrack(filePath, opts = {}) {
 
       for (let i = 0; i < buf.length; i += BYTES_PER_SAMPLE) {
         const sample = buf.readInt16LE(i);
-        const absVal = Math.abs(sample) / 32768;
+        const norm = sample / 32768;        // normalised −1..1
+        const absVal = Math.abs(norm);
         totalSamplesRead++;
 
-        // --- Waveform peaks ---
+        // ── 3-band split ──
+        const bass   = lpFilter(norm, bassAlpha, bassState);
+        const midLp  = lpFilter(norm, midLpAlpha, midLpState);
+        const midHp  = hpFilter(midLp, midHpAlpha, midHpState);
+        const mid    = midHp;
+        const treble = hpFilter(norm, trebAlpha, trebState);
+
+        const absBass = Math.abs(bass);
+        const absMid  = Math.abs(mid);
+        const absTreb = Math.abs(treble);
+
+        // ── Waveform peaks (true RMS + band maxes) ──
         if (absVal > peakMax) peakMax = absVal;
-        peakAccum += absVal;
+        peakRmsAccum += norm * norm;        // true RMS: sum of squares
         peakSampleCount++;
+        if (absBass > peakBassMax)  peakBassMax  = absBass;
+        if (absMid  > peakMidMax)   peakMidMax   = absMid;
+        if (absTreb > peakTrebMax)  peakTrebMax  = absTreb;
 
         if (peakSampleCount >= samplesPerPeak) {
           peaks.push({
             peak: peakMax,
-            rms: Math.sqrt(peakAccum / peakSampleCount),
+            rms:  Math.sqrt(peakRmsAccum / peakSampleCount),
+            bass: peakBassMax,
+            mid:  peakMidMax,
+            treble: peakTrebMax,
           });
-          peakMax = 0;
-          peakAccum = 0;
-          peakSampleCount = 0;
+          peakMax = 0; peakRmsAccum = 0; peakSampleCount = 0;
+          peakBassMax = 0; peakMidMax = 0; peakTrebMax = 0;
         }
 
-        // --- Energy levels ---
-        energyAccum += absVal * absVal;
+        // ── Energy levels (per-band RMS) ──
+        energyAccum += norm * norm;
+        eBassAccum  += bass * bass;
+        eMidAccum   += mid * mid;
+        eTrebAccum  += treble * treble;
         energySampleCount++;
 
         if (energySampleCount >= samplesPerEnergy) {
-          const rms = Math.sqrt(energyAccum / energySampleCount);
           const timeMs = Math.round(((totalSamplesRead - energySampleCount) / DECODE_SAMPLE_RATE) * 1000);
           energySegments.push({
             time_ms: timeMs,
-            energy: parseFloat(rms.toFixed(4)),
+            energy:  parseFloat(Math.sqrt(energyAccum  / energySampleCount).toFixed(4)),
+            bass:    parseFloat(Math.sqrt(eBassAccum   / energySampleCount).toFixed(4)),
+            mid:     parseFloat(Math.sqrt(eMidAccum    / energySampleCount).toFixed(4)),
+            treble:  parseFloat(Math.sqrt(eTrebAccum   / energySampleCount).toFixed(4)),
           });
-          energyAccum = 0;
+          energyAccum = 0; eBassAccum = 0; eMidAccum = 0; eTrebAccum = 0;
           energySampleCount = 0;
         }
       }
@@ -398,24 +546,38 @@ function analyzeTrack(filePath, opts = {}) {
       if (peakSampleCount > 0) {
         peaks.push({
           peak: peakMax,
-          rms: Math.sqrt(peakAccum / peakSampleCount),
+          rms:  Math.sqrt(peakRmsAccum / peakSampleCount),
+          bass: peakBassMax,
+          mid:  peakMidMax,
+          treble: peakTrebMax,
         });
       }
       // Flush remaining energy bucket
       if (energySampleCount > 0) {
-        const rms = Math.sqrt(energyAccum / energySampleCount);
         const timeMs = Math.round(((totalSamplesRead - energySampleCount) / DECODE_SAMPLE_RATE) * 1000);
-        energySegments.push({ time_ms: timeMs, energy: parseFloat(rms.toFixed(4)) });
+        energySegments.push({
+          time_ms: timeMs,
+          energy:  parseFloat(Math.sqrt(energyAccum  / energySampleCount).toFixed(4)),
+          bass:    parseFloat(Math.sqrt(eBassAccum   / energySampleCount).toFixed(4)),
+          mid:     parseFloat(Math.sqrt(eMidAccum    / energySampleCount).toFixed(4)),
+          treble:  parseFloat(Math.sqrt(eTrebAccum   / energySampleCount).toFixed(4)),
+        });
       }
 
-      // Normalize waveform peaks to 0-1 range
-      let globalMax = 0;
-      for (const p of peaks) {
-        if (p.peak > globalMax) globalMax = p.peak;
-      }
+      // ── Percentile-based normalisation ──
+      // Use Nth percentile instead of global max to avoid transient spikes
+      // squashing the waveform.
+      const normPct = Math.max(1, Math.min(100, cfg.NORMALIZE_PERCENTILE));
+      const peakVals = peaks.map(p => p.peak).sort((a, b) => a - b);
+      const pctIdx = Math.min(peakVals.length - 1, Math.floor(peakVals.length * normPct / 100));
+      const normRef = peakVals[pctIdx] || 1;
+
       const waveformPeaks = peaks.map((p) => ({
-        peak: globalMax > 0 ? parseFloat((p.peak / globalMax).toFixed(4)) : 0,
-        rms: globalMax > 0 ? parseFloat((p.rms / globalMax).toFixed(4)) : 0,
+        peak:   parseFloat(Math.min(1, p.peak   / normRef).toFixed(4)),
+        rms:    parseFloat(Math.min(1, p.rms    / normRef).toFixed(4)),
+        bass:   parseFloat(Math.min(1, p.bass   / normRef).toFixed(4)),
+        mid:    parseFloat(Math.min(1, p.mid    / normRef).toFixed(4)),
+        treble: parseFloat(Math.min(1, p.treble / normRef).toFixed(4)),
       }));
 
       // Generate beat grid from BPM
@@ -431,8 +593,8 @@ function analyzeTrack(filePath, opts = {}) {
         }
       }
 
-      // Detect structural sections
-      const sections = detectSections(energySegments, beats, durationMs, bpm);
+      // Detect structural sections (pass multi-band energy)
+      const sections = detectSections(energySegments, beats, durationMs, bpm, cfg);
 
       resolve({
         waveform_peaks: waveformPeaks,
@@ -457,4 +619,4 @@ function analyzeTrack(filePath, opts = {}) {
 
 // ─── Export ─────────────────────────────────────────────────────────────────
 
-module.exports = { analyzeTrack, checkFfmpeg, probeFile, detectSections, ANALYSIS_VERSION, SECTION_COLORS };
+module.exports = { analyzeTrack, checkFfmpeg, probeFile, detectSections, ANALYSIS_VERSION, SECTION_COLORS, DEFAULTS };

@@ -330,6 +330,7 @@
     .config-layout { display: flex; gap: 0; min-height: calc(100vh - 160px); }
     .config-sidebar {
       width: 200px; flex-shrink: 0;
+      display: flex; flex-direction: column;
       background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px 0 0 8px;
       overflow: hidden;
     }
@@ -1189,6 +1190,8 @@
       <button class="config-sidebar-btn" data-cfgtab="database"><span class="cfg-icon">&#128451;</span>Database</button>
       <button class="config-sidebar-btn" data-cfgtab="network"><span class="cfg-icon">&#127760;</span>Network</button>
       <button class="config-sidebar-btn" data-cfgtab="event-log"><span class="cfg-icon">&#9776;</span>Event Log</button>
+      <div style="flex:1"></div>
+      <button class="config-sidebar-btn" data-cfgtab="app-settings"><span class="cfg-icon">&#9881;</span>App Settings</button>
     </div>
 
     <!-- Config Panels -->
@@ -1824,6 +1827,112 @@
               <button class="filter-btn" data-filter="connection">Connection</button>
             </div>
             <div id="logEntries"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── App Settings ─── -->
+      <div class="config-sub-page" id="cfgpage-app-settings">
+        <div class="config-section">
+          <h3>App Settings</h3>
+          <p class="config-desc">Global application settings that control startup behaviour and defaults.</p>
+
+          <table class="subs-table" style="margin-top:16px">
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th style="width:200px">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>Enable DMX Output on Startup</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Automatically enable DMX output when the server starts. When off, DMX output must be manually enabled each session.</div>
+                </td>
+                <td>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <input type="checkbox" id="settingDmxOnStartup" style="accent-color:var(--accent);width:18px;height:18px">
+                    <span id="settingDmxOnStartupLabel" style="font-size:12px">Off</span>
+                  </label>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- ── Analysis Settings ── -->
+          <h3 style="margin-top:32px">Audio Analysis</h3>
+          <p class="config-desc">Settings that control waveform analysis quality and section detection. Changes apply to new analyses only — re-analyze tracks to see the effect.</p>
+
+          <table class="subs-table" style="margin-top:16px">
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th style="width:200px">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>Waveform Resolution</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Number of peak points in the waveform overview. Higher = more detail but larger data. Default: 2000</div>
+                </td>
+                <td>
+                  <select id="settingAnalysisPeaks" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--panel-border);background:var(--bg-dark);color:var(--text-primary)">
+                    <option value="1000">1000 (Low)</option>
+                    <option value="2000" selected>2000 (Default)</option>
+                    <option value="4000">4000 (High)</option>
+                    <option value="8000">8000 (Ultra)</option>
+                  </select>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Analysis Sample Rate</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Sample rate for PCM decoding. Higher captures more detail but uses more CPU. Default: 22050 Hz</div>
+                </td>
+                <td>
+                  <select id="settingAnalysisSampleRate" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--panel-border);background:var(--bg-dark);color:var(--text-primary)">
+                    <option value="22050" selected>22050 Hz (Default)</option>
+                    <option value="44100">44100 Hz (High)</option>
+                  </select>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Section Sensitivity</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">How aggressively section boundaries are detected. Lower = more sections, higher = fewer larger sections. Default: 1.2</div>
+                </td>
+                <td>
+                  <select id="settingAnalysisSensitivity" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--panel-border);background:var(--bg-dark);color:var(--text-primary)">
+                    <option value="0.6">0.6 (Very sensitive)</option>
+                    <option value="0.8">0.8 (Sensitive)</option>
+                    <option value="1.0">1.0 (Medium)</option>
+                    <option value="1.2" selected>1.2 (Default)</option>
+                    <option value="1.6">1.6 (Conservative)</option>
+                    <option value="2.0">2.0 (Minimal)</option>
+                  </select>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Amplitude Normalisation</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Percentile used for waveform normalisation. 99% avoids transient spikes squashing the display. 100% = strict max. Default: 99</div>
+                </td>
+                <td>
+                  <select id="settingAnalysisNormalize" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--panel-border);background:var(--bg-dark);color:var(--text-primary)">
+                    <option value="95">95th percentile</option>
+                    <option value="98">98th percentile</option>
+                    <option value="99" selected>99th percentile (Default)</option>
+                    <option value="100">100% (Global max)</option>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top:24px;padding:16px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
+            <p style="font-size:12px;color:var(--text-dim)">&#128712; Analysis settings only affect new analyses. To apply changes to previously-analyzed tracks, re-analyze them from the sequencer library.</p>
           </div>
         </div>
       </div>
@@ -2861,6 +2970,7 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     if (btn.dataset.cfgtab === 'sequencer') loadSequencerConfig();
     if (btn.dataset.cfgtab === 'database') loadDatabaseConfig();
     if (btn.dataset.cfgtab === 'network') loadNetworkConfig();
+    if (btn.dataset.cfgtab === 'app-settings') loadAppSettings();
   });
 });
 
@@ -3302,6 +3412,65 @@ async function loadNetworkConfig() {
 }
 
 function updateMdnsStatus(s) {
+
+// ═══════════════════════════════════════════════════════════════
+//  Config — App Settings
+// ═══════════════════════════════════════════════════════════════
+async function loadAppSettings() {
+  try {
+    const config = await fetch('/api/config').then(r => r.json());
+    const chk = document.getElementById('settingDmxOnStartup');
+    const lbl = document.getElementById('settingDmxOnStartupLabel');
+    const isOn = config.dmx_output_on_startup === '1' || config.dmx_output_on_startup === 'true';
+    chk.checked = isOn;
+    lbl.textContent = isOn ? 'On' : 'Off';
+
+    // Analysis settings
+    if (config.analysis_target_peaks)       document.getElementById('settingAnalysisPeaks').value       = config.analysis_target_peaks;
+    if (config.analysis_sample_rate)        document.getElementById('settingAnalysisSampleRate').value   = config.analysis_sample_rate;
+    if (config.analysis_section_sensitivity) document.getElementById('settingAnalysisSensitivity').value = config.analysis_section_sensitivity;
+    if (config.analysis_normalize_pct)      document.getElementById('settingAnalysisNormalize').value    = config.analysis_normalize_pct;
+  } catch(e) {
+    console.error('Failed to load app settings', e);
+  }
+}
+
+// Bind change handler immediately (element exists in DOM)
+document.getElementById('settingDmxOnStartup').addEventListener('change', async function() {
+  const val = this.checked ? '1' : '0';
+  document.getElementById('settingDmxOnStartupLabel').textContent = this.checked ? 'On' : 'Off';
+  try {
+    await fetch('/api/config/dmx_output_on_startup', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: val }),
+    });
+  } catch(e) {
+    console.error('Failed to save setting', e);
+  }
+});
+
+// Analysis settings change handlers
+['settingAnalysisPeaks', 'settingAnalysisSampleRate', 'settingAnalysisSensitivity', 'settingAnalysisNormalize'].forEach(id => {
+  const keyMap = {
+    settingAnalysisPeaks:       'analysis_target_peaks',
+    settingAnalysisSampleRate:  'analysis_sample_rate',
+    settingAnalysisSensitivity: 'analysis_section_sensitivity',
+    settingAnalysisNormalize:   'analysis_normalize_pct',
+  };
+  document.getElementById(id).addEventListener('change', async function() {
+    try {
+      await fetch(`/api/config/${keyMap[id]}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: this.value }),
+      });
+    } catch(e) {
+      console.error('Failed to save analysis setting', e);
+    }
+  });
+});
+
   if (s.responder_active && s.enabled) {
     document.getElementById('mdnsStatusBadge').innerHTML =
       '<span style="color:var(--green)">&#9679; Active</span>';
