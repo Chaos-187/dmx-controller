@@ -279,7 +279,7 @@ function getSectionPalettes(paletteName, sectionLabel) {
  * @returns {Object} { cues, bpm, durationMs, palette, genrePreset }
  */
 function generateSequence(opts) {
-  const { track, fixtures, analysis, effects } = opts;
+  const { track, fixtures, analysis, effects, moverPresets } = opts;
   const bpm = track.bpm || 128;
   const durationMs = (track.song_length || 180) * 1000;
   const beatMs = 60000 / bpm;
@@ -372,7 +372,7 @@ function generateSequence(opts) {
 
   // ── Mover movement generation (movers only) ───────────────────────────
   if (movers.length > 0) {
-    generateMoverMovement(cues, movers, sections, beats, ctx);
+    generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets || []);
   }
 
   // ── Effects generation (non-movers only) ──────────────────────────────
@@ -813,24 +813,69 @@ const MOVEMENT_STYLES = {
 const DEFAULT_MOVEMENT = { barsPerMove: 4, range: 0.5, speed: 'medium' };
 
 /**
+ * Build per-fixture position lists from saved mover presets.
+ * Each preset contains positions for all movers — we extract each fixture's
+ * pan/tilt from every preset to create a fixture-specific position pool.
+ * Positions from saved presets are prioritised; hardcoded MOVER_POSITIONS
+ * serve as padding when fewer presets than needed are defined.
+ */
+function buildFixturePositions(moverPresets, movers, rand) {
+  // Map: fixture_id → [{pan, tilt}, ...] from saved presets
+  const perFixture = {};
+  for (const fix of movers) perFixture[fix.id] = [];
+
+  if (moverPresets && moverPresets.length > 0) {
+    for (const preset of moverPresets) {
+      if (!Array.isArray(preset.positions)) continue;
+      // Build lookup for this preset's positions
+      const posMap = {};
+      for (const p of preset.positions) posMap[p.fixture_id] = { pan: p.pan, tilt: p.tilt };
+
+      for (const fix of movers) {
+        if (posMap[fix.id]) {
+          perFixture[fix.id].push(posMap[fix.id]);
+        }
+      }
+    }
+  }
+
+  // Pad with hardcoded positions so we always have enough variety
+  for (const fix of movers) {
+    const arr = perFixture[fix.id];
+    // Append hardcoded positions that are not duplicates of user presets
+    for (const hp of MOVER_POSITIONS) {
+      const isDup = arr.some(a => a.pan === hp.pan && a.tilt === hp.tilt);
+      if (!isDup) arr.push({ pan: hp.pan, tilt: hp.tilt });
+    }
+    // Shuffle the combined list with seeded random for deterministic variety
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+  }
+
+  return perFixture;
+}
+
+/**
  * Generate mover pan/tilt cues alongside color cues.
  * Each mover gets position assignments that sweep through presets.
+ * When saved mover presets exist, their per-fixture positions are used
+ * (supplemented by generic positions for additional variety).
  * Multi-mover setups get mirrored or offset positions for visual variety.
  */
-function generateMoverMovement(cues, movers, sections, beats, ctx) {
+function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets) {
   const { barMs, rand, preset, durationMs } = ctx;
 
-  // Pre-pick a shuffled sequence of positions for deterministic variety
-  const posOrder = MOVER_POSITIONS.slice();
-  for (let i = posOrder.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [posOrder[i], posOrder[j]] = [posOrder[j], posOrder[i]];
-  }
+  // Build per-fixture position lists from saved presets + hardcoded fallback
+  const perFixPositions = buildFixturePositions(moverPresets, movers, rand);
 
   const useSections = sections && sections.length > 0;
 
   for (let mi = 0; mi < movers.length; mi++) {
     const fix = movers[mi];
+    // Position pool for this specific fixture
+    const posOrder = perFixPositions[fix.id];
     // Find existing lane for this fixture (from color cues already generated)
     const existingCue = cues.find(c => c.fixture_id === fix.id);
     const lane = existingCue ? existingCue.lane : mi;

@@ -221,6 +221,7 @@ function handleMessage(data) {
               const genResult = sequenceGenerator.generateSequence({
                 track: { ...track, beatgrid_pos: fbPos }, fixtures, analysis,
                 effects: db.getEffects(),
+                moverPresets: db.getMoverPresets(),
                 noStrobes: db.getConfig('seq_no_strobes') === '1',
               });
               const newSeq = db.createSequence({
@@ -1658,6 +1659,7 @@ app.post('/api/sequences/generate/:trackId', async (req, res) => {
     palette: palKey || undefined,
     genre: genKey || undefined,
     effects: db.getEffects(),
+    moverPresets: db.getMoverPresets(),
     noStrobes: db.getConfig('seq_no_strobes') === '1',
   });
 
@@ -1728,6 +1730,7 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
         palette: palette || undefined,
         genre: genre || undefined,
         effects: allEffects,
+        moverPresets: db.getMoverPresets(),
         noStrobes: db.getConfig('seq_no_strobes') === '1',
       });
 
