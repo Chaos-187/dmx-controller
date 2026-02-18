@@ -13,6 +13,27 @@
  *      - Uses device-specific packet framing (e.g. "sTRt" header)
  */
 
+// ─── pkg native-addon resolver (worker thread has its own Module cache) ─────
+if (process.pkg) {
+  const path = require('path');
+  const fs   = require('fs');
+  const Module = require('module');
+  const EXE_DIR = path.dirname(process.execPath);
+  const origResolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, parent, isMain, options) {
+    try {
+      return origResolve.call(this, request, parent, isMain, options);
+    } catch (e) {
+      if (request.endsWith('.node') && /not included|not find|qualified_path/i.test(e.message)) {
+        const local = path.join(EXE_DIR, path.basename(request));
+        if (fs.existsSync(local)) return local;
+      }
+      throw e;
+    }
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const { parentPort } = require('worker_threads');
 
 // ─── Constants ──────────────────────────────────────────────────────────────

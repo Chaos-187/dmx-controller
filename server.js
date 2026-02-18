@@ -8,6 +8,32 @@
  * - Serves the web UI
  */
 
+// ─── pkg native-addon resolver ──────────────────────────────────────────────
+// When running as a packaged exe, native .node addons live next to the
+// executable but the 'bindings' / 'node-gyp-build' helpers look inside the
+// read-only snapshot.  Intercept failed .node resolves and redirect to the
+// exe directory so every native module loads transparently.
+if (process.pkg) {
+  const path = require('path');
+  const fs   = require('fs');
+  const Module = require('module');
+  const EXE_DIR = path.dirname(process.execPath);
+  const origResolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, parent, isMain, options) {
+    try {
+      return origResolve.call(this, request, parent, isMain, options);
+    } catch (e) {
+      // Only intercept .node files that pkg refused to serve from the snapshot
+      if (request.endsWith('.node') && /not included|not find|qualified_path/i.test(e.message)) {
+        const local = path.join(EXE_DIR, path.basename(request));
+        if (fs.existsSync(local)) return local;
+      }
+      throw e;
+    }
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const net = require('net');
 const http = require('http');
 const path = require('path');
