@@ -33,4 +33,5 @@ prebuilds/
 
 # Misc
 *.tgz
+*.exe
 package-lock.json
