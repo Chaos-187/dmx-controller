@@ -2349,10 +2349,13 @@ function updateState(state) {
     else { te.textContent = 'No track loaded'; te.classList.add('empty'); }
 
     document.getElementById(`bpm-${d}`).textContent = dk.bpm > 0 ? dk.bpm.toFixed(1) : '---';
-    const secs = Math.floor(dk.time || 0);
+    const rawTime = dk.time || 0;
+    const secs = Math.floor(rawTime > 86400 ? rawTime / 1000 : rawTime);
     document.getElementById(`time-${d}`).textContent = `${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
     document.getElementById(`beat-${d}`).textContent = dk.beatpos !== undefined ? dk.beatpos.toFixed(2) : '-';
-    document.getElementById(`firstbeat-${d}`).textContent = dk.firstbeat > 0 ? dk.firstbeat.toFixed(3)+'s' : '-';
+    const fbRaw = dk.firstbeat || 0;
+    const fbSecs = fbRaw > 60 ? fbRaw / 1000 : fbRaw;
+    document.getElementById(`firstbeat-${d}`).textContent = fbSecs > 0 ? fbSecs.toFixed(3)+'s' : '-';
 
     const lvl = ((dk.level||0)*100).toFixed(0);
     document.getElementById(`level-${d}`).style.width = `${lvl}%`;

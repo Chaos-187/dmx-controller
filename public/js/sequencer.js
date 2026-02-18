@@ -225,7 +225,8 @@ function renderSequencerTimeline() {
   for (let i = 0; i < laneFixes.length; i++) {
     const fix = laneFixes[i];
     const isMultiCell = fix.cell_count > 0;
-    const isExpanded = isMultiCell && seqExpandedFixtures.has(fix.id);
+    const isMover = !isMultiCell && fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
+    const isExpanded = (isMultiCell || isMover) && seqExpandedFixtures.has(fix.id);
     const hasRGB = fix.channels.some(c => c.type === 'red');
 
     // Build grid lines (reused for all sub-lanes)
@@ -239,13 +240,13 @@ function renderSequencerTimeline() {
       gt += beatMs;
     }
 
-    // Expand/collapse toggle for multi-cell fixtures
-    const expandToggle = isMultiCell
-      ? `<span class="seq-cell-toggle" data-fix-id="${fix.id}" title="${isExpanded ? 'Collapse cells' : 'Expand cells'}">${isExpanded ? '&#9660;' : '&#9654;'}</span>`
+    // Expand/collapse toggle for multi-cell or mover fixtures
+    const expandToggle = (isMultiCell || isMover)
+      ? `<span class="seq-cell-toggle" data-fix-id="${fix.id}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? '&#9660;' : '&#9654;'}</span>`
       : '';
 
     if (!isExpanded) {
-      // Single lane (collapsed or non-multi-cell): show ALL cues for this fixture
+      // Single lane (collapsed or simple fixture): show ALL cues for this fixture
       const fixCues = seqCues.filter(c => c.fixture_id === fix.id);
       let cuesHtml = '';
       for (const cue of fixCues) {
@@ -258,8 +259,30 @@ function renderSequencerTimeline() {
         `<div class="seq-lh-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
         `<span>${esc(fix.name)}</span></div>` +
         `<div class="seq-lane-track" data-fixture-id="${fix.id}">${gridHtml}${cuesHtml}</div></div>`;
+    } else if (isMover) {
+      // Mover expanded: Light sub-lane + Movement sub-lane
+      const lightCues = seqCues.filter(c => c.fixture_id === fix.id && c.label !== 'move');
+      let lightCuesHtml = '';
+      for (const cue of lightCues) lightCuesHtml += renderCueBlock(cue);
+
+      lanesHtml += `<div class="seq-lane seq-lane-mover-light" data-fixture-id="${fix.id}" data-lane="${i}" data-sublane="light">` +
+        `<div class="seq-lane-header">` +
+        `${expandToggle}` +
+        `<div class="seq-lh-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
+        `<span>${esc(fix.name)} <small style="color:var(--text-dim)">[Light]</small></span></div>` +
+        `<div class="seq-lane-track" data-fixture-id="${fix.id}" data-sublane="light">${gridHtml}${lightCuesHtml}</div></div>`;
+
+      const moveCues = seqCues.filter(c => c.fixture_id === fix.id && c.label === 'move');
+      let moveCuesHtml = '';
+      for (const cue of moveCues) moveCuesHtml += renderCueBlock(cue);
+
+      lanesHtml += `<div class="seq-lane seq-lane-mover-move" data-fixture-id="${fix.id}" data-lane="${i}" data-sublane="movement">` +
+        `<div class="seq-lane-header seq-cell-header">` +
+        `<div class="seq-lh-color" style="background:#4488ff"></div>` +
+        `<span style="font-size:11px">${esc(fix.name)} <small style="color:var(--text-dim)">[Movement]</small></span></div>` +
+        `<div class="seq-lane-track" data-fixture-id="${fix.id}" data-sublane="movement">${gridHtml}${moveCuesHtml}</div></div>`;
     } else {
-      // Expanded: show sub-lanes per cell + optional master lane
+      // Multi-cell expanded: show sub-lanes per cell + optional master lane
       const hasMasterChannels = fix.channels.some(ch => !ch.cell);
 
       // Master lane (channels with no cell assignment)
@@ -466,13 +489,25 @@ function setupSequencerEvents() {
     const lane = +e.target.closest('.seq-lane').dataset.lane;
     const cellAttr = track.dataset.cell;
     const cell = cellAttr !== undefined ? +cellAttr : null;
+    const sublane = track.dataset.sublane || null;
 
-    const body = {
-      lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
-      cue_type: 'static', fixture_id: fixtureId,
-      channel_values: { red: 255, green: 0, blue: 0 },
-      color: '#ff0000', label: '',
-    };
+    let body;
+    if (sublane === 'movement') {
+      body = {
+        lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
+        cue_type: 'fade', fixture_id: fixtureId,
+        channel_values: { pan: 128, tilt: 128 },
+        end_channel_values: { pan: 128, tilt: 128 },
+        color: '#4488ff', label: 'move',
+      };
+    } else {
+      body = {
+        lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
+        cue_type: 'static', fixture_id: fixtureId,
+        channel_values: { red: 255, green: 0, blue: 0 },
+        color: '#ff0000', label: '',
+      };
+    }
     if (cell) body.cell = cell;
 
     const res = await fetch(`/api/sequences/${seqCurrentId}/cues`, {
@@ -768,6 +803,15 @@ function renderCueChannelSliders(cueId, cueType) {
   let channels = fix.channels;
   if (cue.cell) {
     channels = fix.channels.filter(ch => !ch.cell || ch.cell === cue.cell);
+  }
+
+  // For movers, filter channels based on cue type (light vs movement)
+  const moverMoveTypes = new Set(['pan', 'tilt', 'gobo', 'gobo_rotation', 'speed']);
+  const isMoverFixture = fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
+  if (isMoverFixture && cue.label === 'move') {
+    channels = channels.filter(ch => moverMoveTypes.has(ch.type));
+  } else if (isMoverFixture && seqExpandedFixtures.has(fix.id) && cue.label !== 'move') {
+    channels = channels.filter(ch => !moverMoveTypes.has(ch.type));
   }
 
   const chColorMap = {

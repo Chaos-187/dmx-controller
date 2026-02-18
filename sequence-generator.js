@@ -350,10 +350,16 @@ function generateSequence(opts) {
   const cues = [];
   const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes };
 
+  // Multi-cell fixtures get dedicated per-cell patterns, so exclude them
+  // from the main section/bar generator to avoid master cues competing.
+  const colorFixtures = (multiCellFixtures.length > 0 && sections.length > 0)
+    ? rgbFixtures.filter(f => f.cell_count <= 0)
+    : rgbFixtures;
+
   if (sections.length > 0) {
-    generateSectionBased(cues, rgbFixtures, sections, beats, energyLevels, ctx);
+    generateSectionBased(cues, colorFixtures, sections, beats, energyLevels, ctx);
   } else {
-    generateBarBased(cues, rgbFixtures, ctx);
+    generateBarBased(cues, colorFixtures, ctx);
   }
 
   // ── Multi-cell pattern generation (per-cell cues for chases/patterns) ──
@@ -367,8 +373,15 @@ function generateSequence(opts) {
   }
 
   // ── Effects generation (non-movers only) ──────────────────────────────
-  if (effects && effects.length > 0 && nonMoverFixtures.length > 0) {
-    generateEffectCues(cues, regularFixtures, ledBars, effects, sections, ctx);
+  // Exclude multi-cell fixtures from effect generation — they get dedicated
+  // per-cell patterns from generateMultiCellPatterns instead.  Without this
+  // exclusion, master-level effects can stomp on cell cues (e.g. verse sections
+  // ending up with only a master effect and no cell patterns visible).
+  const multiCellIds = new Set(multiCellFixtures.map(f => f.id));
+  const effectLedBars = ledBars.filter(f => !multiCellIds.has(f.id));
+  const effectRegulars = regularFixtures.filter(f => !multiCellIds.has(f.id));
+  if (effects && effects.length > 0 && (effectRegulars.length > 0 || effectLedBars.length > 0)) {
+    generateEffectCues(cues, effectRegulars, effectLedBars, effects, sections, ctx);
   }
 
   // ── Resolve master ↔ cell cue conflicts on multi-cell fixtures ────────
@@ -1127,14 +1140,14 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 // to be fast, high-contrast, and energetic.
 
 const CELL_PATTERN_MAP = {
-  intro:     ['fill_sweep', 'color_wave'],
-  verse:     ['chase_slow', 'alternate', 'color_wave'],
+  intro:     ['fill_sweep', 'color_wave', 'breathe'],
+  verse:     ['chase_slow', 'alternate', 'color_wave', 'breathe'],
   chorus:    ['chase', 'alternate', 'scatter'],
-  bridge:    ['color_wave', 'alternate'],
+  bridge:    ['color_wave', 'alternate', 'breathe'],
   breakdown: ['fill_sweep', 'breathe'],
   buildup:   ['build_reveal', 'chase_accel'],
   drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
-  outro:     ['fill_sweep', 'color_wave'],
+  outro:     ['fill_sweep', 'color_wave', 'breathe'],
 };
 
 /**

@@ -439,6 +439,7 @@ function executeMapAction(map, activate) {
 
   switch (map.action_type) {
     case 'blackout':
+      touchOverrides.blackoutHold = activate;
       if (activate) {
         // Save current DMX state then blackout
         artnetServer.saveBuffers();
@@ -451,6 +452,7 @@ function executeMapAction(map, activate) {
         dmxUsbServer.restoreBuffers();
       }
       broadcast({ type: 'os2l_action', action: 'blackout', map: map.name, active: activate });
+      broadcast({ type: 'touchBlackoutHold', active: activate });
       break;
 
     case 'set_channels': {
@@ -1010,6 +1012,13 @@ app.post('/api/artnet/channel', (req, res) => {
 
 let dmxOutputEnabled = false;
 
+// ─── Touch Override State ────────────────────────────────────────────────────
+// Server-side state that the playback engine respects
+const touchOverrides = {
+  disabledFixtures: new Set(),   // fixture IDs disabled from touch UI
+  blackoutHold: false,           // true while blackout is held (OS2L or touch)
+};
+
 app.get('/api/dmx/output', (req, res) => {
   res.json({ enabled: dmxOutputEnabled });
 });
@@ -1039,6 +1048,47 @@ app.post('/api/dmx/channels', (req, res) => {
   artnetServer.setChannels(universe, channels);
   dmxUsbServer.setChannels(universe, channels);
   res.json({ ok: true });
+});
+
+// ─── Touch Override API ──────────────────────────────────────────────────────
+
+app.get('/api/touch/state', (req, res) => {
+  res.json({
+    disabledFixtures: [...touchOverrides.disabledFixtures],
+    blackoutHold: touchOverrides.blackoutHold,
+  });
+});
+
+app.post('/api/touch/fixture-disable', (req, res) => {
+  const { fixtureId, disabled } = req.body;
+  if (disabled) {
+    touchOverrides.disabledFixtures.add(fixtureId);
+    // Immediately zero out this fixture's channels
+    const allFixtures = db.getFixtureChannelMap();
+    const fixMap = allFixtures.find(f => f.id === fixtureId);
+    if (fixMap && dmxOutputEnabled) {
+      const channels = fixMap.channels.map(ch => ({ ch: ch.dmx_address, val: 0 }));
+      artnetServer.setChannels(fixMap.universe, channels);
+      dmxUsbServer.setChannels(fixMap.universe, channels);
+    }
+  } else {
+    touchOverrides.disabledFixtures.delete(fixtureId);
+  }
+  broadcast({ type: 'touchFixtureDisable', fixtureId, disabled: !!disabled });
+  console.log(`[TOUCH] Fixture ${fixtureId} ${disabled ? 'DISABLED' : 'ENABLED'}`);
+  res.json({ ok: true, disabledFixtures: [...touchOverrides.disabledFixtures] });
+});
+
+app.post('/api/touch/blackout-hold', (req, res) => {
+  const { active } = req.body;
+  touchOverrides.blackoutHold = !!active;
+  if (active) {
+    artnetServer.blackout();
+    dmxUsbServer.blackout();
+  }
+  broadcast({ type: 'touchBlackoutHold', active: !!active });
+  console.log(`[TOUCH] Blackout hold ${active ? 'ON' : 'OFF'}`);
+  res.json({ ok: true, blackoutHold: !!active });
 });
 
 // ─── OS2L Button Maps API ───────────────────────────────────────────────────
@@ -1875,6 +1925,9 @@ function processSequenceAtTime(deckNum, timeMs) {
 
   if (!dmxOutputEnabled) return;
 
+  // ── Touch blackout hold: suppress all playback output ──
+  if (touchOverrides.blackoutHold) return;
+
   // ── Crossfader gating: suppress output for the deck the crossfader is away from ──
   if (_cachedMixerConfig.crossfaderGating) {
     const cf = parseFloat(state.crossfader) || 0;  // 0 = full deck 1, 1 = full deck 2
@@ -1916,6 +1969,9 @@ function processSequenceAtTime(deckNum, timeMs) {
     // This cue is active
     const fixtureId = cue.fixture_id;
     if (!fixtureId) continue;
+
+    // Skip fixtures disabled from the touch interface
+    if (touchOverrides.disabledFixtures.has(fixtureId)) continue;
 
     // Find the fixture in fixture channel map (cache this?)
     const fixMap = db.getFixtureChannelMap().find(f => f.id === fixtureId);
@@ -2399,6 +2455,10 @@ function startMdnsResponder() {
 
 // Initialise database
 db.init();
+
+// Refresh cached mixer config now that DB is ready
+// (the inline call at declaration time fires before db.init() and silently fails)
+refreshMixerConfig();
 
 // Apply "DMX output on startup" setting
 (function applyStartupDmxSetting() {

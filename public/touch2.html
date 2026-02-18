@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>DMX Touch</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   RESET & ROOT
+   ═══════════════════════════════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#000;--surface:rgba(255,255,255,.06);--surface2:rgba(255,255,255,.03);
+  --border:rgba(255,255,255,.08);--text:#fff;--dim:rgba(255,255,255,.35);
+  --active:#fff;--danger:#ff3b30;--green:#30d158;--blue:#0a84ff;
+  --orange:#ff9f0a;--safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --tab-h:56px;--toolbar-h:68px;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text',system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;
+  touch-action:manipulation;display:flex;flex-direction:column;
+  padding-top:var(--safe-t);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOP TOOLBAR
+   ═══════════════════════════════════════════════════════════════ */
+.toolbar{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 16px;flex-shrink:0;z-index:100;
+  background:var(--bg);
+}
+.toolbar-pill{
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  height:44px;padding:0 20px;border-radius:22px;border:none;
+  font-size:14px;font-weight:600;letter-spacing:.02em;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:transform .1s,opacity .15s;position:relative;overflow:hidden;
+}
+.toolbar-pill:active{transform:scale(.92)}
+.toolbar-pill::before{
+  content:'';position:absolute;inset:0;border-radius:inherit;
+  background:currentColor;opacity:0;transition:opacity .1s;
+}
+.toolbar-pill:active::before{opacity:.12}
+
+#btnOutput{background:var(--green);color:#000}
+#btnOutput.off{background:rgba(255,255,255,.1);color:var(--dim)}
+#btnBlackout{background:var(--danger);color:#fff}
+#btnBlackout.active{animation:blackout-pulse .4s ease-in-out infinite alternate}
+@keyframes blackout-pulse{from{opacity:1}to{opacity:.5}}
+
+.toolbar-spacer{flex:1}
+.status-pip{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-pip.ok{background:var(--green)}
+.status-pip.err{background:var(--danger)}
+
+/* Mode toggle (segmented control) */
+.seg-ctrl{
+  display:flex;background:rgba(255,255,255,.08);border-radius:20px;padding:3px;
+}
+.seg-ctrl button{
+  padding:7px 14px;border-radius:17px;border:none;background:none;
+  font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:all .2s;
+}
+.seg-ctrl button.active{background:var(--active);color:#000}
+
+/* ═══════════════════════════════════════════════════════════════
+   TAB BAR (bottom iOS-style)
+   ═══════════════════════════════════════════════════════════════ */
+.tab-bar{
+  display:flex;background:rgba(20,20,20,.95);
+  -webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);
+  border-top:1px solid var(--border);flex-shrink:0;z-index:100;
+  padding-bottom:var(--safe-b);
+}
+.tab-bar button{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:3px;padding:8px 0 6px;border:none;background:none;
+  color:var(--dim);font-size:10px;font-weight:500;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:color .15s;
+}
+.tab-bar button .tab-icon{font-size:22px;line-height:1}
+.tab-bar button.active{color:var(--active)}
+
+/* ═══════════════════════════════════════════════════════════════
+   PAGES
+   ═══════════════════════════════════════════════════════════════ */
+.pages{flex:1;position:relative;overflow:hidden}
+.page{
+  position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;
+  padding:10px 12px;display:none;
+  -webkit-overflow-scrolling:touch;
+}
+.page.active{display:block}
+/* Colors page: two-column dashboard, no scroll */
+.page-dash{display:none !important;flex-direction:column;gap:6px;overflow:hidden !important;padding:6px 10px}
+.page-dash.active{display:flex !important}
+.dash-body{display:flex;gap:10px;flex:1;min-height:0}
+.dash-left{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.dash-right{width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;min-height:0}
+
+.page-title{
+  font-size:28px;font-weight:700;letter-spacing:-.02em;margin-bottom:16px;
+}
+.section-label{
+  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--dim);margin:0 0 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COLOR GRID (square tiles)
+   ═══════════════════════════════════════════════════════════════ */
+.color-grid{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:5px;flex:1;min-height:0;
+}
+.color-tile{
+  border-radius:10px;border:2.5px solid transparent;min-height:0;
+  cursor:pointer;position:relative;overflow:hidden;
+  transition:border-color .12s,transform .1s;
+  -webkit-tap-highlight-color:transparent;
+}
+.color-tile:active{transform:scale(.92)}
+.color-tile.active{border-color:var(--active);box-shadow:0 0 0 2px var(--active)}
+.color-tile .color-label{
+  position:absolute;bottom:0;left:0;right:0;padding:2px 0;
+  text-align:center;font-size:9px;font-weight:700;
+  background:linear-gradient(transparent,rgba(0,0,0,.65));
+  color:#fff;letter-spacing:.03em;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   iOS SLIDER (big, fat, round)
+   ═══════════════════════════════════════════════════════════════ */
+.slider-wrap{
+  display:flex;align-items:center;gap:10px;padding:0;flex-shrink:0;
+}
+.slider-label{
+  font-size:12px;font-weight:600;color:var(--dim);min-width:48px;
+}
+.slider-val{
+  font-size:14px;font-weight:700;min-width:32px;text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;flex:1;
+  height:36px;background:transparent;cursor:pointer;touch-action:none;
+}
+input[type=range]::-webkit-slider-runnable-track{
+  height:28px;border-radius:14px;
+  background:rgba(255,255,255,.08);
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:28px;height:28px;border-radius:50%;
+  background:#fff;border:none;margin-top:0;
+  box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.1);
+}
+input[type=range]::-moz-range-track{
+  height:28px;border-radius:14px;border:none;
+  background:rgba(255,255,255,.08);
+}
+input[type=range]::-moz-range-thumb{
+  width:28px;height:28px;border-radius:50%;
+  background:#fff;border:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.1);
+}
+/* Small variant for inline lists */
+.slider-sm{flex:0 0 100px !important;height:32px !important}
+.slider-sm::-webkit-slider-runnable-track{height:22px;border-radius:11px}
+.slider-sm::-webkit-slider-thumb{width:22px;height:22px}
+.slider-sm::-moz-range-track{height:22px;border-radius:11px}
+.slider-sm::-moz-range-thumb{width:22px;height:22px}
+/* Side-by-side slider row */
+.slider-pair{display:flex;gap:12px;flex-shrink:0}
+.slider-pair .slider-wrap{flex:1;min-width:0}
+
+/* ═══════════════════════════════════════════════════════════════
+   CHIPS (group selectors)
+   ═══════════════════════════════════════════════════════════════ */
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0}
+.chip{
+  height:32px;padding:0 14px;border-radius:16px;
+  border:1.5px solid var(--border);background:var(--surface);
+  font-size:12px;font-weight:600;color:var(--dim);
+  display:inline-flex;align-items:center;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:all .15s;
+}
+.chip:active{transform:scale(.94)}
+.chip.active{border-color:var(--active);color:var(--active);background:rgba(255,255,255,.1)}
+
+/* ═══════════════════════════════════════════════════════════════
+   LIST ROWS (fixtures, groups, movers)
+   ═══════════════════════════════════════════════════════════════ */
+.list-card{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 16px;border-radius:16px;
+  background:var(--surface);margin-bottom:8px;
+}
+.list-card .lc-name{font-size:15px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list-card .lc-sub{font-size:12px;color:var(--dim)}
+.list-card .lc-val{font-size:14px;font-weight:700;min-width:30px;text-align:center;font-variant-numeric:tabular-nums}
+
+/* iOS toggle */
+.ios-toggle{
+  width:51px;height:31px;border-radius:16px;flex-shrink:0;
+  background:rgba(255,255,255,.15);position:relative;cursor:pointer;
+  transition:background .25s;-webkit-tap-highlight-color:transparent;
+}
+.ios-toggle.on{background:var(--green)}
+.ios-toggle::after{
+  content:'';position:absolute;width:27px;height:27px;border-radius:50%;
+  background:#fff;top:2px;left:2px;transition:transform .25s;
+  box-shadow:0 2px 4px rgba(0,0,0,.2);
+}
+.ios-toggle.on::after{transform:translateX(20px)}
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTION GRID
+   ═══════════════════════════════════════════════════════════════ */
+.action-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;flex-shrink:0}
+.action-card{
+  padding:10px 6px;border-radius:12px;background:var(--surface);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:transform .1s,background .15s;border:1.5px solid transparent;
+}
+.action-card:active{transform:scale(.94)}
+.action-card.active{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3)}
+.action-card .ac-icon{font-size:22px;line-height:1;margin-bottom:1px}
+.action-card .ac-label{font-size:11px;font-weight:700}
+
+/* Mover presets on dashboard */
+.mover-section{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+.mover-section .section-label{margin:0}
+.mover-grid{display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto}
+.mover-pill{
+  padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);
+  background:var(--surface);font-size:13px;font-weight:600;color:var(--text);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:center;
+  transition:all .12s;flex-shrink:0;
+}
+.mover-pill:active{transform:scale(.94);background:rgba(255,255,255,.15)}
+
+/* FX Bar (inline) */
+.fx-row{
+  display:flex;gap:6px;align-items:center;flex-shrink:0;
+}
+.fx-btn{
+  height:38px;padding:0 16px;border-radius:19px;border:1.5px solid var(--border);
+  background:var(--surface);font-size:13px;font-weight:700;color:var(--text);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  display:inline-flex;align-items:center;gap:5px;transition:all .12s;flex-shrink:0;
+}
+.fx-btn:active{transform:scale(.92)}
+.fx-btn.active{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.4)}
+.fx-btn.strobe-on{animation:strobe-flash .1s infinite alternate}
+@keyframes strobe-flash{from{opacity:1}to{opacity:.3}}
+
+/* Preset list */
+.preset-pill{
+  height:44px;padding:0 20px;border-radius:22px;border:1.5px solid var(--border);
+  background:var(--surface);font-size:14px;font-weight:600;color:var(--text);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;display:inline-flex;
+  align-items:center;transition:all .12s;
+}
+.preset-pill:active{transform:scale(.92);background:rgba(255,255,255,.15)}
+
+/* Clear btn (inline) */
+.clear-btn-sm{
+  height:32px;padding:0 14px;border-radius:16px;border:none;
+  background:rgba(255,255,255,.08);color:var(--dim);
+  font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;
+  -webkit-tap-highlight-color:transparent;transition:all .12s;
+}
+.clear-btn-sm:active{transform:scale(.94);background:rgba(255,255,255,.15)}
+/* Inline group row */
+.groups-row{
+  display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;
+}
+.groups-row .section-label{margin:0;flex-shrink:0}
+
+/* ═══════════════════════════════════════════════════════════════
+   DECK INFO STRIP
+   ═══════════════════════════════════════════════════════════════ */
+.deck-strip{
+  display:flex;gap:6px;padding:0 12px 6px;flex-shrink:0;
+}
+.deck-card{
+  flex:1;display:flex;align-items:center;gap:8px;
+  padding:8px 12px;border-radius:12px;
+  background:var(--surface);border:1px solid var(--border);
+  min-width:0;overflow:hidden;
+}
+.deck-num{
+  font-size:11px;font-weight:800;color:var(--dim);
+  flex-shrink:0;width:18px;text-align:center;
+}
+.deck-play-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:rgba(255,255,255,.15);transition:background .2s;
+}
+.deck-play-dot.playing{background:var(--green)}
+.deck-play-dot.paused{background:var(--orange)}
+.deck-info{
+  flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;
+}
+.deck-track{
+  font-size:12px;font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;color:var(--text);
+}
+.deck-track.empty{color:var(--dim);font-weight:400;font-style:italic}
+.deck-meta{
+  font-size:10px;font-weight:500;color:var(--dim);
+  font-variant-numeric:tabular-nums;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TOOLBAR
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="toolbar">
+  <span id="statusPip" class="status-pip err"></span>
+  <div class="seg-ctrl" id="modeSwitch">
+    <button class="active" data-mode="hold">HOLD</button>
+    <button data-mode="toggle">TOGGLE</button>
+  </div>
+  <div class="toolbar-spacer"></div>
+  <button class="toolbar-pill" id="btnOutput">OUTPUT</button>
+  <button class="toolbar-pill" id="btnBlackout">BLACKOUT</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     DECK INFO
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="deck-strip">
+  <div class="deck-card">
+    <span class="deck-num">1</span>
+    <span class="deck-play-dot" id="deckDot1"></span>
+    <div class="deck-info">
+      <div class="deck-track empty" id="deckTrack1">No track</div>
+      <div class="deck-meta" id="deckMeta1">--- BPM</div>
+    </div>
+  </div>
+  <div class="deck-card">
+    <span class="deck-num">2</span>
+    <span class="deck-play-dot" id="deckDot2"></span>
+    <div class="deck-info">
+      <div class="deck-track empty" id="deckTrack2">No track</div>
+      <div class="deck-meta" id="deckMeta2">--- BPM</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGES
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="pages">
+
+  <!-- ─── COLORS (dashboard — no scroll) ────────── -->
+  <div class="page-dash active" id="page-colors">
+
+    <div class="groups-row">
+      <button class="clear-btn-sm" onclick="clearColorOverride()">Clear</button>
+      <div class="chip-row" id="colorTargetGroups" style="flex:1"></div>
+    </div>
+
+    <div class="dash-body">
+      <!-- LEFT: colors + sliders + fx -->
+      <div class="dash-left">
+        <div class="color-grid" id="colorGrid"></div>
+        <div class="slider-pair">
+          <div class="slider-wrap"><span class="slider-label">Intensity</span><input type="range" id="colorIntensity" min="0" max="255" value="255"><span class="slider-val" id="colorIntVal">255</span></div>
+          <div class="slider-wrap"><span class="slider-label">Master</span><input type="range" id="masterDim" min="0" max="255" value="255"><span class="slider-val" id="masterDimVal">255</span></div>
+        </div>
+        <div class="fx-row">
+          <button class="fx-btn" id="btnStrobe">&#9889; Strobe</button>
+          <button class="fx-btn" id="btnSmoke">&#9729;&#xFE0E; Smoke</button>
+          <button class="fx-btn" id="btnHaze">&#9729;&#xFE0E; Haze</button>
+          <div class="slider-wrap" style="flex:1;min-width:0"><span class="slider-label">Speed</span><input type="range" id="strobeSpeed" min="1" max="255" value="200"><span class="slider-val" id="strobeSpeedVal">200</span></div>
+        </div>
+      </div>
+      <!-- RIGHT: quick actions + mover presets -->
+      <div class="dash-right">
+        <div class="action-grid">
+          <div class="action-card" data-action="fullWhite"><div class="ac-icon">&#9728;&#xFE0E;</div><div class="ac-label">Full White</div></div>
+          <div class="action-card" data-action="fullColor"><div class="ac-icon">&#127912;</div><div class="ac-label">Full Color</div></div>
+          <div class="action-card" data-action="dimWarm"><div class="ac-icon">&#127774;</div><div class="ac-label">Dim Warm</div></div>
+          <div class="action-card" data-action="allOff"><div class="ac-icon">&#9679;</div><div class="ac-label">All Off</div></div>
+          <div class="action-card" data-action="strobe"><div class="ac-icon">&#9889;</div><div class="ac-label">Strobe</div></div>
+          <div class="action-card" data-action="uvMode"><div class="ac-icon">&#128302;</div><div class="ac-label">UV Mode</div></div>
+        </div>
+        <div class="mover-section">
+          <div class="section-label">Mover Presets</div>
+          <div class="mover-grid" id="moverPresetGridDash"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── GROUPS ─────────────────────────────────── -->
+  <div class="page" id="page-groups">
+    <div class="page-title">Groups</div>
+    <div class="section-label">Dimmers</div>
+    <div id="groupDimmers"></div>
+  </div>
+
+  <!-- ─── FIXTURES ───────────────────────────────── -->
+  <div class="page" id="page-fixtures">
+    <div class="page-title">Fixtures</div>
+    <div class="section-label">Enable / Dimmer</div>
+    <div id="fixtureList"></div>
+  </div>
+
+  <!-- ─── MOVERS ─────────────────────────────────── -->
+  <div class="page" id="page-movers">
+    <div class="page-title">Movers</div>
+
+    <div class="section-label">Presets</div>
+    <div class="chip-row" id="moverPresetGrid"></div>
+
+    <div class="section-label">Manual</div>
+    <div class="slider-wrap"><span class="slider-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="slider-val" id="panVal">128</span></div>
+    <div class="slider-wrap"><span class="slider-label">Tilt</span><input type="range" id="manualTilt" min="0" max="255" value="128"><span class="slider-val" id="tiltVal">128</span></div>
+    <div class="slider-wrap"><span class="slider-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="slider-val" id="speedVal">128</span></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB BAR (bottom, iOS style)
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="tab-bar">
+  <button class="active" data-page="colors"><span class="tab-icon">&#127912;</span>Colors</button>
+  <button data-page="groups"><span class="tab-icon">&#9783;</span>Groups</button>
+  <button data-page="fixtures"><span class="tab-icon">&#128161;</span>Fixtures</button>
+  <button data-page="movers"><span class="tab-icon">&#10146;</span>Movers</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ─── State ────────────────────────────────────────────────── */
+let fixtures = [], groups = [], moverPresets = [];
+let selectedColor = null, colorIntensity = 255, selectedGroups = new Set();
+let outputEnabled = false, blackoutActive = false;
+let strobeActive = false, smokeActive = false, hazeActive = false;
+let fixtureEnabled = {}, fixtureDimmer = {}, groupDimmer = {};
+let holdMode = true;
+let ws = null;
+
+const COLORS = [
+  { name:'Red',     hex:'#ff3b30', r:255, g:0,   b:0   },
+  { name:'Green',   hex:'#30d158', r:0,   g:255, b:0   },
+  { name:'Blue',    hex:'#0a84ff', r:0,   g:0,   b:255 },
+  { name:'White',   hex:'#ffffff', r:255, g:255, b:255 },
+  { name:'Amber',   hex:'#ff9f0a', r:255, g:160, b:0   },
+  { name:'UV',      hex:'#bf5af2', r:120, g:0,   b:255 },
+  { name:'Yellow',  hex:'#ffd60a', r:255, g:235, b:0   },
+  { name:'Magenta', hex:'#ff375f', r:255, g:0,   b:150 },
+  { name:'Cyan',    hex:'#64d2ff', r:0,   g:220, b:255 },
+  { name:'Pink',    hex:'#ff6482', r:255, g:120, b:180 },
+  { name:'Lime',    hex:'#a8ff00', r:180, g:255, b:0   },
+  { name:'Orange',  hex:'#ff6723', r:255, g:100, b:0   },
+];
+
+/* ─── Init ─────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', async () => {
+  initTabs();
+  initModeSwitch();
+  initSliderBindings();
+  initFxButtons();
+  initActionCards();
+  await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState(), fetchTouchState()]);
+  renderAll();
+  connectWebSocket();
+});
+
+/* ─── Tab Bar ──────────────────────────────────────────────── */
+function initTabs() {
+  document.querySelectorAll('.tab-bar button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.page, .page-dash').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('page-' + btn.dataset.page).classList.add('active');
+    });
+  });
+}
+
+/* ─── Mode Switch ──────────────────────────────────────────── */
+function initModeSwitch() {
+  const sw = document.getElementById('modeSwitch');
+  sw.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      holdMode = btn.dataset.mode === 'hold';
+      sw.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (holdMode) releaseAllActions();
+      renderColors(); // rebind color hold/toggle events
+    });
+  });
+}
+
+/* ─── Slider bindings ──────────────────────────────────────── */
+function initSliderBindings() {
+  bindSlider('colorIntensity', 'colorIntVal', v => { colorIntensity = v; if (selectedColor !== null) sendColorOverride(); });
+  bindSlider('masterDim', 'masterDimVal', v => sendMasterDimmer(v));
+  bindSlider('strobeSpeed', 'strobeSpeedVal');
+  bindSlider('manualPan', 'panVal', sendManualPosition);
+  bindSlider('manualTilt', 'tiltVal', sendManualPosition);
+  bindSlider('manualSpeed', 'speedVal', sendManualPosition);
+}
+
+function bindSlider(sliderId, valId, onChange) {
+  const el = document.getElementById(sliderId);
+  const val = document.getElementById(valId);
+  el.addEventListener('input', () => {
+    val.textContent = el.value;
+    if (onChange) onChange(+el.value);
+  });
+}
+
+/* ─── FX Buttons ───────────────────────────────────────────── */
+function initFxButtons() {
+  bindHoldToggle(document.getElementById('btnStrobe'), strobeOn, strobeOff);
+  bindHoldToggle(document.getElementById('btnSmoke'), () => setSmokeHaze('smoke', true), () => setSmokeHaze('smoke', false));
+  bindHoldToggle(document.getElementById('btnHaze'), () => setSmokeHaze('haze', true), () => setSmokeHaze('haze', false));
+
+  document.getElementById('btnOutput').addEventListener('click', toggleOutput);
+  document.getElementById('btnBlackout').addEventListener('click', doBlackout);
+}
+
+/* ─── Action Cards ─────────────────────────────────────────── */
+function initActionCards() {
+  document.querySelectorAll('.action-card[data-action]').forEach(card => {
+    const action = card.dataset.action;
+    const onFn = () => { runAction(action, true); card.classList.add('active'); };
+    const offFn = () => { runAction(action, false); card.classList.remove('active'); };
+    bindHoldToggle(card, onFn, offFn);
+  });
+}
+
+/* ─── Universal Hold / Toggle Binder ──────────────────────── */
+function bindHoldToggle(el, onFn, offFn) {
+  let isOn = false, touchActive = false;
+
+  function activate(e) {
+    if (e) e.preventDefault();
+    if (holdMode) { if (!isOn) { isOn = true; onFn(); } }
+    else { if (isOn) { isOn = false; offFn(); } else { isOn = true; onFn(); } }
+  }
+  function deactivate(e) {
+    if (e) e.preventDefault();
+    if (holdMode && isOn) { isOn = false; offFn(); }
+  }
+
+  el.addEventListener('touchstart', e => { touchActive = true; activate(e); }, { passive: false });
+  el.addEventListener('touchend', e => { touchActive = false; deactivate(e); }, { passive: false });
+  el.addEventListener('touchcancel', e => { touchActive = false; deactivate(e); }, { passive: false });
+  el.addEventListener('mousedown', e => { if (!touchActive) activate(e); });
+  el.addEventListener('mouseup', e => { if (!touchActive) deactivate(e); });
+  el.addEventListener('mouseleave', () => { if (!touchActive && holdMode && isOn) { isOn = false; offFn(); } });
+
+  el._holdReset = () => { if (isOn) { isOn = false; offFn(); } };
+}
+
+function releaseAllActions() {
+  document.querySelectorAll('.action-card[data-action], #btnStrobe, #btnSmoke, #btnHaze').forEach(el => {
+    if (el._holdReset) el._holdReset();
+  });
+}
+
+/* ─── Data Fetch ───────────────────────────────────────────── */
+async function fetchFixtures() {
+  try {
+    fixtures = await fetch('/api/fixture-channel-map').then(r => r.json());
+    fixtures.forEach(f => {
+      if (fixtureEnabled[f.id] === undefined) fixtureEnabled[f.id] = true;
+      if (fixtureDimmer[f.id] === undefined) fixtureDimmer[f.id] = 255;
+    });
+  } catch (e) { console.error('fetch fixtures', e); }
+}
+
+async function fetchGroups() {
+  try {
+    groups = await fetch('/api/groups').then(r => r.json());
+    groups.forEach(g => { if (groupDimmer[g.id] === undefined) groupDimmer[g.id] = 255; });
+  } catch (e) { console.error('fetch groups', e); }
+}
+
+async function fetchMoverPresets() {
+  try { moverPresets = await fetch('/api/mover-presets').then(r => r.json()); }
+  catch (e) { console.error('fetch mover-presets', e); }
+}
+
+async function fetchOutputState() {
+  try {
+    const s = await fetch('/api/dmx/output').then(r => r.json());
+    outputEnabled = s.enabled;
+  } catch (e) {}
+}
+
+async function fetchTouchState() {
+  try {
+    const s = await fetch('/api/touch/state').then(r => r.json());
+    if (s.disabledFixtures) s.disabledFixtures.forEach(id => { fixtureEnabled[id] = false; });
+    blackoutActive = !!s.blackoutHold;
+  } catch (e) {}
+}
+
+/* ─── WebSocket ────────────────────────────────────────────── */
+function connectWebSocket() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host);
+  ws.onopen = () => updateStatus(true);
+  ws.onclose = () => { updateStatus(false); setTimeout(connectWebSocket, 2000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'dmxOutput') { outputEnabled = msg.enabled; renderOutputBtn(); }
+      else if (msg.type === 'touchBlackoutHold') {
+        blackoutActive = msg.active;
+        document.getElementById('btnBlackout').classList.toggle('active', blackoutActive);
+      }
+      else if (msg.type === 'touchFixtureDisable') {
+        fixtureEnabled[msg.fixtureId] = !msg.disabled;
+        const tog = document.querySelector('.ios-toggle[data-id="' + msg.fixtureId + '"]');
+        if (tog) tog.classList.toggle('on', !msg.disabled);
+      }
+      else if (msg.type === 'state' && msg.state && msg.state.decks) {
+        updateDeckStrip(msg.state.decks);
+      }
+    } catch (err) {}
+  };
+}
+
+function updateStatus(connected) {
+  document.getElementById('statusPip').className = 'status-pip ' + (connected ? 'ok' : 'err');
+  renderOutputBtn();
+}
+
+/* ─── Deck Info Strip ──────────────────────────────────────── */
+function updateDeckStrip(decks) {
+  for (let d = 1; d <= 2; d++) {
+    const dk = decks[d];
+    const dot = document.getElementById('deckDot' + d);
+    const track = document.getElementById('deckTrack' + d);
+    const meta = document.getElementById('deckMeta' + d);
+    if (!dk) continue;
+
+    const isPlaying = dk.play > 0;
+    const hasTrack = !!dk.filename;
+    const isPaused = hasTrack && !isPlaying;
+
+    dot.className = 'deck-play-dot' + (isPlaying ? ' playing' : (isPaused ? ' paused' : ''));
+
+    if (dk.filename) {
+      track.textContent = dk.filename;
+      track.classList.remove('empty');
+    } else {
+      track.textContent = 'No track';
+      track.classList.add('empty');
+    }
+
+    const bpm = dk.bpm > 0 ? dk.bpm.toFixed(1) + ' BPM' : '--- BPM';
+    const rawTime = dk.time || 0;
+    const secs = Math.floor(rawTime > 86400 ? rawTime / 1000 : rawTime);
+    const time = String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
+    meta.textContent = bpm + '  ·  ' + time;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RENDER
+   ═══════════════════════════════════════════════════════════════ */
+function renderAll() {
+  renderColors();
+  renderColorTargetGroups();
+  renderGroupDimmers();
+  renderFixtureList();
+  renderMoverPresets();
+  renderOutputBtn();
+  renderBlackoutBtn();
+}
+
+/* ─── Output / Blackout buttons ────────────────────────────── */
+function renderOutputBtn() {
+  const btn = document.getElementById('btnOutput');
+  btn.textContent = outputEnabled ? 'OUTPUT' : 'OFF';
+  btn.classList.toggle('off', !outputEnabled);
+}
+
+function renderBlackoutBtn() {
+  document.getElementById('btnBlackout').classList.toggle('active', blackoutActive);
+}
+
+/* ─── Colors ───────────────────────────────────────────────── */
+function renderColors() {
+  const grid = document.getElementById('colorGrid');
+  grid.innerHTML = COLORS.map((c, i) => {
+    const dark = (c.r + c.g + c.b) > 600;
+    return '<div class="color-tile' + (selectedColor === i ? ' active' : '') +
+      '" style="background:' + c.hex + '" data-idx="' + i + '">' +
+      '<span class="color-label" style="' + (dark ? 'color:#000;text-shadow:none;background:linear-gradient(transparent,rgba(255,255,255,.3))' : '') + '">' + c.name + '</span></div>';
+  }).join('');
+
+  grid.querySelectorAll('.color-tile').forEach(el => {
+    const idx = +el.dataset.idx;
+    if (holdMode) {
+      let t = false;
+      el.addEventListener('touchstart', e => { e.preventDefault(); t = true; selectedColor = idx; renderColorActive(); sendColorOverride(); }, { passive: false });
+      el.addEventListener('touchend', e => { e.preventDefault(); t = false; clearColorOverrideDMX(); selectedColor = null; renderColorActive(); }, { passive: false });
+      el.addEventListener('touchcancel', e => { e.preventDefault(); t = false; clearColorOverrideDMX(); selectedColor = null; renderColorActive(); }, { passive: false });
+      el.addEventListener('mousedown', () => { if (!t) { selectedColor = idx; renderColorActive(); sendColorOverride(); } });
+      el.addEventListener('mouseup', () => { if (!t) { clearColorOverrideDMX(); selectedColor = null; renderColorActive(); } });
+      el.addEventListener('mouseleave', () => { if (!t && selectedColor === idx) { clearColorOverrideDMX(); selectedColor = null; renderColorActive(); } });
+    } else {
+      el.addEventListener('click', () => {
+        selectedColor = selectedColor === idx ? null : idx;
+        renderColorActive();
+        if (selectedColor !== null) sendColorOverride();
+      });
+    }
+  });
+}
+
+function renderColorActive() {
+  document.querySelectorAll('.color-tile').forEach(el => {
+    el.classList.toggle('active', +el.dataset.idx === selectedColor);
+  });
+}
+
+/* ─── Target Groups ────────────────────────────────────────── */
+function renderColorTargetGroups() {
+  const wrap = document.getElementById('colorTargetGroups');
+  wrap.innerHTML = groups.map(g =>
+    '<div class="chip' + (selectedGroups.has(g.id) ? ' active' : '') + '" data-id="' + g.id + '">' + esc(g.name) + '</div>'
+  ).join('');
+  wrap.querySelectorAll('.chip').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = +el.dataset.id;
+      if (selectedGroups.has(id)) selectedGroups.delete(id); else selectedGroups.add(id);
+      renderColorTargetGroups();
+      if (selectedColor !== null) sendColorOverride();
+    });
+  });
+}
+
+/* ─── Group Dimmers ────────────────────────────────────────── */
+function renderGroupDimmers() {
+  const w = document.getElementById('groupDimmers');
+  if (!groups.length) { w.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:12px 0">No groups configured</div>'; return; }
+  w.innerHTML = groups.map(g =>
+    '<div class="list-card">' +
+      '<span class="lc-name" style="color:' + (g.color || '#fff') + '">' + esc(g.name) + '</span>' +
+      '<span class="lc-sub">' + (g.fixture_ids || []).length + '</span>' +
+      '<input type="range" class="slider-sm" min="0" max="255" value="' + (groupDimmer[g.id] || 255) + '" data-gid="' + g.id + '">' +
+      '<span class="lc-val" id="gdim-' + g.id + '">' + (groupDimmer[g.id] || 255) + '</span>' +
+    '</div>'
+  ).join('');
+  w.querySelectorAll('input[data-gid]').forEach(sl => {
+    sl.addEventListener('input', () => {
+      const gid = +sl.dataset.gid;
+      groupDimmer[gid] = +sl.value;
+      document.getElementById('gdim-' + gid).textContent = sl.value;
+      onGroupDimmer(gid, +sl.value);
+    });
+  });
+}
+
+/* ─── Fixtures ─────────────────────────────────────────────── */
+function renderFixtureList() {
+  const w = document.getElementById('fixtureList');
+  if (!fixtures.length) { w.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:12px 0">No fixtures</div>'; return; }
+  w.innerHTML = fixtures.map(f =>
+    '<div class="list-card">' +
+      '<div class="ios-toggle' + (fixtureEnabled[f.id] !== false ? ' on' : '') + '" data-id="' + f.id + '"></div>' +
+      '<div style="flex:1;min-width:0;overflow:hidden">' +
+        '<div class="lc-name">' + esc(f.name) + '</div>' +
+        '<div class="lc-sub">' + esc(f.type_name || '') + ' &middot; ch ' + f.address + '</div>' +
+      '</div>' +
+      '<input type="range" class="slider-sm" min="0" max="255" value="' + (fixtureDimmer[f.id] || 255) + '" data-fid="' + f.id + '">' +
+      '<span class="lc-val" id="fdim-' + f.id + '">' + (fixtureDimmer[f.id] || 255) + '</span>' +
+    '</div>'
+  ).join('');
+
+  // Toggle enable/disable
+  w.querySelectorAll('.ios-toggle').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = +el.dataset.id;
+      fixtureEnabled[id] = !fixtureEnabled[id];
+      el.classList.toggle('on', fixtureEnabled[id]);
+      fetch('/api/touch/fixture-disable', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId: id, disabled: !fixtureEnabled[id] })
+      });
+      if (!fixtureEnabled[id]) blackoutFixture(id);
+    });
+  });
+
+  // Individual dimmers
+  w.querySelectorAll('input[data-fid]').forEach(sl => {
+    sl.addEventListener('input', () => {
+      const fid = +sl.dataset.fid;
+      fixtureDimmer[fid] = +sl.value;
+      document.getElementById('fdim-' + fid).textContent = sl.value;
+      onFixtureDimmer(fid, +sl.value);
+    });
+  });
+}
+
+/* ─── Mover Presets ────────────────────────────────────────── */
+function renderMoverPresets() {
+  // Movers tab grid
+  const g = document.getElementById('moverPresetGrid');
+  if (!moverPresets.length) { g.innerHTML = '<div style="color:var(--dim);font-size:13px">No presets</div>'; }
+  else {
+    g.innerHTML = moverPresets.map((p, i) =>
+      '<div class="preset-pill" data-idx="' + i + '">' + esc(p.name) + '</div>'
+    ).join('');
+    g.querySelectorAll('.preset-pill').forEach(el => {
+      el.addEventListener('click', () => sendMoverPreset(moverPresets[+el.dataset.idx]));
+    });
+  }
+  // Dashboard mover grid
+  const gd = document.getElementById('moverPresetGridDash');
+  if (!moverPresets.length) { gd.innerHTML = '<div style="color:var(--dim);font-size:12px">No presets</div>'; }
+  else {
+    gd.innerHTML = moverPresets.map((p, i) =>
+      '<div class="mover-pill" data-idx="' + i + '">' + esc(p.name) + '</div>'
+    ).join('');
+    gd.querySelectorAll('.mover-pill').forEach(el => {
+      el.addEventListener('click', () => sendMoverPreset(moverPresets[+el.dataset.idx]));
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DMX HELPERS
+   ═══════════════════════════════════════════════════════════════ */
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function getTargetFixtures() {
+  if (selectedGroups.size === 0) return fixtures;
+  return fixtures.filter(f => f.group_ids && f.group_ids.some(gid => selectedGroups.has(gid)));
+}
+
+function getEnabledFixtures(list) {
+  return (list || fixtures).filter(f => fixtureEnabled[f.id] !== false);
+}
+
+function buildChannelUpdates(targetFixtures, channelFilter, valueFn) {
+  const byUniverse = {};
+  for (const f of targetFixtures) {
+    if (fixtureEnabled[f.id] === false) continue;
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) {
+      if (channelFilter(ch, f)) {
+        let val = valueFn(ch, f);
+        if (['red','green','blue','white','amber','uv','dimmer'].includes(ch.type)) {
+          const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
+          val = Math.round(val * (fDim / 255));
+        }
+        byUniverse[u].push({ ch: ch.dmx_address, val: Math.max(0, Math.min(255, val)) });
+      }
+    }
+  }
+  return byUniverse;
+}
+
+function sendDMX(byUniverse) {
+  for (const [universe, channels] of Object.entries(byUniverse)) {
+    if (channels.length) {
+      fetch('/api/dmx/channels', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ universe: +universe, channels })
+      });
+    }
+  }
+}
+
+/* ─── Color Override ───────────────────────────────────────── */
+function sendColorOverride() {
+  if (selectedColor === null) return;
+  const c = COLORS[selectedColor];
+  const scale = colorIntensity / 255;
+  const updates = buildChannelUpdates(getTargetFixtures(),
+    ch => ['red','green','blue','white','amber','uv','dimmer'].includes(ch.type),
+    ch => {
+      switch (ch.type) {
+        case 'red': return Math.round(c.r * scale);
+        case 'green': return Math.round(c.g * scale);
+        case 'blue': return Math.round(c.b * scale);
+        case 'white': return (c.r === 255 && c.g === 255 && c.b === 255) ? Math.round(255 * scale) : 0;
+        case 'dimmer': return Math.round(255 * scale);
+        case 'amber': return c.name === 'Amber' ? Math.round(255 * scale) : 0;
+        case 'uv': return c.name === 'UV' ? Math.round(255 * scale) : 0;
+        default: return 0;
+      }
+    });
+  sendDMX(updates);
+}
+
+function clearColorOverrideDMX() {
+  const updates = buildChannelUpdates(getTargetFixtures(),
+    ch => ['red','green','blue','white','amber','uv'].includes(ch.type), () => 0);
+  sendDMX(updates);
+}
+
+function clearColorOverride() { selectedColor = null; renderColorActive(); }
+
+/* ─── Output / Blackout ────────────────────────────────────── */
+function toggleOutput() {
+  outputEnabled = !outputEnabled;
+  fetch('/api/dmx/output', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: outputEnabled })
+  });
+  renderOutputBtn();
+}
+
+function doBlackout() {
+  blackoutActive = !blackoutActive;
+  renderBlackoutBtn();
+  fetch('/api/touch/blackout-hold', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: blackoutActive })
+  });
+}
+
+/* ─── Strobe ───────────────────────────────────────────────── */
+function strobeOn() {
+  if (strobeActive) return;
+  strobeActive = true;
+  document.getElementById('btnStrobe').classList.add('strobe-on');
+  const speed = +document.getElementById('strobeSpeed').value || 200;
+  const updates = buildChannelUpdates(getEnabledFixtures(),
+    ch => ch.type === 'strobe' || (ch.ranges && ch.ranges.some(r => r.type === 'strobe')),
+    ch => {
+      if (ch.type === 'strobe') return speed;
+      const range = ch.ranges.find(r => r.type === 'strobe');
+      return range ? Math.round(range.min + (speed / 255) * (range.max - range.min)) : speed;
+    });
+  sendDMX(updates);
+}
+
+function strobeOff() {
+  if (!strobeActive) return;
+  strobeActive = false;
+  document.getElementById('btnStrobe').classList.remove('strobe-on');
+  const updates = buildChannelUpdates(getEnabledFixtures(),
+    ch => ch.type === 'strobe' || (ch.ranges && ch.ranges.some(r => r.type === 'strobe')), () => 0);
+  sendDMX(updates);
+}
+
+/* ─── Smoke / Haze ─────────────────────────────────────────── */
+function setSmokeHaze(type, on) {
+  if (type === 'smoke') { smokeActive = on; document.getElementById('btnSmoke').classList.toggle('active', on); }
+  if (type === 'haze') { hazeActive = on; document.getElementById('btnHaze').classList.toggle('active', on); }
+  const updates = buildChannelUpdates(getEnabledFixtures(),
+    ch => ch.type === type || ch.type === 'fog' || ch.type === 'smoke' || ch.type === 'haze',
+    () => on ? 255 : 0);
+  sendDMX(updates);
+}
+
+/* ─── Master Dimmer ────────────────────────────────────────── */
+function sendMasterDimmer(val) {
+  const v = +val;
+  const byUniverse = {};
+  for (const f of getEnabledFixtures()) {
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) {
+      if (ch.type === 'dimmer') {
+        const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
+        byUniverse[u].push({ ch: ch.dmx_address, val: Math.round(v * (fDim / 255)) });
+      }
+    }
+  }
+  sendDMX(byUniverse);
+}
+
+/* ─── Group Dimmers ────────────────────────────────────────── */
+function onGroupDimmer(groupId, val) {
+  const grp = groups.find(g => g.id === groupId);
+  if (!grp) return;
+  const grpFixtures = fixtures.filter(f => (f.group_ids || []).includes(groupId));
+  const updates = buildChannelUpdates(grpFixtures, ch => ch.type === 'dimmer', () => val);
+  sendDMX(updates);
+}
+
+/* ─── Fixture Dimmers & Disable ────────────────────────────── */
+function onFixtureDimmer(fixId, val) {
+  const f = fixtures.find(fx => fx.id === fixId);
+  if (!f || fixtureEnabled[fixId] === false) return;
+  const u = f.universe || 1;
+  const channels = [];
+  for (const ch of f.channels) { if (ch.type === 'dimmer') channels.push({ ch: ch.dmx_address, val }); }
+  if (channels.length) sendDMX({ [u]: channels });
+}
+
+function blackoutFixture(fixId) {
+  const f = fixtures.find(fx => fx.id === fixId);
+  if (!f) return;
+  sendDMX({ [f.universe || 1]: f.channels.map(ch => ({ ch: ch.dmx_address, val: 0 })) });
+}
+
+/* ─── Mover Presets & Manual Position ──────────────────────── */
+function sendMoverPreset(preset) {
+  if (!preset.positions) return;
+  const byUniverse = {};
+  for (const pos of preset.positions) {
+    const f = fixtures.find(fx => fx.id === pos.fixture_id);
+    if (!f || fixtureEnabled[f.id] === false) continue;
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) {
+      if (ch.type === 'pan' && pos.pan !== undefined) byUniverse[u].push({ ch: ch.dmx_address, val: pos.pan });
+      if (ch.type === 'tilt' && pos.tilt !== undefined) byUniverse[u].push({ ch: ch.dmx_address, val: pos.tilt });
+    }
+  }
+  sendDMX(byUniverse);
+}
+
+function sendManualPosition() {
+  const pan = +document.getElementById('manualPan').value;
+  const tilt = +document.getElementById('manualTilt').value;
+  const speed = +document.getElementById('manualSpeed').value;
+  const movers = getEnabledFixtures().filter(f =>
+    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt'));
+  const updates = buildChannelUpdates(movers,
+    ch => ch.type === 'pan' || ch.type === 'tilt' || ch.type === 'speed',
+    ch => ch.type === 'pan' ? pan : ch.type === 'tilt' ? tilt : speed);
+  sendDMX(updates);
+}
+
+/* ─── Quick Actions ────────────────────────────────────────── */
+function runAction(action, on) {
+  const map = {
+    fullWhite: { on: actionFullWhite, off: actionAllOff },
+    fullColor: { on: actionFullColor, off: actionAllOff },
+    dimWarm:   { on: actionDimWarm,   off: actionAllOff },
+    allOff:    { on: actionAllOff,    off: () => {} },
+    strobe:    { on: strobeOn,        off: strobeOff },
+    uvMode:    { on: actionUVMode,    off: actionAllOff },
+  };
+  const e = map[action]; if (!e) return;
+  if (on) e.on(); else e.off();
+}
+
+function actionFullWhite() {
+  sendDMX(buildChannelUpdates(getEnabledFixtures(),
+    ch => ['red','green','blue','white','dimmer'].includes(ch.type), () => 255));
+}
+
+function actionFullColor() {
+  if (selectedColor === null) { selectedColor = 0; renderColorActive(); }
+  sendColorOverride();
+}
+
+function actionDimWarm() {
+  sendDMX(buildChannelUpdates(getEnabledFixtures(),
+    ch => ['red','green','blue','white','amber','dimmer'].includes(ch.type),
+    ch => {
+      switch (ch.type) {
+        case 'red': return 180; case 'green': return 100; case 'blue': return 40;
+        case 'amber': return 200; case 'white': return 80; case 'dimmer': return 120;
+        default: return 0;
+      }
+    }));
+}
+
+function actionAllOff() {
+  const byUniverse = {};
+  for (const f of fixtures) {
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) byUniverse[u].push({ ch: ch.dmx_address, val: 0 });
+  }
+  sendDMX(byUniverse);
+}
+
+function actionUVMode() {
+  sendDMX(buildChannelUpdates(getEnabledFixtures(),
+    ch => ['red','green','blue','white','uv','dimmer'].includes(ch.type),
+    ch => {
+      switch (ch.type) {
+        case 'uv': return 255; case 'dimmer': return 200; case 'blue': return 40;
+        default: return 0;
+      }
+    }));
+}
+</script>
+</body>
+</html>

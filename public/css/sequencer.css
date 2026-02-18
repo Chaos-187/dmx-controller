@@ -190,3 +190,8 @@
   transition: opacity .15s; line-height: 1;
 }
 .seq-cell-toggle:hover { opacity: 1; color: var(--accent); }
+
+/* ─── Mover Sub-Lanes ─────────────────────────────────────────────────── */
+.seq-lane-mover-light { background: rgba(0,0,0,.1); }
+.seq-lane-mover-move { min-height: 30px; background: rgba(68,136,255,.04); }
+.seq-lane-mover-move .seq-lane-header.seq-cell-header { font-size: 10px; }

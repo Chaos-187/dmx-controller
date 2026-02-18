@@ -2,421 +2,1002 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>DMX Touchscreen Controller</title>
-  <link rel="stylesheet" href="css/style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>DMX Show Control</title>
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d0d0d; --panel: #161616; --panel2: #1e1e1e; --border: #2a2a2a;
+      --text: #f0f0f0; --dim: #777; --accent: #ffb300; --red: #f44336;
+      --green: #4caf50; --blue: #2196f3; --radius: 16px;
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-t: env(safe-area-inset-top, 0px);
+    }
+    html, body { height: 100%; overflow: hidden; }
     body {
-      background: #181818;
-      color: #fff;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      margin: 0;
-      padding: 0;
-      touch-action: manipulation;
-      -webkit-user-select: none;
-      user-select: none;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+      touch-action: manipulation; -webkit-user-select: none; user-select: none;
+      display: flex; flex-direction: column;
     }
-    .touch-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: #222;
-      padding: 1rem 1.5rem;
-      font-size: 1.5rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      border-bottom: 2px solid #333;
+
+    /* Header */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--panel); padding: 10px 16px;
+      padding-top: calc(10px + var(--safe-t));
+      border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 50;
     }
-    .touch-main {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-      padding: 1.5rem;
-      max-width: 900px;
-      margin: 0 auto;
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: .02em; }
+    .header-actions { display: flex; gap: 10px; align-items: center; }
+
+    /* Hold/Toggle Switch */
+    .mode-switch {
+      display: flex; align-items: center; gap: 0; background: var(--panel2);
+      border: 1px solid var(--border); border-radius: 24px; padding: 3px;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
     }
-    .touch-section {
-      background: #232323;
-      border-radius: 1.2rem;
-      padding: 1.2rem 1rem 1.5rem 1rem;
-      box-shadow: 0 2px 12px #0008;
-      margin-bottom: 0.5rem;
+    .mode-switch .mode-opt {
+      padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+      color: var(--dim); transition: all .2s;
     }
-    .touch-section h2 {
-      margin: 0 0 1rem 0;
-      font-size: 1.2rem;
-      font-weight: 500;
-      letter-spacing: 0.04em;
-      color: #ffb300;
+    .mode-switch .mode-opt.active {
+      background: var(--accent); color: #111;
     }
-    .color-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      justify-content: center;
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 14px 24px; border-radius: 28px; border: none;
+      font-size: 15px; font-weight: 700; cursor: pointer;
+      transition: all .12s; outline: none; white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
     }
-    .color-btn {
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      border: 3px solid #444;
-      margin: 0.2rem;
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #fff;
-      background: #333;
-      transition: border 0.2s, box-shadow 0.2s;
-      box-shadow: 0 2px 8px #0006;
-      outline: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .btn:active { transform: scale(.94); }
+    .btn-blackout { background: var(--red); color: #fff; }
+    .btn-blackout.active { background: #b71c1c; box-shadow: 0 0 0 4px rgba(244,67,54,.4); }
+    .btn-master { background: var(--green); color: #fff; }
+    .btn-master.off { background: #333; color: var(--dim); }
+    .btn-strobe { background: #fff; color: #111; min-height: 56px; font-size: 16px; }
+    .btn-strobe.active { animation: strobe-pulse .12s infinite alternate; }
+    @keyframes strobe-pulse { from { opacity: 1; } to { opacity: .4; } }
+    .btn-smoke { background: #546e7a; color: #fff; min-height: 56px; font-size: 16px; }
+    .btn-smoke.active { background: #78909c; box-shadow: 0 0 0 4px rgba(84,110,122,.5); }
+    .btn-haze { background: #455a64; color: #fff; min-height: 56px; font-size: 16px; }
+    .btn-haze.active { background: #607d8b; box-shadow: 0 0 0 4px rgba(69,90,100,.5); }
+
+    /* Tabs */
+    .tabs {
+      display: flex; background: var(--panel); border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
-    .color-btn.selected, .color-btn:active {
-      border: 3px solid #ffb300;
-      box-shadow: 0 0 0 4px #ffb30044;
+    .tab {
+      flex: 1; min-width: 0; padding: 14px 4px; text-align: center;
+      font-size: 14px; font-weight: 600; color: var(--dim);
+      border-bottom: 3px solid transparent; cursor: pointer;
+      transition: color .15s, border-color .15s; white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
     }
-    .group-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.7rem;
-      justify-content: center;
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Sections */
+    .tab-content { display: none; padding: 16px; overflow-y: auto; flex: 1; }
+    .tab-content.active { display: block; }
+    .section {
+      background: var(--panel2); border-radius: var(--radius);
+      padding: 18px; margin-bottom: 14px;
     }
-    .group-btn {
-      min-width: 90px;
-      padding: 0.7rem 1.2rem;
-      border-radius: 2rem;
-      border: none;
-      background: #2a2a2a;
-      color: #fff;
-      font-size: 1.1rem;
-      font-weight: 500;
-      margin: 0.2rem;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
+    .section h2 {
+      font-size: 13px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--accent); margin-bottom: 14px;
     }
-    .group-btn.selected, .group-btn:active {
-      background: #ffb300;
-      color: #222;
+
+    /* Color Grid */
+    .color-grid { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+    .color-swatch {
+      width: 72px; height: 72px; border-radius: 50%;
+      border: 4px solid #444; cursor: pointer;
+      transition: border .12s, box-shadow .12s, transform .12s;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 800; color: rgba(255,255,255,.85);
+      text-shadow: 0 1px 3px rgba(0,0,0,.7);
+      -webkit-tap-highlight-color: transparent;
     }
-    .fixture-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.7rem;
-      justify-content: center;
-    }
-    .fixture-btn {
-      min-width: 80px;
-      padding: 0.6rem 1.1rem;
-      border-radius: 1.5rem;
-      border: none;
-      background: #292929;
-      color: #fff;
-      font-size: 1rem;
-      font-weight: 500;
-      margin: 0.2rem;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
-    }
-    .fixture-btn.selected, .fixture-btn:active {
-      background: #ffb300;
-      color: #222;
-    }
-    .preset-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.7rem;
-      justify-content: center;
-    }
-    .preset-btn {
-      min-width: 90px;
-      padding: 0.7rem 1.2rem;
-      border-radius: 2rem;
-      border: none;
-      background: #2a2a2a;
-      color: #fff;
-      font-size: 1.1rem;
-      font-weight: 500;
-      margin: 0.2rem;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
-    }
-    .preset-btn.selected, .preset-btn:active {
-      background: #ffb300;
-      color: #222;
-    }
+    .color-swatch.active { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(255,179,0,.4); transform: scale(1.08); }
+    .color-swatch:active { transform: scale(.9); }
+
+    /* Sliders (fat touch-friendly) */
     .slider-row {
-      display: flex;
-      align-items: center;
-      gap: 1.2rem;
-      margin: 1.2rem 0 0.5rem 0;
-      justify-content: center;
+      display: flex; align-items: center; gap: 14px; margin-top: 14px;
     }
-    .slider-label {
-      font-size: 1.1rem;
-      color: #ffb300;
-      min-width: 70px;
-      text-align: right;
+    .slider-row label {
+      font-size: 13px; font-weight: 600; color: var(--dim);
+      min-width: 56px; text-align: right;
     }
-    .slider {
-      width: 220px;
-      accent-color: #ffb300;
-      height: 2.2em;
+    .slider-row .val {
+      font-size: 15px; font-weight: 700; color: var(--text);
+      min-width: 36px; text-align: center;
     }
-    .touch-footer {
-      background: #222;
-      padding: 1rem 1.5rem;
-      text-align: center;
-      font-size: 1rem;
-      color: #aaa;
-      border-top: 2px solid #333;
-      margin-top: 2rem;
+    /* Custom range styling for fat touch sliders */
+    input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      flex: 1; height: 44px; background: transparent;
+      cursor: pointer; touch-action: none;
     }
-    .row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.2rem;
-      justify-content: center;
-      align-items: center;
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 14px; border-radius: 7px;
+      background: linear-gradient(to right, var(--border), #444);
     }
-    .big-btn {
-      font-size: 1.3rem;
-      font-weight: 600;
-      padding: 1.1rem 2.2rem;
-      border-radius: 2.5rem;
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 38px; height: 38px; border-radius: 50%;
+      background: var(--accent); border: 3px solid #222;
+      margin-top: -12px; box-shadow: 0 2px 8px rgba(0,0,0,.5);
+    }
+    input[type=range]::-moz-range-track {
+      height: 14px; border-radius: 7px;
+      background: linear-gradient(to right, var(--border), #444);
       border: none;
-      background: #ff1744;
-      color: #fff;
-      margin: 0.5rem 1rem;
-      cursor: pointer;
-      box-shadow: 0 2px 8px #0006;
-      transition: background 0.2s, color 0.2s;
     }
-    .big-btn:active {
-      background: #b71c1c;
+    input[type=range]::-moz-range-thumb {
+      width: 38px; height: 38px; border-radius: 50%;
+      background: var(--accent); border: 3px solid #222;
+      box-shadow: 0 2px 8px rgba(0,0,0,.5);
     }
-    .placeholder {
-      color: #888;
-      text-align: center;
-      margin: 2rem 0 1rem 0;
-      font-size: 1.1rem;
-      letter-spacing: 0.03em;
+    /* Fixture dimmer sliders (slightly smaller in list context) */
+    .fi-dim {
+      width: 110px !important; flex: unset !important; height: 40px !important;
     }
-    @media (max-width: 700px) {
-      .touch-main { padding: 0.5rem; }
-      .touch-section { padding: 0.7rem 0.3rem 1rem 0.3rem; }
-      .slider { width: 120px; }
+    .fi-dim::-webkit-slider-thumb { width: 30px; height: 30px; margin-top: -8px; }
+    .fi-dim::-moz-range-thumb { width: 30px; height: 30px; }
+
+    /* Group chips */
+    .chip-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .chip {
+      padding: 12px 22px; border-radius: 24px; border: 2px solid var(--border);
+      background: var(--panel); font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: all .12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .chip.active { border-color: var(--accent); background: rgba(255,179,0,.12); color: var(--accent); }
+    .chip:active { transform: scale(.94); }
+
+    /* Fixture list */
+    .fixture-list { display: flex; flex-direction: column; gap: 6px; }
+    .fixture-item {
+      display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+      background: var(--panel); border-radius: 12px; border: 1px solid var(--border);
+      min-height: 60px;
+    }
+    .fixture-item .fi-name { flex: 1; font-size: 14px; font-weight: 600; }
+    .fixture-item .fi-type { font-size: 11px; color: var(--dim); }
+    .toggle {
+      width: 52px; height: 30px; border-radius: 15px; flex-shrink: 0;
+      background: #444; position: relative; cursor: pointer;
+      transition: background .2s; -webkit-tap-highlight-color: transparent;
+    }
+    .toggle.on { background: var(--green); }
+    .toggle::after {
+      content: ''; position: absolute; width: 24px; height: 24px;
+      border-radius: 50%; background: #eee; top: 3px; left: 3px;
+      transition: left .2s;
+    }
+    .toggle.on::after { left: 25px; }
+
+    /* Quick actions grid */
+    .action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .action-btn {
+      padding: 28px 12px; border-radius: var(--radius); border: 2px solid var(--border);
+      background: var(--panel); font-size: 16px; font-weight: 700;
+      color: var(--text); cursor: pointer; text-align: center;
+      transition: all .12s; -webkit-tap-highlight-color: transparent;
+    }
+    .action-btn:active { transform: scale(.95); }
+    .action-btn.active-action { border-color: var(--accent); background: rgba(255,179,0,.1); color: var(--accent); }
+    .action-btn .action-icon { font-size: 32px; display: block; margin-bottom: 6px; }
+
+    /* Mover presets */
+    .preset-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .preset-btn {
+      padding: 14px 24px; border-radius: 24px; border: 2px solid var(--border);
+      background: var(--panel); font-size: 15px; font-weight: 600;
+      color: var(--text); cursor: pointer; transition: all .12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .preset-btn:active { transform: scale(.94); border-color: var(--blue); background: rgba(33,150,243,.12); }
+
+    /* FX bar */
+    .fx-bar {
+      display: flex; gap: 10px; padding: 12px 16px; align-items: center;
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .fx-bar .slider-row { flex: 1; min-width: 160px; margin-top: 0; }
+
+    /* Status bar */
+    .status-bar {
+      background: var(--panel); border-top: 1px solid var(--border);
+      padding: 8px 16px; padding-bottom: calc(8px + var(--safe-b));
+      display: flex; align-items: center;
+      justify-content: space-between; font-size: 12px; color: var(--dim);
+      flex-shrink: 0;
+    }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; margin-right: 6px;
+    }
+    .status-dot.ok { background: var(--green); }
+    .status-dot.err { background: var(--red); }
+
+    /* Responsive */
+    @media (min-width: 800px) {
+      .action-grid { grid-template-columns: repeat(3, 1fr); }
+      .color-swatch { width: 80px; height: 80px; }
     }
   </style>
 </head>
 <body>
-  <div class="touch-header">
-    <span>DMX Touchscreen</span>
-    <button id="btnBlackout" class="big-btn" style="background:#222;color:#ff1744;font-size:1.1rem;padding:0.7rem 1.5rem;">BLACKOUT</button>
-  </div>
-  <div class="touch-main">
-    <div class="touch-section">
-      <h2>Groups</h2>
-      <div id="groupGrid" class="group-grid"></div>
-    </div>
-    <div class="touch-section">
-      <h2>Fixtures</h2>
-      <div id="fixtureGrid" class="fixture-grid"></div>
-    </div>
-    <div class="touch-section">
-      <h2>Colors</h2>
-      <div id="colorGrid" class="color-grid"></div>
-      <div class="slider-row">
-        <span class="slider-label">Dimmer</span>
-        <input id="dimmerSlider" class="slider" type="range" min="0" max="255" value="255">
-        <span id="dimmerVal">255</span>
-      </div>
-    </div>
-    <div class="touch-section">
-      <h2>Movement Presets</h2>
-      <div id="presetGrid" class="preset-grid"></div>
-    </div>
-    <div class="touch-section">
-      <h2>Effects <span style="font-size:0.9em;color:#888;">(coming soon)</span></h2>
-      <div class="placeholder">Effects and sequences will appear here in a future update.</div>
-    </div>
-  </div>
-  <div class="touch-footer">
-    &copy; 2026 DMX Controller &mdash; Touchscreen Mode
-  </div>
-  <script>
-    // --- Touchscreen Controller JS ---
-    const COLOR_PRESETS = [
-      { name: 'Red', color: '#ff1744', rgb: [255,0,0] },
-      { name: 'Green', color: '#00e676', rgb: [0,255,0] },
-      { name: 'Blue', color: '#2979ff', rgb: [0,0,255] },
-      { name: 'White', color: '#fff', rgb: [255,255,255] },
-      { name: 'Amber', color: '#ffb300', rgb: [255,191,0] },
-      { name: 'UV', color: '#b388ff', rgb: [180,136,255] },
-      { name: 'Yellow', color: '#fff176', rgb: [255,241,118] },
-      { name: 'Magenta', color: '#f500a3', rgb: [245,0,163] },
-      { name: 'Cyan', color: '#00e5ff', rgb: [0,229,255] },
-      { name: 'White (RGB)', color: '#eee', rgb: [255,255,255] }
-    ];
-    let groups = [], fixtures = [], selectedGroup = null, selectedFixtures = [], moverPresets = [], selectedColor = null, dimmer = 255;
 
-    async function fetchGroups() {
-      groups = await fetch('/api/groups').then(r => r.json());
-      renderGroups();
-    }
-    function renderGroups() {
-      const grid = document.getElementById('groupGrid');
-      grid.innerHTML = '';
-      groups.forEach(g => {
-        const btn = document.createElement('button');
-        btn.className = 'group-btn' + (selectedGroup === g.id ? ' selected' : '');
-        btn.textContent = g.name;
-        btn.onclick = () => {
-          selectedGroup = (selectedGroup === g.id) ? null : g.id;
-          renderGroups();
-          renderFixtures();
-        };
-        grid.appendChild(btn);
-      });
-    }
-    async function fetchFixtures() {
-      fixtures = await fetch('/api/fixture-channel-map').then(r => r.json());
-      renderFixtures();
-    }
-    function renderFixtures() {
-      const grid = document.getElementById('fixtureGrid');
-      grid.innerHTML = '';
-      let filtered = selectedGroup ? fixtures.filter(f => f.group_ids && f.group_ids.includes(selectedGroup)) : fixtures;
-      filtered.forEach(f => {
-        const btn = document.createElement('button');
-        btn.className = 'fixture-btn' + (selectedFixtures.includes(f.id) ? ' selected' : '');
-        btn.textContent = f.name;
-        btn.onclick = () => {
-          if (selectedFixtures.includes(f.id)) {
-            selectedFixtures = selectedFixtures.filter(x => x !== f.id);
-          } else {
-            selectedFixtures.push(f.id);
-          }
-          renderFixtures();
-        };
-        grid.appendChild(btn);
-      });
-    }
-    function renderColors() {
-      const grid = document.getElementById('colorGrid');
-      grid.innerHTML = '';
-      COLOR_PRESETS.forEach((c, i) => {
-        const btn = document.createElement('button');
-        btn.className = 'color-btn' + (selectedColor === i ? ' selected' : '');
-        btn.style.background = c.color;
-        btn.title = c.name;
-        btn.onclick = () => {
-          selectedColor = i;
-          sendColor(c.rgb);
-          renderColors();
-        };
-        grid.appendChild(btn);
-      });
-    }
-    function sendColor(rgb) {
-      let targets = getSelectedFixtureIds();
-      if (!targets.length) return;
-      let channels = [];
-      for (const f of fixtures) {
-        if (!targets.includes(f.id)) continue;
-        for (const ch of f.channels) {
-          if (ch.type === 'red') channels.push({ address: ch.dmx_address, value: rgb[0] });
-          if (ch.type === 'green') channels.push({ address: ch.dmx_address, value: rgb[1] });
-          if (ch.type === 'blue') channels.push({ address: ch.dmx_address, value: rgb[2] });
-        }
-      }
-      fetch('/api/dmx/channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channels })
-      });
-    }
-    function getSelectedFixtureIds() {
-      if (selectedFixtures.length) return selectedFixtures;
-      if (selectedGroup) {
-        return fixtures.filter(f => f.group_ids && f.group_ids.includes(selectedGroup)).map(f => f.id);
-      }
-      return fixtures.map(f => f.id);
-    }
-    function renderDimmer() {
-      document.getElementById('dimmerSlider').value = dimmer;
-      document.getElementById('dimmerVal').textContent = dimmer;
-    }
-    function sendDimmer() {
-      let targets = getSelectedFixtureIds();
-      if (!targets.length) return;
-      let channels = [];
-      for (const f of fixtures) {
-        if (!targets.includes(f.id)) continue;
-        for (const ch of f.channels) {
-          if (ch.type === 'dimmer') channels.push({ address: ch.dmx_address, value: dimmer });
-        }
-      }
-      fetch('/api/dmx/channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channels })
-      });
-    }
-    async function fetchMoverPresets() {
-      moverPresets = await fetch('/api/mover-presets').then(r => r.json());
-      renderPresets();
-    }
-    function renderPresets() {
-      const grid = document.getElementById('presetGrid');
-      grid.innerHTML = '';
-      moverPresets.forEach((p, i) => {
-        const btn = document.createElement('button');
-        btn.className = 'preset-btn';
-        btn.textContent = p.name;
-        btn.onclick = () => {
-          sendMoverPreset(p.positions);
-        };
-        grid.appendChild(btn);
-      });
-    }
-    function sendMoverPreset(positions) {
-      // positions: [{fixture_id, pan, tilt}, ...]
-      let channels = [];
-      for (const pos of positions) {
-        const f = fixtures.find(fx => fx.id === pos.fixture_id);
-        if (!f) continue;
-        for (const ch of f.channels) {
-          if (ch.type === 'pan') channels.push({ address: ch.dmx_address, value: pos.pan });
-          if (ch.type === 'tilt') channels.push({ address: ch.dmx_address, value: pos.tilt });
-        }
-      }
-      fetch('/api/dmx/channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channels })
-      });
-    }
-    document.getElementById('dimmerSlider').addEventListener('input', e => {
-      dimmer = parseInt(e.target.value);
-      renderDimmer();
-      sendDimmer();
+<div class="header">
+  <h1>DMX Show Control</h1>
+  <div class="header-actions">
+    <div class="mode-switch" id="modeSwitch">
+      <div class="mode-opt active" data-mode="hold">HOLD</div>
+      <div class="mode-opt" data-mode="toggle">TOGGLE</div>
+    </div>
+    <button id="btnOutput" class="btn btn-master" style="padding:12px 18px">OUTPUT</button>
+    <button id="btnBlackout" class="btn btn-blackout" style="padding:12px 18px">BLACKOUT</button>
+  </div>
+</div>
+
+<!-- FX bar always visible -->
+<div class="fx-bar">
+  <button id="btnStrobe" class="btn btn-strobe">&#9889; STROBE</button>
+  <button id="btnSmoke" class="btn btn-smoke">&#9729; SMOKE</button>
+  <button id="btnHaze" class="btn btn-haze">&#9729; HAZE</button>
+  <div class="slider-row">
+    <label>Master</label>
+    <input type="range" id="masterDim" min="0" max="255" value="255" oninput="sendMasterDimmer(this.value)">
+    <span class="val" id="masterDimVal">255</span>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="colors">Colors</div>
+  <div class="tab" data-tab="groups">Groups</div>
+  <div class="tab" data-tab="fixtures">Fixtures</div>
+  <div class="tab" data-tab="movers">Movers</div>
+  <div class="tab" data-tab="actions">Actions</div>
+</div>
+
+<!-- Colors Tab -->
+<div id="tab-colors" class="tab-content active">
+  <div class="section">
+    <h2>Color Override</h2>
+    <div id="colorGrid" class="color-grid"></div>
+    <div class="slider-row" style="margin-top:18px">
+      <label>Intensity</label>
+      <input type="range" id="colorIntensity" min="0" max="255" value="255" oninput="onIntensityChange(this.value)">
+      <span class="val" id="colorIntVal">255</span>
+    </div>
+    <div style="text-align:center;margin-top:14px">
+      <button class="btn" style="background:var(--border);color:var(--text);font-size:14px;padding:12px 28px" onclick="clearColorOverride()">Clear Override</button>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Apply To</h2>
+    <div id="colorTargetGroups" class="chip-grid"></div>
+    <p style="font-size:12px;color:var(--dim);text-align:center;margin-top:10px">Select groups or leave empty for all fixtures</p>
+  </div>
+</div>
+
+<!-- Groups Tab -->
+<div id="tab-groups" class="tab-content">
+  <div class="section">
+    <h2>Group Dimmers</h2>
+    <div id="groupDimmers" class="fixture-list"></div>
+  </div>
+</div>
+
+<!-- Fixtures Tab -->
+<div id="tab-fixtures" class="tab-content">
+  <div class="section">
+    <h2>Fixture Control</h2>
+    <p style="font-size:12px;color:var(--dim);margin-bottom:12px">Toggle fixtures on/off and set individual dimmers</p>
+    <div id="fixtureList" class="fixture-list"></div>
+  </div>
+</div>
+
+<!-- Movers Tab -->
+<div id="tab-movers" class="tab-content">
+  <div class="section">
+    <h2>Movement Presets</h2>
+    <div id="moverPresetGrid" class="preset-grid"></div>
+  </div>
+  <div class="section">
+    <h2>Manual Position</h2>
+    <div class="slider-row"><label>Pan</label><input type="range" id="manualPan" min="0" max="255" value="128" oninput="sendManualPosition()"><span class="val" id="panVal">128</span></div>
+    <div class="slider-row"><label>Tilt</label><input type="range" id="manualTilt" min="0" max="255" value="128" oninput="sendManualPosition()"><span class="val" id="tiltVal">128</span></div>
+    <div class="slider-row"><label>Speed</label><input type="range" id="manualSpeed" min="0" max="255" value="128" oninput="sendManualPosition()"><span class="val" id="speedVal">128</span></div>
+  </div>
+</div>
+
+<!-- Actions Tab -->
+<div id="tab-actions" class="tab-content">
+  <div class="section">
+    <h2>Quick Actions</h2>
+    <div class="action-grid">
+      <div class="action-btn" data-action="fullWhite"><span class="action-icon">&#9728;</span>Full White</div>
+      <div class="action-btn" data-action="fullColor"><span class="action-icon">&#127912;</span>Full Color</div>
+      <div class="action-btn" data-action="dimWarm"><span class="action-icon">&#127774;</span>Dim Warm</div>
+      <div class="action-btn" data-action="allOff"><span class="action-icon">&#9679;</span>All Off</div>
+      <div class="action-btn" data-action="strobe"><span class="action-icon">&#9889;</span>Strobe</div>
+      <div class="action-btn" data-action="uvMode"><span class="action-icon">&#128302;</span>UV Mode</div>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Strobe Speed</h2>
+    <div class="slider-row"><label>Speed</label><input type="range" id="strobeSpeed" min="1" max="255" value="200" oninput="document.getElementById('strobeSpeedVal').textContent=this.value"><span class="val" id="strobeSpeedVal">200</span></div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span><span id="statusDot" class="status-dot err"></span><span id="statusText">Connecting...</span></span>
+  <span id="statusOutput">Output: --</span>
+</div>
+
+<script>
+// State
+let fixtures = [], groups = [], moverPresets = [];
+let selectedColor = null, colorIntensity = 255, selectedGroups = new Set();
+let outputEnabled = false, blackoutActive = false;
+let strobeActive = false, smokeActive = false, hazeActive = false;
+let fixtureEnabled = {};
+let fixtureDimmer = {};
+let groupDimmer = {};
+let holdMode = true;
+let ws = null;
+
+const COLORS = [
+  { name: 'Red',     hex: '#f44336', r: 255, g: 0,   b: 0   },
+  { name: 'Green',   hex: '#4caf50', r: 0,   g: 255, b: 0   },
+  { name: 'Blue',    hex: '#2196f3', r: 0,   g: 0,   b: 255 },
+  { name: 'White',   hex: '#ffffff', r: 255, g: 255, b: 255 },
+  { name: 'Amber',   hex: '#ff8f00', r: 255, g: 160, b: 0   },
+  { name: 'UV',      hex: '#aa00ff', r: 120, g: 0,   b: 255 },
+  { name: 'Yellow',  hex: '#ffeb3b', r: 255, g: 235, b: 0   },
+  { name: 'Magenta', hex: '#e91e63', r: 255, g: 0,   b: 150 },
+  { name: 'Cyan',    hex: '#00bcd4', r: 0,   g: 220, b: 255 },
+  { name: 'Pink',    hex: '#f48fb1', r: 255, g: 120, b: 180 },
+  { name: 'Lime',    hex: '#c6ff00', r: 180, g: 255, b: 0   },
+  { name: 'Orange',  hex: '#ff6d00', r: 255, g: 100, b: 0   },
+];
+
+// Init
+document.addEventListener('DOMContentLoaded', async () => {
+  initTabs();
+  initModeSwitch();
+  initFxBarButtons();
+  initActionButtons();
+  await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState()]);
+  renderAll();
+  connectWebSocket();
+});
+
+function initTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     });
-    document.getElementById('btnBlackout').addEventListener('click', () => {
-      fetch('/api/dmx/output', {
+  });
+}
+
+function initModeSwitch() {
+  const sw = document.getElementById('modeSwitch');
+  sw.querySelectorAll('.mode-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      holdMode = opt.dataset.mode === 'hold';
+      sw.querySelectorAll('.mode-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      if (holdMode) releaseAllActions();
+      // Re-render colors to rebind events
+      renderColors();
+    });
+  });
+}
+
+// FX bar buttons: strobe / smoke / haze with hold/toggle support
+function initFxBarButtons() {
+  bindHoldToggle(document.getElementById('btnStrobe'), strobeOn, strobeOff);
+  bindHoldToggle(document.getElementById('btnSmoke'), () => setSmokeHaze('smoke', true), () => setSmokeHaze('smoke', false));
+  bindHoldToggle(document.getElementById('btnHaze'), () => setSmokeHaze('haze', true), () => setSmokeHaze('haze', false));
+
+  document.getElementById('btnOutput').addEventListener('click', toggleOutput);
+  document.getElementById('btnBlackout').addEventListener('click', doBlackout);
+}
+
+// Action buttons: hold/toggle aware
+function initActionButtons() {
+  document.querySelectorAll('.action-btn[data-action]').forEach(btn => {
+    const action = btn.dataset.action;
+    const onFn = () => { runAction(action, true); btn.classList.add('active-action'); };
+    const offFn = () => { runAction(action, false); btn.classList.remove('active-action'); };
+    bindHoldToggle(btn, onFn, offFn);
+  });
+}
+
+/**
+ * Universal hold/toggle binder.
+ * In HOLD mode: press=on, release=off (via touch/mouse events).
+ * In TOGGLE mode: tap toggles between on and off.
+ */
+function bindHoldToggle(el, onFn, offFn) {
+  let isOn = false;
+  let touchActive = false;
+
+  function activate(e) {
+    if (e) e.preventDefault();
+    if (holdMode) {
+      if (!isOn) { isOn = true; onFn(); }
+    } else {
+      if (isOn) { isOn = false; offFn(); }
+      else { isOn = true; onFn(); }
+    }
+  }
+
+  function deactivate(e) {
+    if (e) e.preventDefault();
+    if (holdMode && isOn) { isOn = false; offFn(); }
+  }
+
+  el.addEventListener('touchstart', (e) => {
+    touchActive = true;
+    activate(e);
+  }, { passive: false });
+  el.addEventListener('touchend', (e) => {
+    touchActive = false;
+    deactivate(e);
+  }, { passive: false });
+  el.addEventListener('touchcancel', (e) => {
+    touchActive = false;
+    deactivate(e);
+  }, { passive: false });
+  el.addEventListener('mousedown', (e) => {
+    if (touchActive) return;
+    activate(e);
+  });
+  el.addEventListener('mouseup', (e) => {
+    if (touchActive) return;
+    deactivate(e);
+  });
+  el.addEventListener('mouseleave', (e) => {
+    if (touchActive) return;
+    if (holdMode && isOn) { isOn = false; offFn(); }
+  });
+
+  el._holdReset = () => { if (isOn) { isOn = false; offFn(); } };
+}
+
+function releaseAllActions() {
+  document.querySelectorAll('.action-btn[data-action], #btnStrobe, #btnSmoke, #btnHaze').forEach(el => {
+    if (el._holdReset) el._holdReset();
+  });
+}
+
+async function fetchFixtures() {
+  try {
+    fixtures = await fetch('/api/fixture-channel-map').then(r => r.json());
+    fixtures.forEach(f => {
+      if (fixtureEnabled[f.id] === undefined) fixtureEnabled[f.id] = true;
+      if (fixtureDimmer[f.id] === undefined) fixtureDimmer[f.id] = 255;
+    });
+  } catch (e) { console.error('Failed to fetch fixtures', e); }
+}
+
+async function fetchGroups() {
+  try {
+    groups = await fetch('/api/groups').then(r => r.json());
+    groups.forEach(g => {
+      if (groupDimmer[g.id] === undefined) groupDimmer[g.id] = 255;
+    });
+  } catch (e) { console.error('Failed to fetch groups', e); }
+}
+
+async function fetchMoverPresets() {
+  try { moverPresets = await fetch('/api/mover-presets').then(r => r.json()); }
+  catch (e) { console.error('Failed to fetch mover presets', e); }
+}
+
+async function fetchOutputState() {
+  try {
+    const s = await fetch('/api/dmx/output').then(r => r.json());
+    outputEnabled = s.enabled;
+  } catch (e) {}
+}
+
+// WebSocket
+function connectWebSocket() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host);
+  ws.onopen = () => updateStatus(true);
+  ws.onclose = () => { updateStatus(false); setTimeout(connectWebSocket, 2000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'dmxOutput') {
+        outputEnabled = msg.enabled;
+        renderOutputBtn();
+      } else if (msg.type === 'touchBlackoutHold') {
+        // Sync blackout state from OS2L or other sources
+        blackoutActive = msg.active;
+        document.getElementById('btnBlackout').classList.toggle('active', blackoutActive);
+      } else if (msg.type === 'touchFixtureDisable') {
+        // Sync fixture disable from other clients
+        fixtureEnabled[msg.fixtureId] = !msg.disabled;
+        const toggle = document.querySelector('.toggle[data-id="' + msg.fixtureId + '"]');
+        if (toggle) toggle.classList.toggle('on', !msg.disabled);
+      }
+    } catch (err) {}
+  };
+}
+
+function updateStatus(connected) {
+  document.getElementById('statusDot').className = 'status-dot ' + (connected ? 'ok' : 'err');
+  document.getElementById('statusText').textContent = connected ? 'Connected' : 'Disconnected';
+  renderOutputBtn();
+}
+
+// Render
+function renderAll() {
+  renderColors();
+  renderColorTargetGroups();
+  renderGroupDimmers();
+  renderFixtureList();
+  renderMoverPresets();
+  renderOutputBtn();
+}
+
+function renderOutputBtn() {
+  const btn = document.getElementById('btnOutput');
+  btn.textContent = outputEnabled ? 'OUTPUT' : 'OFF';
+  btn.className = 'btn btn-master' + (outputEnabled ? '' : ' off');
+  btn.style.padding = '12px 18px';
+  document.getElementById('statusOutput').textContent = 'Output: ' + (outputEnabled ? 'ON' : 'OFF');
+}
+
+function renderColors() {
+  const grid = document.getElementById('colorGrid');
+  grid.innerHTML = COLORS.map((c, i) =>
+    '<div class="color-swatch' + (selectedColor === i ? ' active' : '') +
+    '" style="background:' + c.hex + '" data-idx="' + i + '">' + c.name + '</div>'
+  ).join('');
+  grid.querySelectorAll('.color-swatch').forEach(el => {
+    const idx = +el.dataset.idx;
+    if (holdMode) {
+      let touchActive = false;
+      el.addEventListener('touchstart', (e) => {
+        e.preventDefault(); touchActive = true;
+        selectedColor = idx; renderColorActive(); sendColorOverride();
+      }, { passive: false });
+      el.addEventListener('touchend', (e) => {
+        e.preventDefault(); touchActive = false;
+        clearColorOverrideDMX(); selectedColor = null; renderColorActive();
+      }, { passive: false });
+      el.addEventListener('touchcancel', (e) => {
+        e.preventDefault(); touchActive = false;
+        clearColorOverrideDMX(); selectedColor = null; renderColorActive();
+      }, { passive: false });
+      el.addEventListener('mousedown', (e) => {
+        if (touchActive) return;
+        selectedColor = idx; renderColorActive(); sendColorOverride();
+      });
+      el.addEventListener('mouseup', (e) => {
+        if (touchActive) return;
+        clearColorOverrideDMX(); selectedColor = null; renderColorActive();
+      });
+      el.addEventListener('mouseleave', (e) => {
+        if (touchActive) return;
+        if (selectedColor === idx) { clearColorOverrideDMX(); selectedColor = null; renderColorActive(); }
+      });
+    } else {
+      el.addEventListener('click', () => {
+        selectedColor = selectedColor === idx ? null : idx;
+        renderColorActive();
+        if (selectedColor !== null) sendColorOverride();
+      });
+    }
+  });
+}
+
+function renderColorActive() {
+  document.querySelectorAll('.color-swatch').forEach(el => {
+    el.classList.toggle('active', +el.dataset.idx === selectedColor);
+  });
+}
+
+function renderColorTargetGroups() {
+  const grid = document.getElementById('colorTargetGroups');
+  grid.innerHTML = groups.map(g =>
+    '<div class="chip' + (selectedGroups.has(g.id) ? ' active' : '') + '" data-id="' + g.id + '">' + g.name + '</div>'
+  ).join('');
+  grid.querySelectorAll('.chip').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = +el.dataset.id;
+      if (selectedGroups.has(id)) selectedGroups.delete(id); else selectedGroups.add(id);
+      renderColorTargetGroups();
+      if (selectedColor !== null) sendColorOverride();
+    });
+  });
+}
+
+function renderGroupDimmers() {
+  const wrap = document.getElementById('groupDimmers');
+  if (!groups.length) { wrap.innerHTML = '<p style="font-size:13px;color:var(--dim)">No groups configured</p>'; return; }
+  wrap.innerHTML = groups.map(g =>
+    '<div class="fixture-item">' +
+      '<span class="fi-name" style="color:' + (g.color || '#fff') + '">' + esc(g.name) + '</span>' +
+      '<span class="fi-type" style="font-size:12px">' + (g.fixture_ids || []).length + ' fixtures</span>' +
+      '<input type="range" class="fi-dim" min="0" max="255" value="' + (groupDimmer[g.id] || 255) + '"' +
+      ' oninput="onGroupDimmer(' + g.id + ', this.value)">' +
+      '<span class="val" id="gdim-' + g.id + '">' + (groupDimmer[g.id] || 255) + '</span>' +
+    '</div>'
+  ).join('');
+}
+
+function renderFixtureList() {
+  const wrap = document.getElementById('fixtureList');
+  if (!fixtures.length) { wrap.innerHTML = '<p style="font-size:13px;color:var(--dim)">No fixtures found</p>'; return; }
+  wrap.innerHTML = fixtures.map(f =>
+    '<div class="fixture-item" data-fix-id="' + f.id + '">' +
+      '<div class="toggle' + (fixtureEnabled[f.id] !== false ? ' on' : '') + '" data-id="' + f.id + '"></div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div class="fi-name">' + esc(f.name) + '</div>' +
+        '<div class="fi-type" style="font-size:11px">' + esc(f.type_name || '') + ' &middot; ch ' + f.address + '</div>' +
+      '</div>' +
+      '<input type="range" class="fi-dim" min="0" max="255" value="' + (fixtureDimmer[f.id] || 255) + '"' +
+      ' oninput="onFixtureDimmer(' + f.id + ', this.value)">' +
+      '<span class="val" id="fdim-' + f.id + '">' + (fixtureDimmer[f.id] || 255) + '</span>' +
+    '</div>'
+  ).join('');
+  wrap.querySelectorAll('.toggle').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = +el.dataset.id;
+      fixtureEnabled[id] = !fixtureEnabled[id];
+      el.classList.toggle('on', fixtureEnabled[id]);
+      // Tell server so playback engine also respects enable/disable
+      fetch('/api/touch/fixture-disable', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId: id, disabled: !fixtureEnabled[id] })
+      });
+      if (!fixtureEnabled[id]) blackoutFixture(id);
+    });
+  });
+}
+
+function renderMoverPresets() {
+  const grid = document.getElementById('moverPresetGrid');
+  if (!moverPresets.length) { grid.innerHTML = '<p style="font-size:13px;color:var(--dim)">No presets saved</p>'; return; }
+  grid.innerHTML = moverPresets.map((p, i) =>
+    '<div class="preset-btn" data-idx="' + i + '">' + esc(p.name) + '</div>'
+  ).join('');
+  grid.querySelectorAll('.preset-btn').forEach(el => {
+    el.addEventListener('click', () => sendMoverPreset(moverPresets[+el.dataset.idx]));
+  });
+}
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// DMX Helpers
+function getTargetFixtures() {
+  if (selectedGroups.size === 0) return fixtures;
+  return fixtures.filter(f => f.group_ids && f.group_ids.some(gid => selectedGroups.has(gid)));
+}
+
+function getEnabledFixtures(list) {
+  return (list || fixtures).filter(f => fixtureEnabled[f.id] !== false);
+}
+
+function buildChannelUpdates(targetFixtures, channelFilter, valueFn) {
+  const byUniverse = {};
+  for (const f of targetFixtures) {
+    if (fixtureEnabled[f.id] === false) continue;
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) {
+      if (channelFilter(ch, f)) {
+        let val = valueFn(ch, f);
+        if (['red', 'green', 'blue', 'white', 'amber', 'uv', 'dimmer'].includes(ch.type)) {
+          const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
+          val = Math.round(val * (fDim / 255));
+        }
+        byUniverse[u].push({ ch: ch.dmx_address, val: Math.max(0, Math.min(255, val)) });
+      }
+    }
+  }
+  return byUniverse;
+}
+
+function sendDMX(byUniverse) {
+  for (const [universe, channels] of Object.entries(byUniverse)) {
+    if (channels.length > 0) {
+      fetch('/api/dmx/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: false })
+        body: JSON.stringify({ universe: +universe, channels: channels })
       });
-      fetch('/api/artnet/blackout', { method: 'POST' });
-    });
-    // --- Init ---
-    fetchGroups();
-    fetchFixtures();
-    fetchMoverPresets();
-    renderColors();
-    renderDimmer();
-  </script>
+    }
+  }
+}
+
+// Color Override
+function sendColorOverride() {
+  if (selectedColor === null) return;
+  const c = COLORS[selectedColor];
+  const scale = colorIntensity / 255;
+  const targets = getTargetFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ['red', 'green', 'blue', 'white', 'amber', 'uv', 'dimmer'].includes(ch.type),
+    (ch) => {
+      switch (ch.type) {
+        case 'red': return Math.round(c.r * scale);
+        case 'green': return Math.round(c.g * scale);
+        case 'blue': return Math.round(c.b * scale);
+        case 'white': return (c.r === 255 && c.g === 255 && c.b === 255) ? Math.round(255 * scale) : 0;
+        case 'dimmer': return Math.round(255 * scale);
+        case 'amber': return (c.name === 'Amber') ? Math.round(255 * scale) : 0;
+        case 'uv': return (c.name === 'UV') ? Math.round(255 * scale) : 0;
+        default: return 0;
+      }
+    }
+  );
+  sendDMX(updates);
+}
+
+function clearColorOverrideDMX() {
+  const targets = getTargetFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ['red', 'green', 'blue', 'white', 'amber', 'uv'].includes(ch.type),
+    () => 0
+  );
+  sendDMX(updates);
+}
+
+function onIntensityChange(val) {
+  colorIntensity = +val;
+  document.getElementById('colorIntVal').textContent = val;
+  if (selectedColor !== null) sendColorOverride();
+}
+
+function clearColorOverride() {
+  selectedColor = null;
+  renderColorActive();
+}
+
+// Output / Blackout
+function toggleOutput() {
+  outputEnabled = !outputEnabled;
+  fetch('/api/dmx/output', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: outputEnabled })
+  });
+  renderOutputBtn();
+}
+
+function doBlackout() {
+  blackoutActive = !blackoutActive;
+  document.getElementById('btnBlackout').classList.toggle('active', blackoutActive);
+  // Use server-side blackout hold so playback engine can't overwrite it
+  fetch('/api/touch/blackout-hold', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: blackoutActive })
+  });
+}
+
+// Strobe
+function strobeOn() {
+  if (strobeActive) return;
+  strobeActive = true;
+  document.getElementById('btnStrobe').classList.add('active');
+  const speed = +document.getElementById('strobeSpeed').value || 200;
+  const targets = getEnabledFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ch.type === 'strobe' || (ch.ranges && ch.ranges.some(r => r.type === 'strobe')),
+    (ch) => {
+      if (ch.type === 'strobe') return speed;
+      const range = ch.ranges.find(r => r.type === 'strobe');
+      return range ? Math.round(range.min + (speed / 255) * (range.max - range.min)) : speed;
+    }
+  );
+  sendDMX(updates);
+}
+
+function strobeOff() {
+  if (!strobeActive) return;
+  strobeActive = false;
+  document.getElementById('btnStrobe').classList.remove('active');
+  const targets = getEnabledFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ch.type === 'strobe' || (ch.ranges && ch.ranges.some(r => r.type === 'strobe')),
+    () => 0
+  );
+  sendDMX(updates);
+}
+
+// Smoke / Haze
+function setSmokeHaze(type, on) {
+  if (type === 'smoke') { smokeActive = on; document.getElementById('btnSmoke').classList.toggle('active', on); }
+  if (type === 'haze') { hazeActive = on; document.getElementById('btnHaze').classList.toggle('active', on); }
+  const targets = getEnabledFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ch.type === type || ch.type === 'fog' || ch.type === 'smoke' || ch.type === 'haze',
+    () => on ? 255 : 0
+  );
+  sendDMX(updates);
+}
+
+// Master Dimmer
+function sendMasterDimmer(val) {
+  document.getElementById('masterDimVal').textContent = val;
+  const v = +val;
+  const targets = getEnabledFixtures();
+  const byUniverse = {};
+  for (const f of targets) {
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) {
+      if (ch.type === 'dimmer') {
+        const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
+        byUniverse[u].push({ ch: ch.dmx_address, val: Math.round(v * (fDim / 255)) });
+      }
+    }
+  }
+  sendDMX(byUniverse);
+}
+
+// Group Dimmers
+function onGroupDimmer(groupId, val) {
+  groupDimmer[groupId] = +val;
+  document.getElementById('gdim-' + groupId).textContent = val;
+  const group = groups.find(g => g.id === groupId);
+  if (!group) return;
+  const groupFixtures = fixtures.filter(f => (f.group_ids || []).includes(groupId));
+  const updates = buildChannelUpdates(groupFixtures,
+    (ch) => ch.type === 'dimmer',
+    () => +val
+  );
+  sendDMX(updates);
+}
+
+// Fixture Dimmers & Disable
+function onFixtureDimmer(fixId, val) {
+  fixtureDimmer[fixId] = +val;
+  document.getElementById('fdim-' + fixId).textContent = val;
+  const f = fixtures.find(fx => fx.id === fixId);
+  if (!f || fixtureEnabled[fixId] === false) return;
+  const u = f.universe || 1;
+  const channels = [];
+  for (const ch of f.channels) {
+    if (ch.type === 'dimmer') channels.push({ ch: ch.dmx_address, val: +val });
+  }
+  if (channels.length) sendDMX({ [u]: channels });
+}
+
+function blackoutFixture(fixId) {
+  const f = fixtures.find(fx => fx.id === fixId);
+  if (!f) return;
+  const u = f.universe || 1;
+  const channels = f.channels.map(ch => ({ ch: ch.dmx_address, val: 0 }));
+  sendDMX({ [u]: channels });
+}
+
+// Mover Presets & Manual Position
+function sendMoverPreset(preset) {
+  if (!preset.positions) return;
+  const byUniverse = {};
+  for (const pos of preset.positions) {
+    const f = fixtures.find(fx => fx.id === pos.fixture_id);
+    if (!f || fixtureEnabled[f.id] === false) continue;
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) {
+      if (ch.type === 'pan' && pos.pan !== undefined) byUniverse[u].push({ ch: ch.dmx_address, val: pos.pan });
+      if (ch.type === 'tilt' && pos.tilt !== undefined) byUniverse[u].push({ ch: ch.dmx_address, val: pos.tilt });
+    }
+  }
+  sendDMX(byUniverse);
+}
+
+function sendManualPosition() {
+  const pan = +document.getElementById('manualPan').value;
+  const tilt = +document.getElementById('manualTilt').value;
+  const speed = +document.getElementById('manualSpeed').value;
+  document.getElementById('panVal').textContent = pan;
+  document.getElementById('tiltVal').textContent = tilt;
+  document.getElementById('speedVal').textContent = speed;
+  const movers = getEnabledFixtures().filter(f =>
+    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt')
+  );
+  const updates = buildChannelUpdates(movers,
+    (ch) => ch.type === 'pan' || ch.type === 'tilt' || ch.type === 'speed',
+    (ch) => ch.type === 'pan' ? pan : ch.type === 'tilt' ? tilt : speed
+  );
+  sendDMX(updates);
+}
+
+// Quick Actions (dispatched by data-action)
+function runAction(action, on) {
+  const actionMap = {
+    fullWhite: { on: actionFullWhite, off: actionAllOff },
+    fullColor: { on: actionFullColor, off: actionAllOff },
+    dimWarm:   { on: actionDimWarm,   off: actionAllOff },
+    allOff:    { on: actionAllOff,    off: function(){} },
+    strobe:    { on: strobeOn,        off: strobeOff },
+    uvMode:    { on: actionUVMode,    off: actionAllOff },
+  };
+  const entry = actionMap[action];
+  if (!entry) return;
+  if (on) entry.on(); else entry.off();
+}
+
+function actionFullWhite() {
+  const targets = getEnabledFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ['red', 'green', 'blue', 'white', 'dimmer'].includes(ch.type),
+    () => 255
+  );
+  sendDMX(updates);
+}
+
+function actionFullColor() {
+  if (selectedColor === null) { selectedColor = 0; renderColorActive(); }
+  sendColorOverride();
+}
+
+function actionDimWarm() {
+  const targets = getEnabledFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ['red', 'green', 'blue', 'white', 'amber', 'dimmer'].includes(ch.type),
+    (ch) => {
+      switch (ch.type) {
+        case 'red': return 180; case 'green': return 100; case 'blue': return 40;
+        case 'amber': return 200; case 'white': return 80; case 'dimmer': return 120;
+        default: return 0;
+      }
+    }
+  );
+  sendDMX(updates);
+}
+
+function actionAllOff() {
+  const byUniverse = {};
+  for (const f of fixtures) {
+    const u = f.universe || 1;
+    if (!byUniverse[u]) byUniverse[u] = [];
+    for (const ch of f.channels) byUniverse[u].push({ ch: ch.dmx_address, val: 0 });
+  }
+  sendDMX(byUniverse);
+}
+
+function actionUVMode() {
+  const targets = getEnabledFixtures();
+  const updates = buildChannelUpdates(targets,
+    (ch) => ['red', 'green', 'blue', 'white', 'uv', 'dimmer'].includes(ch.type),
+    (ch) => {
+      switch (ch.type) {
+        case 'uv': return 255; case 'dimmer': return 200; case 'blue': return 40;
+        default: return 0;
+      }
+    }
+  );
+  sendDMX(updates);
+}
+</script>
 </body>
 </html>
