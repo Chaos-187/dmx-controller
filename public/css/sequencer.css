@@ -179,3 +179,14 @@
 }
 .seq-fix-chip:hover { border-color: var(--accent); }
 .seq-fix-chip.active { border-color: var(--green); background: rgba(0,230,118,.1); color: var(--green); }
+
+/* ─── Multi-Cell Sub-Lanes ─────────────────────────────────────────────── */
+.seq-lane-cell { min-height: 30px; background: rgba(255,255,255,.015); }
+.seq-lane-cell .seq-lane-header { padding-left: 22px; }
+.seq-lane-cell .seq-lane-header.seq-cell-header { font-size: 10px; }
+.seq-lane-master { background: rgba(0,0,0,.1); }
+.seq-cell-toggle {
+  cursor: pointer; font-size: 9px; opacity: .7; user-select: none;
+  transition: opacity .15s; line-height: 1;
+}
+.seq-cell-toggle:hover { opacity: 1; color: var(--accent); }

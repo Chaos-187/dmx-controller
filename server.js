@@ -198,6 +198,7 @@ function handleMessage(data) {
               const genResult = sequenceGenerator.generateSequence({
                 track, fixtures, analysis,
                 effects: db.getEffects(),
+                noStrobes: db.getConfig('seq_no_strobes') === '1',
               });
               const newSeq = db.createSequence({
                 name: track.title || track.filename || 'Untitled',
@@ -218,11 +219,14 @@ function handleMessage(data) {
                 console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck}`);
 
                 const seqAutoPlay = db.getConfig('seq_auto_play') === '1';
-                if (seqAutoPlay) {
+                const deckIsPlaying = state.decks[deck] && state.decks[deck].play;
+                if (seqAutoPlay && deckIsPlaying) {
                   activeSequences[deck].playing = true;
                   startPlaybackTimer(deck);
                   broadcast({ type: 'seq_playing', deck, playing: true });
                   console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
+                } else if (seqAutoPlay && !deckIsPlaying) {
+                  console.log(`[SEQ] Deck ${deck} is paused — sequence loaded but not started`);
                 }
               }
             } catch (ge) {
@@ -242,11 +246,14 @@ function handleMessage(data) {
           console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} for "${state.decks[deck].filename}"`);
 
           const seqAutoPlay = db.getConfig('seq_auto_play') === '1';
-          if (seqAutoPlay) {
+          const deckIsPlaying = state.decks[deck] && state.decks[deck].play;
+          if (seqAutoPlay && deckIsPlaying) {
             activeSequences[deck].playing = true;
             startPlaybackTimer(deck);
             broadcast({ type: 'seq_playing', deck, playing: true });
             console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
+          } else if (seqAutoPlay && !deckIsPlaying) {
+            console.log(`[SEQ] Deck ${deck} is paused — sequence loaded but not started`);
           }
         } else if (seqAutoUnload && activeSequences[deck]) {
           // No matching sequence — unload the current one
@@ -256,6 +263,29 @@ function handleMessage(data) {
           broadcast({ type: 'seq_unloaded', deck });
           console.log(`[SEQ] Auto-unloaded sequence from deck ${deck} (no match)`);
         }
+      }
+    }
+
+    // ─── Sync sequence playback with deck play/pause state ─────
+    if (key === 'play' && activeSequences[deck]) {
+      const deckNowPlaying = state.decks[deck].play;  // already normalized to 1/0
+      if (deckNowPlaying && !activeSequences[deck].playing) {
+        // Deck started playing — resume the sequence
+        activeSequences[deck].playing = true;
+        startPlaybackTimer(deck);
+        broadcast({ type: 'seq_playing', deck, playing: true });
+        console.log(`[SEQ] Deck ${deck} playing — resuming sequence`);
+      } else if (!deckNowPlaying && activeSequences[deck].playing) {
+        // Deck paused — pause the sequence
+        activeSequences[deck].playing = false;
+        if (playbackTimers[deck]) {
+          const ds = activeSequences[deck];
+          ds.currentTimeMs = ds.startOffset != null ? ds.startOffset + (Date.now() - ds.startWall) : ds.currentTimeMs;
+        }
+        stopPlaybackTimer(deck);
+        blackoutDeckFixtures(deck);
+        broadcast({ type: 'seq_playing', deck, playing: false });
+        console.log(`[SEQ] Deck ${deck} paused — pausing sequence`);
       }
     }
 
@@ -551,6 +581,16 @@ app.post('/api/fixture-types/led-bar', (req, res) => {
   }
 });
 
+// Create a multi-cell fixture type with optional master channels
+app.post('/api/fixture-types/multi-cell', (req, res) => {
+  try {
+    const result = db.createMultiCellFixtureType(req.body);
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.put('/api/fixture-types/:id', (req, res) => {
   const result = db.updateFixtureType(+req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
@@ -707,6 +747,8 @@ app.get('/api/config', (req, res) => {
 
 app.put('/api/config/:key', (req, res) => {
   db.setConfig(req.params.key, req.body.value);
+  // Refresh cached mixer settings when relevant keys change
+  if (req.params.key.startsWith('seq_')) refreshMixerConfig();
   res.json({ key: req.params.key, value: req.body.value });
 });
 
@@ -1543,6 +1585,7 @@ app.post('/api/sequences/generate/:trackId', async (req, res) => {
     palette: palKey || undefined,
     genre: genKey || undefined,
     effects: db.getEffects(),
+    noStrobes: db.getConfig('seq_no_strobes') === '1',
   });
 
   // Create sequence
@@ -1612,6 +1655,7 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
         palette: palette || undefined,
         genre: genre || undefined,
         effects: allEffects,
+        noStrobes: db.getConfig('seq_no_strobes') === '1',
       });
 
       const seq = db.createSequence({
@@ -1636,6 +1680,15 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
 
 const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... } }
 const playbackTimers = {};   // { deckNum: intervalId }
+
+// Cached mixer integration settings (refreshed on config save / startup)
+let _cachedMixerConfig = { crossfaderGating: false, deckFaderDimmer: false };
+function refreshMixerConfig() {
+  _cachedMixerConfig.crossfaderGating = db.getConfig('seq_crossfader_gating') === '1';
+  _cachedMixerConfig.deckFaderDimmer = db.getConfig('seq_deck_fader_dimmer') === '1';
+}
+// Refresh on startup after DB is ready
+try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ }
 
 // Start a standalone playback timer for a deck (runs when VDJ isn't driving time)
 function startPlaybackTimer(deck) {
@@ -1797,6 +1850,29 @@ function processSequenceAtTime(deckNum, timeMs) {
 
   if (!dmxOutputEnabled) return;
 
+  // ── Crossfader gating: suppress output for the deck the crossfader is away from ──
+  if (_cachedMixerConfig.crossfaderGating) {
+    const cf = parseFloat(state.crossfader) || 0;  // 0 = full deck 1, 1 = full deck 2
+    // Deck 1 active when cf <= 0.5, Deck 2 active when cf >= 0.55, dead zone 0.5–0.55
+    const gated = (deckNum === 1 && cf > 0.5) || (deckNum === 2 && cf < 0.55);
+    if (gated) {
+      // Only blackout once when transitioning to gated state
+      if (!deckSeq._gated) {
+        deckSeq._gated = true;
+        blackoutDeckFixtures(deckNum);
+      }
+      return;
+    }
+    // Deck just became active again
+    if (deckSeq._gated) deckSeq._gated = false;
+    // Decks 3-4: no crossfader gating, always play if active
+  }
+
+  // ── Deck fader dimmer: scale output by deck volume fader ──
+  const deckLevel = _cachedMixerConfig.deckFaderDimmer
+    ? Math.max(0, Math.min(1, parseFloat(state.decks[deckNum]?.level) || 0))
+    : 1;
+
   // Find all active cues at this time position
   const channelUpdates = {}; // { universe: { channel: value } }
 
@@ -1817,6 +1893,9 @@ function processSequenceAtTime(deckNum, timeMs) {
     const endVals = cue.end_channel_values;
 
     for (const ch of fixMap.channels) {
+      // Cell filtering: if cue targets a specific cell, only apply to that cell's channels
+      if (cue.cell != null && ch.cell != null && ch.cell !== cue.cell) continue;
+      // If cue targets a cell but channel has no cell assignment (master channel), still apply
       let value = null;
       let skipRangeMap = false; // true when value is already mapped to a specific range
 
@@ -1875,6 +1954,10 @@ function processSequenceAtTime(deckNum, timeMs) {
         const universe = fixMap.universe;
         if (!channelUpdates[universe]) channelUpdates[universe] = {};
         let finalValue = Math.max(0, Math.min(255, Math.round(value)));
+        // Scale by deck fader level (acts as master dimmer for this deck's sequence)
+        if (deckLevel < 1) {
+          finalValue = Math.round(finalValue * deckLevel);
+        }
         // Map through channel sub-ranges (e.g. dimmer 0-255 → DMX 8-134)
         if (!skipRangeMap) {
           finalValue = mapValueToRange(finalValue, ch, ch.type);

@@ -19,6 +19,7 @@ let seqPlayheadMs = 0;
 let seqIsPlaying = false;
 let seqDragState = null;
 let seqEditingEffectId = null;
+let seqExpandedFixtures = new Set(); // fixture IDs whose cells are expanded
 
 async function loadSequencer() {
   if (!seqLoaded) {
@@ -113,6 +114,28 @@ async function loadSequenceById(id) {
   }
 }
 
+function renderCueBlock(cue) {
+  const left = (cue.start_ms / 1000) * seqZoomPxPerSec;
+  const width = Math.max(4, (cue.duration_ms / 1000) * seqZoomPxPerSec);
+  const selected = cue.id === seqSelectedCueId ? ' selected' : '';
+  const chV = cue.channel_values || {};
+  const endV = cue.end_channel_values || {};
+  const startColor = (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined)
+    ? colorFromChannelValues(chV) : (cue.color || '#e94560');
+  const hasEndRGB = endV.red !== undefined || endV.green !== undefined || endV.blue !== undefined;
+  let bgStyle;
+  if (hasEndRGB) {
+    const endColor = colorFromChannelValues(endV);
+    bgStyle = `background:linear-gradient(to right, ${startColor}, ${endColor})`;
+  } else {
+    bgStyle = `background:${startColor}`;
+  }
+  return `<div class="seq-cue${selected}" data-cue-id="${cue.id}" ` +
+    `style="left:${left}px;width:${width}px;${bgStyle}" ` +
+    `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s - ${(cue.duration_ms/1000).toFixed(2)}s)">` +
+    `${esc(cue.label || cue.cue_type)}<div class="seq-cue-resize"></div></div>`;
+}
+
 function renderSequencerTimeline() {
   const emptyEl = document.getElementById('seqEmpty');
   const timelineEl = document.getElementById('seqTimeline');
@@ -201,32 +224,11 @@ function renderSequencerTimeline() {
   }
   for (let i = 0; i < laneFixes.length; i++) {
     const fix = laneFixes[i];
-    const fixCues = seqCues.filter(c => c.fixture_id === fix.id);
+    const isMultiCell = fix.cell_count > 0;
+    const isExpanded = isMultiCell && seqExpandedFixtures.has(fix.id);
+    const hasRGB = fix.channels.some(c => c.type === 'red');
 
-    let cuesHtml = '';
-    for (const cue of fixCues) {
-      const left = (cue.start_ms / 1000) * seqZoomPxPerSec;
-      const width = Math.max(4, (cue.duration_ms / 1000) * seqZoomPxPerSec);
-      const selected = cue.id === seqSelectedCueId ? ' selected' : '';
-      const chV = cue.channel_values || {};
-      const endV = cue.end_channel_values || {};
-      const startColor = (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined)
-        ? colorFromChannelValues(chV) : (cue.color || '#e94560');
-      const hasEndRGB = endV.red !== undefined || endV.green !== undefined || endV.blue !== undefined;
-      let bgStyle;
-      if (hasEndRGB) {
-        const endColor = colorFromChannelValues(endV);
-        bgStyle = `background:linear-gradient(to right, ${startColor}, ${endColor})`;
-      } else {
-        bgStyle = `background:${startColor}`;
-      }
-      cuesHtml += `<div class="seq-cue${selected}" data-cue-id="${cue.id}" ` +
-        `style="left:${left}px;width:${width}px;${bgStyle}" ` +
-        `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s - ${(cue.duration_ms/1000).toFixed(2)}s)">` +
-        `${esc(cue.label || cue.cue_type)}<div class="seq-cue-resize"></div></div>`;
-    }
-
-    // Grid lines
+    // Build grid lines (reused for all sub-lanes)
     let gridHtml = '';
     let gt = 0; beatCount = 0;
     while (gt < durationMs) {
@@ -237,14 +239,71 @@ function renderSequencerTimeline() {
       gt += beatMs;
     }
 
-    const hasRGB = fix.channels.some(c => c.type === 'red');
-    lanesHtml += `<div class="seq-lane" data-fixture-id="${fix.id}" data-lane="${i}">` +
-      `<div class="seq-lane-header">` +
-      `<div class="seq-lh-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
-      `<span>${esc(fix.name)}</span></div>` +
-      `<div class="seq-lane-track" data-fixture-id="${fix.id}">${gridHtml}${cuesHtml}</div></div>`;
+    // Expand/collapse toggle for multi-cell fixtures
+    const expandToggle = isMultiCell
+      ? `<span class="seq-cell-toggle" data-fix-id="${fix.id}" title="${isExpanded ? 'Collapse cells' : 'Expand cells'}">${isExpanded ? '&#9660;' : '&#9654;'}</span>`
+      : '';
+
+    if (!isExpanded) {
+      // Single lane (collapsed or non-multi-cell): show ALL cues for this fixture
+      const fixCues = seqCues.filter(c => c.fixture_id === fix.id);
+      let cuesHtml = '';
+      for (const cue of fixCues) {
+        cuesHtml += renderCueBlock(cue);
+      }
+
+      lanesHtml += `<div class="seq-lane" data-fixture-id="${fix.id}" data-lane="${i}">` +
+        `<div class="seq-lane-header">` +
+        `${expandToggle}` +
+        `<div class="seq-lh-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
+        `<span>${esc(fix.name)}</span></div>` +
+        `<div class="seq-lane-track" data-fixture-id="${fix.id}">${gridHtml}${cuesHtml}</div></div>`;
+    } else {
+      // Expanded: show sub-lanes per cell + optional master lane
+      const hasMasterChannels = fix.channels.some(ch => !ch.cell);
+
+      // Master lane (channels with no cell assignment)
+      if (hasMasterChannels) {
+        const masterCues = seqCues.filter(c => c.fixture_id === fix.id && !c.cell);
+        let masterCuesHtml = '';
+        for (const cue of masterCues) masterCuesHtml += renderCueBlock(cue);
+
+        lanesHtml += `<div class="seq-lane seq-lane-master" data-fixture-id="${fix.id}" data-lane="${i}" data-cell="0">` +
+          `<div class="seq-lane-header">` +
+          `${expandToggle}` +
+          `<div class="seq-lh-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
+          `<span>${esc(fix.name)} <small style="color:var(--text-dim)">[Master]</small></span></div>` +
+          `<div class="seq-lane-track" data-fixture-id="${fix.id}" data-cell="0">${gridHtml}${masterCuesHtml}</div></div>`;
+      }
+
+      // Per-cell sub-lanes
+      for (let cell = 1; cell <= fix.cell_count; cell++) {
+        const cellCues = seqCues.filter(c => c.fixture_id === fix.id && c.cell === cell);
+        let cellCuesHtml = '';
+        for (const cue of cellCues) cellCuesHtml += renderCueBlock(cue);
+
+        const cellHasRGB = fix.channels.some(ch => ch.cell === cell && ch.type === 'red');
+        lanesHtml += `<div class="seq-lane seq-lane-cell" data-fixture-id="${fix.id}" data-lane="${i}" data-cell="${cell}">` +
+          `<div class="seq-lane-header seq-cell-header">` +
+          `${!hasMasterChannels && cell === 1 ? expandToggle : ''}` +
+          `<div class="seq-lh-color" style="background:${cellHasRGB ? '#e94560' : '#888'}"></div>` +
+          `<span style="font-size:11px">${esc(fix.name)} <small style="color:var(--text-dim)">Cell ${cell}</small></span></div>` +
+          `<div class="seq-lane-track" data-fixture-id="${fix.id}" data-cell="${cell}">${gridHtml}${cellCuesHtml}</div></div>`;
+      }
+    }
   }
   lanesWrap.innerHTML = lanesHtml;
+
+  // Bind cell expand/collapse toggles
+  lanesWrap.querySelectorAll('.seq-cell-toggle').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const fixId = +el.dataset.fixId;
+      if (seqExpandedFixtures.has(fixId)) seqExpandedFixtures.delete(fixId);
+      else seqExpandedFixtures.add(fixId);
+      renderSequencerTimeline();
+    });
+  });
 
   // Draw waveform on the canvas (defer to next frame so DOM is laid out)
   if (wfAnalysisData && wfWaveformData && typeof drawTimelineWaveform === 'function') {
@@ -402,16 +461,21 @@ function setupSequencerEvents() {
     const bpm = seqCurrentSeq.bpm || 128;
     const durMs = (60000 / bpm) * 4; // default 1 bar
     const lane = +e.target.closest('.seq-lane').dataset.lane;
+    const cellAttr = track.dataset.cell;
+    const cell = cellAttr !== undefined ? +cellAttr : null;
+
+    const body = {
+      lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
+      cue_type: 'static', fixture_id: fixtureId,
+      channel_values: { red: 255, green: 0, blue: 0 },
+      color: '#ff0000', label: '',
+    };
+    if (cell) body.cell = cell;
 
     const res = await fetch(`/api/sequences/${seqCurrentId}/cues`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
-        cue_type: 'static', fixture_id: fixtureId,
-        channel_values: { red: 255, green: 0, blue: 0 },
-        color: '#ff0000', label: '',
-      })
+      body: JSON.stringify(body)
     });
     const cue = await res.json();
     seqCues.push(cue);
@@ -697,13 +761,19 @@ function renderCueChannelSliders(cueId, cueType) {
 
   if (!fix) { chContainer.innerHTML = '<div style="color:var(--text-dim);font-size:11px">No fixture assigned</div>'; return; }
 
+  // Filter channels by cell when cue targets a specific cell
+  let channels = fix.channels;
+  if (cue.cell) {
+    channels = fix.channels.filter(ch => !ch.cell || ch.cell === cue.cell);
+  }
+
   const chColorMap = {
     red: '#f44', green: '#4f4', blue: '#44f', white: '#fff',
     dimmer: '#ff0', amber: '#fa0', uv: '#a0f',
   };
 
   let html = '<div class="seq-ch-start" style="margin-bottom:6px"><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">START VALUES</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
-  for (const ch of fix.channels) {
+  for (const ch of channels) {
     const val = chVals[ch.type] !== undefined ? chVals[ch.type] : 0;
     const color = chColorMap[ch.type] || '#888';
     html += `<div class="seq-ch-slider" data-ch-type="${ch.type}">` +
@@ -721,7 +791,7 @@ function renderCueChannelSliders(cueId, cueType) {
       '<span>END VALUES</span>' +
       '<button type="button" class="btn btn-sm" style="font-size:9px;padding:1px 6px" onclick="copyStartToEnd()">Copy Start→End</button>' +
       '</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
-    for (const ch of fix.channels) {
+    for (const ch of channels) {
       const val = hasEnd && endVals[ch.type] !== undefined ? endVals[ch.type] : (chVals[ch.type] !== undefined ? chVals[ch.type] : 0);
       const color = chColorMap[ch.type] || '#888';
       html += `<div class="seq-ch-slider" data-ch-type="${ch.type}">` +

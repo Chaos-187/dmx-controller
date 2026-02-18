@@ -1646,6 +1646,35 @@
             </div>
           </div>
 
+          <div class="config-card" style="margin-top:16px">
+            <h4>Generation Options</h4>
+            <div class="config-row">
+              <label>Exclude Strobes</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgSeqNoStrobes" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Do not generate strobe cues in auto-generated sequences</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="config-card" style="margin-top:16px">
+            <h4>Mixer Integration</h4>
+            <div class="config-row">
+              <label>Crossfader Sequence Gating</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgSeqCrossfaderGating" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Only output the active deck's sequence based on crossfader position (0–0.5 = Deck 1, 0.55–1 = Deck 2)</span>
+              </label>
+            </div>
+            <div class="config-row">
+              <label>Deck Fader as Dimmer</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgSeqDeckFaderDimmer" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Scale the sequence output brightness by each deck's volume fader level (acts as a master dimmer per deck)</span>
+              </label>
+            </div>
+          </div>
+
           <div style="margin-top:12px;display:flex;gap:8px">
             <button class="btn btn-primary btn-sm" id="btnSaveSeqConfig">Save</button>
           </div>
@@ -2034,6 +2063,7 @@
           <option value="fog">Fog / Haze</option>
           <option value="dimmer">Dimmer</option>
           <option value="led_bar">LED Bar</option>
+          <option value="multi_cell">Multi-Cell</option>
           <option value="effect">Effect</option>
           <option value="other">Other</option>
         </select>
@@ -2043,6 +2073,24 @@
       <label>Channels</label>
       <div class="channels-editor" id="channelsEditor"></div>
       <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
+    </div>
+    <div class="form-group" id="tMultiCellGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
+      <label>Multi-Cell Builder</label>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Quickly build a multi-cell fixture: define master channels above, then set the per-cell pattern and count below.</div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <label style="font-size:12px;color:var(--text-dim);margin:0">Cells:</label>
+        <input type="number" id="tMultiCellCount" value="4" min="1" max="64" style="width:60px">
+        <label style="font-size:12px;color:var(--text-dim);margin:0">Pattern:</label>
+        <select id="tMultiCellPattern" style="width:auto">
+          <option value="rgb">RGB (3ch)</option>
+          <option value="rgbw">RGBW (4ch)</option>
+          <option value="rgbwa">RGBWA (5ch)</option>
+          <option value="rgbd">RGB + Dimmer (4ch)</option>
+          <option value="rgbwd">RGBW + Dimmer (5ch)</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" id="btnBuildMultiCell" type="button">Build Channels</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tMultiCellHint"></div>
     </div>
     <div class="form-group" id="tDuplicateGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
       <label>Duplicate Channel Pattern</label>
@@ -2178,7 +2226,7 @@ const CHANNEL_TYPES = [
 ];
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', strobe:'Strobe', laser:'Laser',
-  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', effect:'Effect', other:'Other'
+  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -2681,6 +2729,7 @@ function renderChannelsEditor() {
     // Main row
     const row = document.createElement('div');
     row.className = 'ch-row';
+    const cellVal = ch.cell || '';
     row.innerHTML = `
       <span style="font-size:11px;color:var(--text-dim);width:20px;padding-top:4px">${i+1}</span>
       <div class="ch-main">
@@ -2688,7 +2737,8 @@ function renderChannelsEditor() {
         <select data-idx="${i}" data-field="type">
           ${CHANNEL_TYPES.map(t => `<option value="${t}" ${t===ch.type?'selected':''}>${t}</option>`).join('')}
         </select>
-        <input type="number" value="${ch.default_value||0}" min="0" max="255" data-idx="${i}" data-field="default_value" title="Default value">
+        <input type="number" value="${ch.default_value||0}" min="0" max="255" data-idx="${i}" data-field="default_value" title="Default value" style="width:55px">
+        <input type="number" value="${cellVal}" min="0" max="64" data-idx="${i}" data-field="cell" placeholder="Cell" title="Cell number (0 or empty = master)" style="width:55px">
         <button type="button" class="ch-ranges-toggle ${hasRanges ? 'has-ranges' : ''}" data-idx="${i}" title="Define value ranges for multi-function channels">
           ${hasRanges ? `Ranges (${ch.ranges.length})` : '+ Ranges'}
         </button>
@@ -2735,7 +2785,9 @@ function renderChannelsEditor() {
     el.addEventListener('change', () => {
       const idx = +el.dataset.idx;
       const field = el.dataset.field;
-      typeChannels[idx][field] = field === 'default_value' ? +el.value : el.value;
+      if (field === 'default_value') typeChannels[idx][field] = +el.value;
+      else if (field === 'cell') typeChannels[idx][field] = el.value ? +el.value : null;
+      else typeChannels[idx][field] = el.value;
     });
   });
 
@@ -2803,9 +2855,61 @@ window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(
 
 document.getElementById('btnAddChannel').addEventListener('click', () => {
   const num = typeChannels.length + 1;
-  typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255, ranges: null });
+  typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255, ranges: null, cell: null });
   renderChannelsEditor();
   updateDuplicateHint();
+});
+
+/* Category change — show/hide multi-cell builder */
+function updateMultiCellVisibility() {
+  const cat = document.getElementById('tCategory').value;
+  document.getElementById('tMultiCellGroup').style.display = (cat === 'multi_cell' || cat === 'led_bar') ? '' : 'none';
+}
+document.getElementById('tCategory').addEventListener('change', updateMultiCellVisibility);
+
+/* Multi-Cell Builder */
+const MULTI_CELL_PATTERNS = {
+  rgb: ['red', 'green', 'blue'],
+  rgbw: ['red', 'green', 'blue', 'white'],
+  rgbwa: ['red', 'green', 'blue', 'white', 'amber'],
+  rgbd: ['red', 'green', 'blue', 'dimmer'],
+  rgbwd: ['red', 'green', 'blue', 'white', 'dimmer'],
+};
+
+document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
+  const cellCount = Math.max(1, +document.getElementById('tMultiCellCount').value || 4);
+  const patternKey = document.getElementById('tMultiCellPattern').value;
+  const pattern = MULTI_CELL_PATTERNS[patternKey] || MULTI_CELL_PATTERNS.rgb;
+
+  // Keep existing channels with cell=null as master channels
+  const masterChannels = typeChannels.filter(ch => !ch.cell);
+
+  // Build cell channels
+  const cellChannels = [];
+  for (let cell = 1; cell <= cellCount; cell++) {
+    for (const type of pattern) {
+      const label = type.charAt(0).toUpperCase() + type.slice(1);
+      cellChannels.push({
+        channel_number: 0,
+        name: `Cell ${cell} ${label}`,
+        type,
+        default_value: 0,
+        min_value: 0,
+        max_value: 255,
+        ranges: null,
+        cell,
+      });
+    }
+  }
+
+  typeChannels = [...masterChannels, ...cellChannels];
+  typeChannels.forEach((ch, i) => { ch.channel_number = i + 1; });
+  renderChannelsEditor();
+  updateDuplicateHint();
+
+  const hint = document.getElementById('tMultiCellHint');
+  hint.textContent = `Built ${masterChannels.length} master + ${cellChannels.length} cell channels (${cellCount} cells × ${pattern.length}ch)`;
+  hint.style.color = 'var(--accent)';
 });
 
 async function openTypeModal(typeId) {
@@ -2826,6 +2930,7 @@ async function openTypeModal(typeId) {
     typeChannels = [];
   }
   renderChannelsEditor();
+  updateMultiCellVisibility();
   // Reset duplicate section
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('tDuplicateHint').textContent = '';
@@ -2899,11 +3004,14 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
   const count = Math.max(1, +document.getElementById('tDuplicateCount').value || 1);
   if (typeChannels.length === 0) return showError('typeError', 'Add at least one channel first');
   if (count <= 1) return showError('typeError', 'Set repeat to more than 1');
+  const cat = document.getElementById('tCategory').value;
+  const assignCells = (cat === 'multi_cell' || cat === 'led_bar');
   // Snapshot the current pattern as the base template
   const pattern = typeChannels.map(ch => ({ name: ch.name, type: ch.type, default_value: ch.default_value, min_value: ch.min_value, max_value: ch.max_value, ranges: ch.ranges || null }));
   // Rename existing channels as group 1
   typeChannels.forEach((ch, i) => {
     ch.name = `${pattern[i].name} 1`;
+    if (assignCells) ch.cell = 1;
   });
   // Append copies for groups 2..count
   for (let g = 2; g <= count; g++) {
@@ -2916,6 +3024,7 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
         min_value: tpl.min_value || 0,
         max_value: tpl.max_value || 255,
         ranges: tpl.ranges ? JSON.parse(JSON.stringify(tpl.ranges)) : null,
+        cell: assignCells ? g : null,
       });
     }
   }
@@ -3210,6 +3319,9 @@ async function loadSequencerConfig() {
   document.getElementById('cfgSeqAutoPlay').checked = config.seq_auto_play === '1';
   document.getElementById('cfgSeqAutoUnload').checked = config.seq_auto_unload === '1';
   document.getElementById('cfgSeqAutoGenerate').checked = config.seq_auto_generate === '1';
+  document.getElementById('cfgSeqNoStrobes').checked = config.seq_no_strobes === '1';
+  document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
+  document.getElementById('cfgSeqDeckFaderDimmer').checked = config.seq_deck_fader_dimmer === '1';
 
   // Load linked sequences
   const seqs = await fetch('/api/sequences').then(r => r.json());
@@ -3236,6 +3348,9 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_auto_play', document.getElementById('cfgSeqAutoPlay').checked ? '1' : '0'],
     ['seq_auto_unload', document.getElementById('cfgSeqAutoUnload').checked ? '1' : '0'],
     ['seq_auto_generate', document.getElementById('cfgSeqAutoGenerate').checked ? '1' : '0'],
+    ['seq_no_strobes', document.getElementById('cfgSeqNoStrobes').checked ? '1' : '0'],
+    ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],
+    ['seq_deck_fader_dimmer', document.getElementById('cfgSeqDeckFaderDimmer').checked ? '1' : '0'],
   ], 'btnSaveSeqConfig');
 });
 

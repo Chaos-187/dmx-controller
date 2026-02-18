@@ -256,6 +256,22 @@ function init() {
     console.log('[DB] Migrated track_analysis: added sections column');
   }
 
+  // Migrate: add cell column to fixture_type_channels if missing
+  try {
+    db.prepare("SELECT cell FROM fixture_type_channels LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixture_type_channels ADD COLUMN cell INTEGER DEFAULT NULL");
+    console.log('[DB] Migrated fixture_type_channels: added cell column');
+  }
+
+  // Migrate: add cell column to sequence_cues if missing
+  try {
+    db.prepare("SELECT cell FROM sequence_cues LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE sequence_cues ADD COLUMN cell INTEGER DEFAULT NULL");
+    console.log('[DB] Migrated sequence_cues: added cell column');
+  }
+
   // Seed subscriptions if empty
   const subCount = db.prepare('SELECT COUNT(*) as c FROM subscriptions').get().c;
   if (subCount === 0) {
@@ -423,13 +439,57 @@ function createLedBarFixtureType({ name, manufacturer, cellCount, channelPattern
   for (let cell = 1; cell <= cellCount; cell++) {
     for (const type of pattern) {
       const label = type.charAt(0).toUpperCase() + type.slice(1);
-      channels.push({ name: `Cell ${cell} ${label}`, type, default_value: 0 });
+      channels.push({ name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
     }
   }
   return createFixtureType({
     name: name || `LED Bar ${cellCount} Cell`,
     manufacturer: manufacturer || 'Generic',
     category: 'led_bar',
+    channels,
+  });
+}
+
+// ─── Multi-Cell Fixture Type Helper ─────────────────────────────────────────
+
+/**
+ * Create a multi-cell fixture type with optional master channels and per-cell channel pattern.
+ * @param {Object} opts
+ * @param {string}   opts.name              - Fixture type name
+ * @param {string}   opts.manufacturer      - Manufacturer
+ * @param {number}   opts.cellCount         - Number of cells (required, >= 1)
+ * @param {Array}    opts.masterChannels    - Global channels [{name, type}] (optional)
+ * @param {string[]} opts.cellChannelPattern - Channel types per cell (default: ['red','green','blue'])
+ */
+function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChannels, cellChannelPattern }) {
+  if (!cellCount || cellCount < 1) throw new Error('cellCount is required and must be >= 1');
+  const pattern = cellChannelPattern || ['red', 'green', 'blue'];
+  const channels = [];
+
+  // Master/global channels first (cell = null)
+  if (masterChannels && masterChannels.length > 0) {
+    for (const mc of masterChannels) {
+      channels.push({
+        name: mc.name || mc.type.charAt(0).toUpperCase() + mc.type.slice(1),
+        type: mc.type || 'dimmer',
+        default_value: mc.default_value || 0,
+        cell: null,
+      });
+    }
+  }
+
+  // Per-cell channels
+  for (let cell = 1; cell <= cellCount; cell++) {
+    for (const type of pattern) {
+      const label = type.charAt(0).toUpperCase() + type.slice(1);
+      channels.push({ name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
+    }
+  }
+
+  return createFixtureType({
+    name: name || `Multi-Cell ${cellCount}`,
+    manufacturer: manufacturer || 'Generic',
+    category: 'multi_cell',
     channels,
   });
 }
@@ -698,13 +758,13 @@ function createFixtureType({ name, manufacturer, category, channels }) {
   const id = r.lastInsertRowid;
   if (channels && channels.length) {
     const ins = db.prepare(
-      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertAll = db.transaction(() => {
       for (const ch of channels) {
         const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson);
+        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null);
       }
     });
     insertAll();
@@ -725,12 +785,12 @@ function updateFixtureType(id, { name, manufacturer, category, channels }) {
     if (channels) {
       db.prepare('DELETE FROM fixture_type_channels WHERE fixture_type_id = ?').run(id);
       const ins = db.prepare(
-        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const ch of channels) {
         const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson);
+        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null);
       }
     }
   });
@@ -1058,19 +1118,23 @@ function getFixtureChannelMap() {
 
   return fixtures.map(f => {
     const channels = db.prepare(
-      'SELECT channel_number, name, type, ranges FROM fixture_type_channels WHERE fixture_type_id = (SELECT fixture_type_id FROM fixtures WHERE id = ?) ORDER BY channel_number'
+      'SELECT channel_number, name, type, ranges, cell FROM fixture_type_channels WHERE fixture_type_id = (SELECT fixture_type_id FROM fixtures WHERE id = ?) ORDER BY channel_number'
     ).all(f.id);
     const group_ids = db.prepare(
       'SELECT group_id FROM fixture_group_members WHERE fixture_id = ?'
     ).all(f.id).map(r => r.group_id);
+    const cellNums = channels.filter(ch => ch.cell != null).map(ch => ch.cell);
+    const cell_count = cellNums.length > 0 ? Math.max(...cellNums) : 0;
     return {
       ...f,
       group_ids,
+      cell_count,
       channels: channels.map(ch => ({
         dmx_address: f.address + ch.channel_number - 1,
         channel_number: ch.channel_number,
         name: ch.name,
         type: ch.type,
+        cell: ch.cell || null,
         ranges: ch.ranges ? JSON.parse(ch.ranges) : null,
       })),
     };
@@ -1423,8 +1487,8 @@ function createCue(sequenceId, cue) {
   const effectParamsJson = typeof cue.effect_params === 'string' ? cue.effect_params : JSON.stringify(cue.effect_params || {});
   const result = db.prepare(`
     INSERT INTO sequence_cues (sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, group_id,
-      channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order, cell)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     sequenceId,
     cue.lane || 0,
@@ -1439,7 +1503,8 @@ function createCue(sequenceId, cue) {
     effectParamsJson,
     cue.color || '#e94560',
     cue.label || '',
-    cue.sort_order || 0
+    cue.sort_order || 0,
+    cue.cell || null
   );
   // Update sequence timestamp
   db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);
@@ -1471,7 +1536,7 @@ function updateCue(id, updates) {
     : existing.effect_params;
   db.prepare(`
     UPDATE sequence_cues SET lane=?, start_ms=?, duration_ms=?, cue_type=?, fixture_id=?, group_id=?,
-      channel_values=?, end_channel_values=?, effect_id=?, effect_params=?, color=?, label=?, sort_order=?
+      channel_values=?, end_channel_values=?, effect_id=?, effect_params=?, color=?, label=?, sort_order=?, cell=?
     WHERE id=?
   `).run(
     updates.lane !== undefined ? updates.lane : existing.lane,
@@ -1487,6 +1552,7 @@ function updateCue(id, updates) {
     updates.color !== undefined ? updates.color : existing.color,
     updates.label !== undefined ? updates.label : existing.label,
     updates.sort_order !== undefined ? updates.sort_order : existing.sort_order,
+    updates.cell !== undefined ? (updates.cell || null) : (existing.cell || null),
     id
   );
   // Update sequence timestamp
@@ -1508,8 +1574,8 @@ function bulkUpdateCues(sequenceId, cues) {
     // Insert all cues
     const ins = db.prepare(`
       INSERT INTO sequence_cues (sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, group_id,
-        channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order, cell)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const cue of cues) {
       const channelJson = typeof cue.channel_values === 'string' ? cue.channel_values : JSON.stringify(cue.channel_values || {});
@@ -1521,7 +1587,7 @@ function bulkUpdateCues(sequenceId, cues) {
         sequenceId, cue.lane || 0, cue.start_ms || 0, cue.duration_ms || 1000,
         cue.cue_type || 'static', cue.fixture_id || null, cue.group_id || null,
         channelJson, endChannelJson, cue.effect_id || null, effectParamsJson,
-        cue.color || '#e94560', cue.label || '', cue.sort_order || 0
+        cue.color || '#e94560', cue.label || '', cue.sort_order || 0, cue.cell || null
       );
     }
     db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);
@@ -1624,6 +1690,7 @@ module.exports = {
   init,
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
   createLedBarFixtureType,
+  createMultiCellFixtureType,
   getFixtures, getFixture, createFixture, updateFixture, deleteFixture,
   getUniverseMap,
   getFixtureChannelMap,

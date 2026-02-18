@@ -289,6 +289,13 @@ function generateSequence(opts) {
   const genreKey = opts.genre || resolveGenrePreset(track.genre);
   const preset = genrePresets[genreKey] || genrePresets.default;
 
+  // ── BPM-adaptive factor ─────────────────────────────────────────────
+  // 0 = very slow / chill (≤90 BPM), 1 = energetic (≥150 BPM)
+  const bpmFactor = Math.max(0, Math.min(1, (bpm - 90) / 60));
+
+  // Strobe suppression from config
+  const noStrobes = !!opts.noStrobes;
+
   // Resolve color palette
   let paletteKey = opts.palette || preset.preferredPalette || 'vibrant';
   // Seed random from track ID for deterministic generation
@@ -328,22 +335,30 @@ function generateSequence(opts) {
 
   // LED bars: category='led_bar' or fixtures with many repeated RGB cells (>= 6 RGB channels)
   const ledBars = nonMoverFixtures.filter(fix => {
-    if (fix.category === 'led_bar') return true;
+    if (fix.category === 'led_bar' || fix.category === 'multi_cell') return true;
     const rgbCount = fix.channels.filter(ch => ch.type === 'red' || ch.type === 'green' || ch.type === 'blue').length;
     return rgbCount >= 6;  // at least 2 cells of RGB
   });
   const ledBarIds = new Set(ledBars.map(b => b.id));
 
+  // Multi-cell fixtures: have explicit cell structure
+  const multiCellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0);
+
   // Regular fixtures (pars, etc.) — not movers, not LED bars
   const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
 
   const cues = [];
-  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset };
+  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes };
 
   if (sections.length > 0) {
     generateSectionBased(cues, rgbFixtures, sections, beats, energyLevels, ctx);
   } else {
     generateBarBased(cues, rgbFixtures, ctx);
+  }
+
+  // ── Multi-cell pattern generation (per-cell cues for chases/patterns) ──
+  if (multiCellFixtures.length > 0 && sections.length > 0) {
+    generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx);
   }
 
   // ── Mover movement generation (movers only) ───────────────────────────
@@ -362,7 +377,12 @@ function generateSequence(opts) {
 // ─── Section-based generation ───────────────────────────────────────────────
 
 function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx) {
-  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset } = ctx;
+  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes } = ctx;
+
+  // BPM-adaptive: slow songs get fade transitions, fast songs get snappy statics
+  // bpmFactor: 0 = slow (≤90), 1 = fast (≥150)
+  const useFades = bpmFactor < 0.5;  // songs under ~120 BPM get fades
+  const fadeOverlapFactor = Math.max(0, 1 - bpmFactor);  // 0-1: how much fade overlap (1 = max for slow songs)
 
   for (let fiIdx = 0; fiIdx < fixtures.length; fiIdx++) {
     const fix = fixtures[fiIdx];
@@ -381,8 +401,9 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       // Get palettes for this section from the chosen color theme
       const palettes = getSectionPalettes(paletteKey, sec.label);
 
-      // Apply genre preset to cue density
-      const adjustedCuePerBars = Math.max(1, Math.round(style.cuePerBars / preset.cueDensityMult));
+      // Apply genre preset to cue density (BPM-adaptive: slower songs = fewer, longer cues)
+      const bpmDensityScale = 0.7 + 0.6 * bpmFactor;  // 0.7x at slow BPM, 1.3x at fast BPM
+      const adjustedCuePerBars = Math.max(1, Math.round(style.cuePerBars / (preset.cueDensityMult * bpmDensityScale)));
       const cueBarMs = adjustedCuePerBars * barMs;
       const numCues = Math.max(1, Math.floor(secDurMs / cueBarMs));
 
@@ -438,11 +459,14 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
           endVals.white = Math.round((endColor.r + endColor.g + endColor.b) / 3 * 0.25);
         }
 
+        // BPM-adaptive cue type: slow songs use fades for smooth transitions
+        const cueType = useFades ? 'fade' : 'static';
+
         cues.push({
           lane,
           start_ms: Math.round(cueStart),
           duration_ms: Math.round(cueDur),
-          cue_type: 'static',
+          cue_type: cueType,
           fixture_id: fix.id,
           channel_values: startVals,
           end_channel_values: endVals,
@@ -452,7 +476,8 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       }
 
       // ── Strobe hits on high-energy beats ────────────────────────────
-      const effectiveStrobeChance = (style.strobeChance || 0) * preset.strobeMult;
+      if (!noStrobes) {
+      const effectiveStrobeChance = (style.strobeChance || 0) * preset.strobeMult * (0.3 + 0.7 * bpmFactor);
       if (effectiveStrobeChance > 0 && beats.length > 0) {
         const strobeBeats = beats.filter(b => b >= secStartMs && b < secEndMs);
         const strobeDurMs = Math.round((style.strobeDurationBeats || 0.5) * beatMs);
@@ -491,6 +516,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
           }
         }
       }
+      } // end noStrobes guard
 
       // ── Beat-synced color flash on chorus/drop first beat ────────────
       if (preset.flashOnSection && (sec.label === 'chorus' || sec.label === 'drop') && beats.length > 0) {
@@ -561,7 +587,11 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
 // ─── Bar-based fallback generation ──────────────────────────────────────────
 
 function generateBarBased(cues, fixtures, ctx) {
-  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset } = ctx;
+  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes } = ctx;
+
+  // BPM-adaptive
+  const useFades = bpmFactor < 0.5;
+  const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
 
   // Use verse/chorus palettes from the selected theme
   const versePalettes = getSectionPalettes(paletteKey, 'verse');
@@ -569,7 +599,7 @@ function generateBarBased(cues, fixtures, ctx) {
   const allPalettes = [...versePalettes, ...chorusPalettes];
 
   const totalBars = Math.floor(durationMs / barMs);
-  const sectionBars = Math.max(1, Math.round(2 / preset.cueDensityMult));
+  const sectionBars = Math.max(1, Math.round(2 / (preset.cueDensityMult * bpmDensityScale)));
 
   for (let fiIdx = 0; fiIdx < fixtures.length; fiIdx++) {
     const fix = fixtures[fiIdx];
@@ -604,7 +634,7 @@ function generateBarBased(cues, fixtures, ctx) {
         lane,
         start_ms: Math.round(startMs),
         duration_ms: Math.round(durMs),
-        cue_type: 'static',
+        cue_type: useFades ? 'fade' : 'static',
         fixture_id: fix.id,
         channel_values: startVals,
         end_channel_values: endVals,
@@ -612,9 +642,9 @@ function generateBarBased(cues, fixtures, ctx) {
         label: '',
       });
 
-      // Add occasional strobe
-      const strobeChance = 0.3 * preset.strobeMult;
-      if (bar % 8 === 0 && bar > 0 && strobeChance > 0 && rand() < strobeChance) {
+      // Add occasional strobe (BPM-adaptive + noStrobes guard)
+      const strobeChance = 0.3 * preset.strobeMult * (0.3 + 0.7 * bpmFactor);
+      if (!noStrobes && bar % 8 === 0 && bar > 0 && strobeChance > 0 && rand() < strobeChance) {
         const strobeDur = Math.round(beatMs);
         const strobeVals = { red: 255, green: 255, blue: 255, strobe_hz: 12 };
         if (hasDimmer) strobeVals.dimmer = 255;
@@ -934,8 +964,8 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
     for (const section of sections) {
       const label = section.label || 'verse';
-      const sectionStart = Math.round(section.start * 1000);
-      const sectionEnd = Math.round(section.end * 1000);
+      const sectionStart = Math.round(section.start_ms || (section.start * 1000));
+      const sectionEnd = Math.round(section.end_ms || (section.end * 1000));
       const sectionDuration = sectionEnd - sectionStart;
       if (sectionDuration < barMs) continue;
 
