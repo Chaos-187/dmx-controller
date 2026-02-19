@@ -2488,6 +2488,16 @@
         <input type="checkbox" id="fInvertTilt"> Invert Tilt
       </label>
     </div>
+    <div class="form-row" id="fHomeRow" style="display:none">
+      <div class="form-group" style="flex:1">
+        <label>Home Pan <span id="fHomePanVal" style="color:var(--cyan)">128</span></label>
+        <input type="range" id="fHomePan" min="0" max="255" value="128" style="width:100%">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Home Tilt <span id="fHomeTiltVal" style="color:var(--cyan)">128</span></label>
+        <input type="range" id="fHomeTilt" min="0" max="255" value="128" style="width:100%">
+      </div>
+    </div>
     <div class="form-error" id="fixtureError"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('fixtureModal')">Cancel</button>
@@ -3202,11 +3212,16 @@ function renderFixtureCards(fixtures) {
 
     const type = fixtureTypesCache.find(t => t.id === f.fixture_type_id);
     const channels = type ? type.channels : [];
-    const chBadges = channels.map(c => {
-      const hasRanges = c.ranges && c.ranges.length > 0;
-      const badgeClass = hasRanges ? 'multi' : c.type;
-      const title = hasRanges ? c.ranges.map(r => `${r.min}-${r.max}: ${r.label}`).join('\n') : '';
-      return `<span class="ch-badge ${badgeClass}" ${title ? `title="${esc(title)}"` : ''}>${c.channel_number}: ${c.name}${hasRanges ? ' ⚡' : ''}</span>`;
+
+    // Build channel type summary instead of listing every channel
+    const typeCounts = {};
+    for (const c of channels) {
+      const t = c.type || 'other';
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+    }
+    const chSummary = Object.entries(typeCounts).map(([t, count]) => {
+      const label = count > 1 ? `${t} ×${count}` : t;
+      return `<span class="ch-badge ${t}">${label}</span>`;
     }).join('');
 
     // Group tags
@@ -3232,7 +3247,7 @@ function renderFixtureCards(fixtures) {
       </div>
       ${groupTags ? `<div class="fixture-card-groups">${groupTags}</div>` : ''}
       ${f.notes ? `<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">${esc(f.notes)}</div>` : ''}
-      <div class="fixture-card-channels">${chBadges}</div>
+      <div class="fixture-card-channels">${chSummary}</div>
       <div class="fixture-card-actions">
         <button class="btn btn-secondary btn-sm" onclick="editFixture(${f.id})">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="deleteFixture(${f.id},'${esc(f.name).replace(/'/g,"\\'")}')">Delete</button>
@@ -3258,6 +3273,7 @@ async function openFixtureModal(fixtureId) {
     const ft = fixtureTypesCache.find(t => t.id === typeId);
     const hasPanTilt = ft && ft.channels && ft.channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
     document.getElementById('fInvertRow').style.display = hasPanTilt ? 'flex' : 'none';
+    document.getElementById('fHomeRow').style.display = hasPanTilt ? 'flex' : 'none';
   }
   sel.onchange = updateInvertVisibility;
 
@@ -3273,6 +3289,10 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fNotes').value = f.notes || '';
     document.getElementById('fInvertPan').checked = !!f.invert_pan;
     document.getElementById('fInvertTilt').checked = !!f.invert_tilt;
+    document.getElementById('fHomePan').value = f.home_pan ?? 128;
+    document.getElementById('fHomePanVal').textContent = f.home_pan ?? 128;
+    document.getElementById('fHomeTilt').value = f.home_tilt ?? 128;
+    document.getElementById('fHomeTiltVal').textContent = f.home_tilt ?? 128;
   } else {
     document.getElementById('fixtureModalTitle').textContent = 'Add Fixture';
     document.getElementById('fixtureEditId').value = '';
@@ -3283,6 +3303,10 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fNotes').value = '';
     document.getElementById('fInvertPan').checked = false;
     document.getElementById('fInvertTilt').checked = false;
+    document.getElementById('fHomePan').value = 128;
+    document.getElementById('fHomePanVal').textContent = '128';
+    document.getElementById('fHomeTilt').value = 128;
+    document.getElementById('fHomeTiltVal').textContent = '128';
   }
   updateInvertVisibility();
   document.getElementById('fixtureError').textContent = '';
@@ -3290,6 +3314,37 @@ async function openFixtureModal(fixtureId) {
 }
 
 window.editFixture = (id) => openFixtureModal(id);
+
+// Home pan/tilt slider value display + live DMX preview
+function sendHomePanTiltLive() {
+  const editId = document.getElementById('fixtureEditId').value;
+  if (!editId) return;
+  const fix = _allFixtures.find(f => f.id === +editId);
+  if (!fix) return;
+  const ft = fixtureTypesCache.find(t => t.id === fix.fixture_type_id);
+  if (!ft || !ft.channels) return;
+  const panVal = +document.getElementById('fHomePan').value;
+  const tiltVal = +document.getElementById('fHomeTilt').value;
+  const channels = [];
+  for (const ch of ft.channels) {
+    if (ch.type === 'pan') channels.push({ ch: fix.address + ch.channel_number - 1, val: panVal });
+    if (ch.type === 'tilt') channels.push({ ch: fix.address + ch.channel_number - 1, val: tiltVal });
+  }
+  if (channels.length) {
+    fetch('/api/dmx/channels', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ universe: fix.universe, channels }),
+    });
+  }
+}
+document.getElementById('fHomePan').addEventListener('input', (e) => {
+  document.getElementById('fHomePanVal').textContent = e.target.value;
+  sendHomePanTiltLive();
+});
+document.getElementById('fHomeTilt').addEventListener('input', (e) => {
+  document.getElementById('fHomeTiltVal').textContent = e.target.value;
+  sendHomePanTiltLive();
+});
 
 window.deleteFixture = async (id, name) => {
   if (!confirm(`Delete fixture "${name}"?`)) return;
@@ -3309,6 +3364,8 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
     notes: document.getElementById('fNotes').value.trim(),
     invert_pan: document.getElementById('fInvertPan').checked,
     invert_tilt: document.getElementById('fInvertTilt').checked,
+    home_pan: +document.getElementById('fHomePan').value,
+    home_tilt: +document.getElementById('fHomeTilt').value,
   };
   if (!body.name) return showError('fixtureError', 'Name is required');
 
@@ -5859,6 +5916,11 @@ function bindQuickActionButtons() {
       if (qaType === 'dimmer') {
         document.getElementById('qaMasterDimmer').value = qaVal;
         document.getElementById('qaMasterDimmerVal').textContent = qaVal;
+        fetch('/api/touch/master-dimmer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: qaVal }),
+        });
       }
       // If blackout, clear all toggle states and reset slider
       if (qaType === 'all' && qaVal === 0) {
@@ -5866,6 +5928,11 @@ function bindQuickActionButtons() {
         document.querySelectorAll('.qa-btn.toggled-on').forEach(b => b.classList.remove('toggled-on'));
         document.getElementById('qaMasterDimmer').value = 0;
         document.getElementById('qaMasterDimmerVal').textContent = '0';
+        fetch('/api/touch/master-dimmer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: 0 }),
+        });
       }
     });
   });
@@ -5876,8 +5943,15 @@ function bindQuickActionButtons() {
   masterSlider.addEventListener('input', () => {
     const val = +masterSlider.value;
     masterVal.textContent = val;
+    // Send dimmer to fixtures directly for immediate visual feedback
     const result = getQaTargetsForType('dimmer', val);
     if (result) sendQaChannels(result.targets, result.val);
+    // Sync to server so effects/scenes also respect master dimmer
+    fetch('/api/touch/master-dimmer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: val }),
+    });
   });
 }
 

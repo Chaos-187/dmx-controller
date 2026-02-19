@@ -1081,6 +1081,7 @@ let dmxOutputEnabled = false;
 const touchOverrides = {
   disabledFixtures: new Set(),   // fixture IDs disabled from touch UI
   blackoutHold: false,           // true while blackout is held (OS2L or touch)
+  masterDimmer: 255,             // 0-255 master dimmer level (scales all intensity/color output)
 };
 
 app.get('/api/dmx/output', (req, res) => {
@@ -1120,6 +1121,7 @@ app.get('/api/touch/state', (req, res) => {
   res.json({
     disabledFixtures: [...touchOverrides.disabledFixtures],
     blackoutHold: touchOverrides.blackoutHold,
+    masterDimmer: touchOverrides.masterDimmer,
   });
 });
 
@@ -1153,6 +1155,13 @@ app.post('/api/touch/blackout-hold', (req, res) => {
   broadcast({ type: 'touchBlackoutHold', active: !!active });
   console.log(`[TOUCH] Blackout hold ${active ? 'ON' : 'OFF'}`);
   res.json({ ok: true, blackoutHold: !!active });
+});
+
+app.post('/api/touch/master-dimmer', (req, res) => {
+  const val = Math.max(0, Math.min(255, Math.round(+req.body.value || 0)));
+  touchOverrides.masterDimmer = val;
+  broadcast({ type: 'masterDimmer', value: val });
+  res.json({ ok: true, masterDimmer: val });
 });
 
 // ─── OS2L Button Maps API ───────────────────────────────────────────────────
@@ -1538,7 +1547,8 @@ app.post('/api/effects/run', (req, res) => {
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
-          channelUpdates[fix.universe][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, Math.round(value))), ch);
+          let finalVal = applyMasterDimmer(Math.max(0, Math.min(255, Math.round(value))), ch.type);
+          channelUpdates[fix.universe][ch.dmx_address] = applyInvert(finalVal, ch);
         }
       }
     }
@@ -2242,7 +2252,8 @@ function processSceneEffects(scene, startTime) {
         if (value !== null && value !== undefined) {
           const u = fix.universe;
           if (!channelUpdates[u]) channelUpdates[u] = {};
-          channelUpdates[u][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, Math.round(value))), ch);
+          let finalVal = applyMasterDimmer(Math.max(0, Math.min(255, Math.round(value))), ch.type);
+          channelUpdates[u][ch.dmx_address] = applyInvert(finalVal, ch);
         }
       }
     }
@@ -2274,6 +2285,7 @@ function applyChannelValues(fix, channelValues, channelUpdates) {
       const u = fix.universe;
       if (!channelUpdates[u]) channelUpdates[u] = {};
       let mapped = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
+      mapped = applyMasterDimmer(mapped, ch.type);
       channelUpdates[u][ch.dmx_address] = applyInvert(mapped, ch);
     }
   }
@@ -2601,6 +2613,15 @@ function applyInvert(value, channel) {
   return channel.invert ? 255 - value : value;
 }
 
+/** Scale a value by the master dimmer level. Only applied to intensity/color channels. */
+const DIMMABLE_CHANNELS = new Set(['dimmer','red','green','blue','white','amber','uv']);
+function applyMasterDimmer(value, channelType) {
+  if (!DIMMABLE_CHANNELS.has(channelType)) return value;
+  const md = touchOverrides.masterDimmer;
+  if (md >= 255) return value;
+  return Math.round(value * md / 255);
+}
+
 /**
  * Called on each time update to drive the sequence engine.
  * Finds active cues at the current position and sends DMX values.
@@ -2616,6 +2637,8 @@ function buildChannelCtx(ch, fix) {
   const ctx = {
     channel_number: ch.channel_number,
     total_channels: fix.channels.length,
+    home_pan: fix.home_pan ?? 128,
+    home_tilt: fix.home_tilt ?? 128,
   };
   if (fix.cell_count > 0) {
     ctx.cell_count = fix.cell_count;
@@ -2769,6 +2792,8 @@ function processSequenceAtTime(deckNum, timeMs) {
         if (deckLevel < 1) {
           finalValue = Math.round(finalValue * deckLevel);
         }
+        // Scale by master dimmer
+        finalValue = applyMasterDimmer(finalValue, ch.type);
         // Map through channel sub-ranges (e.g. dimmer 0-255 → DMX 8-134)
         if (!skipRangeMap) {
           finalValue = mapValueToRange(finalValue, ch, ch.type);
@@ -2904,7 +2929,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Chase: sequential pattern across cells ──────────────────────────
     case 'chase': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
       const tail  = params.tail  || data.tail  || 0;
@@ -2945,7 +2970,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Comet: directional chase with long trailing tail ────────────────
     case 'comet': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const tail  = params.tail  || data.tail  || 10;
       const dir   = params.direction || data.direction || 'left';
@@ -2970,7 +2995,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Scanner: bouncing Larson-scanner style ─────────────────────────
     case 'scanner': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 1;
       const tail  = params.tail  || data.tail  || 5;
@@ -2991,7 +3016,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Sparkle: random cells flash and fade ───────────────────────────
     case 'sparkle': {
       const { cellIndex, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const density  = params.density    || data.density    || 0.1;
       const fadeSpd  = params.fade_speed || data.fade_speed || 6;
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
@@ -3008,7 +3033,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Color Wave: rainbow distributed across cells ───────────────────
     case 'color_wave': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const wavelength = params.wavelength || data.wavelength || 20;
       const speed = params.speed || data.speed || 1;
 
@@ -3024,7 +3049,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Fire: flickering warm light simulation ─────────────────────────
     case 'fire': {
       const { cellIndex, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const intensity = params.intensity || data.intensity || 0.8;
       const cooling   = params.cooling   || data.cooling   || 0.3;
 
@@ -3044,7 +3069,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Buildup: progressive fill across cells ─────────────────────────
     case 'buildup': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const dir = params.direction || data.direction || 'left';
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
 
@@ -3065,12 +3090,13 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'pan_sweep': {
       const speed = params.speed || data.speed || 1;
       const range = params.range || data.range || 1.0;
-      const center = 128;
+      const homePan = channelCtx.home_pan ?? 128;
+      const homeTilt = channelCtx.home_tilt ?? 128;
       const amplitude = 127 * range;
       const cycle = (progress * speed) % 1;
-      // Pan sweeps, tilt holds center
-      if (channelType === 'pan') return center + amplitude * Math.sin(cycle * 2 * Math.PI);
-      if (channelType === 'tilt') return center;
+      // Pan sweeps, tilt holds home
+      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + amplitude * Math.sin(cycle * 2 * Math.PI)));
+      if (channelType === 'tilt') return homeTilt;
       return null;
     }
 
@@ -3078,12 +3104,13 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'tilt_sweep': {
       const speed = params.speed || data.speed || 1;
       const range = params.range || data.range || 1.0;
-      const center = 128;
+      const homePan = channelCtx.home_pan ?? 128;
+      const homeTilt = channelCtx.home_tilt ?? 128;
       const amplitude = 127 * range;
       const cycle = (progress * speed) % 1;
-      // Tilt sweeps, pan holds center
-      if (channelType === 'tilt') return center + amplitude * Math.sin(cycle * 2 * Math.PI);
-      if (channelType === 'pan') return center;
+      // Tilt sweeps, pan holds home
+      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + amplitude * Math.sin(cycle * 2 * Math.PI)));
+      if (channelType === 'pan') return homePan;
       return null;
     }
 
@@ -3091,11 +3118,13 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'circle': {
       const speed = params.speed || data.speed || 1;
       const size = params.size || data.size || 0.5;
+      const homePan = channelCtx.home_pan ?? 128;
+      const homeTilt = channelCtx.home_tilt ?? 128;
       const cycle = (progress * speed) % 1;
       const angle = cycle * 2 * Math.PI;
       const amplitude = 127 * size;
-      if (channelType === 'pan') return 128 + amplitude * Math.cos(angle);
-      if (channelType === 'tilt') return 128 + amplitude * Math.sin(angle);
+      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + amplitude * Math.cos(angle)));
+      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + amplitude * Math.sin(angle)));
       return null;
     }
 
@@ -3103,11 +3132,13 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'figure_eight': {
       const speed = params.speed || data.speed || 1;
       const size = params.size || data.size || 0.5;
+      const homePan = channelCtx.home_pan ?? 128;
+      const homeTilt = channelCtx.home_tilt ?? 128;
       const cycle = (progress * speed) % 1;
       const angle = cycle * 2 * Math.PI;
       const amplitude = 127 * size;
-      if (channelType === 'pan') return 128 + amplitude * Math.sin(angle);
-      if (channelType === 'tilt') return 128 + amplitude * Math.sin(angle * 2);
+      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + amplitude * Math.sin(angle)));
+      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + amplitude * Math.sin(angle * 2)));
       return null;
     }
 
@@ -3117,6 +3148,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const range = params.range || data.range || 0.5;
       if (channelType !== 'pan' && channelType !== 'tilt') return null;
 
+      const home = channelType === 'pan' ? (channelCtx.home_pan ?? 128) : (channelCtx.home_tilt ?? 128);
       const t = progress * speed * 10;
       const slot = Math.floor(t);
       const frac = t - slot;
@@ -3126,7 +3158,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       // Smooth interpolation between random positions
       const smooth = frac * frac * (3 - 2 * frac); // smoothstep
       const pos = pos1 + (pos2 - pos1) * smooth;
-      return 128 + 127 * range * pos;
+      return Math.max(0, Math.min(255, home + 127 * range * pos));
     }
 
     // ── Fan: spread movers out from center position ────────────────────
@@ -3135,6 +3167,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const spread = params.spread || data.spread || 1.0;
       if (channelType !== 'pan' && channelType !== 'tilt') return null;
 
+      const homePan = channelCtx.home_pan ?? 128;
+      const homeTilt = channelCtx.home_tilt ?? 128;
       // Use fixture-level index from channel context
       // For multi-fixture groups, channelCtx provides the fixture's pan/tilt ordinal
       const panChannels = (channelCtx._fixtureCount || 1);
@@ -3143,8 +3177,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
       const cycle = (progress * speed) % 1;
       const currentSpread = spread * Math.sin(cycle * Math.PI);
-      if (channelType === 'tilt') return 128 + 127 * normalizedIdx * currentSpread;
-      if (channelType === 'pan') return 128; // Pan stays centered
+      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + 127 * normalizedIdx * currentSpread));
+      if (channelType === 'pan') return homePan; // Pan stays at home
       return null;
     }
 
@@ -3153,9 +3187,10 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const speed = params.speed || data.speed || 2;
       const range = params.range || data.range || 0.3;
       const axis = params.axis || data.axis || 'tilt';
-      if (channelType === axis) return 128 + 127 * range * Math.sin(((progress * speed) % 1) * 2 * Math.PI);
-      // Hold the other axis at center
-      if (channelType === 'pan' || channelType === 'tilt') return 128;
+      const home = channelType === 'pan' ? (channelCtx.home_pan ?? 128) : (channelCtx.home_tilt ?? 128);
+      if (channelType === axis) return Math.max(0, Math.min(255, home + 127 * range * Math.sin(((progress * speed) % 1) * 2 * Math.PI)));
+      // Hold the other axis at home
+      if (channelType === 'pan' || channelType === 'tilt') return home;
       return null;
     }
 
@@ -3166,7 +3201,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Segments: alternating on/off cell groups that shift ─────────────
     case 'segments': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const segSize = params.segment_size || data.segment_size || 2;
       const speed = params.offset_speed || data.offset_speed || 1;
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
@@ -3178,7 +3213,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Ripple: expanding rings from center ────────────────────────────
     case 'ripple': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
       const decay = params.decay || data.decay || 0.7;
@@ -3198,7 +3233,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Cell Strobe: strobe individual cells sequentially or randomly ──
     case 'cell_strobe': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const freq = params.frequency || data.frequency || 8;
       const pattern = params.pattern || data.pattern || 'sequential';
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
@@ -3216,7 +3251,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ── Gradient: smooth color gradient across cells ───────────────────
     case 'gradient': {
       const { cellIndex, cellCount, isMaster } = resolveCellInfo();
-      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const colors = data.colors || ['#ff0000', '#0000ff'];
       if (!['red', 'green', 'blue'].includes(channelType)) {
