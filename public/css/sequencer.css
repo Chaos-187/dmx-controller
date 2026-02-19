@@ -56,6 +56,7 @@
 .seq-ruler-mark.bar { border-left-color: #555; }
 .seq-ruler-mark.bar .seq-rm-label { font-weight: 600; color: var(--text); }
 .seq-lane { display: flex; min-height: 36px; border-bottom: 1px solid #1a1a2e; }
+.seq-lanes-wrap { position: relative; }
 .seq-lane:hover { background: rgba(255,255,255,.01); }
 .seq-lane-header {
   width: 140px; min-width: 140px; padding: 4px 8px;
@@ -195,3 +196,19 @@
 .seq-lane-mover-light { background: rgba(0,0,0,.1); }
 .seq-lane-mover-move { min-height: 30px; background: rgba(68,136,255,.04); }
 .seq-lane-mover-move .seq-lane-header.seq-cell-header { font-size: 10px; }
+
+/* ─── Rubber-Band Marquee Selection ──────────────────────────────────── */
+.seq-marquee {
+  position: absolute; display: none;
+  border: 1px solid rgba(100,180,255,.6);
+  background: rgba(100,180,255,.12);
+  z-index: 20; pointer-events: none;
+  border-radius: 2px;
+}
+
+/* ─── Cross-Lane Drop Target Highlight ───────────────────────────────── */
+.seq-lane-track.seq-drop-target {
+  background: rgba(0,230,118,.08);
+  outline: 1px dashed rgba(0,230,118,.5);
+  outline-offset: -1px;
+}

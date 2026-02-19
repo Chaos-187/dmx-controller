@@ -791,6 +791,20 @@ app.delete('/api/mover-presets/:id', (req, res) => {
   res.json({ deleted: true });
 });
 
+// ─── Version / About API ────────────────────────────────────────────────────
+
+app.get('/api/version', (req, res) => {
+  const pkg = require('./package.json');
+  res.json({
+    version: pkg.version,
+    name: pkg.name,
+    description: pkg.description,
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch
+  });
+});
+
 // ─── Config API ─────────────────────────────────────────────────────────────
 
 app.get('/api/config', (req, res) => {
@@ -2594,9 +2608,9 @@ console.log(`
 ╔══════════════════════════════════════════════╗
 ║          DMX Controller v1.0                 ║
 ║                                              ║
-║  OS2L:  port ${OS2L_PORT}                          ║
-║  Web:   http://localhost:${WEB_PORT}              ║
-║  mDNS:  http://${getMdnsHostname()}.local:${WEB_PORT}        ║
+║  OS2L:  port ${OS2L_PORT}                            ║
+║  Web:   http://localhost:${WEB_PORT}                ║
+║  mDNS:  http://${getMdnsHostname()}.local:${WEB_PORT}         ║
 ║                                              ║
 ║  Waiting for VirtualDJ connection...         ║
 ╚══════════════════════════════════════════════╝

@@ -14,10 +14,14 @@ let seqActiveLanes = new Set(); // fixture IDs active as lanes
 let seqZoomPxPerSec = 5;
 let seqSnapBeats = 4;
 let seqSelectedCueId = null;
+let seqSelectedCueIds = new Set(); // multi-select
+let seqClipboard = null; // copied cue data for paste (array for multi)
+let seqMarquee = null; // rubber-band selection state
 let seqDeck = 1;
 let seqPlayheadMs = 0;
 let seqIsPlaying = false;
 let seqDragState = null;
+let seqIsDraggingPlayhead = false;
 let seqEditingEffectId = null;
 let seqExpandedFixtures = new Set(); // fixture IDs whose cells are expanded
 
@@ -68,6 +72,7 @@ async function loadSequenceById(id) {
     seqCues = [];
     seqActiveLanes = new Set();
     seqSelectedCueId = null;
+    seqSelectedCueIds.clear();
     wfAnalysisData = null;
     wfWaveformData = null;
     wfRawPeaks = null;
@@ -117,23 +122,24 @@ async function loadSequenceById(id) {
 function renderCueBlock(cue) {
   const left = (cue.start_ms / 1000) * seqZoomPxPerSec;
   const width = Math.max(4, (cue.duration_ms / 1000) * seqZoomPxPerSec);
-  const selected = cue.id === seqSelectedCueId ? ' selected' : '';
+  const selected = seqSelectedCueIds.has(cue.id) ? ' selected' : '';
   const chV = cue.channel_values || {};
   const endV = cue.end_channel_values || {};
   const startColor = (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined)
     ? colorFromChannelValues(chV) : (cue.color || '#e94560');
   const hasEndRGB = endV.red !== undefined || endV.green !== undefined || endV.blue !== undefined;
   let bgStyle;
-  if (hasEndRGB) {
+  if (hasEndRGB && cue.cue_type !== 'solid') {
     const endColor = colorFromChannelValues(endV);
     bgStyle = `background:linear-gradient(to right, ${startColor}, ${endColor})`;
   } else {
     bgStyle = `background:${startColor}`;
   }
+  const typeLabel = cue.label || (cue.cue_type === 'solid' ? '' : cue.cue_type);
   return `<div class="seq-cue${selected}" data-cue-id="${cue.id}" ` +
     `style="left:${left}px;width:${width}px;${bgStyle}" ` +
     `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s - ${(cue.duration_ms/1000).toFixed(2)}s)">` +
-    `${esc(cue.label || cue.cue_type)}<div class="seq-cue-resize"></div></div>`;
+    `${esc(typeLabel)}<div class="seq-cue-resize"></div></div>`;
 }
 
 function renderSequencerTimeline() {
@@ -412,6 +418,7 @@ function setupSequencerEvents() {
     seqCurrentSeq = null;
     seqCues = [];
     seqSelectedCueId = null;
+    seqSelectedCueIds.clear();
     renderSeqSelector();
     renderSequencerTimeline();
     document.getElementById('seqProperties').classList.remove('open');
@@ -503,7 +510,7 @@ function setupSequencerEvents() {
     } else {
       body = {
         lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs),
-        cue_type: 'static', fixture_id: fixtureId,
+        cue_type: 'solid', fixture_id: fixtureId,
         channel_values: { red: 255, green: 0, blue: 0 },
         color: '#ff0000', label: '',
       };
@@ -522,74 +529,254 @@ function setupSequencerEvents() {
     selectCue(cue.id);
   });
 
-  // Click/mousedown on cue to select & start drag
+  // ─── Mousedown on lanes: cue click / marquee start ─────────────────────
   document.getElementById('seqLanesWrap').addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
     const cueEl = e.target.closest('.seq-cue');
-    if (!cueEl) return;
 
-    const cueId = +cueEl.dataset.cueId;
-    selectCue(cueId);
-    const cue = seqCues.find(c => c.id === cueId);
-    if (!cue) return;
+    if (cueEl) {
+      // -- Click on a cue block --
+      const cueId = +cueEl.dataset.cueId;
+      const cue = seqCues.find(c => c.id === cueId);
+      if (!cue) return;
 
-    if (e.target.classList.contains('seq-cue-resize')) {
-      seqDragState = {
-        type: 'resize', cueId, startX: e.clientX,
-        origWidth: parseFloat(cueEl.style.width), origDurMs: cue.duration_ms,
-      };
-    } else {
-      seqDragState = {
-        type: 'move', cueId, startX: e.clientX,
-        origLeft: parseFloat(cueEl.style.left), origStartMs: cue.start_ms,
-      };
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+click: toggle in multi-selection
+        if (seqSelectedCueIds.has(cueId)) {
+          seqSelectedCueIds.delete(cueId);
+          cueEl.classList.remove('selected');
+          if (seqSelectedCueId === cueId) {
+            seqSelectedCueId = seqSelectedCueIds.size > 0 ? [...seqSelectedCueIds][0] : null;
+          }
+        } else {
+          seqSelectedCueIds.add(cueId);
+          seqSelectedCueId = cueId;
+          cueEl.classList.add('selected');
+        }
+        updateSelectionInfo();
+      } else if (!seqSelectedCueIds.has(cueId)) {
+        // Plain click on unselected cue: single select
+        selectCue(cueId);
+      }
+      // else: plain click on already selected cue — keep selection for drag
+
+      if (e.target.classList.contains('seq-cue-resize')) {
+        // Resize only works on one cue
+        seqDragState = {
+          type: 'resize', cueId, startX: e.clientX,
+          origWidth: parseFloat(cueEl.style.width), origDurMs: cue.duration_ms,
+        };
+      } else {
+        // Move – capture orig positions for ALL selected cues
+        const track = cueEl.closest('.seq-lane-track');
+        const origLane = track ? (+track.dataset.fixtureId || null) : null;
+        const items = [];
+        for (const sid of seqSelectedCueIds) {
+          const sc = seqCues.find(c => c.id === sid);
+          const sel = document.querySelector(`.seq-cue[data-cue-id="${sid}"]`);
+          if (sc && sel) {
+            items.push({ cueId: sid, origLeft: parseFloat(sel.style.left), origStartMs: sc.start_ms });
+          }
+        }
+        seqDragState = {
+          type: 'move', cueId, startX: e.clientX, startY: e.clientY,
+          origLeft: parseFloat(cueEl.style.left), origStartMs: cue.start_ms,
+          items, origFixtureId: origLane, crossLane: false, hasMoved: false,
+        };
+      }
+      e.preventDefault();
+      return;
     }
+
+    // -- Click on empty area: start rubber-band marquee --
+    const track = e.target.closest('.seq-lane-track');
+    if (!track) {
+      // Clicked on header or empty area outside tracks — clear selection
+      if (!e.ctrlKey && !e.metaKey) clearCueSelection();
+      return;
+    }
+    if (!e.ctrlKey && !e.metaKey) clearCueSelection();
+
+    const lanesWrap = document.getElementById('seqLanesWrap');
+    const wrapRect = lanesWrap.getBoundingClientRect();
+    const scrollWrap = document.getElementById('seqTimelineWrap');
+    const startX = e.clientX - wrapRect.left + scrollWrap.scrollLeft;
+    const startY = e.clientY - wrapRect.top + scrollWrap.scrollTop;
+
+    let marqueeEl = document.getElementById('seqMarquee');
+    if (!marqueeEl) {
+      marqueeEl = document.createElement('div');
+      marqueeEl.id = 'seqMarquee';
+      marqueeEl.className = 'seq-marquee';
+      lanesWrap.appendChild(marqueeEl);
+    }
+    marqueeEl.style.display = 'block';
+    marqueeEl.style.left = startX + 'px';
+    marqueeEl.style.top = startY + 'px';
+    marqueeEl.style.width = '0px';
+    marqueeEl.style.height = '0px';
+
+    seqMarquee = { startX, startY, additive: e.ctrlKey || e.metaKey };
     e.preventDefault();
   });
 
-  // Mouse move for drag/resize
+  // ─── Mousemove: drag cues / resize / marquee ──────────────────────────
   document.addEventListener('mousemove', (e) => {
+    // Marquee
+    if (seqMarquee) {
+      const lanesWrap = document.getElementById('seqLanesWrap');
+      const wrapRect = lanesWrap.getBoundingClientRect();
+      const scrollWrap = document.getElementById('seqTimelineWrap');
+      const curX = e.clientX - wrapRect.left + scrollWrap.scrollLeft;
+      const curY = e.clientY - wrapRect.top + scrollWrap.scrollTop;
+      const x = Math.min(seqMarquee.startX, curX);
+      const y = Math.min(seqMarquee.startY, curY);
+      const w = Math.abs(curX - seqMarquee.startX);
+      const h = Math.abs(curY - seqMarquee.startY);
+      const marqueeEl = document.getElementById('seqMarquee');
+      if (marqueeEl) {
+        marqueeEl.style.left = x + 'px';
+        marqueeEl.style.top = y + 'px';
+        marqueeEl.style.width = w + 'px';
+        marqueeEl.style.height = h + 'px';
+      }
+      // Live highlight cues under marquee
+      const mRect = { left: x, top: y, right: x + w, bottom: y + h };
+      document.querySelectorAll('.seq-cue').forEach(cel => {
+        const cid = +cel.dataset.cueId;
+        const cr = {
+          left: cel.offsetLeft,
+          top: cel.closest('.seq-lane').offsetTop + cel.offsetTop,
+          right: cel.offsetLeft + cel.offsetWidth,
+          bottom: cel.closest('.seq-lane').offsetTop + cel.offsetTop + cel.offsetHeight,
+        };
+        const intersects = !(cr.right < mRect.left || cr.left > mRect.right || cr.bottom < mRect.top || cr.top > mRect.bottom);
+        cel.classList.toggle('selected', intersects || (seqMarquee.additive && seqSelectedCueIds.has(cid)));
+      });
+      return;
+    }
+
+    // Cue drag / resize
     if (!seqDragState) return;
     const dx = e.clientX - seqDragState.startX;
-    const cueEl = document.querySelector(`.seq-cue[data-cue-id="${seqDragState.cueId}"]`);
-    if (!cueEl) return;
 
-    if (seqDragState.type === 'move') {
-      cueEl.style.left = Math.max(0, seqDragState.origLeft + dx) + 'px';
-    } else {
-      cueEl.style.width = Math.max(4, seqDragState.origWidth + dx) + 'px';
+    if (seqDragState.type === 'resize') {
+      const cueEl = document.querySelector(`.seq-cue[data-cue-id="${seqDragState.cueId}"]`);
+      if (cueEl) cueEl.style.width = Math.max(4, seqDragState.origWidth + dx) + 'px';
+    } else if (seqDragState.type === 'move') {
+      if (Math.abs(dx) > 2 || Math.abs(e.clientY - seqDragState.startY) > 2) seqDragState.hasMoved = true;
+      // Move all selected cues horizontally
+      for (const item of seqDragState.items) {
+        const el = document.querySelector(`.seq-cue[data-cue-id="${item.cueId}"]`);
+        if (el) el.style.left = Math.max(0, item.origLeft + dx) + 'px';
+      }
+      // Detect cross-lane drag (vertical movement)
+      const dy = e.clientY - seqDragState.startY;
+      seqDragState.crossLane = Math.abs(dy) > 18;
+      // Show visual indicator for drop target lane
+      document.querySelectorAll('.seq-lane-track').forEach(lt => lt.classList.remove('seq-drop-target'));
+      if (seqDragState.crossLane) {
+        const targetTrack = document.elementFromPoint(e.clientX, e.clientY)?.closest('.seq-lane-track');
+        if (targetTrack) targetTrack.classList.add('seq-drop-target');
+      }
     }
   });
 
-  // Mouse up to commit drag
+  // ─── Mouseup: commit drag / marquee selection ─────────────────────────
   document.addEventListener('mouseup', async (e) => {
-    if (!seqDragState) return;
-    const cueId = seqDragState.cueId;
-    const cue = seqCues.find(c => c.id === cueId);
-    const cueEl = document.querySelector(`.seq-cue[data-cue-id="${cueId}"]`);
-    if (!cue || !cueEl) { seqDragState = null; return; }
+    // Marquee finish
+    if (seqMarquee) {
+      const marqueeEl = document.getElementById('seqMarquee');
+      if (marqueeEl) marqueeEl.style.display = 'none';
 
-    if (seqDragState.type === 'move') {
-      const newLeft = parseFloat(cueEl.style.left);
-      cue.start_ms = Math.round(snapToGrid((newLeft / seqZoomPxPerSec) * 1000));
-      await fetch(`/api/cues/${cueId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_ms: cue.start_ms })
+      // Collect intersected cues
+      const lanesWrap = document.getElementById('seqLanesWrap');
+      const wrapRect = lanesWrap.getBoundingClientRect();
+      const scrollWrap = document.getElementById('seqTimelineWrap');
+      const curX = e.clientX - wrapRect.left + scrollWrap.scrollLeft;
+      const curY = e.clientY - wrapRect.top + scrollWrap.scrollTop;
+      const x = Math.min(seqMarquee.startX, curX);
+      const y = Math.min(seqMarquee.startY, curY);
+      const w = Math.abs(curX - seqMarquee.startX);
+      const h = Math.abs(curY - seqMarquee.startY);
+      const mRect = { left: x, top: y, right: x + w, bottom: y + h };
+
+      if (!seqMarquee.additive) seqSelectedCueIds.clear();
+
+      document.querySelectorAll('.seq-cue').forEach(cel => {
+        const cid = +cel.dataset.cueId;
+        const lane = cel.closest('.seq-lane');
+        const cr = {
+          left: cel.offsetLeft,
+          top: lane.offsetTop + cel.offsetTop,
+          right: cel.offsetLeft + cel.offsetWidth,
+          bottom: lane.offsetTop + cel.offsetTop + cel.offsetHeight,
+        };
+        const intersects = !(cr.right < mRect.left || cr.left > mRect.right || cr.bottom < mRect.top || cr.top > mRect.bottom);
+        if (intersects) seqSelectedCueIds.add(cid);
       });
-    } else {
-      const newWidth = parseFloat(cueEl.style.width);
-      cue.duration_ms = Math.max(100, Math.round(snapToGrid((newWidth / seqZoomPxPerSec) * 1000)));
-      await fetch(`/api/cues/${cueId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ duration_ms: cue.duration_ms })
-      });
+
+      // Set primary to first in set
+      seqSelectedCueId = seqSelectedCueIds.size > 0 ? [...seqSelectedCueIds][0] : null;
+      seqMarquee = null;
+      updateSelectionVisuals();
+      updateSelectionInfo();
+      return;
+    }
+
+    // Cue drag/resize finish
+    if (!seqDragState) return;
+    document.querySelectorAll('.seq-lane-track').forEach(lt => lt.classList.remove('seq-drop-target'));
+
+    if (seqDragState.type === 'resize') {
+      const cueId = seqDragState.cueId;
+      const cue = seqCues.find(c => c.id === cueId);
+      const cueEl = document.querySelector(`.seq-cue[data-cue-id="${cueId}"]`);
+      if (cue && cueEl) {
+        const newWidth = parseFloat(cueEl.style.width);
+        cue.duration_ms = Math.max(100, Math.round(snapToGrid((newWidth / seqZoomPxPerSec) * 1000)));
+        await fetch(`/api/cues/${cueId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ duration_ms: cue.duration_ms })
+        });
+      }
+    } else if (seqDragState.type === 'move' && seqDragState.hasMoved) {
+      // Determine if cross-lane drop
+      let newFixtureId = null;
+      if (seqDragState.crossLane) {
+        const targetTrack = document.elementFromPoint(e.clientX, e.clientY)?.closest('.seq-lane-track');
+        if (targetTrack) newFixtureId = +targetTrack.dataset.fixtureId || null;
+      }
+
+      // Update all selected cues
+      const updates = [];
+      for (const item of seqDragState.items) {
+        const cue = seqCues.find(c => c.id === item.cueId);
+        const el = document.querySelector(`.seq-cue[data-cue-id="${item.cueId}"]`);
+        if (!cue || !el) continue;
+        const newLeft = parseFloat(el.style.left);
+        cue.start_ms = Math.max(0, Math.round(snapToGrid((newLeft / seqZoomPxPerSec) * 1000)));
+        const body = { start_ms: cue.start_ms };
+        if (newFixtureId && newFixtureId !== cue.fixture_id) {
+          cue.fixture_id = newFixtureId;
+          body.fixture_id = newFixtureId;
+          // Ensure new fixture is in active lanes
+          seqActiveLanes.add(newFixtureId);
+        }
+        updates.push(fetch(`/api/cues/${item.cueId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }));
+      }
+      await Promise.all(updates);
     }
     seqDragState = null;
     renderSequencerTimeline();
-    if (seqSelectedCueId === cueId) selectCue(cueId);
+    updateSelectionVisuals();
   });
 
-  // Apply cue properties
-  document.getElementById('seqPropSave').addEventListener('click', async () => {
+  // Apply cue properties (reusable)
+  async function applyCurrentCueProperties() {
     if (!seqSelectedCueId) return;
     const cue = seqCues.find(c => c.id === seqSelectedCueId);
     if (!cue) return;
@@ -636,18 +823,14 @@ function setupSequencerEvents() {
     });
     Object.assign(cue, update);
     renderSequencerTimeline();
-  });
+    updateSelectionVisuals();
+  }
 
-  // Delete cue
-  document.getElementById('seqPropDelete').addEventListener('click', async () => {
-    if (!seqSelectedCueId) return;
-    await fetch(`/api/cues/${seqSelectedCueId}`, { method: 'DELETE' });
-    seqCues = seqCues.filter(c => c.id !== seqSelectedCueId);
-    seqSelectedCueId = null;
-    document.getElementById('seqProperties').classList.remove('open');
-    document.getElementById('seqCueCount').textContent = seqCues.length;
-    renderSequencerTimeline();
-  });
+  // Apply button
+  document.getElementById('seqPropSave').addEventListener('click', applyCurrentCueProperties);
+
+  // Delete cue(s)
+  document.getElementById('seqPropDelete').addEventListener('click', () => deleteSelectedCues());
 
   // Type change — re-render channel sliders without resetting dropdown
   document.getElementById('seqPropType').addEventListener('change', () => {
@@ -720,24 +903,246 @@ function setupSequencerEvents() {
   document.getElementById('effType').addEventListener('change', (e) => {
     renderEffectParams(e.target.value, {});
   });
+
+  // ─── Keyboard shortcuts: Copy / Paste / Delete / Nudge / Select All ──────
+  document.addEventListener('keydown', async (e) => {
+    // Ignore when typing in an input / textarea / select
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+    // Ctrl+A — select all cues
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      if (!seqCurrentId) return;
+      e.preventDefault();
+      seqSelectedCueIds.clear();
+      for (const c of seqCues) seqSelectedCueIds.add(c.id);
+      seqSelectedCueId = seqCues.length > 0 ? seqCues[0].id : null;
+      updateSelectionVisuals();
+      updateSelectionInfo();
+      return;
+    }
+
+    // Delete — remove all selected cues
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (seqSelectedCueIds.size === 0) return;
+      e.preventDefault();
+      await deleteSelectedCues();
+      return;
+    }
+
+    // Ctrl+C — copy all selected cues
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      if (seqSelectedCueIds.size === 0) return;
+      e.preventDefault();
+      seqClipboard = [...seqSelectedCueIds].map(id => {
+        const c = seqCues.find(q => q.id === id);
+        return c ? JSON.parse(JSON.stringify(c)) : null;
+      }).filter(Boolean);
+      return;
+    }
+
+    // Ctrl+V — paste copied cues at playhead position
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+      if (!seqClipboard || !seqClipboard.length || !seqCurrentId) return;
+      e.preventDefault();
+      // Calculate offset so earliest cue starts at playhead
+      const minStart = Math.min(...seqClipboard.map(c => c.start_ms));
+      const offset = Math.round(seqPlayheadMs) - minStart;
+      const newIds = [];
+      for (const clip of seqClipboard) {
+        const body = {
+          lane: clip.lane,
+          start_ms: Math.max(0, clip.start_ms + offset),
+          duration_ms: clip.duration_ms,
+          cue_type: clip.cue_type || 'static',
+          fixture_id: clip.fixture_id,
+          channel_values: clip.channel_values,
+          end_channel_values: clip.end_channel_values || null,
+          color: clip.color,
+          label: clip.label || '',
+          effect_id: clip.effect_id || null,
+        };
+        if (clip.cell) body.cell = clip.cell;
+        const res = await fetch(`/api/sequences/${seqCurrentId}/cues`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const newCue = await res.json();
+        seqCues.push(newCue);
+        newIds.push(newCue.id);
+      }
+      document.getElementById('seqCueCount').textContent = seqCues.length;
+      // Select all pasted cues
+      seqSelectedCueIds.clear();
+      newIds.forEach(id => seqSelectedCueIds.add(id));
+      seqSelectedCueId = newIds[0] || null;
+      renderSequencerTimeline();
+      updateSelectionVisuals();
+      updateSelectionInfo();
+      return;
+    }
+
+    // Escape — deselect all
+    if (e.key === 'Escape') {
+      clearCueSelection();
+      return;
+    }
+
+    // Left / Right arrow — nudge all selected cues
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (seqSelectedCueIds.size === 0) return;
+      e.preventDefault();
+
+      let nudgeMs;
+      if (seqSnapBeats && seqCurrentSeq?.bpm) {
+        const beatMs = 60000 / seqCurrentSeq.bpm;
+        nudgeMs = beatMs * seqSnapBeats;
+      } else {
+        nudgeMs = 10;
+      }
+      if (e.shiftKey) nudgeMs = Math.max(10, nudgeMs / 4);
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+
+      const updates = [];
+      for (const sid of seqSelectedCueIds) {
+        const cue = seqCues.find(c => c.id === sid);
+        if (!cue) continue;
+        cue.start_ms = Math.max(0, Math.round(cue.start_ms + dir * nudgeMs));
+        updates.push(fetch(`/api/cues/${cue.id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_ms: cue.start_ms })
+        }));
+      }
+      await Promise.all(updates);
+      renderSequencerTimeline();
+      updateSelectionVisuals();
+      return;
+    }
+  });
 }
 
 // ─── Cue Selection & Properties ──────────────────────────────────────────────
 
-function selectCue(cueId) {
-  seqSelectedCueId = cueId;
-  const cue = seqCues.find(c => c.id === cueId);
+async function deleteSelectedCues() {
+  if (seqSelectedCueIds.size === 0) return;
+  const ids = [...seqSelectedCueIds];
+  await Promise.all(ids.map(id => fetch(`/api/cues/${id}`, { method: 'DELETE' })));
+  seqCues = seqCues.filter(c => !seqSelectedCueIds.has(c.id));
+  clearCueSelection();
+  document.getElementById('seqCueCount').textContent = seqCues.length;
+  renderSequencerTimeline();
+}
 
+// Backwards compat alias
+async function deleteSelectedCue() { return deleteSelectedCues(); }
+
+function autoApplyCurrentCue() {
+  // Silently save the current cue properties without re-rendering
+  if (!seqSelectedCueId) return;
+  const cue = seqCues.find(c => c.id === seqSelectedCueId);
+  if (!cue) return;
+
+  const type = document.getElementById('seqPropType').value;
+  const startMs = parseFloat(document.getElementById('seqPropStart').value) * 1000;
+  const durMs = parseFloat(document.getElementById('seqPropDur').value) * 1000;
+  const label = document.getElementById('seqPropLabel').value;
+  const effectId = document.getElementById('seqPropEffect').value || null;
+
+  const channelValues = {};
+  document.querySelectorAll('#seqColorChannels .seq-ch-start .seq-ch-slider').forEach(sl => {
+    channelValues[sl.dataset.chType] = +sl.querySelector('input[type="range"]').value;
+  });
+
+  const color = (channelValues.red !== undefined || channelValues.green !== undefined || channelValues.blue !== undefined)
+    ? colorFromChannelValues(channelValues)
+    : document.getElementById('seqPropColor').value;
+
+  let endChannelValues = null;
+  const endSliders = document.querySelectorAll('#seqColorChannels .seq-ch-end .seq-ch-slider');
+  if (endSliders.length > 0) {
+    endChannelValues = {};
+    endSliders.forEach(sl => {
+      endChannelValues[sl.dataset.chType] = +sl.querySelector('input[type="range"]').value;
+    });
+  }
+
+  if (type === 'strobe') {
+    const hzEl = document.querySelector('#seqColorChannels .seq-ch-slider[data-ch-type="strobe_hz"] input[type="range"]');
+    if (hzEl) channelValues.strobe_hz = +hzEl.value;
+  }
+
+  const update = {
+    cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs),
+    label, color, channel_values: channelValues,
+    end_channel_values: endChannelValues, effect_id: effectId ? +effectId : null,
+  };
+
+  // Fire-and-forget save
+  fetch(`/api/cues/${seqSelectedCueId}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update)
+  });
+  Object.assign(cue, update);
+}
+
+function clearCueSelection() {
+  seqSelectedCueIds.clear();
+  seqSelectedCueId = null;
   document.querySelectorAll('.seq-cue.selected').forEach(el => el.classList.remove('selected'));
-  const cueEl = document.querySelector(`.seq-cue[data-cue-id="${cueId}"]`);
-  if (cueEl) cueEl.classList.add('selected');
+  document.getElementById('seqProperties').classList.remove('open');
+  // Ensure keyboard shortcuts work
+  if (document.activeElement && document.activeElement.tagName.match(/INPUT|TEXTAREA|SELECT/i)) {
+    document.activeElement.blur();
+  }
+}
 
+function updateSelectionVisuals() {
+  document.querySelectorAll('.seq-cue').forEach(el => {
+    el.classList.toggle('selected', seqSelectedCueIds.has(+el.dataset.cueId));
+  });
+}
+
+function updateSelectionInfo() {
+  // Open properties panel for primary selected cue
+  if (seqSelectedCueId) {
+    const cue = seqCues.find(c => c.id === seqSelectedCueId);
+    if (cue) showCueProperties(cue);
+  } else {
+    document.getElementById('seqProperties').classList.remove('open');
+  }
+  // Ensure keyboard shortcuts work
+  if (document.activeElement && document.activeElement.tagName.match(/INPUT|TEXTAREA|SELECT/i)) {
+    document.activeElement.blur();
+  }
+}
+
+function selectCue(cueId) {
+  // Auto-apply changes to previous cue before switching
+  if (seqSelectedCueId && seqSelectedCueId !== cueId && document.getElementById('seqProperties').classList.contains('open')) {
+    autoApplyCurrentCue();
+  }
+  // Single-select: clear others, set this one
+  seqSelectedCueIds.clear();
+  seqSelectedCueIds.add(cueId);
+  seqSelectedCueId = cueId;
+  updateSelectionVisuals();
+
+  // Ensure keyboard shortcuts work by moving focus away from any input
+  if (document.activeElement && document.activeElement.tagName.match(/INPUT|TEXTAREA|SELECT/i)) {
+    document.activeElement.blur();
+  }
+
+  const cue = seqCues.find(c => c.id === cueId);
   if (!cue) { document.getElementById('seqProperties').classList.remove('open'); return; }
+  showCueProperties(cue);
+}
 
+function showCueProperties(cue) {
   const propsEl = document.getElementById('seqProperties');
   propsEl.classList.add('open');
 
-  const cueType = cue.cue_type || 'static';
+  const cueType = cue.cue_type || 'solid';
 
   document.getElementById('seqPropType').value = cueType;
   document.getElementById('seqPropStart').value = (cue.start_ms / 1000).toFixed(3);
@@ -753,7 +1158,7 @@ function selectCue(cueId) {
   document.getElementById('seqPropEffect').value = cue.effect_id || '';
 
   // Build channel sliders based on stored type
-  renderCueChannelSliders(cueId, cueType);
+  renderCueChannelSliders(cue.id, cueType);
 }
 
 // ─── Color Helpers ───────────────────────────────────────────────────────────
@@ -819,7 +1224,8 @@ function renderCueChannelSliders(cueId, cueType) {
     dimmer: '#ff0', amber: '#fa0', uv: '#a0f',
   };
 
-  let html = '<div class="seq-ch-start" style="margin-bottom:6px"><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">START VALUES</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+  let html = '<div class="seq-ch-start" style="margin-bottom:6px"><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">' +
+    (cueType === 'solid' ? 'COLOR' : 'START VALUES') + '</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
   for (const ch of channels) {
     const val = chVals[ch.type] !== undefined ? chVals[ch.type] : 0;
     const color = chColorMap[ch.type] || '#888';
@@ -830,8 +1236,9 @@ function renderCueChannelSliders(cueId, cueType) {
   }
   html += '</div></div>';
 
-  // End values — always shown for transition support
-  if (cueType !== 'effect') {
+  // End values — only shown for transition types (not solid/effect)
+  const showEndValues = cueType === 'static' || cueType === 'chase';
+  if (showEndValues) {
     const endVals = cue.end_channel_values || {};
     const hasEnd = Object.keys(endVals).length > 0;
     html += '<div class="seq-ch-end" style="margin-bottom:6px"><div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-dim);margin-bottom:4px">' +
