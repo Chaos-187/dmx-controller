@@ -47,6 +47,25 @@
     .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #f44; transition: background .3s; }
     .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
 
+    /* Bottom Status Bar */
+    .status-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      padding: 6px 24px;
+      background: var(--panel); border-top: 1px solid var(--panel-border);
+      font-size: 12px; color: var(--text-dim);
+    }
+    body { padding-bottom: 32px; }
+
+    /* Header Touch 2 button */
+    .btn-touch2 {
+      background: var(--input-bg); color: var(--cyan); border: 1px solid var(--cyan);
+      padding: 5px 14px; border-radius: 4px; font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
+      text-decoration: none; white-space: nowrap; transition: all .15s;
+    }
+    .btn-touch2:hover { background: rgba(0,229,255,.12); box-shadow: 0 0 10px rgba(0,229,255,0.3); }
+
     /* Now-Playing bar in header */
     .now-playing { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; justify-content: center; }
     .np-deck {
@@ -78,7 +97,7 @@
 
     /* Fixture Groups */
     .groups-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 12px; }
-    .groups-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .groups-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; min-height: 20px; }
     .group-chip {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
@@ -257,7 +276,7 @@
        Fixtures Tab (tab 2)
        ═══════════════════════════════════════════════════════════════ */
     .fixtures-toolbar {
-      display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+      display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;
     }
     .btn {
       padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer;
@@ -272,20 +291,63 @@
     .btn-danger:hover { background: var(--danger); color: #fff; }
     .btn-sm { padding: 4px 10px; font-size: 11px; }
 
+    /* Filter bar */
+    .fixtures-filter-bar {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      padding: 10px 14px; margin-bottom: 14px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    }
+    .fixtures-filter-bar label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .filter-input {
+      padding: 5px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 12px; min-width: 0;
+    }
+    .filter-input:focus { border-color: var(--accent); outline: none; }
+    .filter-input::placeholder { color: var(--text-dim); }
+    .filter-select { composes: filter-input; cursor: pointer; }
+    .filter-sep { width: 1px; height: 22px; background: var(--panel-border); flex-shrink: 0; }
+    .filter-count { font-size: 11px; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+    .btn-clear-filters {
+      background: none; border: 1px solid var(--input-border); color: var(--text-dim);
+      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all .15s;
+    }
+    .btn-clear-filters:hover { border-color: var(--accent); color: var(--text); }
+
     .fixtures-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px;
+      margin-bottom: 16px;
+    }
+    .fixtures-grid-empty {
+      grid-column: 1 / -1; text-align: center; padding: 30px 20px;
+      color: var(--text-dim); font-size: 13px;
     }
     .fixture-card {
       background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
       padding: 14px 16px; transition: border-color .2s;
+      display: flex; flex-direction: column;
     }
     .fixture-card:hover { border-color: var(--accent); }
-    .fixture-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .fixture-card-name { font-size: 14px; font-weight: 600; }
-    .fixture-card-type { font-size: 11px; color: var(--cyan); }
-    .fixture-card-meta { font-size: 11px; color: var(--text-dim); display: flex; gap: 12px; margin-bottom: 8px; }
+    .fixture-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; gap: 8px; }
+    .fixture-card-name { font-size: 14px; font-weight: 600; word-break: break-word; }
+    .fixture-card-type { font-size: 11px; color: var(--cyan); white-space: nowrap; flex-shrink: 0; }
+    .fixture-card-meta { font-size: 11px; color: var(--text-dim); display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .fixture-card-meta span { white-space: nowrap; }
+    .fixture-meta-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; padding: 2px 7px; border-radius: 3px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
+    }
+    .fixture-meta-badge.artnet { background: rgba(68,138,255,.15); color: var(--blue); }
+    .fixture-meta-badge.dmx-usb { background: rgba(255,234,0,.12); color: var(--yellow); }
+    .fixture-card-groups {
+      display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px;
+    }
+    .fixture-group-tag {
+      font-size: 9px; padding: 1px 6px; border-radius: 10px;
+      border: 1px solid; font-weight: 500;
+    }
     .fixture-card-channels {
-      display: flex; gap: 3px; flex-wrap: wrap; margin-top: 8px;
+      display: flex; gap: 3px; flex-wrap: wrap; margin-top: auto; padding-top: 8px;
     }
     .ch-badge {
       font-size: 9px; padding: 2px 5px; border-radius: 3px;
@@ -316,20 +378,77 @@
     .type-actions { display: flex; gap: 6px; }
 
     /* ═══════════════════════════════════════════════════════════════
-       Universe Map Tab (tab 4)
+       Integrated Universe Map (inside Fixtures tab)
        ═══════════════════════════════════════════════════════════════ */
+    .universe-section {
+      margin-top: 8px; margin-bottom: 20px; padding: 14px 16px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    }
+    .universe-section-header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 10px; cursor: pointer; user-select: none;
+    }
+    .universe-section-header h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
+    .universe-collapse-btn {
+      background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer;
+      transition: transform .2s; padding: 0 4px; line-height: 1;
+    }
+    .universe-section.collapsed .universe-collapse-btn { transform: rotate(-90deg); }
+    .universe-section-body {
+      overflow: hidden; transition: max-height .3s ease, opacity .2s ease;
+      max-height: 2000px; opacity: 1;
+    }
+    .universe-section.collapsed .universe-section-body {
+      max-height: 0; opacity: 0; padding-top: 0;
+    }
+    .universe-section.collapsed .universe-section-header { margin-bottom: 0; }
     .universe-bar {
-      display: flex; flex-wrap: wrap; gap: 1px; margin-top: 12px;
+      display: flex; flex-wrap: wrap; gap: 0; margin-top: 4px;
+      position: relative;
     }
+    .universe-bar.drag-active { outline: 2px dashed var(--cyan); outline-offset: 4px; border-radius: 4px; }
     .universe-slot {
-      width: 18px; height: 30px; font-size: 7px;
-      display: flex; align-items: center; justify-content: center;
+      width: 18px; height: 44px; font-size: 7px;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
       background: #1a1a1a; border: 1px solid #222; color: var(--text-dim);
-      cursor: default; position: relative;
+      cursor: default; position: relative; padding-bottom: 2px;
+      transition: background .15s, border-color .15s;
     }
-    .universe-slot.occupied { background: var(--accent-dim); border-color: var(--accent); color: #fff; cursor: pointer; }
-    .universe-slot.occupied:hover { background: var(--accent); }
-    .universe-info { margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+    .universe-slot.occupied { cursor: grab; }
+    .universe-slot.occupied:hover { filter: brightness(1.2); }
+    .universe-slot.occupied.dragging-source { opacity: 0.3; cursor: grabbing; }
+    .universe-slot.drop-target { background: rgba(0,229,255,.2) !important; border-color: var(--cyan) !important; }
+    .universe-slot.drop-invalid { background: rgba(244,68,68,.2) !important; border-color: var(--danger) !important; }
+    .universe-fixture-label {
+      position: absolute; top: -1px; left: -1px; right: 0;
+      height: 22px; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      pointer-events: none; z-index: 2; padding: 0 2px;
+      border-radius: 3px 3px 0 0;
+    }
+    .universe-info { font-size: 12px; color: var(--text-dim); }
+
+    /* Fixture card drag styles */
+    .fixture-card[draggable="true"] { cursor: grab; }
+    .fixture-card.dragging { opacity: 0.4; border-color: var(--cyan); box-shadow: 0 0 12px rgba(0,229,255,.3); }
+
+    /* Universe fixture colour palette */
+    .ufix-color-0 { background: #7b2d3b; border-color: #e94560; }
+    .ufix-color-1 { background: #1a4a3a; border-color: #00e676; }
+    .ufix-color-2 { background: #1a2a5a; border-color: #448aff; }
+    .ufix-color-3 { background: #4a3a1a; border-color: #ffea00; }
+    .ufix-color-4 { background: #1a4a4a; border-color: #00e5ff; }
+    .ufix-color-5 { background: #3a1a4a; border-color: #e040fb; }
+    .ufix-color-6 { background: #4a2a1a; border-color: #ff9100; }
+    .ufix-color-7 { background: #2a3a1a; border-color: #76ff03; }
+    .ufix-label-0 { background: rgba(233,69,96,.85); }
+    .ufix-label-1 { background: rgba(0,230,118,.7); color: #000; }
+    .ufix-label-2 { background: rgba(68,138,255,.85); }
+    .ufix-label-3 { background: rgba(255,234,0,.75); color: #000; }
+    .ufix-label-4 { background: rgba(0,229,255,.7); color: #000; }
+    .ufix-label-5 { background: rgba(224,64,251,.8); }
+    .ufix-label-6 { background: rgba(255,145,0,.8); color: #000; }
+    .ufix-label-7 { background: rgba(118,255,3,.7); color: #000; }
 
     /* ═══════════════════════════════════════════════════════════════
        Config Tab — Sub-tab layout
@@ -952,19 +1071,23 @@
       <div class="toggle-switch" id="outputSwitch"></div>
     </div>
     <button class="btn-blackout" id="btnEmergencyBlackout" title="Emergency Blackout — kills all DMX output">BLACKOUT</button>
-    <div class="status-badge">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">Disconnected</span>
-    </div>
+    <a href="touch2.html" class="btn-touch2" target="_blank" title="Open Touch Interface">Touch Interface</a>
   </div>
 </header>
+
+<!-- ══════ Bottom Status Bar ══════ -->
+<div class="status-bar">
+  <div class="status-badge">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Disconnected</span>
+  </div>
+</div>
 
 <!-- ══════ Tabs ══════ -->
 <div class="tabs">
   <button class="tab-btn active" data-tab="decks">Decks</button>
   <button class="tab-btn" data-tab="fixtures">Fixtures</button>
   <button class="tab-btn" data-tab="types">Fixture Types</button>
-  <button class="tab-btn" data-tab="universe">Universe</button>
   <button class="tab-btn" data-tab="dmxcontrol">DMX Control</button>
   <a href="sequencer.html" class="tab-btn" style="text-decoration:none">Sequencer</a>
   <button class="tab-btn" data-tab="config">Config</button>
@@ -997,21 +1120,66 @@
      TAB 2 — FIXTURES
      ══════════════════════════════════════════════════════════════ -->
 <div class="tab-page" id="page-fixtures">
+  <!-- Top actions -->
   <div class="fixtures-toolbar">
     <button class="btn btn-primary" id="btnAddFixture">+ Add Fixture</button>
+    <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
     <span style="flex:1"></span>
     <span style="font-size:12px;color:var(--text-dim)" id="fixtureCount"></span>
   </div>
-  <!-- Fixture Groups -->
-  <div class="groups-toolbar">
-    <span style="font-size:13px;font-weight:600;color:var(--text)">Groups</span>
-    <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
-    <span style="flex:1"></span>
+
+  <!-- Filter bar -->
+  <div class="fixtures-filter-bar">
+    <label>⚲ Filter</label>
+    <input type="text" class="filter-input" id="filterFixtureName" placeholder="Search by name…" style="width:160px">
+    <div class="filter-sep"></div>
+    <select class="filter-input" id="filterFixtureGroup" style="min-width:110px">
+      <option value="">All Groups</option>
+    </select>
+    <select class="filter-input" id="filterFixtureType" style="min-width:130px">
+      <option value="">All Types</option>
+    </select>
+    <select class="filter-input" id="filterFixtureOutput" style="min-width:110px">
+      <option value="">All Outputs</option>
+      <option value="artnet">Art-Net</option>
+      <option value="dmx_usb">DMX USB</option>
+    </select>
+    <select class="filter-input" id="filterFixtureUniverse" style="min-width:100px">
+      <option value="">All Universes</option>
+      <option value="1">Universe 1</option>
+      <option value="2">Universe 2</option>
+      <option value="3">Universe 3</option>
+      <option value="4">Universe 4</option>
+    </select>
+    <button class="btn-clear-filters" id="btnClearFixtureFilters" title="Clear all filters">✕ Clear</button>
+    <span class="filter-count" id="filterFixtureCount"></span>
   </div>
+
+  <!-- Groups chips -->
   <div class="groups-list" id="groupsList">
     <span style="font-size:11px;color:var(--text-dim)">No groups yet.</span>
   </div>
+
+  <!-- Fixture cards grid -->
   <div class="fixtures-grid" id="fixturesGrid"></div>
+
+  <!-- Integrated Universe Map -->
+  <div class="universe-section">
+    <div class="universe-section-header" id="universeSectionToggle">
+      <button class="universe-collapse-btn" title="Collapse/Expand">▼</button>
+      <h3>Universe Map</h3>
+      <label style="font-size:12px;color:var(--text-dim)" onclick="event.stopPropagation()">Universe:</label>
+      <select id="universeSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;" onclick="event.stopPropagation()">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+      </select>
+      <span style="flex:1"></span>
+      <span class="universe-info" id="universeInfo"></span>
+    </div>
+    <div class="universe-section-body">
+      <div class="universe-bar" id="universeBar"></div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:6px">Drag fixtures from above and drop onto the universe map to assign their DMX address.</div>
+    </div>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════
@@ -1025,21 +1193,7 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════
-     TAB 4 — UNIVERSE MAP
-     ══════════════════════════════════════════════════════════════ -->
-<div class="tab-page" id="page-universe">
-  <div class="fixtures-toolbar">
-    <label style="font-size:12px;color:var(--text-dim)">Universe:</label>
-    <select id="universeSelect" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;">
-      <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
-    </select>
-  </div>
-  <div class="universe-bar" id="universeBar"></div>
-  <div class="universe-info" id="universeInfo"></div>
-</div>
-
-<!-- ══════════════════════════════════════════════════════════════
-     TAB 5 — DMX CONTROL
+     TAB 4 — DMX CONTROL
      ══════════════════════════════════════════════════════════════ -->
 <div class="tab-page" id="page-dmxcontrol">
 
@@ -2239,9 +2393,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('page-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'fixtures') { loadFixtures(); loadGroups(); }
+    if (btn.dataset.tab === 'fixtures') { loadFixtures(); loadGroups(); loadUniverseMap(); }
     if (btn.dataset.tab === 'types') loadTypes();
-    if (btn.dataset.tab === 'universe') loadUniverse();
     if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
     if (btn.dataset.tab === 'config') loadConfigPage();
   });
@@ -2581,9 +2734,30 @@ function logEvent(info) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Fixtures CRUD
+//  Fixtures CRUD + Filtering
 // ═══════════════════════════════════════════════════════════════
 let fixtureTypesCache = [];
+let _allFixtures = [];  // cached for filtering without re-fetching
+
+// ── Filter controls ──
+const _fFilterName     = document.getElementById('filterFixtureName');
+const _fFilterGroup    = document.getElementById('filterFixtureGroup');
+const _fFilterType     = document.getElementById('filterFixtureType');
+const _fFilterOutput   = document.getElementById('filterFixtureOutput');
+const _fFilterUniverse = document.getElementById('filterFixtureUniverse');
+
+// Live filtering on any change
+[_fFilterName, _fFilterGroup, _fFilterType, _fFilterOutput, _fFilterUniverse].forEach(el => {
+  el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => renderFilteredFixtures());
+});
+document.getElementById('btnClearFixtureFilters').addEventListener('click', () => {
+  _fFilterName.value = '';
+  _fFilterGroup.value = '';
+  _fFilterType.value = '';
+  _fFilterOutput.value = '';
+  _fFilterUniverse.value = '';
+  renderFilteredFixtures();
+});
 
 async function loadFixtures() {
   const [fixtures, types] = await Promise.all([
@@ -2591,20 +2765,120 @@ async function loadFixtures() {
     fetch('/api/fixture-types').then(r=>r.json())
   ]);
   fixtureTypesCache = types;
+  _allFixtures = fixtures;
   document.getElementById('fixtureCount').textContent = `${fixtures.length} fixture(s)`;
 
+  // Populate type filter dropdown
+  const prevType = _fFilterType.value;
+  _fFilterType.innerHTML = '<option value="">All Types</option>' +
+    types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  _fFilterType.value = prevType;
+
+  // Populate group filter dropdown (uses fixtureGroups, loaded separately)
+  populateGroupFilter();
+
+  renderFilteredFixtures();
+}
+
+function populateGroupFilter() {
+  const prev = _fFilterGroup.value;
+  _fFilterGroup.innerHTML = '<option value="">All Groups</option>' +
+    fixtureGroups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('') +
+    '<option value="_ungrouped">Ungrouped</option>';
+  _fFilterGroup.value = prev;
+}
+
+function getFilteredFixtures() {
+  const nameQ = _fFilterName.value.trim().toLowerCase();
+  const groupId = _fFilterGroup.value;
+  const typeId = _fFilterType.value;
+  const output = _fFilterOutput.value;
+  const universe = _fFilterUniverse.value;
+
+  return _allFixtures.filter(f => {
+    if (nameQ && !f.name.toLowerCase().includes(nameQ)) return false;
+    if (typeId && f.fixture_type_id !== +typeId) return false;
+    if (output && f.output_type !== output) return false;
+    if (universe && f.universe !== +universe) return false;
+    if (groupId === '_ungrouped') {
+      const inAny = fixtureGroups.some(g => g.fixture_ids.includes(f.id));
+      if (inAny) return false;
+    } else if (groupId) {
+      const grp = fixtureGroups.find(g => g.id === +groupId);
+      if (!grp || !grp.fixture_ids.includes(f.id)) return false;
+    }
+    return true;
+  });
+}
+
+function renderFilteredFixtures() {
+  const filtered = getFilteredFixtures();
+  const total = _allFixtures.length;
+  const countEl = document.getElementById('filterFixtureCount');
+  if (filtered.length === total) {
+    countEl.textContent = '';
+  } else {
+    countEl.textContent = `Showing ${filtered.length} of ${total}`;
+  }
+  renderFixtureCards(filtered);
+}
+
+function renderFixtureCards(fixtures) {
   const grid = document.getElementById('fixturesGrid');
   grid.innerHTML = '';
 
-  if (fixtures.length === 0) {
-    grid.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center;">No fixtures configured. Click "+ Add Fixture" to get started.</div>';
+  if (_allFixtures.length === 0) {
+    grid.innerHTML = '<div class="fixtures-grid-empty">No fixtures configured. Click "+ Add Fixture" to get started.</div>';
     return;
+  }
+  if (fixtures.length === 0) {
+    grid.innerHTML = '<div class="fixtures-grid-empty">No fixtures match the current filters.</div>';
+    return;
+  }
+
+  // Build a lookup: fixture id → groups it belongs to
+  const fixtureGroupMap = {};
+  for (const g of fixtureGroups) {
+    for (const fid of g.fixture_ids) {
+      if (!fixtureGroupMap[fid]) fixtureGroupMap[fid] = [];
+      fixtureGroupMap[fid].push(g);
+    }
   }
 
   for (const f of fixtures) {
     const card = document.createElement('div');
     card.className = 'fixture-card';
-    const type = types.find(t => t.id === f.fixture_type_id);
+
+    // Make card draggable for universe map drag-and-drop
+    card.draggable = true;
+    card.dataset.fixtureId = f.id;
+    card.dataset.channelCount = f.channel_count;
+    card.dataset.fixtureUniverse = f.universe;
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/x-fixture-id', String(f.id));
+      e.dataTransfer.setData('text/x-channel-count', String(f.channel_count));
+      e.dataTransfer.setData('text/x-fixture-universe', String(f.universe));
+      e.dataTransfer.effectAllowed = 'move';
+      _dragFixtureChannels = f.channel_count;
+      _dragFixtureId = f.id;
+      card.classList.add('dragging');
+      // Auto-expand universe section when dragging starts
+      const section = document.querySelector('.universe-section');
+      if (section && section.classList.contains('collapsed')) {
+        section.classList.remove('collapsed');
+      }
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      _dragFixtureChannels = 0;
+      _dragFixtureId = 0;
+      _dragBarCounter = 0;
+      const bar = document.getElementById('universeBar');
+      bar.classList.remove('drag-active');
+      clearDropHighlights(bar);
+    });
+
+    const type = fixtureTypesCache.find(t => t.id === f.fixture_type_id);
     const channels = type ? type.channels : [];
     const chBadges = channels.map(c => {
       const hasRanges = c.ranges && c.ranges.length > 0;
@@ -2613,18 +2887,28 @@ async function loadFixtures() {
       return `<span class="ch-badge ${badgeClass}" ${title ? `title="${esc(title)}"` : ''}>${c.channel_number}: ${c.name}${hasRanges ? ' ⚡' : ''}</span>`;
     }).join('');
 
+    // Group tags
+    const groups = fixtureGroupMap[f.id] || [];
+    const groupTags = groups.map(g =>
+      `<span class="fixture-group-tag" style="color:${g.color};border-color:${g.color}">${esc(g.name)}</span>`
+    ).join('');
+
+    const outputBadge = f.output_type === 'dmx_usb'
+      ? '<span class="fixture-meta-badge dmx-usb">DMX USB</span>'
+      : '<span class="fixture-meta-badge artnet">Art-Net</span>';
+
     card.innerHTML = `
       <div class="fixture-card-header">
         <span class="fixture-card-name">${esc(f.name)}</span>
         <span class="fixture-card-type">${esc(f.type_name)}</span>
       </div>
       <div class="fixture-card-meta">
-        <span>Universe ${f.universe}</span>
-        <span>Address ${f.address}–${f.address + f.channel_count - 1}</span>
+        <span>U${f.universe} &middot; Ch ${f.address}&ndash;${f.address + f.channel_count - 1}</span>
         <span>${f.channel_count}ch</span>
         <span>${CATEGORY_LABELS[f.category]||f.category}</span>
-        <span class="ch-badge ${f.output_type === 'dmx_usb' ? 'dimmer' : 'color'}" style="font-size:10px">${f.output_type === 'dmx_usb' ? 'DMX USB' : 'Art-Net'}</span>
+        ${outputBadge}
       </div>
+      ${groupTags ? `<div class="fixture-card-groups">${groupTags}</div>` : ''}
       ${f.notes ? `<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">${esc(f.notes)}</div>` : ''}
       <div class="fixture-card-channels">${chBadges}</div>
       <div class="fixture-card-actions">
@@ -2675,6 +2959,7 @@ window.deleteFixture = async (id, name) => {
   if (!confirm(`Delete fixture "${name}"?`)) return;
   await fetch(`/api/fixtures/${id}`, { method: 'DELETE' });
   loadFixtures();
+  loadUniverseMap();
 };
 
 document.getElementById('btnSaveFixture').addEventListener('click', async () => {
@@ -2696,6 +2981,7 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
   if (data.error) return showError('fixtureError', data.error);
   closeModal('fixtureModal');
   loadFixtures();
+  loadUniverseMap();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -3048,36 +3334,219 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
 });
 
 // ═══════════════════════════════════════════════════════════════
-//  Universe Map
+//  Integrated Universe Map (drag & drop)
 // ═══════════════════════════════════════════════════════════════
-document.getElementById('universeSelect').addEventListener('change', loadUniverse);
+document.getElementById('universeSelect').addEventListener('change', loadUniverseMap);
 
-async function loadUniverse() {
+// Collapsible universe section
+document.getElementById('universeSectionToggle').addEventListener('click', () => {
+  const section = document.querySelector('.universe-section');
+  section.classList.toggle('collapsed');
+  // Remember state
+  localStorage.setItem('dmx_universe_collapsed', section.classList.contains('collapsed') ? '1' : '0');
+});
+// Restore collapse state
+if (localStorage.getItem('dmx_universe_collapsed') === '1') {
+  document.querySelector('.universe-section').classList.add('collapsed');
+}
+
+// Fixture colour palette for universe map (cycles)
+const UNIV_FIX_COLORS = 8;
+let _univFixColorMap = {};
+
+// Current drag state
+let _dragFixtureChannels = 0;
+let _dragFixtureId = 0;
+let _dragBarCounter = 0; // dragenter/dragleave balancing
+
+async function loadUniverseMap() {
   const univ = +document.getElementById('universeSelect').value;
   const fixtures = await fetch(`/api/universe/${univ}`).then(r=>r.json());
 
+  // Assign a stable colour index to each fixture by ID
+  _univFixColorMap = {};
+  fixtures.forEach((f, i) => { _univFixColorMap[f.id] = i % UNIV_FIX_COLORS; });
+
+  // Build slot occupancy map
   const slotMap = {};
   for (const f of fixtures) {
     for (let ch = 0; ch < f.channel_count; ch++) {
-      slotMap[f.address + ch] = { name: f.name, type: f.type_name, start: f.address, end: f.address + f.channel_count - 1 };
+      slotMap[f.address + ch] = { ...f, offset: ch };
     }
   }
 
   const bar = document.getElementById('universeBar');
   bar.innerHTML = '';
+
+  // Build all 512 slot elements
   for (let addr = 1; addr <= 512; addr++) {
     const slot = document.createElement('div');
-    slot.className = 'universe-slot' + (slotMap[addr] ? ' occupied' : '');
-    slot.textContent = addr;
-    if (slotMap[addr]) {
-      slot.title = `${slotMap[addr].name} (${slotMap[addr].type})\nCh ${slotMap[addr].start}–${slotMap[addr].end}`;
+    slot.className = 'universe-slot';
+    slot.dataset.addr = addr;
+
+    // Channel number as text
+    const numSpan = document.createElement('span');
+    numSpan.textContent = addr;
+    numSpan.style.pointerEvents = 'none';
+    slot.appendChild(numSpan);
+
+    const info = slotMap[addr];
+    if (info) {
+      const ci = _univFixColorMap[info.id] ?? 0;
+      slot.classList.add('occupied', `ufix-color-${ci}`);
+      slot.title = `${info.name} (${info.type_name})\nCh ${info.address}–${info.address + info.channel_count - 1}\nDrag to move`;
+
+      // Make every occupied slot draggable so you can grab any channel of a fixture
+      slot.draggable = true;
+      slot.dataset.fixtureId = info.id;
+      slot.dataset.channelCount = info.channel_count;
+      slot.dataset.fixtureAddr = info.address;
+
+      slot.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/x-fixture-id', String(info.id));
+        e.dataTransfer.setData('text/x-channel-count', String(info.channel_count));
+        e.dataTransfer.setData('text/x-fixture-universe', String(univ));
+        e.dataTransfer.effectAllowed = 'move';
+        _dragFixtureChannels = info.channel_count;
+        _dragFixtureId = info.id;
+        // Dim all slots belonging to this fixture
+        requestAnimationFrame(() => {
+          bar.querySelectorAll(`.universe-slot[data-fixture-id="${info.id}"]`).forEach(s => {
+            s.classList.add('dragging-source');
+          });
+        });
+      });
+      slot.addEventListener('dragend', () => {
+        _dragFixtureChannels = 0;
+        _dragFixtureId = 0;
+        _dragBarCounter = 0;
+        bar.classList.remove('drag-active');
+        clearDropHighlights(bar);
+        bar.querySelectorAll('.dragging-source').forEach(s => s.classList.remove('dragging-source'));
+      });
+
+      // Add fixture name label on the first channel only
+      if (info.offset === 0) {
+        const label = document.createElement('div');
+        label.className = `universe-fixture-label ufix-label-${ci}`;
+        label.style.width = (info.channel_count * 18) + 'px';
+        label.textContent = info.name;
+        label.title = `${info.name} — ${info.type_name} (${info.channel_count}ch)`;
+        slot.appendChild(label);
+      }
     }
     bar.appendChild(slot);
   }
 
-  const info = document.getElementById('universeInfo');
+  const info2 = document.getElementById('universeInfo');
   const used = Object.keys(slotMap).length;
-  info.textContent = `Universe ${univ}: ${used}/512 channels used, ${fixtures.length} fixture(s)`;
+  info2.textContent = `${used}/512 channels used, ${fixtures.length} fixture(s)`;
+}
+
+// ── Bar-level drag & drop events (attached once) ──
+(function initUniverseBarDragDrop() {
+  const bar = document.getElementById('universeBar');
+
+  bar.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    _dragBarCounter++;
+    bar.classList.add('drag-active');
+  });
+
+  bar.addEventListener('dragleave', (e) => {
+    _dragBarCounter--;
+    if (_dragBarCounter <= 0) {
+      _dragBarCounter = 0;
+      bar.classList.remove('drag-active');
+      clearDropHighlights(bar);
+    }
+  });
+
+  bar.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const targetAddr = getSlotAddrFromEvent(bar, e);
+    if (targetAddr) {
+      highlightDropZone(bar, targetAddr);
+    }
+  });
+
+  bar.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    _dragBarCounter = 0;
+    bar.classList.remove('drag-active');
+    clearDropHighlights(bar);
+
+    const fixtureId = +e.dataTransfer.getData('text/x-fixture-id');
+    const channelCount = +e.dataTransfer.getData('text/x-channel-count');
+    if (!fixtureId) return;
+
+    const targetAddr = getSlotAddrFromEvent(bar, e);
+    if (!targetAddr) return;
+    const targetUniv = +document.getElementById('universeSelect').value;
+
+    // Validate: fits in 512 channels
+    if (targetAddr + channelCount - 1 > 512) {
+      showDropError(`Cannot place ${channelCount}ch fixture at address ${targetAddr} — exceeds channel 512`);
+      return;
+    }
+
+    // Send update
+    const res = await fetch(`/api/fixtures/${fixtureId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: targetAddr, universe: targetUniv })
+    });
+    const data = await res.json();
+    if (data.error) {
+      showDropError(data.error);
+      return;
+    }
+
+    // Reload both fixtures grid and universe map
+    loadFixtures();
+    loadUniverseMap();
+  });
+})();
+
+/**
+ * Resolve the DMX address from a drag/drop event over the universe bar.
+ * Walks up from event target to find a .universe-slot with data-addr.
+ */
+function getSlotAddrFromEvent(bar, e) {
+  let el = e.target;
+  while (el && el !== bar) {
+    if (el.dataset && el.dataset.addr) return +el.dataset.addr;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function highlightDropZone(bar, dropAddr) {
+  clearDropHighlights(bar);
+  if (!_dragFixtureChannels) return;
+
+  const count = _dragFixtureChannels;
+  const end = dropAddr + count - 1;
+  const overflow = end > 512;
+
+  for (let a = dropAddr; a <= Math.min(end, 512); a++) {
+    const sl = bar.children[a - 1];
+    if (sl) sl.classList.add(overflow ? 'drop-invalid' : 'drop-target');
+  }
+}
+
+function clearDropHighlights(bar) {
+  bar.querySelectorAll('.drop-target, .drop-invalid').forEach(s => {
+    s.classList.remove('drop-target', 'drop-invalid');
+  });
+}
+
+function showDropError(msg) {
+  const info = document.getElementById('universeInfo');
+  info.style.color = 'var(--danger)';
+  info.textContent = '⚠ ' + msg;
+  setTimeout(() => { info.style.color = ''; loadUniverseMap(); }, 3000);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4820,6 +5289,9 @@ async function loadGroups() {
   } catch { fixtureGroups = []; }
   renderGroupChips();
   populateQaGroupFilter();
+  populateGroupFilter();
+  // Re-render cards so group tags update
+  if (_allFixtures.length) renderFilteredFixtures();
 }
 
 function renderGroupChips() {
