@@ -473,17 +473,34 @@
         <div class="form-group">
           <label>Type</label>
           <select id="effType">
-            <option value="pulse">Pulse</option>
-            <option value="rainbow">Rainbow</option>
-            <option value="strobe">Strobe</option>
-            <option value="color_fade">Color Fade</option>
-            <option value="chase">Chase</option>
-            <option value="comet">Comet</option>
-            <option value="scanner">Scanner</option>
-            <option value="sparkle">Sparkle</option>
-            <option value="color_wave">Color Wave</option>
-            <option value="fire">Fire</option>
-            <option value="buildup">Buildup</option>
+            <optgroup label="Color / Intensity">
+              <option value="pulse">Pulse</option>
+              <option value="rainbow">Rainbow</option>
+              <option value="strobe">Strobe</option>
+              <option value="color_fade">Color Fade</option>
+              <option value="sparkle">Sparkle</option>
+              <option value="color_wave">Color Wave</option>
+              <option value="fire">Fire</option>
+            </optgroup>
+            <optgroup label="Multicell">
+              <option value="chase">Chase</option>
+              <option value="comet">Comet</option>
+              <option value="scanner">Scanner</option>
+              <option value="buildup">Buildup</option>
+              <option value="segments">Segments</option>
+              <option value="ripple">Ripple</option>
+              <option value="cell_strobe">Cell Strobe</option>
+              <option value="gradient">Gradient</option>
+            </optgroup>
+            <optgroup label="Moving Head">
+              <option value="pan_sweep">Pan Sweep</option>
+              <option value="tilt_sweep">Tilt Sweep</option>
+              <option value="circle">Circle</option>
+              <option value="figure_eight">Figure Eight</option>
+              <option value="random_move">Random Movement</option>
+              <option value="fan">Fan</option>
+              <option value="nod">Nod / Shake</option>
+            </optgroup>
           </select>
         </div>
       </div>
@@ -496,6 +513,17 @@
             <option value="movement">Movement</option>
           </select>
         </div>
+        <div class="form-group">
+          <label>Fixture Target</label>
+          <select id="effFixtureTarget">
+            <option value="all">All Fixtures</option>
+            <option value="color">Color Fixtures</option>
+            <option value="moving_head">Moving Heads Only</option>
+            <option value="multicell">Multicell Only</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label>Duration (beats)</label>
           <input type="number" id="effDurBeats" value="4" min="0.25" step="0.25">

@@ -69,6 +69,8 @@ function init() {
       universe        INTEGER NOT NULL DEFAULT 1,
       address         INTEGER NOT NULL,
       output_type     TEXT    NOT NULL DEFAULT 'artnet',
+      invert_pan      INTEGER NOT NULL DEFAULT 0,
+      invert_tilt     INTEGER NOT NULL DEFAULT 0,
       notes           TEXT    DEFAULT '',
       created_at      TEXT    DEFAULT (datetime('now')),
       updated_at      TEXT    DEFAULT (datetime('now'))
@@ -162,6 +164,7 @@ function init() {
       name            TEXT    NOT NULL,
       type            TEXT    NOT NULL DEFAULT 'static',
       category        TEXT    DEFAULT 'color',
+      fixture_target  TEXT    DEFAULT 'all',
       effect_data     TEXT    DEFAULT '{}',
       duration_beats  REAL    DEFAULT 4,
       created_at      TEXT    DEFAULT (datetime('now'))
@@ -216,6 +219,48 @@ function init() {
       created_at      TEXT    DEFAULT (datetime('now'))
     );
 
+    -- Static scenes (used when no sequence is running)
+    CREATE TABLE IF NOT EXISTS static_scenes (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      description TEXT    DEFAULT '',
+      priority    INTEGER DEFAULT 0,
+      is_default  INTEGER DEFAULT 0,
+      created_at  TEXT    DEFAULT (datetime('now')),
+      updated_at  TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS static_scene_entries (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      scene_id        INTEGER NOT NULL REFERENCES static_scenes(id) ON DELETE CASCADE,
+      fixture_id      INTEGER DEFAULT NULL,
+      group_id        INTEGER DEFAULT NULL,
+      channel_values  TEXT    DEFAULT '{}',
+      effect_id       INTEGER DEFAULT NULL,
+      effect_params   TEXT    DEFAULT '{}',
+      label           TEXT    DEFAULT '',
+      sort_order      INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_scene_entries_scene ON static_scene_entries(scene_id);
+
+    -- Touch action grid buttons (configurable from index.html)
+    CREATE TABLE IF NOT EXISTS touch_actions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      label       TEXT    NOT NULL DEFAULT '',
+      icon        TEXT    DEFAULT '',
+      action_type TEXT    NOT NULL DEFAULT 'color',
+      action_data TEXT    DEFAULT '{}',
+      color       TEXT    DEFAULT '#ffffff',
+      text_color  TEXT    DEFAULT '#ffffff',
+      grid_row    INTEGER DEFAULT 0,
+      grid_col    INTEGER DEFAULT 0,
+      grid_w      INTEGER DEFAULT 1,
+      grid_h      INTEGER DEFAULT 1,
+      sort_order  INTEGER DEFAULT 0,
+      enabled     INTEGER DEFAULT 1,
+      created_at  TEXT    DEFAULT (datetime('now'))
+    );
+
     -- Waveform / energy analysis data per track
     CREATE TABLE IF NOT EXISTS track_analysis (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -266,12 +311,42 @@ function init() {
     console.log('[DB] Migrated fixture_type_channels: added cell column');
   }
 
+  // Migrate: add invert column to fixture_type_channels if missing (legacy, no longer used)
+  try {
+    db.prepare("SELECT invert FROM fixture_type_channels LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixture_type_channels ADD COLUMN invert INTEGER DEFAULT 0");
+    console.log('[DB] Migrated fixture_type_channels: added invert column');
+  }
+
+  // Migrate: add invert_pan and invert_tilt columns to fixtures if missing
+  try {
+    db.prepare("SELECT invert_pan FROM fixtures LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN invert_pan INTEGER NOT NULL DEFAULT 0");
+    console.log('[DB] Migrated fixtures: added invert_pan column');
+  }
+  try {
+    db.prepare("SELECT invert_tilt FROM fixtures LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN invert_tilt INTEGER NOT NULL DEFAULT 0");
+    console.log('[DB] Migrated fixtures: added invert_tilt column');
+  }
+
   // Migrate: add cell column to sequence_cues if missing
   try {
     db.prepare("SELECT cell FROM sequence_cues LIMIT 1").get();
   } catch (e) {
     db.exec("ALTER TABLE sequence_cues ADD COLUMN cell INTEGER DEFAULT NULL");
     console.log('[DB] Migrated sequence_cues: added cell column');
+  }
+
+  // Migrate: add fixture_target column to effects if missing
+  try {
+    db.prepare("SELECT fixture_target FROM effects LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE effects ADD COLUMN fixture_target TEXT DEFAULT 'all'");
+    console.log('[DB] Migrated effects: added fixture_target column');
   }
 
   // Seed subscriptions if empty
@@ -324,6 +399,16 @@ function init() {
 
   // Always run migration to add new effect types to existing databases
   seedNewEffectsV2();
+  seedNewEffectsV3();
+
+  // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
+  // Color-only effects target fixtures with color channels
+  db.exec("UPDATE effects SET fixture_target = 'color' WHERE type IN ('pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire')");
+  // chase/comet/scanner/buildup work on ALL fixtures (virtual cells via channels_per_cell heuristic)
+  db.exec("UPDATE effects SET fixture_target = 'all' WHERE type IN ('chase','comet','scanner','buildup')");
+  // Only truly multicell-specific effects are restricted
+  db.exec("UPDATE effects SET fixture_target = 'multicell' WHERE fixture_target = 'all' AND type IN ('segments','ripple','cell_strobe','gradient')");
+  db.exec("UPDATE effects SET fixture_target = 'moving_head' WHERE fixture_target = 'all' AND type IN ('pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod')");
 
   console.log(`[DB] Opened ${DB_PATH}  (${subCount > 0 ? subCount + ' subscriptions' : 'seeded subs'}, ${count > 0 ? count + ' fixture types' : 'seeded defaults'}, ${effectCount > 0 ? effectCount + ' effects' : 'seeded effects'})`);
   return db;
@@ -422,6 +507,62 @@ function seedNewEffectsV2() {
   });
   tx();
   if (added > 0) console.log(`[DB] Added ${added} new effects (v2 migration)`);
+}
+
+// ─── Seed V3: Movement Effects for Movers & Multicell-specific Effects ────
+
+function seedNewEffectsV3() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // ── Moving Head effects (pan/tilt) ──────────────────────────────────
+    ['Pan Sweep',         'pan_sweep',    'movement', 'moving_head', J({ speed:1, range:1.0 }), 4],
+    ['Fast Pan Sweep',    'pan_sweep',    'movement', 'moving_head', J({ speed:4, range:1.0 }), 2],
+    ['Narrow Pan Sweep',  'pan_sweep',    'movement', 'moving_head', J({ speed:1, range:0.3 }), 4],
+    ['Tilt Sweep',        'tilt_sweep',   'movement', 'moving_head', J({ speed:1, range:1.0 }), 4],
+    ['Fast Tilt Sweep',   'tilt_sweep',   'movement', 'moving_head', J({ speed:4, range:1.0 }), 2],
+    ['Narrow Tilt Sweep', 'tilt_sweep',   'movement', 'moving_head', J({ speed:1, range:0.3 }), 4],
+    ['Circle',            'circle',       'movement', 'moving_head', J({ speed:1, size:0.5 }), 4],
+    ['Fast Circle',       'circle',       'movement', 'moving_head', J({ speed:3, size:0.5 }), 2],
+    ['Small Circle',      'circle',       'movement', 'moving_head', J({ speed:1, size:0.2 }), 4],
+    ['Large Circle',      'circle',       'movement', 'moving_head', J({ speed:0.5, size:0.8 }), 8],
+    ['Figure Eight',      'figure_eight', 'movement', 'moving_head', J({ speed:1, size:0.5 }), 8],
+    ['Fast Figure Eight', 'figure_eight', 'movement', 'moving_head', J({ speed:2, size:0.5 }), 4],
+    ['Random Movement',   'random_move',  'movement', 'moving_head', J({ speed:1, range:0.5, smoothing:0.3 }), 8],
+    ['Slow Random',       'random_move',  'movement', 'moving_head', J({ speed:0.3, range:0.3, smoothing:0.5 }), 16],
+    ['Fan Out',           'fan',          'movement', 'moving_head', J({ speed:0.5, spread:1.0 }), 8],
+    ['Fan Narrow',        'fan',          'movement', 'moving_head', J({ speed:0.5, spread:0.3 }), 8],
+    ['Nod',               'nod',          'movement', 'moving_head', J({ speed:2, range:0.3, axis:'tilt' }), 2],
+    ['Shake',             'nod',          'movement', 'moving_head', J({ speed:4, range:0.15, axis:'pan' }), 1],
+
+    // ── Multicell-specific effects ──────────────────────────────────────
+    ['Pixel Segments',    'segments',     'color', 'multicell', J({ segment_size:2, offset_speed:1 }), 4],
+    ['Fast Segments',     'segments',     'color', 'multicell', J({ segment_size:3, offset_speed:4 }), 2],
+    ['Ripple Out',        'ripple',       'color', 'multicell', J({ speed:1, width:3, decay:0.7 }), 4],
+    ['Fast Ripple',       'ripple',       'color', 'multicell', J({ speed:3, width:2, decay:0.5 }), 2],
+    ['Cell Strobe',       'cell_strobe',  'intensity', 'multicell', J({ frequency:8, pattern:'sequential' }), 4],
+    ['Random Cell Strobe','cell_strobe',  'intensity', 'multicell', J({ frequency:12, pattern:'random' }), 2],
+    ['Gradient Sweep',    'gradient',     'color', 'multicell', J({ speed:1, colors:['#ff0000','#0000ff'] }), 8],
+    ['RGB Gradient',      'gradient',     'color', 'multicell', J({ speed:0.5, colors:['#ff0000','#00ff00','#0000ff'] }), 8],
+
+    // ── Update existing multicell effects with fixture_target ───────────
+    // (these are handled by the migration backfill, but ensure new installs get it right)
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v3 migration — movers & multicell)`);
 }
 
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
@@ -760,13 +901,13 @@ function createFixtureType({ name, manufacturer, category, channels }) {
   const id = r.lastInsertRowid;
   if (channels && channels.length) {
     const ins = db.prepare(
-      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell, invert)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertAll = db.transaction(() => {
       for (const ch of channels) {
         const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null);
+        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null, ch.invert ? 1 : 0);
       }
     });
     insertAll();
@@ -787,12 +928,12 @@ function updateFixtureType(id, { name, manufacturer, category, channels }) {
     if (channels) {
       db.prepare('DELETE FROM fixture_type_channels WHERE fixture_type_id = ?').run(id);
       const ins = db.prepare(
-        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell, invert)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const ch of channels) {
         const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null);
+        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null, ch.invert ? 1 : 0);
       }
     }
   });
@@ -836,7 +977,7 @@ function getFixture(id) {
   return f;
 }
 
-function createFixture({ name, fixture_type_id, universe, address, output_type, notes }) {
+function createFixture({ name, fixture_type_id, universe, address, output_type, notes, invert_pan, invert_tilt }) {
   // Validate type exists
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
   if (!type) return { error: 'Fixture type not found' };
@@ -851,13 +992,13 @@ function createFixture({ name, fixture_type_id, universe, address, output_type, 
 
   const otype = output_type || 'artnet';
   const r = db.prepare(
-    `INSERT INTO fixtures (name, fixture_type_id, universe, address, output_type, notes) VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(name, fixture_type_id, universe || 1, address, otype, notes || '');
+    `INSERT INTO fixtures (name, fixture_type_id, universe, address, output_type, notes, invert_pan, invert_tilt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, fixture_type_id, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0);
 
   return getFixture(r.lastInsertRowid);
 }
 
-function updateFixture(id, { name, fixture_type_id, universe, address, output_type, notes }) {
+function updateFixture(id, { name, fixture_type_id, universe, address, output_type, notes, invert_pan, invert_tilt }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -876,8 +1017,8 @@ function updateFixture(id, { name, fixture_type_id, universe, address, output_ty
   if (overlap) return { error: overlap };
 
   db.prepare(
-    `UPDATE fixtures SET name=?, fixture_type_id=?, universe=?, address=?, output_type=?, notes=?, updated_at=datetime('now') WHERE id=?`
-  ).run(name || existing.name, typeId, univ, addr, otype, notes ?? existing.notes, id);
+    `UPDATE fixtures SET name=?, fixture_type_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, updated_at=datetime('now') WHERE id=?`
+  ).run(name || existing.name, typeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, id);
 
   return getFixture(id);
 }
@@ -1116,7 +1257,8 @@ function clearTracks() {
 
 function getFixtureChannelMap() {
   const fixtures = db.prepare(`
-    SELECT f.id, f.name, f.universe, f.address, ft.channel_count, ft.name as type_name, ft.category
+    SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
+           ft.channel_count, ft.name as type_name, ft.category
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
     ORDER BY f.universe, f.address
@@ -1135,14 +1277,20 @@ function getFixtureChannelMap() {
       ...f,
       group_ids,
       cell_count,
-      channels: channels.map(ch => ({
-        dmx_address: f.address + ch.channel_number - 1,
-        channel_number: ch.channel_number,
-        name: ch.name,
-        type: ch.type,
-        cell: ch.cell || null,
-        ranges: ch.ranges ? JSON.parse(ch.ranges) : null,
-      })),
+      channels: channels.map(ch => {
+        // Derive per-channel invert from fixture-level pan/tilt invert settings
+        const isPan = ch.type === 'pan' || ch.type === 'pan_fine';
+        const isTilt = ch.type === 'tilt' || ch.type === 'tilt_fine';
+        return {
+          dmx_address: f.address + ch.channel_number - 1,
+          channel_number: ch.channel_number,
+          name: ch.name,
+          type: ch.type,
+          cell: ch.cell || null,
+          ranges: ch.ranges ? JSON.parse(ch.ranges) : null,
+          invert: isPan ? !!f.invert_pan : isTilt ? !!f.invert_tilt : false,
+        };
+      }),
     };
   });
 }
@@ -1304,7 +1452,7 @@ function toggleButtonMap(id) {
 // ─── Effects CRUD ───────────────────────────────────────────────────────────
 
 function getEffects() {
-  const rows = db.prepare('SELECT * FROM effects ORDER BY category, name').all();
+  const rows = db.prepare('SELECT * FROM effects ORDER BY fixture_target, category, name').all();
   return rows.map(r => ({ ...r, effect_data: JSON.parse(r.effect_data || '{}') }));
 }
 
@@ -1314,27 +1462,28 @@ function getEffect(id) {
   return { ...r, effect_data: JSON.parse(r.effect_data || '{}') };
 }
 
-function createEffect({ name, type, category, effect_data, duration_beats }) {
+function createEffect({ name, type, category, fixture_target, effect_data, duration_beats }) {
   if (!name || !name.trim()) return { error: 'Name is required' };
   const dataJson = typeof effect_data === 'string' ? effect_data : JSON.stringify(effect_data || {});
   const result = db.prepare(
-    'INSERT INTO effects (name, type, category, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?)'
-  ).run(name.trim(), type || 'static', category || 'color', dataJson, duration_beats || 4);
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(name.trim(), type || 'static', category || 'color', fixture_target || 'all', dataJson, duration_beats || 4);
   return getEffect(result.lastInsertRowid);
 }
 
-function updateEffect(id, { name, type, category, effect_data, duration_beats }) {
+function updateEffect(id, { name, type, category, fixture_target, effect_data, duration_beats }) {
   const existing = db.prepare('SELECT * FROM effects WHERE id = ?').get(id);
   if (!existing) return null;
   const dataJson = effect_data !== undefined
     ? (typeof effect_data === 'string' ? effect_data : JSON.stringify(effect_data))
     : existing.effect_data;
   db.prepare(
-    'UPDATE effects SET name=?, type=?, category=?, effect_data=?, duration_beats=? WHERE id=?'
+    'UPDATE effects SET name=?, type=?, category=?, fixture_target=?, effect_data=?, duration_beats=? WHERE id=?'
   ).run(
     name !== undefined ? name.trim() : existing.name,
     type !== undefined ? type : existing.type,
     category !== undefined ? category : existing.category,
+    fixture_target !== undefined ? fixture_target : (existing.fixture_target || 'all'),
     dataJson,
     duration_beats !== undefined ? duration_beats : existing.duration_beats,
     id
@@ -1679,6 +1828,243 @@ function getDbStats() {
   };
 }
 
+// ─── Static Scenes CRUD ─────────────────────────────────────────────────────
+
+function getScenes() {
+  return db.prepare('SELECT * FROM static_scenes ORDER BY priority DESC, name').all();
+}
+
+function getScene(id) {
+  const scene = db.prepare('SELECT * FROM static_scenes WHERE id = ?').get(id);
+  if (!scene) return null;
+  scene.entries = db.prepare('SELECT * FROM static_scene_entries WHERE scene_id = ? ORDER BY sort_order').all(scene.id);
+  scene.entries = scene.entries.map(e => ({
+    ...e,
+    channel_values: JSON.parse(e.channel_values || '{}'),
+    effect_params: JSON.parse(e.effect_params || '{}'),
+  }));
+  return scene;
+}
+
+function getDefaultScene() {
+  const scene = db.prepare('SELECT * FROM static_scenes WHERE is_default = 1').get();
+  if (!scene) return null;
+  return getScene(scene.id);
+}
+
+function createScene({ name, description, priority, is_default }) {
+  if (!name || !name.trim()) return { error: 'Name is required' };
+  if (is_default) {
+    db.prepare('UPDATE static_scenes SET is_default = 0').run();
+  }
+  const result = db.prepare(
+    'INSERT INTO static_scenes (name, description, priority, is_default) VALUES (?, ?, ?, ?)'
+  ).run(name.trim(), description || '', priority || 0, is_default ? 1 : 0);
+  return getScene(result.lastInsertRowid);
+}
+
+function updateScene(id, { name, description, priority, is_default }) {
+  const existing = db.prepare('SELECT * FROM static_scenes WHERE id = ?').get(id);
+  if (!existing) return null;
+  if (is_default) {
+    db.prepare('UPDATE static_scenes SET is_default = 0').run();
+  }
+  db.prepare(
+    "UPDATE static_scenes SET name=?, description=?, priority=?, is_default=?, updated_at=datetime('now') WHERE id=?"
+  ).run(
+    name !== undefined ? name.trim() : existing.name,
+    description !== undefined ? description : existing.description,
+    priority !== undefined ? priority : existing.priority,
+    is_default !== undefined ? (is_default ? 1 : 0) : existing.is_default,
+    id
+  );
+  return getScene(id);
+}
+
+function deleteScene(id) {
+  db.prepare('DELETE FROM static_scenes WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+function setDefaultScene(id) {
+  db.prepare('UPDATE static_scenes SET is_default = 0').run();
+  db.prepare('UPDATE static_scenes SET is_default = 1 WHERE id = ?').run(id);
+  return getScene(id);
+}
+
+// ─── Scene Entries CRUD ─────────────────────────────────────────────────────
+
+function getSceneEntries(sceneId) {
+  const entries = db.prepare('SELECT * FROM static_scene_entries WHERE scene_id = ? ORDER BY sort_order').all(sceneId);
+  return entries.map(e => ({
+    ...e,
+    channel_values: JSON.parse(e.channel_values || '{}'),
+    effect_params: JSON.parse(e.effect_params || '{}'),
+  }));
+}
+
+function createSceneEntry(sceneId, entry) {
+  const channelJson = typeof entry.channel_values === 'string' ? entry.channel_values : JSON.stringify(entry.channel_values || {});
+  const effectParamsJson = typeof entry.effect_params === 'string' ? entry.effect_params : JSON.stringify(entry.effect_params || {});
+  const result = db.prepare(`
+    INSERT INTO static_scene_entries (scene_id, fixture_id, group_id, channel_values, effect_id, effect_params, label, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sceneId,
+    entry.fixture_id || null,
+    entry.group_id || null,
+    channelJson,
+    entry.effect_id || null,
+    effectParamsJson,
+    entry.label || '',
+    entry.sort_order || 0
+  );
+  db.prepare("UPDATE static_scenes SET updated_at=datetime('now') WHERE id=?").run(sceneId);
+  return getSceneEntry(result.lastInsertRowid);
+}
+
+function getSceneEntry(id) {
+  const e = db.prepare('SELECT * FROM static_scene_entries WHERE id = ?').get(id);
+  if (!e) return null;
+  return {
+    ...e,
+    channel_values: JSON.parse(e.channel_values || '{}'),
+    effect_params: JSON.parse(e.effect_params || '{}'),
+  };
+}
+
+function updateSceneEntry(id, updates) {
+  const existing = db.prepare('SELECT * FROM static_scene_entries WHERE id = ?').get(id);
+  if (!existing) return null;
+  const channelJson = updates.channel_values !== undefined
+    ? (typeof updates.channel_values === 'string' ? updates.channel_values : JSON.stringify(updates.channel_values))
+    : existing.channel_values;
+  const effectParamsJson = updates.effect_params !== undefined
+    ? (typeof updates.effect_params === 'string' ? updates.effect_params : JSON.stringify(updates.effect_params))
+    : existing.effect_params;
+  db.prepare(`
+    UPDATE static_scene_entries SET fixture_id=?, group_id=?, channel_values=?, effect_id=?, effect_params=?, label=?, sort_order=?
+    WHERE id=?
+  `).run(
+    updates.fixture_id !== undefined ? updates.fixture_id : existing.fixture_id,
+    updates.group_id !== undefined ? updates.group_id : existing.group_id,
+    channelJson,
+    updates.effect_id !== undefined ? updates.effect_id : existing.effect_id,
+    effectParamsJson,
+    updates.label !== undefined ? updates.label : existing.label,
+    updates.sort_order !== undefined ? updates.sort_order : existing.sort_order,
+    id
+  );
+  db.prepare("UPDATE static_scenes SET updated_at=datetime('now') WHERE id=?").run(existing.scene_id);
+  return getSceneEntry(id);
+}
+
+function deleteSceneEntry(id) {
+  const e = db.prepare('SELECT scene_id FROM static_scene_entries WHERE id = ?').get(id);
+  db.prepare('DELETE FROM static_scene_entries WHERE id = ?').run(id);
+  if (e) db.prepare("UPDATE static_scenes SET updated_at=datetime('now') WHERE id=?").run(e.scene_id);
+  return { deleted: true };
+}
+
+function bulkUpdateSceneEntries(sceneId, entries) {
+  const txn = db.transaction(() => {
+    db.prepare('DELETE FROM static_scene_entries WHERE scene_id = ?').run(sceneId);
+    const ins = db.prepare(`
+      INSERT INTO static_scene_entries (scene_id, fixture_id, group_id, channel_values, effect_id, effect_params, label, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const entry of entries) {
+      const channelJson = typeof entry.channel_values === 'string' ? entry.channel_values : JSON.stringify(entry.channel_values || {});
+      const effectParamsJson = typeof entry.effect_params === 'string' ? entry.effect_params : JSON.stringify(entry.effect_params || {});
+      ins.run(
+        sceneId, entry.fixture_id || null, entry.group_id || null,
+        channelJson, entry.effect_id || null, effectParamsJson,
+        entry.label || '', entry.sort_order || 0
+      );
+    }
+    db.prepare("UPDATE static_scenes SET updated_at=datetime('now') WHERE id=?").run(sceneId);
+  });
+  txn();
+  return getSceneEntries(sceneId);
+}
+
+// ─── Touch Actions CRUD ─────────────────────────────────────────────────────
+
+function getTouchActions() {
+  const rows = db.prepare('SELECT * FROM touch_actions ORDER BY sort_order, grid_row, grid_col, id').all();
+  return rows.map(r => ({ ...r, action_data: JSON.parse(r.action_data || '{}') }));
+}
+
+function getTouchAction(id) {
+  const r = db.prepare('SELECT * FROM touch_actions WHERE id = ?').get(id);
+  if (!r) return null;
+  return { ...r, action_data: JSON.parse(r.action_data || '{}') };
+}
+
+function createTouchAction(data) {
+  if (!data.label || !data.label.trim()) return { error: 'Label is required' };
+  const result = db.prepare(`
+    INSERT INTO touch_actions (label, icon, action_type, action_data, color, text_color, grid_row, grid_col, grid_w, grid_h, sort_order, enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    data.label.trim(),
+    data.icon || '',
+    data.action_type || 'color',
+    typeof data.action_data === 'string' ? data.action_data : JSON.stringify(data.action_data || {}),
+    data.color || '#ffffff',
+    data.text_color || '#ffffff',
+    data.grid_row || 0,
+    data.grid_col || 0,
+    data.grid_w || 1,
+    data.grid_h || 1,
+    data.sort_order || 0,
+    data.enabled !== undefined ? (data.enabled ? 1 : 0) : 1
+  );
+  return getTouchAction(result.lastInsertRowid);
+}
+
+function updateTouchAction(id, data) {
+  const existing = db.prepare('SELECT * FROM touch_actions WHERE id = ?').get(id);
+  if (!existing) return null;
+  db.prepare(`
+    UPDATE touch_actions SET label=?, icon=?, action_type=?, action_data=?, color=?, text_color=?,
+      grid_row=?, grid_col=?, grid_w=?, grid_h=?, sort_order=?, enabled=?
+    WHERE id = ?
+  `).run(
+    data.label !== undefined ? data.label.trim() : existing.label,
+    data.icon !== undefined ? data.icon : existing.icon,
+    data.action_type !== undefined ? data.action_type : existing.action_type,
+    data.action_data !== undefined ? (typeof data.action_data === 'string' ? data.action_data : JSON.stringify(data.action_data)) : existing.action_data,
+    data.color !== undefined ? data.color : existing.color,
+    data.text_color !== undefined ? data.text_color : existing.text_color,
+    data.grid_row !== undefined ? data.grid_row : existing.grid_row,
+    data.grid_col !== undefined ? data.grid_col : existing.grid_col,
+    data.grid_w !== undefined ? data.grid_w : existing.grid_w,
+    data.grid_h !== undefined ? data.grid_h : existing.grid_h,
+    data.sort_order !== undefined ? data.sort_order : existing.sort_order,
+    data.enabled !== undefined ? (data.enabled ? 1 : 0) : existing.enabled,
+    id
+  );
+  return getTouchAction(id);
+}
+
+function deleteTouchAction(id) {
+  db.prepare('DELETE FROM touch_actions WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+function bulkUpdateTouchActions(actions) {
+  const txn = db.transaction(() => {
+    for (const a of actions) {
+      if (a.id) {
+        updateTouchAction(a.id, a);
+      }
+    }
+  });
+  txn();
+  return getTouchActions();
+}
+
 function getTracksWithAnalysis() {
   return db.prepare(`
     SELECT t.id, t.title, t.author, t.filename, t.bpm, t.song_length,
@@ -1713,4 +2099,7 @@ module.exports = {
   getUsbDevices, getEnabledUsbDevices, getUsbDevice, createUsbDevice, updateUsbDevice, deleteUsbDevice, toggleUsbDevice,
   getTrackAnalysis, upsertTrackAnalysis, deleteTrackAnalysis, deleteAllAnalysis,
   deleteAllSequences, getDbStats, getTracksWithAnalysis,
+  getScenes, getScene, getDefaultScene, createScene, updateScene, deleteScene, setDefaultScene,
+  getSceneEntries, getSceneEntry, createSceneEntry, updateSceneEntry, deleteSceneEntry, bulkUpdateSceneEntries,
+  getTouchActions, getTouchAction, createTouchAction, updateTouchAction, deleteTouchAction, bulkUpdateTouchActions,
 };

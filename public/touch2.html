@@ -253,6 +253,66 @@ input[type=range]::-moz-range-thumb{
 }
 .color-tile.mover-tile .color-label{position:static;background:none;font-size:10px;font-weight:700;padding:0}
 
+/* ═══════════════════════════════════════════════════════════════
+   SCENES
+   ═══════════════════════════════════════════════════════════════ */
+.scene-card{
+  padding:14px 16px;border-radius:16px;
+  background:var(--surface);margin-bottom:8px;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:transform .1s,border-color .15s;
+  border:1.5px solid var(--border);position:relative;
+}
+.scene-card:active{transform:scale(.97)}
+.scene-card.active-scene{border-color:var(--green);background:rgba(48,209,88,.08)}
+.scene-card .sc-name{font-size:15px;font-weight:600;margin-bottom:2px}
+.scene-card .sc-desc{font-size:12px;color:var(--dim);margin-bottom:6px}
+.scene-card .sc-entries{display:flex;gap:4px;flex-wrap:wrap}
+.scene-entry-dot{
+  width:20px;height:20px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.15);
+}
+.scene-active-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12px;font-weight:600;color:var(--green);
+  padding:6px 14px;border-radius:16px;
+  background:rgba(48,209,88,.1);margin-bottom:8px;
+}
+.scene-active-badge .badge-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.scene-deactivate-btn{
+  height:36px;padding:0 16px;border-radius:18px;border:1.5px solid var(--danger);
+  background:rgba(255,59,48,.1);color:var(--danger);font-size:13px;font-weight:600;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;margin-bottom:8px;
+}
+.scene-deactivate-btn:active{transform:scale(.94)}
+.scene-empty{color:var(--dim);font-size:13px;text-align:center;padding:40px 0}
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTIONS TAB (full-screen grid)
+   ═══════════════════════════════════════════════════════════════ */
+.page-actions{display:none !important;padding:0 !important;overflow:hidden !important}
+.page-actions.active{display:block !important}
+.actions-grid{
+  display:grid;
+  grid-template-columns:repeat(var(--ag-cols,4),1fr);
+  grid-auto-rows:minmax(72px,1fr);
+  gap:4px;padding:4px;
+  width:100%;height:100%;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.action-btn{
+  border-radius:12px;border:none;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden;
+  -webkit-tap-highlight-color:transparent;transition:transform .08s,opacity .12s;
+  padding:6px 4px;
+}
+.action-btn:active{transform:scale(.92)}
+.action-btn.held{opacity:.7;transform:scale(.94)}
+.action-btn .ab-icon{font-size:22px;line-height:1}
+.action-btn .ab-label{font-size:11px;line-height:1.2;text-align:center;word-break:break-word}
+.action-btn.action-active{box-shadow:inset 0 0 0 2px #fff}
+
 /* Mover presets on dashboard */
 .mover-section{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;overflow-y:auto}
 .mover-section .section-label{margin:0}
@@ -383,8 +443,13 @@ input[type=range]::-moz-range-thumb{
      ═══════════════════════════════════════════════════════════════ -->
 <div class="pages">
 
+  <!-- ─── ACTIONS (full-screen grid) ──────────────── -->
+  <div class="page-actions active" id="page-actions">
+    <div class="actions-grid" id="actionsGrid"></div>
+  </div>
+
   <!-- ─── COLORS (dashboard — no scroll) ────────── -->
-  <div class="page-dash active" id="page-colors">
+  <div class="page-dash" id="page-colors">
 
     <div class="groups-row">
       <button class="clear-btn-sm" onclick="clearColorOverride()">Clear</button>
@@ -433,16 +498,25 @@ input[type=range]::-moz-range-thumb{
     <div class="slider-wrap"><span class="slider-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="slider-val" id="speedVal">128</span></div>
   </div>
 
+  <!-- ─── SCENES ──────────────────────────────────── -->
+  <div class="page" id="page-scenes">
+    <div class="page-title">Scenes</div>
+    <div id="sceneActiveStatus"></div>
+    <div id="scenesList"></div>
+  </div>
+
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
      TAB BAR (bottom, iOS style)
      ═══════════════════════════════════════════════════════════════ -->
 <div class="tab-bar">
-  <button class="active" data-page="colors"><span class="tab-icon">&#127912;</span>Colors</button>
+  <button class="active" data-page="actions"><span class="tab-icon">&#9654;</span>Actions</button>
+  <button data-page="colors"><span class="tab-icon">&#127912;</span>Colors</button>
   <button data-page="groups"><span class="tab-icon">&#9783;</span>Groups</button>
   <button data-page="fixtures"><span class="tab-icon">&#128161;</span>Fixtures</button>
   <button data-page="movers"><span class="tab-icon">&#10146;</span>Movers</button>
+  <button data-page="scenes"><span class="tab-icon">&#127917;</span>Scenes</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -452,12 +526,14 @@ input[type=range]::-moz-range-thumb{
 'use strict';
 
 /* ─── State ────────────────────────────────────────────────── */
-let fixtures = [], groups = [], moverPresets = [];
+let fixtures = [], groups = [], moverPresets = [], scenes = [], touchActions = [];
 let selectedColor = null, colorIntensity = 255, selectedGroups = new Set();
 let outputEnabled = false, blackoutActive = false;
 let strobeActive = false, smokeActive = false, hazeActive = false;
 let fixtureEnabled = {}, fixtureDimmer = {}, groupDimmer = {};
 let holdMode = true;
+let activeSceneId = null;
+let actionActiveStates = {}; // track toggle state per action button
 let ws = null;
 
 const COLORS = [
@@ -482,8 +558,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSliderBindings();
   initFxButtons();
   initActionCards();
-  await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState(), fetchTouchState()]);
+  await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState(), fetchTouchState(), fetchScenes(), fetchTouchActions()]);
   renderAll();
+  renderActionsGrid();
   connectWebSocket();
 });
 
@@ -492,7 +569,7 @@ function initTabs() {
   document.querySelectorAll('.tab-bar button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.page, .page-dash').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.page, .page-dash, .page-actions').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('page-' + btn.dataset.page).classList.add('active');
     });
@@ -643,6 +720,14 @@ function connectWebSocket() {
       else if (msg.type === 'state' && msg.state && msg.state.decks) {
         updateDeckStrip(msg.state.decks);
       }
+      else if (msg.type === 'scene_activated') {
+        activeSceneId = msg.scene ? msg.scene.id : null;
+        renderScenes();
+      }
+      else if (msg.type === 'scene_deactivated') {
+        activeSceneId = null;
+        renderScenes();
+      }
     } catch (err) {}
   };
 }
@@ -692,6 +777,7 @@ function renderAll() {
   renderGroupDimmers();
   renderFixtureList();
   renderMoverPresets();
+  renderScenes();
   renderOutputBtn();
   renderBlackoutBtn();
 }
@@ -1132,6 +1218,227 @@ function actionUVMode() {
         default: return 0;
       }
     }));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCENES
+   ═══════════════════════════════════════════════════════════════ */
+async function fetchScenes() {
+  try {
+    const [sceneList, activeRes] = await Promise.all([
+      fetch('/api/scenes').then(r => r.json()),
+      fetch('/api/scenes/active').then(r => r.json()),
+    ]);
+    scenes = sceneList;
+    activeSceneId = activeRes.activeSceneId;
+  } catch (e) { console.error('fetch scenes', e); }
+}
+
+function renderScenes() {
+  const wrap = document.getElementById('scenesList');
+  const status = document.getElementById('sceneActiveStatus');
+
+  // Active status badge + deactivate button
+  if (activeSceneId) {
+    const active = scenes.find(s => s.id === activeSceneId);
+    status.innerHTML =
+      '<div class="scene-active-badge"><span class="badge-dot"></span>Active: ' + esc(active ? active.name : 'Scene #' + activeSceneId) + '</div>' +
+      '<button class="scene-deactivate-btn" onclick="deactivateScene()">Deactivate Scene</button>';
+  } else {
+    status.innerHTML = '';
+  }
+
+  if (!scenes.length) {
+    wrap.innerHTML = '<div class="scene-empty">No scenes configured.<br>Use the main UI to create scenes.</div>';
+    return;
+  }
+
+  wrap.innerHTML = scenes.map(s => {
+    const isActive = s.id === activeSceneId;
+    // Build color preview dots from entries
+    let dots = '';
+    if (s.entries && s.entries.length) {
+      dots = s.entries.slice(0, 8).map(e => {
+        let cv;
+        try { cv = typeof e.channel_values === 'string' ? JSON.parse(e.channel_values) : e.channel_values; } catch(_) { cv = {}; }
+        const r = cv.red || 0, g = cv.green || 0, b = cv.blue || 0;
+        return '<span class="scene-entry-dot" style="background:rgb(' + r + ',' + g + ',' + b + ')"></span>';
+      }).join('');
+      if (s.entries.length > 8) dots += '<span style="color:var(--dim);font-size:11px;align-self:center">+' + (s.entries.length - 8) + '</span>';
+    }
+    return '<div class="scene-card' + (isActive ? ' active-scene' : '') + '" data-sid="' + s.id + '">' +
+      '<div class="sc-name">' + esc(s.name) + (s.is_default ? ' &#9733;' : '') + '</div>' +
+      (s.description ? '<div class="sc-desc">' + esc(s.description) + '</div>' : '') +
+      '<div class="sc-entries">' + dots + '</div>' +
+    '</div>';
+  }).join('');
+
+  // Bind tap to activate
+  wrap.querySelectorAll('.scene-card').forEach(el => {
+    el.addEventListener('click', () => {
+      const sid = +el.dataset.sid;
+      if (sid === activeSceneId) return; // already active
+      activateScene(sid);
+    });
+  });
+}
+
+async function activateScene(id) {
+  try {
+    await fetch('/api/scenes/' + id + '/activate', { method: 'POST' });
+    activeSceneId = id;
+    renderScenes();
+  } catch (e) { console.error('activate scene', e); }
+}
+
+async function deactivateScene() {
+  try {
+    await fetch('/api/scenes/deactivate', { method: 'POST' });
+    activeSceneId = null;
+    renderScenes();
+  } catch (e) { console.error('deactivate scene', e); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTIONS GRID — configurable full-screen action board
+   ═══════════════════════════════════════════════════════════════ */
+async function fetchTouchActions() {
+  try {
+    touchActions = await fetch('/api/touch-actions').then(r => r.json());
+  } catch (e) { console.error('fetch touch-actions', e); }
+}
+
+function renderActionsGrid() {
+  const grid = document.getElementById('actionsGrid');
+  const enabled = touchActions.filter(a => a.enabled);
+
+  if (!enabled.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;color:var(--dim);font-size:14px;text-align:center;align-self:center;padding:40px 0">No action buttons configured.<br>Use Config &rarr; Touch Actions in the main UI.</div>';
+    return;
+  }
+
+  // Determine column count from data (max grid_col + grid_w)
+  let maxCol = 4;
+  for (const a of enabled) {
+    const endCol = (a.grid_col || 0) + (a.grid_w || 1);
+    if (endCol > maxCol) maxCol = endCol;
+  }
+  grid.style.setProperty('--ag-cols', maxCol);
+
+  grid.innerHTML = enabled.map(a => {
+    const style = 'background:' + (a.color || '#333') + ';color:' + (a.text_color || '#fff') +
+      ';grid-column:' + ((a.grid_col || 0) + 1) + ' / span ' + (a.grid_w || 1) +
+      ';grid-row:' + ((a.grid_row || 0) + 1) + ' / span ' + (a.grid_h || 1);
+    const activeClass = actionActiveStates[a.id] ? ' action-active' : '';
+    return '<button class="action-btn' + activeClass + '" data-aid="' + a.id + '" style="' + style + '">' +
+      (a.icon ? '<span class="ab-icon">' + a.icon + '</span>' : '') +
+      '<span class="ab-label">' + esc(a.label) + '</span></button>';
+  }).join('');
+
+  // Bind events
+  grid.querySelectorAll('.action-btn').forEach(btn => {
+    const aid = +btn.dataset.aid;
+    const action = touchActions.find(a => a.id === aid);
+    if (!action) return;
+
+    const onFn = () => { executeAction(action, true); btn.classList.add('held'); };
+    const offFn = () => { executeAction(action, false); btn.classList.remove('held'); };
+
+    if (action.action_type === 'scene') {
+      // Scenes are always toggle (activate/deactivate)
+      btn.addEventListener('click', () => {
+        if (actionActiveStates[aid]) {
+          actionActiveStates[aid] = false;
+          deactivateScene();
+          btn.classList.remove('action-active');
+        } else {
+          // Deactivate other scene buttons
+          for (const k of Object.keys(actionActiveStates)) {
+            const ta = touchActions.find(t => t.id === +k);
+            if (ta && ta.action_type === 'scene') actionActiveStates[k] = false;
+          }
+          actionActiveStates[aid] = true;
+          const sid = action.action_data.scene_id;
+          if (sid) activateScene(sid);
+          renderActionsGrid();
+        }
+      });
+    } else {
+      bindHoldToggle(btn, onFn, offFn);
+    }
+  });
+}
+
+function executeAction(action, on) {
+  const data = action.action_data || {};
+  switch (action.action_type) {
+    case 'color': {
+      if (on) {
+        const scale = colorIntensity / 255;
+        const r = Math.round((data.red || 0) * scale);
+        const g = Math.round((data.green || 0) * scale);
+        const b = Math.round((data.blue || 0) * scale);
+        const updates = buildChannelUpdates(getEnabledFixtures(),
+          ch => ['red','green','blue','white','amber','uv','dimmer'].includes(ch.type),
+          ch => {
+            switch (ch.type) {
+              case 'red': return r;
+              case 'green': return g;
+              case 'blue': return b;
+              case 'white': return data.white || 0;
+              case 'dimmer': return Math.round(255 * scale);
+              case 'amber': return data.amber || 0;
+              case 'uv': return data.uv || 0;
+              default: return 0;
+            }
+          });
+        sendDMX(updates);
+      } else {
+        clearColorOverrideDMX();
+      }
+      break;
+    }
+    case 'quick_action': {
+      const qa = data.action;
+      if (qa) runAction(qa, on);
+      break;
+    }
+    case 'mover_preset': {
+      if (on && data.preset_index !== undefined) {
+        const preset = moverPresets[data.preset_index];
+        if (preset) sendMoverPreset(preset);
+      }
+      break;
+    }
+    case 'scene': {
+      // Handled inline in renderActionsGrid click handler
+      break;
+    }
+    case 'strobe': {
+      if (on) strobeOn(); else strobeOff();
+      break;
+    }
+    case 'smoke': {
+      setSmokeHaze('smoke', on);
+      break;
+    }
+    case 'haze': {
+      setSmokeHaze('haze', on);
+      break;
+    }
+    case 'blackout': {
+      if (on) { blackoutActive = true; doBlackout(); }
+      break;
+    }
+    case 'master_dimmer': {
+      if (on && data.value !== undefined) {
+        document.getElementById('masterDim').value = data.value;
+        document.getElementById('masterDimVal').textContent = data.value;
+        sendMasterDimmer(data.value);
+      }
+      break;
+    }
+  }
 }
 </script>
 </body>

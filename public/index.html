@@ -547,6 +547,57 @@
     .subs-status-bar strong { color: var(--text); }
 
     /* ═══════════════════════════════════════════════════════════════
+       Static Scenes
+       ═══════════════════════════════════════════════════════════════ */
+    .scenes-list { display: flex; flex-direction: column; gap: 10px; }
+    .scene-card {
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      padding: 14px 18px; transition: border-color .2s;
+    }
+    .scene-card:hover { border-color: var(--accent); }
+    .scene-card.active-scene { border-color: var(--green); box-shadow: 0 0 12px rgba(0,230,118,.12); }
+    .scene-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .scene-card-name { font-size: 15px; font-weight: 600; flex: 1; }
+    .scene-card-badges { display: flex; gap: 6px; }
+    .scene-badge {
+      font-size: 9px; padding: 2px 8px; border-radius: 3px; text-transform: uppercase;
+      letter-spacing: .5px; font-weight: 600;
+    }
+    .scene-badge.default { background: rgba(0,230,118,.12); color: var(--green); }
+    .scene-badge.active { background: var(--green); color: #000; }
+    .scene-badge.priority { background: rgba(68,138,255,.12); color: var(--blue); }
+    .scene-card-desc { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+    .scene-card-entries { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+    .scene-entry-chip {
+      font-size: 10px; padding: 3px 8px; border-radius: 4px;
+      background: #222; color: var(--text-dim); display: flex; align-items: center; gap: 4px;
+    }
+    .scene-entry-chip .chip-color {
+      width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(255,255,255,.2);
+    }
+    .scene-entry-chip.has-effect { border: 1px solid rgba(233,69,96,.3); color: var(--accent); }
+    .scene-card-actions { display: flex; gap: 6px; }
+
+    /* Scene entry editor rows */
+    .scene-entry-row {
+      display: flex; gap: 8px; align-items: center; padding: 8px 10px; margin-bottom: 6px;
+      background: #181828; border: 1px solid var(--panel-border); border-radius: 6px;
+      flex-wrap: wrap;
+    }
+    .scene-entry-row select, .scene-entry-row input {
+      padding: 5px 8px; background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; color: var(--text); font-size: 12px;
+    }
+    .scene-entry-color-preview {
+      width: 28px; height: 28px; border-radius: 4px; border: 1px solid rgba(255,255,255,.15);
+      flex-shrink: 0;
+    }
+    .scene-entry-sliders { display: flex; gap: 4px; align-items: center; }
+    .scene-entry-sliders label { font-size: 10px; color: var(--text-dim); width: 14px; text-align: right; }
+    .scene-entry-sliders input[type=range] { width: 70px; accent-color: var(--accent); }
+    .scene-entry-sliders .se-val { font-size: 10px; color: var(--text-dim); width: 22px; }
+
+    /* ═══════════════════════════════════════════════════════════════
        Modal
        ═══════════════════════════════════════════════════════════════ */
     .modal-overlay {
@@ -680,6 +731,16 @@
     .dmx-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .dmx-subpage { display: none; }
     .dmx-subpage.active { display: block; }
+
+    /* Effects Library Tabs */
+    .efx-lib-tab {
+      padding: 6px 16px; cursor: pointer; font-size: 12px; font-weight: 600;
+      color: var(--text-dim); background: none; border: none;
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .efx-lib-tab:hover { color: var(--text); }
+    .efx-lib-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
     /* Quick Actions */
     .qa-section { margin-bottom: 20px; }
@@ -1088,6 +1149,7 @@
   <button class="tab-btn active" data-tab="decks">Decks</button>
   <button class="tab-btn" data-tab="fixtures">Fixtures</button>
   <button class="tab-btn" data-tab="types">Fixture Types</button>
+  <button class="tab-btn" data-tab="scenes">Scenes</button>
   <button class="tab-btn" data-tab="dmxcontrol">DMX Control</button>
   <a href="sequencer.html" class="tab-btn" style="text-decoration:none">Sequencer</a>
   <button class="tab-btn" data-tab="config">Config</button>
@@ -1193,6 +1255,81 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════
+     TAB — STATIC SCENES
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-scenes">
+  <div class="fixtures-toolbar">
+    <button class="btn btn-primary" id="btnAddScene">+ New Scene</button>
+    <button class="btn btn-secondary" id="btnGenerateScene">&#9881; Generate Scene</button>
+    <span style="flex:1"></span>
+    <span class="scene-active-badge" id="sceneActiveBadge" style="display:none;font-size:11px;padding:4px 12px;border-radius:4px;background:rgba(0,230,118,.12);color:var(--green);border:1px solid var(--green);font-weight:600"></span>
+    <button class="btn btn-danger btn-sm" id="btnDeactivateScene" style="display:none">Deactivate Scene</button>
+  </div>
+  <div class="scenes-list" id="scenesList"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SCENE MODAL — Create / Edit Scene
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="sceneModal">
+  <div class="modal" style="max-width:740px">
+    <h2 id="sceneModalTitle">New Scene</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Name</label>
+        <input id="sceneNameInput" placeholder="e.g. Pre-Show Warm">
+      </div>
+      <div class="form-group" style="flex:.6">
+        <label>Priority</label>
+        <input id="scenePriorityInput" type="number" value="0" min="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <input id="sceneDescInput" placeholder="Optional description">
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px">
+      <input type="checkbox" id="sceneDefaultCheck" style="accent-color:var(--accent);width:16px;height:16px">
+      <label style="margin:0;cursor:pointer" for="sceneDefaultCheck">Set as default scene (activated on startup / idle)</label>
+    </div>
+
+    <h3 style="font-size:13px;color:var(--accent);margin:18px 0 10px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--panel-border);padding-bottom:6px">Scene Entries</h3>
+    <div id="sceneEntriesEditor"></div>
+    <button class="btn btn-secondary btn-sm" id="btnAddSceneEntry" style="margin-top:8px">+ Add Entry</button>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="document.getElementById('sceneModal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveScene">Save Scene</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     GENERATE SCENE MODAL
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="generateSceneModal">
+  <div class="modal">
+    <h2>Generate Scene</h2>
+    <div class="form-group">
+      <label>Name</label>
+      <input id="genSceneNameInput" placeholder="e.g. Warm Ambient">
+    </div>
+    <div class="form-group">
+      <label>Style</label>
+      <select id="genSceneStyleSelect"></select>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px">
+      <input type="checkbox" id="genSceneEffects" checked style="accent-color:var(--accent);width:16px;height:16px">
+      <label style="margin:0;cursor:pointer" for="genSceneEffects">Include effects (slow pulse/wave on some fixtures)</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="document.getElementById('generateSceneModal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" id="btnDoGenerateScene">Generate</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
      TAB 4 — DMX CONTROL
      ══════════════════════════════════════════════════════════════ -->
 <div class="tab-page" id="page-dmxcontrol">
@@ -1283,7 +1420,16 @@
     </div>
     <div class="qa-section">
       <h3>Effects Library</h3>
-      <div class="qa-grid" id="qaEffectsLibraryGrid"></div>
+      <div class="effects-lib-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--panel-border);margin-bottom:8px">
+        <button class="efx-lib-tab active" data-efxtab="color" style="margin-bottom:-2px">🎨 Color</button>
+        <button class="efx-lib-tab" data-efxtab="motion" style="margin-bottom:-2px">🔦 Motion</button>
+        <button class="efx-lib-tab" data-efxtab="multicell" style="margin-bottom:-2px">▓ Multicell</button>
+        <button class="efx-lib-tab" data-efxtab="all" style="margin-bottom:-2px">🎛️ All</button>
+      </div>
+      <div class="qa-grid effects-lib-page active" id="efxTabColor" data-efxtab="color"></div>
+      <div class="qa-grid effects-lib-page" id="efxTabMotion" data-efxtab="motion" style="display:none"></div>
+      <div class="qa-grid effects-lib-page" id="efxTabMulticell" data-efxtab="multicell" style="display:none"></div>
+      <div class="qa-grid effects-lib-page" id="efxTabAll" data-efxtab="all" style="display:none"></div>
     </div>
     <div class="qa-section">
       <h3>Strobe</h3>
@@ -1342,6 +1488,7 @@
       <button class="config-sidebar-btn" data-cfgtab="lighting"><span class="cfg-icon">&#9728;</span>Lighting</button>
       <button class="config-sidebar-btn" data-cfgtab="movers"><span class="cfg-icon">&#10146;</span>Movers</button>
       <button class="config-sidebar-btn" data-cfgtab="sequencer"><span class="cfg-icon">&#9836;</span>Sequencer</button>
+      <button class="config-sidebar-btn" data-cfgtab="touch-actions"><span class="cfg-icon">&#9654;</span>Touch Actions</button>
       <button class="config-sidebar-btn" data-cfgtab="database"><span class="cfg-icon">&#128451;</span>Database</button>
       <button class="config-sidebar-btn" data-cfgtab="network"><span class="cfg-icon">&#127760;</span>Network</button>
       <button class="config-sidebar-btn" data-cfgtab="event-log"><span class="cfg-icon">&#9776;</span>Event Log</button>
@@ -1990,6 +2137,135 @@
         </div>
       </div>
 
+      <!-- ─── Touch Actions ─── -->
+      <div class="config-sub-page" id="cfgpage-touch-actions">
+        <div class="config-section">
+          <h3>Touch Actions Grid</h3>
+          <p class="config-desc">Configure the action buttons shown on the Touch &rarr; Actions tab. Each button can trigger a color, scene, mover preset, strobe, smoke/haze, quick action, or master dimmer level. Drag grid positions or edit row/col to arrange the layout.</p>
+
+          <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+            <button class="btn btn-primary btn-sm" id="btnAddTouchAction">+ Add Action</button>
+            <button class="btn btn-secondary btn-sm" id="btnAutoPopulate">&#9889; Auto-Populate</button>
+            <span style="flex:1"></span>
+            <span style="font-size:11px;color:var(--text-dim)" id="touchActionCount"></span>
+          </div>
+
+          <table class="subs-table" id="touchActionsTable">
+            <thead>
+              <tr>
+                <th style="width:30px">On</th>
+                <th>Label</th>
+                <th>Type</th>
+                <th>Color</th>
+                <th>Row</th>
+                <th>Col</th>
+                <th>W</th>
+                <th>H</th>
+                <th style="width:140px"></th>
+              </tr>
+            </thead>
+            <tbody id="touchActionsBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Touch Action Modal -->
+        <div class="modal-overlay" id="touchActionModal">
+          <div class="modal" style="max-width:540px">
+            <h2 id="touchActionModalTitle">Add Action</h2>
+              <input type="hidden" id="taId">
+              <div class="form-group">
+                <label>Label</label>
+                <input id="taLabel" placeholder="Button label">
+              </div>
+              <div class="form-group">
+                <label>Icon (emoji/HTML)</label>
+                <input id="taIcon" placeholder="e.g. ☀ or ⚡">
+              </div>
+              <div class="form-group">
+                <label>Action Type</label>
+                <select id="taActionType">
+                  <option value="color">Color</option>
+                  <option value="quick_action">Quick Action</option>
+                  <option value="scene">Scene</option>
+                  <option value="mover_preset">Mover Preset</option>
+                  <option value="strobe">Strobe</option>
+                  <option value="smoke">Smoke</option>
+                  <option value="haze">Haze</option>
+                  <option value="blackout">Blackout</option>
+                  <option value="master_dimmer">Master Dimmer</option>
+                </select>
+              </div>
+              <!-- Color data fields -->
+              <div id="taColorFields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group"><label>R</label><input type="number" id="taColorR" min="0" max="255" value="255"></div>
+                  <div class="form-group"><label>G</label><input type="number" id="taColorG" min="0" max="255" value="0"></div>
+                  <div class="form-group"><label>B</label><input type="number" id="taColorB" min="0" max="255" value="0"></div>
+                  <div class="form-group"><label>W</label><input type="number" id="taColorW" min="0" max="255" value="0"></div>
+                </div>
+              </div>
+              <!-- Quick action selector -->
+              <div id="taQuickActionFields" style="display:none">
+                <div class="form-group">
+                  <label>Action</label>
+                  <select id="taQuickAction">
+                    <option value="fullWhite">Full White</option>
+                    <option value="fullColor">Full Color</option>
+                    <option value="dimWarm">Dim Warm</option>
+                    <option value="allOff">All Off</option>
+                    <option value="uvMode">UV Mode</option>
+                  </select>
+                </div>
+              </div>
+              <!-- Scene selector -->
+              <div id="taSceneFields" style="display:none">
+                <div class="form-group">
+                  <label>Scene</label>
+                  <select id="taScene"></select>
+                </div>
+              </div>
+              <!-- Mover preset selector -->
+              <div id="taMoverFields" style="display:none">
+                <div class="form-group">
+                  <label>Preset</label>
+                  <select id="taMoverPreset"></select>
+                </div>
+              </div>
+              <!-- Master dimmer value -->
+              <div id="taDimmerFields" style="display:none">
+                <div class="form-group">
+                  <label>Dimmer Value (0-255)</label>
+                  <input type="number" id="taDimmerValue" min="0" max="255" value="255" style="width:100px">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Button Color</label>
+                  <input type="color" id="taBtnColor" value="#333333" style="height:36px;padding:2px">
+                </div>
+                <div class="form-group">
+                  <label>Text Color</label>
+                  <input type="color" id="taTxtColor" value="#ffffff" style="height:36px;padding:2px">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>Row</label><input type="number" id="taRow" min="0" value="0"></div>
+                <div class="form-group"><label>Col</label><input type="number" id="taCol" min="0" value="0"></div>
+                <div class="form-group"><label>Width</label><input type="number" id="taW" min="1" value="1"></div>
+                <div class="form-group"><label>Height</label><input type="number" id="taH" min="1" value="1"></div>
+              </div>
+              <div class="form-group">
+                <label>Sort Order</label>
+                <input type="number" id="taSortOrder" value="0" style="width:100px">
+              </div>
+            <div class="modal-actions">
+              <button class="btn btn-secondary" onclick="document.getElementById('touchActionModal').classList.remove('open')">Cancel</button>
+              <button class="btn btn-primary" id="btnSaveTouchAction">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ─── Event Log ─── -->
       <div class="config-sub-page" id="cfgpage-event-log">
         <div class="config-section">
@@ -2203,6 +2479,14 @@
     <div class="form-group">
       <label>Notes</label>
       <textarea id="fNotes" rows="2" placeholder="Optional notes..."></textarea>
+    </div>
+    <div class="form-row" id="fInvertRow" style="display:none">
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="fInvertPan"> Invert Pan
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="fInvertTilt"> Invert Tilt
+      </label>
     </div>
     <div class="form-error" id="fixtureError"></div>
     <div class="modal-actions">
@@ -2431,6 +2715,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById('page-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'fixtures') { loadFixtures(); loadGroups(); loadUniverseMap(); }
     if (btn.dataset.tab === 'types') loadTypes();
+    if (btn.dataset.tab === 'scenes') loadScenes();
     if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
     if (btn.dataset.tab === 'config') loadConfigPage();
   });
@@ -2509,6 +2794,7 @@ function connect() {
     else if (msg.type === 'beat') { handleBeat(msg.data); }
     else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
     else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing' || msg.type === 'seq_time') { handleSeqWsMessage(msg); }
+    else if (msg.type === 'scene_activated' || msg.type === 'scene_deactivated') { handleSceneWsMessage(msg); }
     else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     else logEvent({ evtType: msg.type || 'event', raw: msg });
   };
@@ -2966,6 +3252,15 @@ async function openFixtureModal(fixtureId) {
     `<option value="${t.id}">${esc(t.name)} (${t.channel_count}ch)</option>`
   ).join('');
 
+  // Helper: show/hide invert row based on selected fixture type
+  function updateInvertVisibility() {
+    const typeId = +document.getElementById('fTypeId').value;
+    const ft = fixtureTypesCache.find(t => t.id === typeId);
+    const hasPanTilt = ft && ft.channels && ft.channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
+    document.getElementById('fInvertRow').style.display = hasPanTilt ? 'flex' : 'none';
+  }
+  sel.onchange = updateInvertVisibility;
+
   if (fixtureId) {
     const f = await fetch(`/api/fixtures/${fixtureId}`).then(r=>r.json());
     document.getElementById('fixtureModalTitle').textContent = 'Edit Fixture';
@@ -2976,6 +3271,8 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fUniverse').value = f.universe;
     document.getElementById('fAddress').value = f.address;
     document.getElementById('fNotes').value = f.notes || '';
+    document.getElementById('fInvertPan').checked = !!f.invert_pan;
+    document.getElementById('fInvertTilt').checked = !!f.invert_tilt;
   } else {
     document.getElementById('fixtureModalTitle').textContent = 'Add Fixture';
     document.getElementById('fixtureEditId').value = '';
@@ -2984,7 +3281,10 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fUniverse').value = '1';
     document.getElementById('fAddress').value = '1';
     document.getElementById('fNotes').value = '';
+    document.getElementById('fInvertPan').checked = false;
+    document.getElementById('fInvertTilt').checked = false;
   }
+  updateInvertVisibility();
   document.getElementById('fixtureError').textContent = '';
   document.getElementById('fixtureModal').classList.add('open');
 }
@@ -3007,6 +3307,8 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
     universe: +document.getElementById('fUniverse').value,
     address: +document.getElementById('fAddress').value,
     notes: document.getElementById('fNotes').value.trim(),
+    invert_pan: document.getElementById('fInvertPan').checked,
+    invert_tilt: document.getElementById('fInvertTilt').checked,
   };
   if (!body.name) return showError('fixtureError', 'Name is required');
 
@@ -3121,6 +3423,8 @@ function renderChannelsEditor() {
       if (field === 'default_value') typeChannels[idx][field] = +el.value;
       else if (field === 'cell') typeChannels[idx][field] = el.value ? +el.value : null;
       else typeChannels[idx][field] = el.value;
+      // Re-render when type changes
+      if (field === 'type') renderChannelsEditor();
     });
   });
 
@@ -3600,6 +3904,7 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     if (btn.dataset.cfgtab === 'lighting') loadLightingConfig();
     if (btn.dataset.cfgtab === 'movers') loadMoverConfig();
     if (btn.dataset.cfgtab === 'sequencer') loadSequencerConfig();
+    if (btn.dataset.cfgtab === 'touch-actions') loadTouchActionsConfig();
     if (btn.dataset.cfgtab === 'database') loadDatabaseConfig();
     if (btn.dataset.cfgtab === 'network') loadNetworkConfig();
     if (btn.dataset.cfgtab === 'app-settings') loadAppSettings();
@@ -4034,6 +4339,210 @@ document.getElementById('btnDeleteAllTracks').addEventListener('click', async ()
   }
   setTimeout(() => { btn.disabled = false; btn.textContent = 'Delete All Tracks'; btn.style.borderColor = ''; btn.style.color = ''; }, 2000);
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  Config — Touch Actions Grid
+// ═══════════════════════════════════════════════════════════════
+let _touchActionsList = [];
+let _taScenes = [];
+let _taMoverPresets = [];
+
+async function loadTouchActionsConfig() {
+  try {
+    const [actions, scenes, presets] = await Promise.all([
+      fetch('/api/touch-actions').then(r => r.json()),
+      fetch('/api/scenes').then(r => r.json()),
+      fetch('/api/mover-presets').then(r => r.json()),
+    ]);
+    _touchActionsList = actions;
+    _taScenes = scenes;
+    _taMoverPresets = presets;
+    renderTouchActionsTable();
+  } catch (e) {
+    console.error('Failed to load touch actions', e);
+  }
+}
+
+function renderTouchActionsTable() {
+  const tbody = document.getElementById('touchActionsBody');
+  document.getElementById('touchActionCount').textContent = _touchActionsList.length + ' action(s)';
+
+  if (!_touchActionsList.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-dim)">No actions configured. Click "+ Add Action" to create one.</td></tr>';
+    return;
+  }
+
+  const typeLabels = {
+    color: 'Color', quick_action: 'Quick Action', scene: 'Scene',
+    mover_preset: 'Mover Preset', strobe: 'Strobe', smoke: 'Smoke',
+    haze: 'Haze', blackout: 'Blackout', master_dimmer: 'Master Dimmer',
+  };
+
+  tbody.innerHTML = _touchActionsList.map(a => {
+    return '<tr>' +
+      '<td><span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:' + (a.enabled ? 'var(--green)' : 'var(--text-dim)') + '"></span></td>' +
+      '<td>' + esc(a.label) + (a.icon ? ' ' + a.icon : '') + '</td>' +
+      '<td>' + (typeLabels[a.action_type] || a.action_type) + '</td>' +
+      '<td><span style="display:inline-block;width:24px;height:24px;border-radius:4px;background:' + (a.color || '#333') + ';border:1px solid rgba(255,255,255,.1)"></span></td>' +
+      '<td>' + (a.grid_row || 0) + '</td>' +
+      '<td>' + (a.grid_col || 0) + '</td>' +
+      '<td>' + (a.grid_w || 1) + '</td>' +
+      '<td>' + (a.grid_h || 1) + '</td>' +
+      '<td>' +
+        '<button class="btn btn-secondary btn-xs" onclick="openTouchActionModal(' + a.id + ')">Edit</button> ' +
+        '<button class="btn btn-secondary btn-xs" onclick="toggleTouchAction(' + a.id + ',' + (a.enabled ? 0 : 1) + ')">' + (a.enabled ? 'Disable' : 'Enable') + '</button> ' +
+        '<button class="btn btn-danger btn-xs" onclick="deleteTouchAction(' + a.id + ')">Delete</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+document.getElementById('btnAddTouchAction').addEventListener('click', () => openTouchActionModal(null));
+
+document.getElementById('btnAutoPopulate').addEventListener('click', async () => {
+  const hasExisting = _touchActionsList.length > 0;
+  const msg = hasExisting
+    ? 'This will DELETE all existing actions and replace them with auto-generated ones (colors, quick actions, effects, scenes, mover presets).\n\nContinue?'
+    : 'Auto-populate the Actions grid with colors, quick actions, effects, scenes, and mover presets?';
+  if (!confirm(msg)) return;
+  try {
+    const resp = await fetch('/api/touch-actions/auto-populate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear: true }),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    _touchActionsList = data.actions || [];
+    renderTouchActionsTable();
+  } catch (e) {
+    console.error('Auto-populate failed', e);
+    alert('Auto-populate failed.');
+  }
+});
+
+function openTouchActionModal(id) {
+  const modal = document.getElementById('touchActionModal');
+  const a = id ? _touchActionsList.find(x => x.id === id) : null;
+
+  document.getElementById('touchActionModalTitle').textContent = a ? 'Edit Action' : 'Add Action';
+  document.getElementById('taId').value = a ? a.id : '';
+  document.getElementById('taLabel').value = a ? a.label : '';
+  document.getElementById('taIcon').value = a ? a.icon : '';
+  document.getElementById('taActionType').value = a ? a.action_type : 'color';
+  document.getElementById('taBtnColor').value = a ? a.color : '#333333';
+  document.getElementById('taTxtColor').value = a ? a.text_color : '#ffffff';
+  document.getElementById('taRow').value = a ? (a.grid_row || 0) : 0;
+  document.getElementById('taCol').value = a ? (a.grid_col || 0) : 0;
+  document.getElementById('taW').value = a ? (a.grid_w || 1) : 1;
+  document.getElementById('taH').value = a ? (a.grid_h || 1) : 1;
+  document.getElementById('taSortOrder').value = a ? (a.sort_order || 0) : 0;
+
+  // Populate action-type-specific fields
+  const data = a ? a.action_data : {};
+  document.getElementById('taColorR').value = data.red || 0;
+  document.getElementById('taColorG').value = data.green || 0;
+  document.getElementById('taColorB').value = data.blue || 0;
+  document.getElementById('taColorW').value = data.white || 0;
+  document.getElementById('taQuickAction').value = data.action || 'fullWhite';
+  document.getElementById('taDimmerValue').value = data.value !== undefined ? data.value : 255;
+
+  // Populate scene select
+  const sceneSel = document.getElementById('taScene');
+  sceneSel.innerHTML = _taScenes.map(s => '<option value="' + s.id + '"' + (data.scene_id === s.id ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('');
+
+  // Populate mover preset select
+  const moverSel = document.getElementById('taMoverPreset');
+  moverSel.innerHTML = _taMoverPresets.map((p, i) => '<option value="' + i + '"' + (data.preset_index === i ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
+
+  // Auto-fill button color from color action data
+  if (!a && document.getElementById('taActionType').value === 'color') {
+    const r = +document.getElementById('taColorR').value;
+    const g = +document.getElementById('taColorG').value;
+    const b = +document.getElementById('taColorB').value;
+    document.getElementById('taBtnColor').value = '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+  }
+
+  updateTaFieldVisibility();
+  modal.classList.add('open');
+}
+
+document.getElementById('taActionType').addEventListener('change', updateTaFieldVisibility);
+
+function updateTaFieldVisibility() {
+  const type = document.getElementById('taActionType').value;
+  document.getElementById('taColorFields').style.display = type === 'color' ? 'block' : 'none';
+  document.getElementById('taQuickActionFields').style.display = type === 'quick_action' ? 'block' : 'none';
+  document.getElementById('taSceneFields').style.display = type === 'scene' ? 'block' : 'none';
+  document.getElementById('taMoverFields').style.display = type === 'mover_preset' ? 'block' : 'none';
+  document.getElementById('taDimmerFields').style.display = type === 'master_dimmer' ? 'block' : 'none';
+}
+
+document.getElementById('btnSaveTouchAction').addEventListener('click', async () => {
+  const id = document.getElementById('taId').value;
+  const type = document.getElementById('taActionType').value;
+
+  let action_data = {};
+  switch (type) {
+    case 'color':
+      action_data = {
+        red: +document.getElementById('taColorR').value,
+        green: +document.getElementById('taColorG').value,
+        blue: +document.getElementById('taColorB').value,
+        white: +document.getElementById('taColorW').value,
+      };
+      break;
+    case 'quick_action':
+      action_data = { action: document.getElementById('taQuickAction').value };
+      break;
+    case 'scene':
+      action_data = { scene_id: +document.getElementById('taScene').value };
+      break;
+    case 'mover_preset':
+      action_data = { preset_index: +document.getElementById('taMoverPreset').value };
+      break;
+    case 'master_dimmer':
+      action_data = { value: +document.getElementById('taDimmerValue').value };
+      break;
+  }
+
+  const body = {
+    label: document.getElementById('taLabel').value,
+    icon: document.getElementById('taIcon').value,
+    action_type: type,
+    action_data,
+    color: document.getElementById('taBtnColor').value,
+    text_color: document.getElementById('taTxtColor').value,
+    grid_row: +document.getElementById('taRow').value,
+    grid_col: +document.getElementById('taCol').value,
+    grid_w: +document.getElementById('taW').value,
+    grid_h: +document.getElementById('taH').value,
+    sort_order: +document.getElementById('taSortOrder').value,
+    enabled: true,
+  };
+
+  try {
+    if (id) {
+      await fetch('/api/touch-actions/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    } else {
+      await fetch('/api/touch-actions', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    }
+    document.getElementById('touchActionModal').classList.remove('open');
+    loadTouchActionsConfig();
+  } catch (e) {
+    console.error('Failed to save touch action', e);
+  }
+});
+
+async function toggleTouchAction(id, enabled) {
+  await fetch('/api/touch-actions/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: !!enabled }) });
+  loadTouchActionsConfig();
+}
+
+async function deleteTouchAction(id) {
+  if (!confirm('Delete this action button?')) return;
+  await fetch('/api/touch-actions/' + id, { method: 'DELETE' });
+  loadTouchActionsConfig();
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Config — Network / mDNS
@@ -5108,11 +5617,40 @@ const EFFECT_STYLE = {
   color_wave: { bg: 'linear-gradient(135deg,#00bcd4,#7c4dff)', fg: '#fff', border: '#00bcd4', icon: '🌊' },
   fire:       { bg: 'linear-gradient(135deg,#ff5722,#ff9800)', fg: '#fff', border: '#ff5722', icon: '🔥' },
   buildup:    { bg: 'linear-gradient(135deg,#4caf50,#8bc34a)', fg: '#fff', border: '#4caf50', icon: '📈' },
+  // Moving head effects
+  pan_sweep:    { bg: 'linear-gradient(135deg,#00897b,#4db6ac)', fg: '#fff', border: '#00897b', icon: '↔️' },
+  tilt_sweep:   { bg: 'linear-gradient(135deg,#00695c,#80cbc4)', fg: '#fff', border: '#00695c', icon: '↕️' },
+  circle:       { bg: 'linear-gradient(135deg,#0277bd,#4fc3f7)', fg: '#fff', border: '#0277bd', icon: '⭕' },
+  figure_eight: { bg: 'linear-gradient(135deg,#283593,#7986cb)', fg: '#fff', border: '#283593', icon: '∞' },
+  random_move:  { bg: 'linear-gradient(135deg,#4527a0,#b39ddb)', fg: '#fff', border: '#4527a0', icon: '🎲' },
+  fan:          { bg: 'linear-gradient(135deg,#1565c0,#64b5f6)', fg: '#fff', border: '#1565c0', icon: '🪭' },
+  nod:          { bg: 'linear-gradient(135deg,#558b2f,#aed581)', fg: '#fff', border: '#558b2f', icon: '🔔' },
+  // Multicell effects
+  segments:     { bg: 'linear-gradient(135deg,#ad1457,#f48fb1)', fg: '#fff', border: '#ad1457', icon: '▓' },
+  ripple:       { bg: 'linear-gradient(135deg,#0097a7,#80deea)', fg: '#fff', border: '#0097a7', icon: '◎' },
+  cell_strobe:  { bg: 'linear-gradient(135deg,#f9a825,#fff176)', fg: '#000', border: '#f9a825', icon: '⚡' },
+  gradient:     { bg: 'linear-gradient(135deg,#d81b60,#7b1fa2,#1565c0)', fg: '#fff', border: '#d81b60', icon: '🌅' },
 };
 
 async function buildEffectsLibraryGrid() {
-  const grid = document.getElementById('qaEffectsLibraryGrid');
-  grid.innerHTML = '';
+  // Tab switching logic (bind once)
+  if (!buildEffectsLibraryGrid._tabsBound) {
+    buildEffectsLibraryGrid._tabsBound = true;
+    document.querySelectorAll('.effects-lib-tabs .efx-lib-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.effects-lib-tabs .efx-lib-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.effects-lib-page').forEach(p => p.style.display = 'none');
+        const target = btn.dataset.efxtab;
+        const page = document.querySelector(`.effects-lib-page[data-efxtab="${target}"]`);
+        if (page) page.style.display = '';
+      });
+    });
+  }
+
+  // Clear all tab grids
+  const tabIds = { color: 'efxTabColor', motion: 'efxTabMotion', multicell: 'efxTabMulticell', all: 'efxTabAll' };
+  for (const id of Object.values(tabIds)) document.getElementById(id).innerHTML = '';
 
   let effects = [];
   try {
@@ -5120,14 +5658,40 @@ async function buildEffectsLibraryGrid() {
   } catch { return; }
 
   if (effects.length === 0) {
-    grid.innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects created yet. Use the Sequencer → Effects tab to create effects.</span>';
+    document.getElementById('efxTabColor').innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects created yet. Use the Sequencer → Effects tab to create effects.</span>';
     return;
   }
 
   const filtered = getFilteredChannelMap();
   const fixtureIds = filtered.map(f => f.id);
 
-  effects.forEach(effect => {
+  // Detect fixture capabilities for targeting
+  const moverFixtures = filtered.filter(f => f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt'));
+  const multicellFixtures = filtered.filter(f => f.cell_count > 0);
+  const colorFixtures = filtered.filter(f => f.channels.some(ch => ['red','green','blue'].includes(ch.type)));
+
+  // Map fixture_target → which fixtures to send to
+  function getTargetFixtureIds(target) {
+    if (target === 'moving_head') return moverFixtures.map(f => f.id);
+    if (target === 'multicell') return multicellFixtures.map(f => f.id);
+    if (target === 'color') return colorFixtures.map(f => f.id);
+    return fixtureIds; // 'all'
+  }
+
+  // Map fixture_target → which tab(s) it appears in
+  // color → Color tab; moving_head → Motion tab; multicell → Multicell tab;
+  // all → All tab (chase/comet/scanner/buildup work everywhere)
+  function getTabsForEffect(eff) {
+    const t = eff.fixture_target || 'all';
+    const tabs = ['all']; // every effect appears in All tab
+    if (t === 'color') tabs.push('color');
+    else if (t === 'moving_head') tabs.push('motion');
+    else if (t === 'multicell') tabs.push('multicell');
+    return tabs;
+  }
+
+  // Build effect button
+  function makeEffectBtn(effect) {
     const style = EFFECT_STYLE[effect.type] || { bg: '#555', fg: '#fff', border: '#777', icon: '✨' };
     const btn = document.createElement('button');
     btn.className = 'qa-btn qa-effect-lib-btn';
@@ -5137,30 +5701,31 @@ async function buildEffectsLibraryGrid() {
       btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border}`;
     }
     btn.textContent = effect.name;
-    btn.title = `${effect.type} effect`;
+    const target = effect.fixture_target || 'all';
+    btn.title = `${effect.type} effect (${target.replace('_',' ')})`;
     btn.dataset.effectId = effect.id;
 
-    if (fixtureIds.length === 0) {
+    const targetIds = getTargetFixtureIds(target);
+    if (targetIds.length === 0) {
       btn.style.opacity = '0.3';
-      btn.title = 'No fixtures available';
+      btn.title = target === 'moving_head' ? 'No moving head fixtures available'
+        : target === 'multicell' ? 'No multicell fixtures available'
+        : target === 'color' ? 'No color fixtures available'
+        : 'No matching fixtures available';
     }
 
-    // Toggle behavior: click to start/stop
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
-      if (fixtureIds.length === 0) return;
-
+      if (targetIds.length === 0) return;
       if (qaActiveEffectId === effect.id) {
-        // Stop the running effect
         await fetch('/api/effects/stop', { method: 'POST' });
         qaActiveEffectId = null;
         document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
       } else {
-        // Stop any previous, start this one
         await fetch('/api/effects/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ effectId: effect.id, fixtureIds }),
+          body: JSON.stringify({ effectId: effect.id, fixtureIds: targetIds }),
         });
         qaActiveEffectId = effect.id;
         document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
@@ -5168,21 +5733,37 @@ async function buildEffectsLibraryGrid() {
       }
     });
 
-    grid.appendChild(btn);
-  });
+    return btn;
+  }
 
-  // Add a "Stop Effect" button at the end
-  const stopBtn = document.createElement('button');
-  stopBtn.className = 'qa-btn';
-  stopBtn.style.cssText = 'background:#c62828;color:#fff;border-color:#ef5350';
-  stopBtn.textContent = '⏹ Stop Effect';
-  stopBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    await fetch('/api/effects/stop', { method: 'POST' });
-    qaActiveEffectId = null;
-    document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
-  });
-  grid.appendChild(stopBtn);
+  // Populate each tab
+  for (const effect of effects) {
+    const tabs = getTabsForEffect(effect);
+    for (const tab of tabs) {
+      const grid = document.getElementById(tabIds[tab]);
+      if (grid) grid.appendChild(makeEffectBtn(effect));
+    }
+  }
+
+  // Add a "Stop Effect" button to each tab
+  for (const id of Object.values(tabIds)) {
+    const grid = document.getElementById(id);
+    if (!grid || grid.children.length === 0) {
+      grid.innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects in this category.</span>';
+      continue;
+    }
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'qa-btn';
+    stopBtn.style.cssText = 'background:#c62828;color:#fff;border-color:#ef5350';
+    stopBtn.textContent = '⏹ Stop';
+    stopBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await fetch('/api/effects/stop', { method: 'POST' });
+      qaActiveEffectId = null;
+      document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+    });
+    grid.appendChild(stopBtn);
+  }
 }
 
 function sendQaChannels(targets, value) {
@@ -6005,6 +6586,313 @@ function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.
 document.querySelectorAll('.modal-overlay').forEach(o => {
   o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('open'); });
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  Static Scenes
+// ═══════════════════════════════════════════════════════════════
+let _scenesCache = [];
+let _sceneFixturesCache = [];
+let _sceneGroupsCache = [];
+let _sceneEffectsCache = [];
+let _activeSceneId = null;
+
+async function loadScenes() {
+  try {
+    const [scenes, fixtures, groups, effects, activeRes] = await Promise.all([
+      fetch('/api/scenes').then(r => r.json()),
+      fetch('/api/fixture-channel-map').then(r => r.json()),
+      fetch('/api/groups').then(r => r.json()),
+      fetch('/api/effects').then(r => r.json()),
+      fetch('/api/scenes/active').then(r => r.json()),
+    ]);
+    _scenesCache = scenes;
+    _sceneFixturesCache = fixtures;
+    _sceneGroupsCache = groups;
+    _sceneEffectsCache = effects;
+    _activeSceneId = activeRes.activeSceneId;
+    renderScenesList(scenes);
+    updateSceneActiveUI();
+  } catch (e) { console.error('Failed to load scenes', e); }
+}
+
+function updateSceneActiveUI() {
+  const badge = document.getElementById('sceneActiveBadge');
+  const deactBtn = document.getElementById('btnDeactivateScene');
+  if (_activeSceneId) {
+    const s = _scenesCache.find(s => s.id === _activeSceneId);
+    badge.textContent = '● Active: ' + (s ? s.name : 'Scene #' + _activeSceneId);
+    badge.style.display = '';
+    deactBtn.style.display = '';
+  } else {
+    badge.style.display = 'none';
+    deactBtn.style.display = 'none';
+  }
+}
+
+function renderScenesList(scenes) {
+  const el = document.getElementById('scenesList');
+  if (!scenes.length) {
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim)">No scenes yet. Create one manually or generate from your fixtures.</div>';
+    return;
+  }
+  el.innerHTML = scenes.map(s => {
+    const isActive = s.id === _activeSceneId;
+    const entries = (s.entries || []);
+    const entryChips = entries.slice(0, 8).map(e => {
+      const fix = _sceneFixturesCache.find(f => f.id === e.fixture_id);
+      const grp = _sceneGroupsCache.find(g => g.id === e.group_id);
+      const cv = e.channel_values || {};
+      const r = cv.red || 0, g2 = cv.green || 0, b = cv.blue || 0;
+      const colorStyle = (cv.red !== undefined || cv.green !== undefined || cv.blue !== undefined)
+        ? `background:rgb(${r},${g2},${b})` : 'background:#444';
+      const hasEffect = !!e.effect_id;
+      const label = fix ? fix.name : grp ? grp.name : 'All';
+      return `<span class="scene-entry-chip ${hasEffect ? 'has-effect' : ''}">
+        <span class="chip-color" style="${colorStyle}"></span>${esc(label)}${hasEffect ? ' ✦' : ''}
+      </span>`;
+    }).join('');
+    const extra = entries.length > 8 ? `<span class="scene-entry-chip">+${entries.length - 8} more</span>` : '';
+
+    return `<div class="scene-card ${isActive ? 'active-scene' : ''}" data-id="${s.id}">
+      <div class="scene-card-header">
+        <span class="scene-card-name">${esc(s.name)}</span>
+        <span class="scene-card-badges">
+          ${s.is_default ? '<span class="scene-badge default">Default</span>' : ''}
+          ${isActive ? '<span class="scene-badge active">Active</span>' : ''}
+          ${s.priority ? '<span class="scene-badge priority">P:' + s.priority + '</span>' : ''}
+        </span>
+      </div>
+      ${s.description ? '<div class="scene-card-desc">' + esc(s.description) + '</div>' : ''}
+      <div class="scene-card-entries">${entryChips}${extra}</div>
+      <div class="scene-card-actions">
+        <button class="btn btn-primary btn-sm" onclick="activateScene(${s.id})">Activate</button>
+        <button class="btn btn-secondary btn-sm" onclick="editScene(${s.id})">Edit</button>
+        ${!s.is_default ? '<button class="btn btn-secondary btn-sm" onclick="setDefaultScene(' + s.id + ')">Set Default</button>' : ''}
+        <button class="btn btn-danger btn-sm" onclick="deleteScene(${s.id}, \'${esc(s.name).replace(/'/g, "\\'")}\'')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function activateScene(id) {
+  await fetch(`/api/scenes/${id}/activate`, { method: 'POST' });
+  _activeSceneId = id;
+  renderScenesList(_scenesCache);
+  updateSceneActiveUI();
+}
+
+document.getElementById('btnDeactivateScene').addEventListener('click', async () => {
+  await fetch('/api/scenes/deactivate', { method: 'POST' });
+  _activeSceneId = null;
+  renderScenesList(_scenesCache);
+  updateSceneActiveUI();
+});
+
+async function setDefaultScene(id) {
+  await fetch(`/api/scenes/${id}/default`, { method: 'POST' });
+  loadScenes();
+}
+
+async function deleteScene(id, name) {
+  if (!confirm('Delete scene "' + name + '"?')) return;
+  await fetch(`/api/scenes/${id}`, { method: 'DELETE' });
+  loadScenes();
+}
+
+// ── Scene Modal ──
+let _editSceneId = null;
+let _sceneEntries = [];
+
+document.getElementById('btnAddScene').addEventListener('click', () => openSceneModal());
+
+async function openSceneModal(sceneId) {
+  _editSceneId = sceneId || null;
+  document.getElementById('sceneModalTitle').textContent = sceneId ? 'Edit Scene' : 'New Scene';
+  document.getElementById('sceneNameInput').value = '';
+  document.getElementById('sceneDescInput').value = '';
+  document.getElementById('scenePriorityInput').value = '0';
+  document.getElementById('sceneDefaultCheck').checked = false;
+  _sceneEntries = [];
+
+  if (sceneId) {
+    const s = await fetch(`/api/scenes/${sceneId}`).then(r => r.json());
+    document.getElementById('sceneNameInput').value = s.name;
+    document.getElementById('sceneDescInput').value = s.description || '';
+    document.getElementById('scenePriorityInput').value = s.priority || 0;
+    document.getElementById('sceneDefaultCheck').checked = !!s.is_default;
+    _sceneEntries = (s.entries || []).map(e => ({
+      fixture_id: e.fixture_id || '',
+      group_id: e.group_id || '',
+      channel_values: e.channel_values || {},
+      effect_id: e.effect_id || '',
+      effect_params: e.effect_params || {},
+      label: e.label || '',
+    }));
+  }
+  renderSceneEntryEditor();
+  document.getElementById('sceneModal').classList.add('open');
+}
+
+window.editScene = (id) => openSceneModal(id);
+
+function renderSceneEntryEditor() {
+  const container = document.getElementById('sceneEntriesEditor');
+  if (!_sceneEntries.length) {
+    container.innerHTML = '<div style="padding:10px;color:var(--text-dim);font-size:12px">No entries. Add fixtures/groups and set their channel values.</div>';
+    return;
+  }
+  container.innerHTML = _sceneEntries.map((entry, idx) => {
+    const cv = entry.channel_values || {};
+    const r = cv.red ?? 0, g = cv.green ?? 0, b = cv.blue ?? 0, w = cv.white ?? 0, dim = cv.dimmer ?? 255;
+    const previewColor = `rgb(${r},${g},${b})`;
+
+    const fixtureOpts = _sceneFixturesCache.map(f =>
+      `<option value="${f.id}" ${entry.fixture_id == f.id ? 'selected' : ''}>${esc(f.name)}</option>`
+    ).join('');
+    const groupOpts = _sceneGroupsCache.map(g =>
+      `<option value="${g.id}" ${entry.group_id == g.id ? 'selected' : ''}>${esc(g.name)}</option>`
+    ).join('');
+    const effectOpts = _sceneEffectsCache.map(e =>
+      `<option value="${e.id}" ${entry.effect_id == e.id ? 'selected' : ''}>${esc(e.name)}</option>`
+    ).join('');
+
+    return `<div class="scene-entry-row" data-idx="${idx}">
+      <select class="se-fixture" style="min-width:120px" onchange="updateSceneEntry(${idx},'fixture_id',this.value)">
+        <option value="">— Fixture —</option>${fixtureOpts}
+      </select>
+      <select class="se-group" style="min-width:100px" onchange="updateSceneEntry(${idx},'group_id',this.value)">
+        <option value="">— Group —</option>${groupOpts}
+      </select>
+      <div class="scene-entry-color-preview" style="background:${previewColor}"></div>
+      <div class="scene-entry-sliders">
+        <label>R</label><input type="range" min="0" max="255" value="${r}" oninput="updateSceneEntryColor(${idx},'red',this.value,this)"><span class="se-val">${r}</span>
+        <label>G</label><input type="range" min="0" max="255" value="${g}" oninput="updateSceneEntryColor(${idx},'green',this.value,this)"><span class="se-val">${g}</span>
+        <label>B</label><input type="range" min="0" max="255" value="${b}" oninput="updateSceneEntryColor(${idx},'blue',this.value,this)"><span class="se-val">${b}</span>
+        <label>W</label><input type="range" min="0" max="255" value="${w}" oninput="updateSceneEntryColor(${idx},'white',this.value,this)"><span class="se-val">${w}</span>
+        <label>D</label><input type="range" min="0" max="255" value="${dim}" oninput="updateSceneEntryColor(${idx},'dimmer',this.value,this)"><span class="se-val">${dim}</span>
+      </div>
+      <select class="se-effect" style="min-width:100px" onchange="updateSceneEntry(${idx},'effect_id',this.value)">
+        <option value="">— Effect —</option>${effectOpts}
+      </select>
+      <button class="ch-remove" onclick="removeSceneEntry(${idx})" title="Remove entry">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+window.updateSceneEntry = function(idx, field, val) {
+  if (field === 'fixture_id' || field === 'group_id' || field === 'effect_id') {
+    _sceneEntries[idx][field] = val ? +val : '';
+    // If fixture selected, clear group and vice versa
+    if (field === 'fixture_id' && val) _sceneEntries[idx].group_id = '';
+    if (field === 'group_id' && val) _sceneEntries[idx].fixture_id = '';
+  }
+};
+
+window.updateSceneEntryColor = function(idx, channel, val, inputEl) {
+  val = +val;
+  if (!_sceneEntries[idx].channel_values) _sceneEntries[idx].channel_values = {};
+  _sceneEntries[idx].channel_values[channel] = val;
+  // Update the val label next to slider
+  const nextSpan = inputEl.nextElementSibling;
+  if (nextSpan) nextSpan.textContent = val;
+  // Update color preview
+  const row = inputEl.closest('.scene-entry-row');
+  const preview = row.querySelector('.scene-entry-color-preview');
+  const cv = _sceneEntries[idx].channel_values;
+  preview.style.background = `rgb(${cv.red || 0},${cv.green || 0},${cv.blue || 0})`;
+};
+
+window.removeSceneEntry = function(idx) {
+  _sceneEntries.splice(idx, 1);
+  renderSceneEntryEditor();
+};
+
+document.getElementById('btnAddSceneEntry').addEventListener('click', () => {
+  _sceneEntries.push({
+    fixture_id: '', group_id: '',
+    channel_values: { red: 255, green: 255, blue: 255, white: 0, dimmer: 255 },
+    effect_id: '', effect_params: {}, label: '',
+  });
+  renderSceneEntryEditor();
+});
+
+document.getElementById('btnSaveScene').addEventListener('click', async () => {
+  const name = document.getElementById('sceneNameInput').value.trim();
+  if (!name) return alert('Name required');
+
+  const body = {
+    name,
+    description: document.getElementById('sceneDescInput').value.trim(),
+    priority: +document.getElementById('scenePriorityInput').value || 0,
+    is_default: document.getElementById('sceneDefaultCheck').checked,
+  };
+
+  let sceneId = _editSceneId;
+  if (sceneId) {
+    await fetch(`/api/scenes/${sceneId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } else {
+    const res = await fetch('/api/scenes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const created = await res.json();
+    sceneId = created.id;
+  }
+
+  // Save entries
+  const entries = _sceneEntries.map((e, i) => ({
+    fixture_id: e.fixture_id || null,
+    group_id: e.group_id || null,
+    channel_values: e.channel_values || {},
+    effect_id: e.effect_id || null,
+    effect_params: e.effect_params || {},
+    label: e.label || '',
+    sort_order: i,
+  }));
+  await fetch(`/api/scenes/${sceneId}/entries/bulk`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries }),
+  });
+
+  closeModal('sceneModal');
+  loadScenes();
+});
+
+// ── Generate Scene Modal ──
+document.getElementById('btnGenerateScene').addEventListener('click', async () => {
+  const opts = await fetch('/api/scenes/generate-options').then(r => r.json());
+  const sel = document.getElementById('genSceneStyleSelect');
+  sel.innerHTML = opts.styles.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  document.getElementById('genSceneNameInput').value = '';
+  document.getElementById('generateSceneModal').classList.add('open');
+});
+
+document.getElementById('btnDoGenerateScene').addEventListener('click', async () => {
+  const name = document.getElementById('genSceneNameInput').value.trim() || 'Generated Scene';
+  const style = document.getElementById('genSceneStyleSelect').value;
+  const include_effects = document.getElementById('genSceneEffects').checked;
+  const res = await fetch('/api/scenes/generate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, style, include_effects }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.error || 'Failed to generate');
+    return;
+  }
+  closeModal('generateSceneModal');
+  loadScenes();
+});
+
+// Handle scene WebSocket messages
+function handleSceneWsMessage(msg) {
+  if (msg.type === 'scene_activated') {
+    _activeSceneId = msg.sceneId;
+    renderScenesList(_scenesCache);
+    updateSceneActiveUI();
+  } else if (msg.type === 'scene_deactivated') {
+    _activeSceneId = null;
+    renderScenesList(_scenesCache);
+    updateSceneActiveUI();
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Boot

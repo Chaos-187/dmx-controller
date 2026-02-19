@@ -902,6 +902,15 @@ function setupSequencerEvents() {
   document.getElementById('effSaveBtn').addEventListener('click', saveEffect);
   document.getElementById('effType').addEventListener('change', (e) => {
     renderEffectParams(e.target.value, {});
+    // Auto-set fixture_target based on effect type category
+    const movingTypes = ['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod'];
+    const multicellOnlyTypes = ['segments','ripple','cell_strobe','gradient'];
+    const colorTypes = ['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire'];
+    const sel = document.getElementById('effFixtureTarget');
+    if (movingTypes.includes(e.target.value)) sel.value = 'moving_head';
+    else if (multicellOnlyTypes.includes(e.target.value)) sel.value = 'multicell';
+    else if (colorTypes.includes(e.target.value)) sel.value = 'color';
+    else sel.value = 'all';
   });
 
   // ─── Keyboard shortcuts: Copy / Paste / Delete / Nudge / Select All ──────
@@ -1321,9 +1330,12 @@ function renderEffectsList() {
     return;
   }
   let html = '';
+  const TARGET_BADGE = { all: '', color: '🎨', moving_head: '🔦', multicell: '▓' };
   for (const eff of seqEffects) {
+    const badge = TARGET_BADGE[eff.fixture_target] || '';
     html += `<div class="seq-effect-card" data-eff-id="${eff.id}">` +
       `<span class="eff-type ${eff.type}">${eff.type.replace('_', ' ')}</span>` +
+      (badge ? `<span style="font-size:10px" title="${(eff.fixture_target||'all').replace('_',' ')}">${badge}</span>` : '') +
       `<span class="eff-name">${esc(eff.name)}</span>` +
       `<span style="font-size:9px;color:var(--text-dim)">${eff.duration_beats}b</span>` +
       `<span class="eff-actions">` +
@@ -1340,6 +1352,7 @@ function openEffectModal(eff) {
   document.getElementById('effName').value = eff ? eff.name : '';
   document.getElementById('effType').value = eff ? eff.type : 'pulse';
   document.getElementById('effCategory').value = eff ? (eff.category || 'color') : 'color';
+  document.getElementById('effFixtureTarget').value = eff ? (eff.fixture_target || 'all') : 'all';
   document.getElementById('effDurBeats').value = eff ? eff.duration_beats : 4;
   renderEffectParams(eff ? eff.type : 'pulse', eff ? eff.effect_data : {});
   document.getElementById('effectModal').classList.add('open');
@@ -1441,6 +1454,84 @@ function renderEffectParams(type, data) {
         `<option value="center" ${data.direction==='center'?'selected':''}>Center Out</option>` +
       `</select></div>` +
       `${cellRow(data)}</div>`;
+  // ── Moving Head effects ─────────────────────────────────────────────
+  } else if (type === 'pan_sweep' || type === 'tilt_sweep') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed (cycles)</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
+      `<div class="form-group"><label>Range (0-1)</label>` +
+        `<input type="number" id="effParamRange" value="${data.range||1}" min="0.05" max="1" step="0.05"></div></div>`;
+  } else if (type === 'circle' || type === 'figure_eight') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed (cycles)</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
+      `<div class="form-group"><label>Size (0-1)</label>` +
+        `<input type="number" id="effParamSize" value="${data.size||0.5}" min="0.05" max="1" step="0.05"></div></div>`;
+  } else if (type === 'random_move') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div>` +
+      `<div class="form-group"><label>Range (0-1)</label>` +
+        `<input type="number" id="effParamRange" value="${data.range||0.5}" min="0.05" max="1" step="0.05"></div></div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Smoothing (0-1)</label>` +
+        `<input type="number" id="effParamSmoothing" value="${data.smoothing||0.3}" min="0" max="1" step="0.05"></div></div>`;
+  } else if (type === 'fan') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||0.5}" min="0.1" max="10" step="0.1"></div>` +
+      `<div class="form-group"><label>Spread (0-1)</label>` +
+        `<input type="number" id="effParamSpread" value="${data.spread||1}" min="0.1" max="1" step="0.05"></div></div>`;
+  } else if (type === 'nod') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Axis</label><select id="effParamAxis">` +
+        `<option value="tilt" ${(data.axis||'tilt')==='tilt'?'selected':''}>Tilt (Nod)</option>` +
+        `<option value="pan" ${data.axis==='pan'?'selected':''}>Pan (Shake)</option>` +
+      `</select></div>` +
+      `<div class="form-group"><label>Speed</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||2}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Range (0-1)</label>` +
+        `<input type="number" id="effParamRange" value="${data.range||0.3}" min="0.05" max="1" step="0.05"></div></div>`;
+  // ── Multicell-specific effects ──────────────────────────────────────
+  } else if (type === 'segments') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Segment Size (cells)</label>` +
+        `<input type="number" id="effParamSegSize" value="${data.segment_size||2}" min="1" max="20" step="1"></div>` +
+      `<div class="form-group"><label>Offset Speed</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.offset_speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row">${cellRow(data)}</div>`;
+  } else if (type === 'ripple') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div>` +
+      `<div class="form-group"><label>Width (cells)</label>` +
+        `<input type="number" id="effParamWidth" value="${data.width||3}" min="1" max="20" step="1"></div></div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Decay (0-1)</label>` +
+        `<input type="number" id="effParamDecay" value="${data.decay||0.7}" min="0.1" max="1" step="0.05"></div>` +
+      `${cellRow(data)}</div>`;
+  } else if (type === 'cell_strobe') {
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Frequency (Hz)</label>` +
+        `<input type="number" id="effParamFreq" value="${data.frequency||8}" min="1" max="30" step="1"></div>` +
+      `<div class="form-group"><label>Pattern</label><select id="effParamPattern">` +
+        `<option value="sequential" ${(data.pattern||'sequential')==='sequential'?'selected':''}>Sequential</option>` +
+        `<option value="random" ${data.pattern==='random'?'selected':''}>Random</option>` +
+      `</select></div></div>` +
+      `<div class="form-row">${cellRow(data)}</div>`;
+  } else if (type === 'gradient') {
+    const colors = data.colors || ['#ff0000', '#0000ff'];
+    html = `<div class="form-row">` +
+      `<div class="form-group"><label>Speed</label>` +
+        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div>` +
+      `</div>` +
+      `<div class="form-row">` +
+      `<div class="form-group"><label>Color 1</label><input type="color" id="effParamGradC1" value="${colors[0]||'#ff0000'}"></div>` +
+      `<div class="form-group"><label>Color 2</label><input type="color" id="effParamGradC2" value="${colors[1]||'#0000ff'}"></div>` +
+      `<div class="form-group"><label>Color 3 (opt)</label><input type="color" id="effParamGradC3" value="${colors[2]||'#000000'}"></div></div>` +
+      `<div class="form-row"><div class="form-group"><label><input type="checkbox" id="effParamGradC3On" ${colors.length>=3?'checked':''}> Use 3rd color</label></div>` +
+      `${cellRow(data)}</div>`;
   }
   area.innerHTML = html;
 }
@@ -1502,6 +1593,67 @@ function getEffectDataFromForm(type) {
       direction: document.getElementById('effParamDir')?.value || 'left',
       channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
     };
+  // Moving head effects
+  } else if (type === 'pan_sweep' || type === 'tilt_sweep') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      range: +(document.getElementById('effParamRange')?.value || 1),
+    };
+  } else if (type === 'circle' || type === 'figure_eight') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      size: +(document.getElementById('effParamSize')?.value || 0.5),
+    };
+  } else if (type === 'random_move') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      range: +(document.getElementById('effParamRange')?.value || 0.5),
+      smoothing: +(document.getElementById('effParamSmoothing')?.value || 0.3),
+    };
+  } else if (type === 'fan') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 0.5),
+      spread: +(document.getElementById('effParamSpread')?.value || 1),
+    };
+  } else if (type === 'nod') {
+    return {
+      axis: document.getElementById('effParamAxis')?.value || 'tilt',
+      speed: +(document.getElementById('effParamSpeed')?.value || 2),
+      range: +(document.getElementById('effParamRange')?.value || 0.3),
+    };
+  // Multicell effects
+  } else if (type === 'segments') {
+    return {
+      segment_size: +(document.getElementById('effParamSegSize')?.value || 2),
+      offset_speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'ripple') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      width: +(document.getElementById('effParamWidth')?.value || 3),
+      decay: +(document.getElementById('effParamDecay')?.value || 0.7),
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'cell_strobe') {
+    return {
+      frequency: +(document.getElementById('effParamFreq')?.value || 8),
+      pattern: document.getElementById('effParamPattern')?.value || 'sequential',
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
+  } else if (type === 'gradient') {
+    const colors = [
+      document.getElementById('effParamGradC1')?.value || '#ff0000',
+      document.getElementById('effParamGradC2')?.value || '#0000ff',
+    ];
+    if (document.getElementById('effParamGradC3On')?.checked) {
+      colors.push(document.getElementById('effParamGradC3')?.value || '#00ff00');
+    }
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 1),
+      colors,
+      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
+    };
   }
   return {};
 }
@@ -1511,10 +1663,11 @@ async function saveEffect() {
   if (!name) { alert('Name is required'); return; }
   const type = document.getElementById('effType').value;
   const category = document.getElementById('effCategory').value;
+  const fixture_target = document.getElementById('effFixtureTarget').value;
   const duration_beats = +(document.getElementById('effDurBeats').value || 4);
   const effect_data = getEffectDataFromForm(type);
 
-  const body = { name, type, category, effect_data, duration_beats };
+  const body = { name, type, category, fixture_target, effect_data, duration_beats };
   let result;
   if (seqEditingEffectId) {
     const res = await fetch(`/api/effects/${seqEditingEffectId}`, {

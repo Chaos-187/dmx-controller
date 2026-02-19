@@ -1473,9 +1473,10 @@ function stopRunningEffect() {
       const fix = fixMap.find(f => f.id === fixtureId);
       if (!fix) continue;
       for (const ch of fix.channels) {
-        if (['red','green','blue','white','dimmer'].includes(ch.type)) {
+        if (['red','green','blue','white','dimmer','pan','tilt'].includes(ch.type)) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
-          channelUpdates[fix.universe][ch.dmx_address] = 0;
+          // Reset color/dimmer to 0, but pan/tilt to center (128)
+          channelUpdates[fix.universe][ch.dmx_address] = (ch.type === 'pan' || ch.type === 'tilt') ? 128 : 0;
         }
       }
     }
@@ -1508,9 +1509,12 @@ app.post('/api/effects/run', (req, res) => {
     const elapsed = (Date.now() - startTime) / 1000;
     const channelUpdates = {};
 
-    for (const fixtureId of fixtureIds) {
+    for (let fi = 0; fi < fixtureIds.length; fi++) {
+      const fixtureId = fixtureIds[fi];
       const fix = fixMap.find(f => f.id === fixtureId);
       if (!fix) continue;
+      // Skip fixtures that aren't compatible with this effect's target
+      if (!isFixtureCompatibleWithEffect(effect, fix)) continue;
 
       for (const ch of fix.channels) {
         // For color_fade, cycle every 4 seconds; for others, use raw elapsed
@@ -1523,11 +1527,18 @@ app.post('/api/effects/run', (req, res) => {
 
         const baseValues = { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
         const channelCtx = buildChannelCtx(ch, fix);
-        const value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
+        // Add fixture ordinal for multi-fixture effects (fan, etc.)
+        channelCtx._fixtureOrdinal = fi;
+        channelCtx._fixtureCount = fixtureIds.length;
+        let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
+
+        // QA runner: only send channels the effect actually controls.
+        // Don't fall back to base values — that would override user's current
+        // color/dimmer settings with full white.
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
-          channelUpdates[fix.universe][ch.dmx_address] = Math.max(0, Math.min(255, Math.round(value)));
+          channelUpdates[fix.universe][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, Math.round(value))), ch);
         }
       }
     }
@@ -1542,7 +1553,15 @@ app.post('/api/effects/run', (req, res) => {
   }, 25); // ~40 Hz
 
   runningQaEffect = { timer, effectId, fixtureIds };
-  console.log(`[QA] Started effect "${effect.name}" on ${fixtureIds.length} fixture(s)`);
+  console.log(`[QA] Started effect "${effect.name}" (type=${effect.type}, target=${effect.fixture_target}) on ${fixtureIds.length} fixture(s): [${fixtureIds.join(',')}]`);
+  // Debug: log fixture compatibility
+  for (const fid of fixtureIds) {
+    const fix = fixMap.find(f => f.id === fid);
+    if (fix) {
+      const compat = isFixtureCompatibleWithEffect(effect, fix);
+      console.log(`[QA]   fixture ${fid} "${fix.name}" cell_count=${fix.cell_count} channels=${fix.channels.length} compatible=${compat}`);
+    }
+  }
   res.json({ ok: true });
 });
 
@@ -1552,6 +1571,316 @@ app.post('/api/effects/stop', (req, res) => {
   }
   stopRunningEffect();
   res.json({ ok: true });
+});
+
+// ─── Static Scenes API ──────────────────────────────────────────────────────
+
+app.get('/api/scenes', (req, res) => {
+  res.json(db.getScenes());
+});
+
+// Literal paths MUST come before parameterized :id routes
+app.get('/api/scenes/default', (req, res) => {
+  const s = db.getDefaultScene();
+  s ? res.json(s) : res.status(404).json({ error: 'No default scene' });
+});
+
+app.get('/api/scenes/active', (req, res) => {
+  res.json({ activeSceneId: activeStaticScene ? activeStaticScene.id : null });
+});
+
+app.get('/api/scenes/generate-options', (req, res) => {
+  res.json({
+    styles: [
+      { key: 'warm', label: 'Warm Ambience' },
+      { key: 'cool', label: 'Cool / Blue' },
+      { key: 'party', label: 'Party Colours' },
+      { key: 'elegant', label: 'Elegant / Purple & Gold' },
+      { key: 'nature', label: 'Nature / Green & Amber' },
+      { key: 'sunset', label: 'Sunset Gradient' },
+      { key: 'ocean', label: 'Ocean Blues' },
+      { key: 'fire', label: 'Fire / Red & Orange' },
+      { key: 'pastel', label: 'Pastel Soft' },
+      { key: 'white', label: 'Clean White' },
+      { key: 'rainbow', label: 'Rainbow Spread' },
+      { key: 'random', label: 'Random' },
+    ],
+  });
+});
+
+app.post('/api/scenes/generate', (req, res) => {
+  const { name, style, color_palette, include_effects } = req.body || {};
+  const fixtures = db.getFixtureChannelMap();
+  const groups = db.getGroups();
+  const effects = include_effects ? db.getEffects() : [];
+
+  if (!fixtures.length) return res.status(400).json({ error: 'No fixtures configured' });
+
+  const scene = generateStaticScene({
+    name: name || 'Generated Scene',
+    style: style || 'warm',
+    colorPalette: color_palette,
+    fixtures, groups, effects,
+  });
+
+  const created = db.createScene({ name: scene.name, description: scene.description });
+  if (scene.entries.length > 0) {
+    db.bulkUpdateSceneEntries(created.id, scene.entries);
+  }
+  res.status(201).json(db.getScene(created.id));
+});
+
+app.post('/api/scenes/deactivate', (req, res) => {
+  deactivateScene();
+  res.json({ ok: true });
+});
+
+app.get('/api/scenes/:id', (req, res) => {
+  const s = db.getScene(+req.params.id);
+  s ? res.json(s) : res.status(404).json({ error: 'Not found' });
+});
+
+app.post('/api/scenes', (req, res) => {
+  const result = db.createScene(req.body);
+  if (result.error) return res.status(400).json(result);
+  res.status(201).json(result);
+});
+
+app.put('/api/scenes/:id', (req, res) => {
+  const result = db.updateScene(+req.params.id, req.body);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  if (result.error) return res.status(400).json(result);
+  // If this is the active scene, reload it
+  if (activeStaticScene && activeStaticScene.id === +req.params.id) {
+    activateScene(+req.params.id);
+  }
+  res.json(result);
+});
+
+app.delete('/api/scenes/:id', (req, res) => {
+  // If deleting active scene, deactivate first
+  if (activeStaticScene && activeStaticScene.id === +req.params.id) {
+    deactivateScene();
+  }
+  db.deleteScene(+req.params.id);
+  res.json({ deleted: true });
+});
+
+app.post('/api/scenes/:id/default', (req, res) => {
+  const result = db.setDefaultScene(+req.params.id);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.post('/api/scenes/:id/activate', (req, res) => {
+  const scene = activateScene(+req.params.id);
+  if (!scene) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true, scene });
+});
+
+// Scene entries
+app.get('/api/scenes/:id/entries', (req, res) => {
+  res.json(db.getSceneEntries(+req.params.id));
+});
+
+app.post('/api/scenes/:id/entries', (req, res) => {
+  const result = db.createSceneEntry(+req.params.id, req.body);
+  if (result.error) return res.status(400).json(result);
+  // Reload active scene if modified
+  if (activeStaticScene && activeStaticScene.id === +req.params.id) {
+    activateScene(+req.params.id);
+  }
+  res.status(201).json(result);
+});
+
+app.put('/api/scene-entries/:id', (req, res) => {
+  const result = db.updateSceneEntry(+req.params.id, req.body);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  // Reload active scene if entry belongs to it
+  const entry = db.getSceneEntry(+req.params.id);
+  if (entry && activeStaticScene && activeStaticScene.id === entry.scene_id) {
+    activateScene(entry.scene_id);
+  }
+  res.json(result);
+});
+
+app.delete('/api/scene-entries/:id', (req, res) => {
+  const entry = db.getSceneEntry(+req.params.id);
+  db.deleteSceneEntry(+req.params.id);
+  if (entry && activeStaticScene && activeStaticScene.id === entry.scene_id) {
+    activateScene(entry.scene_id);
+  }
+  res.json({ deleted: true });
+});
+
+app.put('/api/scenes/:id/entries/bulk', (req, res) => {
+  const entries = req.body.entries || [];
+  const result = db.bulkUpdateSceneEntries(+req.params.id, entries);
+  if (activeStaticScene && activeStaticScene.id === +req.params.id) {
+    activateScene(+req.params.id);
+  }
+  res.json(result);
+});
+
+// ─── Touch Actions API ─────────────────────────────────────────────────────
+
+app.get('/api/touch-actions', (req, res) => {
+  res.json(db.getTouchActions());
+});
+
+// Literal path MUST come before parameterized :id route
+app.put('/api/touch-actions/bulk', (req, res) => {
+  const result = db.bulkUpdateTouchActions(req.body.actions || []);
+  res.json(result);
+});
+
+app.get('/api/touch-actions/:id', (req, res) => {
+  const a = db.getTouchAction(+req.params.id);
+  a ? res.json(a) : res.status(404).json({ error: 'Not found' });
+});
+
+app.post('/api/touch-actions', (req, res) => {
+  const result = db.createTouchAction(req.body);
+  if (result.error) return res.status(400).json(result);
+  res.status(201).json(result);
+});
+
+app.put('/api/touch-actions/:id', (req, res) => {
+  const result = db.updateTouchAction(+req.params.id, req.body);
+  result ? res.json(result) : res.status(404).json({ error: 'Not found' });
+});
+
+app.delete('/api/touch-actions/:id', (req, res) => {
+  db.deleteTouchAction(+req.params.id);
+  res.json({ deleted: true });
+});
+
+app.post('/api/touch-actions/auto-populate', (req, res) => {
+  const COLORS = [
+    { name:'Red',     hex:'#ff3b30', r:255, g:0,   b:0   },
+    { name:'Green',   hex:'#30d158', r:0,   g:255, b:0   },
+    { name:'Blue',    hex:'#0a84ff', r:0,   g:0,   b:255 },
+    { name:'White',   hex:'#ffffff', r:255, g:255, b:255 },
+    { name:'Amber',   hex:'#ff9f0a', r:255, g:160, b:0   },
+    { name:'UV',      hex:'#bf5af2', r:120, g:0,   b:255 },
+    { name:'Yellow',  hex:'#ffd60a', r:255, g:235, b:0   },
+    { name:'Magenta', hex:'#ff375f', r:255, g:0,   b:150 },
+    { name:'Cyan',    hex:'#64d2ff', r:0,   g:220, b:255 },
+    { name:'Pink',    hex:'#ff6482', r:255, g:120, b:180 },
+    { name:'Lime',    hex:'#a8ff00', r:180, g:255, b:0   },
+    { name:'Orange',  hex:'#ff6723', r:255, g:100, b:0   },
+  ];
+
+  const QUICK_ACTIONS = [
+    { label:'Full White', icon:'\u2600\uFE0E', action:'fullWhite', color:'#ffffff', text:'#000000' },
+    { label:'Dim Warm',   icon:'\uD83D\uDD6F\uFE0E', action:'dimWarm',   color:'#b47832', text:'#ffffff' },
+    { label:'UV Mode',    icon:'\uD83D\uDD2E', action:'uvMode',    color:'#7b2ff2', text:'#ffffff' },
+    { label:'All Off',    icon:'\u26D4',       action:'allOff',    color:'#333333', text:'#ffffff' },
+  ];
+
+  const EFFECTS = [
+    { label:'Strobe',   icon:'\u26A1', type:'strobe',   color:'#ffcc00', text:'#000000' },
+    { label:'Smoke',    icon:'\u2601\uFE0E', type:'smoke',    color:'#556677', text:'#ffffff' },
+    { label:'Haze',     icon:'\u2601\uFE0E', type:'haze',     color:'#445566', text:'#ffffff' },
+    { label:'Blackout', icon:'\u26AB',       type:'blackout', color:'#cc0000', text:'#ffffff' },
+  ];
+
+  const clearFirst = req.body.clear !== false;
+  try {
+    // Optionally clear existing actions
+    if (clearFirst) {
+      const existing = db.getTouchActions();
+      for (const a of existing) db.deleteTouchAction(a.id);
+    }
+
+    const cols = 6;
+    let row = 0, col = 0;
+    const created = [];
+
+    function nextPos() {
+      const pos = { row, col };
+      col++;
+      if (col >= cols) { col = 0; row++; }
+      return pos;
+    }
+    function startNewRow() { if (col > 0) { col = 0; row++; } }
+
+    // Colors
+    for (const c of COLORS) {
+      const pos = nextPos();
+      created.push(db.createTouchAction({
+        label: c.name, icon: '', action_type: 'color',
+        action_data: { red: c.r, green: c.g, blue: c.b, white: 0 },
+        color: c.hex, text_color: c.name === 'White' || c.name === 'Yellow' || c.name === 'Lime' ? '#000000' : '#ffffff',
+        grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
+        sort_order: created.length, enabled: true,
+      }));
+    }
+
+    // Quick actions
+    startNewRow();
+    for (const qa of QUICK_ACTIONS) {
+      const pos = nextPos();
+      created.push(db.createTouchAction({
+        label: qa.label, icon: qa.icon, action_type: 'quick_action',
+        action_data: { action: qa.action },
+        color: qa.color, text_color: qa.text,
+        grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
+        sort_order: created.length, enabled: true,
+      }));
+    }
+
+    // Effects
+    startNewRow();
+    for (const fx of EFFECTS) {
+      const pos = nextPos();
+      created.push(db.createTouchAction({
+        label: fx.label, icon: fx.icon, action_type: fx.type,
+        action_data: {},
+        color: fx.color, text_color: fx.text,
+        grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
+        sort_order: created.length, enabled: true,
+      }));
+    }
+
+    // Scenes
+    const scenes = db.getScenes();
+    if (scenes.length) {
+      startNewRow();
+      for (const s of scenes) {
+        const pos = nextPos();
+        created.push(db.createTouchAction({
+          label: s.name, icon: '\uD83C\uDFA8', action_type: 'scene',
+          action_data: { scene_id: s.id },
+          color: '#1a6b3c', text_color: '#ffffff',
+          grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
+          sort_order: created.length, enabled: true,
+        }));
+      }
+    }
+
+    // Mover presets
+    const presets = db.getMoverPresets();
+    if (presets.length) {
+      startNewRow();
+      for (let i = 0; i < presets.length; i++) {
+        const p = presets[i];
+        const pos = nextPos();
+        created.push(db.createTouchAction({
+          label: p.name, icon: '\uD83D\uDCA1', action_type: 'mover_preset',
+          action_data: { preset_index: i },
+          color: '#1a3b6b', text_color: '#ffffff',
+          grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
+          sort_order: created.length, enabled: true,
+        }));
+      }
+    }
+
+    res.json({ created: created.length, actions: db.getTouchActions() });
+  } catch (e) {
+    console.error('Auto-populate error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── Sequences API ──────────────────────────────────────────────────────────
@@ -1792,6 +2121,322 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
   broadcast({ type: 'seq_batch_complete', completed, failed, skipped, total: track_ids.length });
 });
 
+// ─── Static Scene Engine ────────────────────────────────────────────────────
+
+let activeStaticScene = null;    // The currently active scene object (with entries)
+let sceneEffectTimer = null;     // Interval for processing scene effects
+
+/**
+ * Activate a static scene — sends static channel values and starts
+ * effect processing for any entries that have effects assigned.
+ */
+function activateScene(sceneId) {
+  deactivateScene(); // clean up previous
+
+  const scene = db.getScene(sceneId);
+  if (!scene) return null;
+
+  activeStaticScene = scene;
+  console.log(`[SCENE] Activated scene "${scene.name}" (${scene.entries.length} entries)`);
+
+  // Send initial static values
+  applySceneStaticValues(scene);
+
+  // If any entries have effects, start the effect tick loop
+  const hasEffects = scene.entries.some(e => e.effect_id);
+  if (hasEffects) {
+    const startTime = Date.now();
+    sceneEffectTimer = setInterval(() => {
+      if (!dmxOutputEnabled || !activeStaticScene) return;
+      if (touchOverrides.blackoutHold) return;
+      processSceneEffects(activeStaticScene, startTime);
+    }, 25); // ~40 Hz
+    console.log(`[SCENE] Started effect loop for scene "${scene.name}"`);
+  }
+
+  broadcast({ type: 'scene_activated', sceneId: scene.id, sceneName: scene.name });
+  return scene;
+}
+
+/**
+ * Deactivate the current scene — zero out all affected fixtures.
+ */
+function deactivateScene() {
+  if (sceneEffectTimer) {
+    clearInterval(sceneEffectTimer);
+    sceneEffectTimer = null;
+  }
+  if (activeStaticScene) {
+    // Blackout all fixtures used by the scene
+    blackoutSceneFixtures(activeStaticScene);
+    console.log(`[SCENE] Deactivated scene "${activeStaticScene.name}"`);
+    activeStaticScene = null;
+    broadcast({ type: 'scene_deactivated' });
+  }
+}
+
+/**
+ * Send static channel values for all entries that don't have effects.
+ */
+function applySceneStaticValues(scene) {
+  if (!dmxOutputEnabled) return;
+  const fixMap = db.getFixtureChannelMap();
+  const channelUpdates = {};
+
+  for (const entry of scene.entries) {
+    if (entry.effect_id) continue; // effects are handled in the tick loop
+    const fixtureIds = resolveEntryFixtures(entry, fixMap);
+    for (const fid of fixtureIds) {
+      if (touchOverrides.disabledFixtures.has(fid)) continue;
+      const fix = fixMap.find(f => f.id === fid);
+      if (!fix) continue;
+      applyChannelValues(fix, entry.channel_values, channelUpdates);
+    }
+  }
+
+  sendChannelUpdates(channelUpdates);
+}
+
+/**
+ * Process effect entries each tick.
+ */
+function processSceneEffects(scene, startTime) {
+  const fixMap = db.getFixtureChannelMap();
+  const channelUpdates = {};
+  const elapsed = (Date.now() - startTime) / 1000;
+
+  for (const entry of scene.entries) {
+    if (!entry.effect_id) continue;
+    const effect = db.getEffect(entry.effect_id);
+    if (!effect) continue;
+
+    const fixtureIds = resolveEntryFixtures(entry, fixMap);
+    for (let fi = 0; fi < fixtureIds.length; fi++) {
+      const fid = fixtureIds[fi];
+      if (touchOverrides.disabledFixtures.has(fid)) continue;
+      const fix = fixMap.find(f => f.id === fid);
+      if (!fix) continue;
+      // Skip fixtures that aren't compatible with this effect's target
+      if (!isFixtureCompatibleWithEffect(effect, fix)) continue;
+
+      for (const ch of fix.channels) {
+        let progress;
+        if (effect.type === 'color_fade') {
+          progress = (elapsed % 4) / 4;
+        } else {
+          progress = elapsed;
+        }
+
+        const baseValues = entry.channel_values || { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
+        const channelCtx = buildChannelCtx(ch, fix);
+        channelCtx._fixtureOrdinal = fi;
+        channelCtx._fixtureCount = fixtureIds.length;
+        let value = computeEffectValue(effect, ch.type, progress, baseValues, entry.effect_params || {}, channelCtx);
+
+        // If the effect doesn't control this channel (e.g. motion effect → color channels),
+        // fall back to the base value so colours/dimmer still get sent.
+        if (value === null || value === undefined) {
+          value = baseValues[ch.type] !== undefined ? baseValues[ch.type] : null;
+        }
+
+        if (value !== null && value !== undefined) {
+          const u = fix.universe;
+          if (!channelUpdates[u]) channelUpdates[u] = {};
+          channelUpdates[u][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, Math.round(value))), ch);
+        }
+      }
+    }
+  }
+
+  sendChannelUpdates(channelUpdates);
+}
+
+/**
+ * Resolve which fixture IDs an entry applies to (by fixture_id, group_id, or all).
+ */
+function resolveEntryFixtures(entry, fixMap) {
+  if (entry.fixture_id) return [entry.fixture_id];
+  if (entry.group_id) {
+    const group = db.getGroup(entry.group_id);
+    return group ? group.fixture_ids : [];
+  }
+  // If neither fixture nor group, apply to all fixtures
+  return fixMap.map(f => f.id);
+}
+
+/**
+ * Apply channel_values to a fixture's channels in the update map.
+ */
+function applyChannelValues(fix, channelValues, channelUpdates) {
+  for (const ch of fix.channels) {
+    const val = channelValues[ch.type];
+    if (val !== undefined && val !== null) {
+      const u = fix.universe;
+      if (!channelUpdates[u]) channelUpdates[u] = {};
+      let mapped = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
+      channelUpdates[u][ch.dmx_address] = applyInvert(mapped, ch);
+    }
+  }
+}
+
+/**
+ * Send accumulated channel updates to both output backends.
+ */
+function sendChannelUpdates(channelUpdates) {
+  for (const [u, chMap] of Object.entries(channelUpdates)) {
+    const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
+    if (channels.length > 0) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+}
+
+/**
+ * Blackout all fixtures used by a scene.
+ */
+function blackoutSceneFixtures(scene) {
+  if (!dmxOutputEnabled) return;
+  const fixMap = db.getFixtureChannelMap();
+  const channelUpdates = {};
+
+  for (const entry of scene.entries) {
+    const fixtureIds = resolveEntryFixtures(entry, fixMap);
+    for (const fid of fixtureIds) {
+      const fix = fixMap.find(f => f.id === fid);
+      if (!fix) continue;
+      const u = fix.universe;
+      if (!channelUpdates[u]) channelUpdates[u] = {};
+      for (const ch of fix.channels) {
+        channelUpdates[u][ch.dmx_address] = 0;
+      }
+    }
+  }
+
+  sendChannelUpdates(channelUpdates);
+}
+
+// ─── Static Scene Generator ─────────────────────────────────────────────────
+
+const SCENE_PALETTES = {
+  warm:     { label: 'Warm Ambience',   colors: [{red:255,green:147,blue:41},{red:255,green:100,blue:20},{red:255,green:180,blue:80}] },
+  cool:     { label: 'Cool / Blue',     colors: [{red:0,green:100,blue:255},{red:0,green:180,blue:220},{red:50,green:50,blue:200}] },
+  party:    { label: 'Party Colours',   colors: [{red:255,green:0,blue:128},{red:0,green:255,blue:128},{red:128,green:0,blue:255},{red:255,green:255,blue:0}] },
+  elegant:  { label: 'Elegant',         colors: [{red:120,green:0,blue:200},{red:200,green:150,blue:50},{red:180,green:0,blue:180}] },
+  nature:   { label: 'Nature',          colors: [{red:34,green:139,blue:34},{red:255,green:165,blue:0},{red:0,green:200,blue:80}] },
+  sunset:   { label: 'Sunset Gradient', colors: [{red:255,green:60,blue:0},{red:255,green:120,blue:50},{red:200,green:0,blue:100},{red:255,green:200,blue:0}] },
+  ocean:    { label: 'Ocean Blues',     colors: [{red:0,green:60,blue:200},{red:0,green:130,blue:180},{red:0,green:200,blue:200}] },
+  fire:     { label: 'Fire',            colors: [{red:255,green:0,blue:0},{red:255,green:80,blue:0},{red:255,green:160,blue:0}] },
+  pastel:   { label: 'Pastel Soft',     colors: [{red:255,green:182,blue:193},{red:176,green:224,blue:230},{red:221,green:160,blue:221}] },
+  white:    { label: 'Clean White',     colors: [{red:255,green:255,blue:255,white:255}] },
+  rainbow:  { label: 'Rainbow Spread',  colors: [{red:255,green:0,blue:0},{red:255,green:127,blue:0},{red:255,green:255,blue:0},{red:0,green:255,blue:0},{red:0,green:0,blue:255},{red:139,green:0,blue:255}] },
+};
+
+function generateStaticScene({ name, style, colorPalette, fixtures, groups, effects }) {
+  let palette;
+  if (style === 'random' || !SCENE_PALETTES[style]) {
+    const keys = Object.keys(SCENE_PALETTES);
+    palette = SCENE_PALETTES[keys[Math.floor(Math.random() * keys.length)]];
+  } else {
+    palette = SCENE_PALETTES[style];
+  }
+
+  const colors = colorPalette || palette.colors;
+  const entries = [];
+  let sortOrder = 0;
+
+  // Separate fixtures by category
+  const colorFixtures = fixtures.filter(f =>
+    f.channels.some(ch => ['red', 'green', 'blue', 'white'].includes(ch.type))
+  );
+  const moverFixtures = fixtures.filter(f => f.category === 'moving_head');
+  const dimmerOnlyFixtures = fixtures.filter(f =>
+    f.channels.every(ch => !['red', 'green', 'blue', 'white'].includes(ch.type)) &&
+    f.channels.some(ch => ch.type === 'dimmer')
+  );
+
+  // Assign colors to colour fixtures in round-robin
+  for (let i = 0; i < colorFixtures.length; i++) {
+    const fix = colorFixtures[i];
+    const color = colors[i % colors.length];
+    const cv = { ...color };
+    // Add dimmer if fixture has one
+    if (fix.channels.some(ch => ch.type === 'dimmer')) {
+      cv.dimmer = 255;
+    }
+    entries.push({
+      fixture_id: fix.id,
+      channel_values: cv,
+      label: `${fix.name} — ${palette.label}`,
+      sort_order: sortOrder++,
+    });
+  }
+
+  // Give movers a static position + color
+  for (let i = 0; i < moverFixtures.length; i++) {
+    const fix = moverFixtures[i];
+    const color = colors[i % colors.length];
+    const cv = {
+      ...color,
+      dimmer: 255,
+      pan: 128,
+      tilt: 128 + Math.round((i - moverFixtures.length / 2) * 20),
+    };
+    entries.push({
+      fixture_id: fix.id,
+      channel_values: cv,
+      label: `${fix.name} — position`,
+      sort_order: sortOrder++,
+    });
+  }
+
+  // Dimmer-only fixtures at a warm level
+  for (const fix of dimmerOnlyFixtures) {
+    entries.push({
+      fixture_id: fix.id,
+      channel_values: { dimmer: 180 },
+      label: `${fix.name} — ambient`,
+      sort_order: sortOrder++,
+    });
+  }
+
+  // Optionally add a slow effect to some fixtures
+  if (effects.length > 0 && colorFixtures.length > 2) {
+    // Find a pulse or color_wave effect
+    const gentleEffect = effects.find(e => e.type === 'pulse') ||
+                          effects.find(e => e.type === 'color_wave') ||
+                          effects.find(e => e.type === 'color_fade');
+    if (gentleEffect) {
+      // Apply effect to about half the colour fixtures
+      const effectFixtures = colorFixtures.slice(0, Math.ceil(colorFixtures.length / 2));
+      for (let i = 0; i < effectFixtures.length; i++) {
+        const fix = effectFixtures[i];
+        const color = colors[i % colors.length];
+        // Update the existing entry to add an effect instead of creating duplicate
+        const existing = entries.find(e => e.fixture_id === fix.id);
+        if (existing) {
+          existing.effect_id = gentleEffect.id;
+          existing.effect_params = { frequency: 0.3, speed: 0.5 };
+        }
+      }
+    }
+  }
+
+  return {
+    name,
+    description: `Auto-generated ${palette.label} scene with ${entries.length} fixtures`,
+    entries,
+  };
+}
+
+// Check if any sequence is currently playing — used to decide scene activation
+function isAnySequencePlaying() {
+  for (const [, ds] of Object.entries(activeSequences)) {
+    if (ds && ds.playing) return true;
+  }
+  return false;
+}
+
 // ─── Sequence Playback Engine ───────────────────────────────────────────────
 
 const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... } }
@@ -1951,6 +2596,11 @@ function mapValueToRange(value, channel, rangeType) {
   return Math.round(range.min + (value / 255) * (range.max - range.min));
 }
 
+/** Apply channel invert flag (flips 0-255 → 255-0). */
+function applyInvert(value, channel) {
+  return channel.invert ? 255 - value : value;
+}
+
 /**
  * Called on each time update to drive the sequence engine.
  * Finds active cues at the current position and sends DMX values.
@@ -2100,9 +2750,14 @@ function processSequenceAtTime(deckNum, timeMs) {
         value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
       } else if (cue.cue_type === 'effect' && cue.effect_id) {
         const effect = db.getEffect(cue.effect_id);
-        if (effect) {
+        if (effect && isFixtureCompatibleWithEffect(effect, fixMap)) {
           const channelCtx = buildChannelCtx(ch, fixMap);
           value = computeEffectValue(effect, ch.type, progress, channelVals, cue.effect_params || {}, channelCtx);
+          // If the effect doesn't control this channel (e.g. motion effect → color channels),
+          // fall back to the cue's base channel value so colours/dimmer still get sent.
+          if (value === null || value === undefined) {
+            value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
+          }
         }
       }
 
@@ -2118,7 +2773,7 @@ function processSequenceAtTime(deckNum, timeMs) {
         if (!skipRangeMap) {
           finalValue = mapValueToRange(finalValue, ch, ch.type);
         }
-        channelUpdates[universe][ch.dmx_address] = Math.max(0, Math.min(255, finalValue));
+        channelUpdates[universe][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, finalValue)), ch);
       }
     }
   }
@@ -2152,10 +2807,42 @@ function pseudoRandom(seed) {
  * @param {Object} params       - Per-cue effect_params overrides
  * @param {Object} [channelCtx] - { channel_number, total_channels } for cell-aware effects
  */
+// ── Effect↔Fixture compatibility helpers ───────────────────────────────────
+const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
+const MULTICELL_EFFECT_TYPES   = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
+const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
+const PAN_TILT = new Set(['pan','tilt']);
+const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv']);
+
+/**
+ * Check whether a fixture is compatible with an effect's fixture_target.
+ * Returns false if the fixture should be skipped entirely.
+ */
+function isFixtureCompatibleWithEffect(effect, fix) {
+  const target = effect.fixture_target || 'all';
+  if (target === 'all') return true;
+  if (target === 'moving_head') {
+    return fix.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt');
+  }
+  if (target === 'multicell') {
+    return (fix.cell_count || 0) > 0;
+  }
+  if (target === 'color') {
+    return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
+  }
+  return true;
+}
+
 function computeEffectValue(effect, channelType, progress, baseValues, params, channelCtx) {
   const data = effect.effect_data || {};
   const type = effect.type;
   channelCtx = channelCtx || { channel_number: 1, total_channels: 1 };
+
+  // ── Channel-type guards ─────────────────────────────────────────────
+  // Moving head effects only produce values for pan/tilt channels
+  if (MOVING_HEAD_EFFECT_TYPES.has(type) && !PAN_TILT.has(channelType)) return null;
+  // Non-mover effects must NEVER write to pan/tilt channels
+  if (!MOVING_HEAD_EFFECT_TYPES.has(type) && PAN_TILT.has(channelType)) return null;
 
   // Helper: resolve channels-per-cell (legacy heuristic)
   const getCpp = () => params.channels_per_cell || data.channels_per_cell || 3;
@@ -2368,6 +3055,197 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       }
       if (dir === 'right') return cellIndex >= cellCount - litCells ? val : 0;
       return cellIndex < litCells ? val : 0;  // left (default)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  MOVING HEAD EFFECTS (pan/tilt)
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Pan Sweep: sweep pan channel back and forth ────────────────────
+    case 'pan_sweep': {
+      const speed = params.speed || data.speed || 1;
+      const range = params.range || data.range || 1.0;
+      const center = 128;
+      const amplitude = 127 * range;
+      const cycle = (progress * speed) % 1;
+      // Pan sweeps, tilt holds center
+      if (channelType === 'pan') return center + amplitude * Math.sin(cycle * 2 * Math.PI);
+      if (channelType === 'tilt') return center;
+      return null;
+    }
+
+    // ── Tilt Sweep: sweep tilt channel back and forth ──────────────────
+    case 'tilt_sweep': {
+      const speed = params.speed || data.speed || 1;
+      const range = params.range || data.range || 1.0;
+      const center = 128;
+      const amplitude = 127 * range;
+      const cycle = (progress * speed) % 1;
+      // Tilt sweeps, pan holds center
+      if (channelType === 'tilt') return center + amplitude * Math.sin(cycle * 2 * Math.PI);
+      if (channelType === 'pan') return center;
+      return null;
+    }
+
+    // ── Circle: circular pan/tilt motion ───────────────────────────────
+    case 'circle': {
+      const speed = params.speed || data.speed || 1;
+      const size = params.size || data.size || 0.5;
+      const cycle = (progress * speed) % 1;
+      const angle = cycle * 2 * Math.PI;
+      const amplitude = 127 * size;
+      if (channelType === 'pan') return 128 + amplitude * Math.cos(angle);
+      if (channelType === 'tilt') return 128 + amplitude * Math.sin(angle);
+      return null;
+    }
+
+    // ── Figure Eight: lissajous figure-8 pattern ───────────────────────
+    case 'figure_eight': {
+      const speed = params.speed || data.speed || 1;
+      const size = params.size || data.size || 0.5;
+      const cycle = (progress * speed) % 1;
+      const angle = cycle * 2 * Math.PI;
+      const amplitude = 127 * size;
+      if (channelType === 'pan') return 128 + amplitude * Math.sin(angle);
+      if (channelType === 'tilt') return 128 + amplitude * Math.sin(angle * 2);
+      return null;
+    }
+
+    // ── Random Movement: pseudo-random position changes ────────────────
+    case 'random_move': {
+      const speed = params.speed || data.speed || 1;
+      const range = params.range || data.range || 0.5;
+      if (channelType !== 'pan' && channelType !== 'tilt') return null;
+
+      const t = progress * speed * 10;
+      const slot = Math.floor(t);
+      const frac = t - slot;
+      const seed1 = channelType === 'pan' ? 137 : 251;
+      const pos1 = pseudoRandom(slot * seed1) * 2 - 1;
+      const pos2 = pseudoRandom((slot + 1) * seed1) * 2 - 1;
+      // Smooth interpolation between random positions
+      const smooth = frac * frac * (3 - 2 * frac); // smoothstep
+      const pos = pos1 + (pos2 - pos1) * smooth;
+      return 128 + 127 * range * pos;
+    }
+
+    // ── Fan: spread movers out from center position ────────────────────
+    case 'fan': {
+      const speed = params.speed || data.speed || 0.5;
+      const spread = params.spread || data.spread || 1.0;
+      if (channelType !== 'pan' && channelType !== 'tilt') return null;
+
+      // Use fixture-level index from channel context
+      // For multi-fixture groups, channelCtx provides the fixture's pan/tilt ordinal
+      const panChannels = (channelCtx._fixtureCount || 1);
+      const fixtureOrdinal = (channelCtx._fixtureOrdinal || 0);
+      const normalizedIdx = panChannels > 1 ? (fixtureOrdinal / (panChannels - 1) - 0.5) : 0;
+
+      const cycle = (progress * speed) % 1;
+      const currentSpread = spread * Math.sin(cycle * Math.PI);
+      if (channelType === 'tilt') return 128 + 127 * normalizedIdx * currentSpread;
+      if (channelType === 'pan') return 128; // Pan stays centered
+      return null;
+    }
+
+    // ── Nod/Shake: rapid small oscillation on one axis ─────────────────
+    case 'nod': {
+      const speed = params.speed || data.speed || 2;
+      const range = params.range || data.range || 0.3;
+      const axis = params.axis || data.axis || 'tilt';
+      if (channelType === axis) return 128 + 127 * range * Math.sin(((progress * speed) % 1) * 2 * Math.PI);
+      // Hold the other axis at center
+      if (channelType === 'pan' || channelType === 'tilt') return 128;
+      return null;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  MULTICELL-SPECIFIC EFFECTS
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Segments: alternating on/off cell groups that shift ─────────────
+    case 'segments': {
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const segSize = params.segment_size || data.segment_size || 2;
+      const speed = params.offset_speed || data.offset_speed || 1;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const offset = Math.floor(progress * speed * cellCount);
+      const pos = (cellIndex + offset) % (segSize * 2);
+      return pos < segSize ? val : 0;
+    }
+
+    // ── Ripple: expanding rings from center ────────────────────────────
+    case 'ripple': {
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const speed = params.speed || data.speed || 1;
+      const width = params.width || data.width || 3;
+      const decay = params.decay || data.decay || 0.7;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const center = (cellCount - 1) / 2;
+      const dist = Math.abs(cellIndex - center);
+      const waveFront = progress * speed * cellCount;
+      const delta = Math.abs(dist - waveFront);
+      if (delta < width) {
+        const intensity = (1 - delta / width) * Math.pow(decay, Math.floor(waveFront / cellCount));
+        return val * Math.max(0, intensity);
+      }
+      return 0;
+    }
+
+    // ── Cell Strobe: strobe individual cells sequentially or randomly ──
+    case 'cell_strobe': {
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const freq = params.frequency || data.frequency || 8;
+      const pattern = params.pattern || data.pattern || 'sequential';
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const beat = Math.floor(progress * freq);
+      let activeCell;
+      if (pattern === 'random') {
+        activeCell = Math.floor(pseudoRandom(beat * 997) * cellCount);
+      } else {
+        activeCell = beat % cellCount;
+      }
+      return cellIndex === activeCell ? val : 0;
+    }
+
+    // ── Gradient: smooth color gradient across cells ───────────────────
+    case 'gradient': {
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      if (isMaster) return baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const speed = params.speed || data.speed || 1;
+      const colors = data.colors || ['#ff0000', '#0000ff'];
+      if (!['red', 'green', 'blue'].includes(channelType)) {
+        if (channelType === 'dimmer') return 255;
+        return null;
+      }
+
+      // Position in gradient (0-1), shifts with time
+      const pos = ((cellIndex / Math.max(1, cellCount - 1)) + progress * speed) % 1;
+      // Interpolate between gradient color stops
+      const segmentCount = colors.length - 1;
+      const segPos = pos * segmentCount;
+      const segIdx = Math.min(Math.floor(segPos), segmentCount - 1);
+      const segFrac = segPos - segIdx;
+
+      function hexToRgb(hex) {
+        const m = hex.replace('#', '');
+        return { r: parseInt(m.slice(0, 2), 16), g: parseInt(m.slice(2, 4), 16), b: parseInt(m.slice(4, 6), 16) };
+      }
+      const c1 = hexToRgb(colors[segIdx]);
+      const c2 = hexToRgb(colors[Math.min(segIdx + 1, colors.length - 1)]);
+      const r = Math.round(c1.r + (c2.r - c1.r) * segFrac);
+      const g = Math.round(c1.g + (c2.g - c1.g) * segFrac);
+      const b = Math.round(c1.b + (c2.b - c1.b) * segFrac);
+
+      if (channelType === 'red') return r;
+      if (channelType === 'green') return g;
+      if (channelType === 'blue') return b;
+      return null;
     }
 
     default:
