@@ -1432,6 +1432,23 @@
       <div class="qa-grid effects-lib-page" id="efxTabAll" data-efxtab="all" style="display:none"></div>
     </div>
     <div class="qa-section">
+      <h3>Effect Speed</h3>
+      <div class="qa-strobe-ctrl">
+        <div class="qa-strobe-row">
+          <label>Speed</label>
+          <input type="range" id="qaEffectSpeed" min="10" max="300" value="100" step="5">
+          <span id="qaEffectSpeedVal" class="qa-strobe-val" style="color:var(--accent);min-width:48px">1.00×</span>
+        </div>
+        <div class="qa-strobe-actions">
+          <button class="btn btn-secondary btn-sm" onclick="setEffectSpeed(50)">0.5×</button>
+          <button class="btn btn-secondary btn-sm" onclick="setEffectSpeed(75)">0.75×</button>
+          <button class="btn btn-primary btn-sm" onclick="setEffectSpeed(100)">1×</button>
+          <button class="btn btn-secondary btn-sm" onclick="setEffectSpeed(150)">1.5×</button>
+          <button class="btn btn-secondary btn-sm" onclick="setEffectSpeed(200)">2×</button>
+        </div>
+      </div>
+    </div>
+    <div class="qa-section">
       <h3>Strobe</h3>
       <div class="qa-strobe-ctrl">
         <div class="qa-strobe-row">
@@ -2805,6 +2822,11 @@ function connect() {
     else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
     else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing' || msg.type === 'seq_time') { handleSeqWsMessage(msg); }
     else if (msg.type === 'scene_activated' || msg.type === 'scene_deactivated') { handleSceneWsMessage(msg); }
+    else if (msg.type === 'effectSpeed') {
+      const pct = Math.round(msg.value * 100);
+      document.getElementById('qaEffectSpeed').value = pct;
+      document.getElementById('qaEffectSpeedVal').textContent = msg.value.toFixed(2) + '×';
+    }
     else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     else logEvent({ evtType: msg.type || 'event', raw: msg });
   };
@@ -5433,6 +5455,27 @@ function sendStrobeValue(value) {
   }
 }
 
+// ─── Effect Speed Control ─────────────────────────────────────────────────
+document.getElementById('qaEffectSpeed').addEventListener('input', () => {
+  const raw = +document.getElementById('qaEffectSpeed').value;
+  const val = (raw / 100).toFixed(2);
+  document.getElementById('qaEffectSpeedVal').textContent = val + '×';
+  fetch('/api/touch/effect-speed', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ value: parseFloat(val) }),
+  });
+});
+
+function setEffectSpeed(pct) {
+  document.getElementById('qaEffectSpeed').value = pct;
+  const val = (pct / 100).toFixed(2);
+  document.getElementById('qaEffectSpeedVal').textContent = val + '×';
+  fetch('/api/touch/effect-speed', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ value: parseFloat(val) }),
+  });
+}
+
 document.getElementById('qaStrobeApply').addEventListener('click', () => {
   const val = +document.getElementById('qaStrobeSpeed').value;
   sendStrobeValue(val);
@@ -5660,7 +5703,14 @@ function buildQaGrid(gridId, items) {
 }
 
 // ─── Effects Library Grid for Quick Actions ───────────────────────────
-let qaActiveEffectId = null; // currently running effect ID
+const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
+const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
+function getEffectSlot(type) {
+  if (MOTION_TYPES.has(type)) return 'motion';
+  if (MULTICELL_TYPES.has(type)) return 'multicell';
+  return 'color';
+}
+const qaActiveEffects = {}; // { color: effectId, motion: effectId, multicell: effectId }
 
 const EFFECT_STYLE = {
   pulse:      { bg: '#7c4dff', fg: '#fff', border: '#b388ff', icon: '💜' },
@@ -5774,22 +5824,30 @@ async function buildEffectsLibraryGrid() {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       if (targetIds.length === 0) return;
-      if (qaActiveEffectId === effect.id) {
-        await fetch('/api/effects/stop', { method: 'POST' });
-        qaActiveEffectId = null;
-        document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+      const slot = getEffectSlot(effect.type);
+      if (qaActiveEffects[slot] === effect.id) {
+        // Clicking the active effect in this slot → stop just this slot
+        await fetch('/api/effects/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot }),
+        });
+        delete qaActiveEffects[slot];
+        document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
       } else {
         await fetch('/api/effects/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ effectId: effect.id, fixtureIds: targetIds }),
         });
-        qaActiveEffectId = effect.id;
-        document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+        qaActiveEffects[slot] = effect.id;
+        // Only clear toggled state for buttons in the same slot
+        document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
         btn.classList.add('toggled-on');
       }
     });
 
+    btn.dataset.slot = getEffectSlot(effect.type);
     return btn;
   }
 
@@ -5802,22 +5860,32 @@ async function buildEffectsLibraryGrid() {
     }
   }
 
-  // Add a "Stop Effect" button to each tab
-  for (const id of Object.values(tabIds)) {
+  // Add a "Stop" button to each tab
+  const tabSlotMap = { efxTabColor: 'color', efxTabMotion: 'motion', efxTabMulticell: 'multicell', efxTabAll: null };
+  for (const [id, slot] of Object.entries(tabSlotMap)) {
     const grid = document.getElementById(id);
-    if (!grid || grid.children.length === 0) {
-      grid.innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects in this category.</span>';
+    if (!grid || grid.querySelectorAll('.qa-effect-lib-btn').length === 0) {
+      if (grid) grid.innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects in this category.</span>';
       continue;
     }
     const stopBtn = document.createElement('button');
     stopBtn.className = 'qa-btn';
     stopBtn.style.cssText = 'background:#c62828;color:#fff;border-color:#ef5350';
-    stopBtn.textContent = '⏹ Stop';
+    stopBtn.textContent = slot ? '⏹ Stop' : '⏹ Stop All';
     stopBtn.addEventListener('click', async (e) => {
       e.preventDefault();
-      await fetch('/api/effects/stop', { method: 'POST' });
-      qaActiveEffectId = null;
-      document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+      await fetch('/api/effects/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(slot ? { slot } : {}),
+      });
+      if (slot) {
+        delete qaActiveEffects[slot];
+        document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
+      } else {
+        for (const k of Object.keys(qaActiveEffects)) delete qaActiveEffects[k];
+        document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+      }
     });
     grid.appendChild(stopBtn);
   }

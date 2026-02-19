@@ -1082,6 +1082,7 @@ const touchOverrides = {
   disabledFixtures: new Set(),   // fixture IDs disabled from touch UI
   blackoutHold: false,           // true while blackout is held (OS2L or touch)
   masterDimmer: 255,             // 0-255 master dimmer level (scales all intensity/color output)
+  effectSpeed: 1.0,              // master effect speed multiplier (0.1 – 3.0)
 };
 
 app.get('/api/dmx/output', (req, res) => {
@@ -1122,6 +1123,7 @@ app.get('/api/touch/state', (req, res) => {
     disabledFixtures: [...touchOverrides.disabledFixtures],
     blackoutHold: touchOverrides.blackoutHold,
     masterDimmer: touchOverrides.masterDimmer,
+    effectSpeed: touchOverrides.effectSpeed,
   });
 });
 
@@ -1162,6 +1164,14 @@ app.post('/api/touch/master-dimmer', (req, res) => {
   touchOverrides.masterDimmer = val;
   broadcast({ type: 'masterDimmer', value: val });
   res.json({ ok: true, masterDimmer: val });
+});
+
+app.post('/api/touch/effect-speed', (req, res) => {
+  const val = Math.max(0.1, Math.min(3.0, parseFloat(req.body.value) || 1.0));
+  touchOverrides.effectSpeed = val;
+  broadcast({ type: 'effectSpeed', value: val });
+  console.log(`[TOUCH] Effect speed = ${val.toFixed(2)}x`);
+  res.json({ ok: true, effectSpeed: val });
 });
 
 // ─── OS2L Button Maps API ───────────────────────────────────────────────────
@@ -1470,27 +1480,52 @@ app.delete('/api/effects/:id', (req, res) => {
 });
 
 // ─── Quick Action Effects Runner ────────────────────────────────────────────
+// Supports concurrent effects in different categories (color, motion, multicell).
+// Each category slot can run one effect at a time; starting a new effect in the
+// same category replaces the previous one without affecting other categories.
 
-let runningQaEffect = null; // { timer, effectId, fixtureIds }
+const runningQaEffects = {}; // { color: { timer, effectId, fixtureIds }, motion: ..., multicell: ... }
 
-function stopRunningEffect(skipBlackout) {
-  if (runningQaEffect) {
-    clearInterval(runningQaEffect.timer);
+/**
+ * Determine which slot category an effect belongs to.
+ */
+function getEffectSlot(effectType) {
+  if (MOVING_HEAD_EFFECT_TYPES.has(effectType)) return 'motion';
+  if (MULTICELL_EFFECT_TYPES.has(effectType)) return 'multicell';
+  return 'color';
+}
+
+/**
+ * Stop a specific effect slot, or all slots if no slot specified.
+ * @param {string} [slot] - 'color', 'motion', or 'multicell'. Omit to stop all.
+ * @param {boolean} [skipBlackout] - If true, don't send cleanup values (for seamless switching).
+ */
+function stopRunningEffect(slot, skipBlackout) {
+  const slotsToStop = slot ? [slot] : Object.keys(runningQaEffects);
+
+  for (const s of slotsToStop) {
+    const running = runningQaEffects[s];
+    if (!running) continue;
+
+    clearInterval(running.timer);
+
     if (!skipBlackout) {
-      // Send cleanup values: color/dimmer to 0, pan/tilt to home
       const fixMap = db.getFixtureChannelMap();
       const channelUpdates = {};
-      for (const fixtureId of runningQaEffect.fixtureIds) {
+      for (const fixtureId of running.fixtureIds) {
         const fix = fixMap.find(f => f.id === fixtureId);
         if (!fix) continue;
         for (const ch of fix.channels) {
-          if (['red','green','blue','white','dimmer','pan','tilt'].includes(ch.type)) {
-            if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
-            // Reset color/dimmer to 0, but pan/tilt to home position
-            let resetVal = 0;
-            if (ch.type === 'pan') resetVal = fix.home_pan ?? 128;
-            else if (ch.type === 'tilt') resetVal = fix.home_tilt ?? 128;
-            channelUpdates[fix.universe][ch.dmx_address] = resetVal;
+          if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
+          if (s === 'motion') {
+            // Motion slot: only reset pan/tilt to home
+            if (ch.type === 'pan') channelUpdates[fix.universe][ch.dmx_address] = fix.home_pan ?? 128;
+            else if (ch.type === 'tilt') channelUpdates[fix.universe][ch.dmx_address] = fix.home_tilt ?? 128;
+          } else {
+            // Color/multicell slot: zero out color & dimmer channels
+            if (COLOR_CHANNELS.has(ch.type)) {
+              channelUpdates[fix.universe][ch.dmx_address] = 0;
+            }
           }
         }
       }
@@ -1502,17 +1537,21 @@ function stopRunningEffect(skipBlackout) {
         }
       }
     }
-    runningQaEffect = null;
+
+    delete runningQaEffects[s];
   }
 }
 
 app.post('/api/effects/run', (req, res) => {
   const { effectId, fixtureIds } = req.body;
-  stopRunningEffect(true); // skip blackout — new effect takes over immediately
 
   const effect = db.getEffect(effectId);
   if (!effect) return res.status(404).json({ error: 'Effect not found' });
   if (!fixtureIds || fixtureIds.length === 0) return res.status(400).json({ error: 'No fixtures specified' });
+
+  const slot = getEffectSlot(effect.type);
+  // Only stop the same slot — other categories keep running
+  stopRunningEffect(slot, true); // skip blackout for seamless switching
 
   const startTime = Date.now();
   const fixMap = db.getFixtureChannelMap();
@@ -1520,18 +1559,16 @@ app.post('/api/effects/run', (req, res) => {
   const timer = setInterval(() => {
     if (!dmxOutputEnabled) return;
 
-    const elapsed = (Date.now() - startTime) / 1000;
+    const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
     const channelUpdates = {};
 
     for (let fi = 0; fi < fixtureIds.length; fi++) {
       const fixtureId = fixtureIds[fi];
       const fix = fixMap.find(f => f.id === fixtureId);
       if (!fix) continue;
-      // Skip fixtures that aren't compatible with this effect's target
       if (!isFixtureCompatibleWithEffect(effect, fix)) continue;
 
       for (const ch of fix.channels) {
-        // For color_fade, cycle every 4 seconds; for others, use raw elapsed
         let progress;
         if (effect.type === 'color_fade') {
           progress = (elapsed % 4) / 4;
@@ -1541,14 +1578,9 @@ app.post('/api/effects/run', (req, res) => {
 
         const baseValues = { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
         const channelCtx = buildChannelCtx(ch, fix);
-        // Add fixture ordinal for multi-fixture effects (fan, etc.)
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
         let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
-
-        // QA runner: only send channels the effect actually controls.
-        // Don't fall back to base values — that would override user's current
-        // color/dimmer settings with full white.
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
@@ -1565,26 +1597,22 @@ app.post('/api/effects/run', (req, res) => {
         dmxUsbServer.setChannels(+u, channels);
       }
     }
-  }, 25); // ~40 Hz
+  }, 25);
 
-  runningQaEffect = { timer, effectId, fixtureIds };
-  console.log(`[QA] Started effect "${effect.name}" (type=${effect.type}, target=${effect.fixture_target}) on ${fixtureIds.length} fixture(s): [${fixtureIds.join(',')}]`);
-  // Debug: log fixture compatibility
-  for (const fid of fixtureIds) {
-    const fix = fixMap.find(f => f.id === fid);
-    if (fix) {
-      const compat = isFixtureCompatibleWithEffect(effect, fix);
-      console.log(`[QA]   fixture ${fid} "${fix.name}" cell_count=${fix.cell_count} channels=${fix.channels.length} compatible=${compat}`);
-    }
-  }
-  res.json({ ok: true });
+  runningQaEffects[slot] = { timer, effectId, fixtureIds };
+  console.log(`[QA] Started ${slot} effect "${effect.name}" (type=${effect.type}) on ${fixtureIds.length} fixture(s): [${fixtureIds.join(',')}]`);
+  const activeSlots = Object.keys(runningQaEffects);
+  if (activeSlots.length > 1) console.log(`[QA]   Concurrent slots active: ${activeSlots.join(', ')}`);
+  res.json({ ok: true, slot });
 });
 
 app.post('/api/effects/stop', (req, res) => {
-  if (runningQaEffect) {
-    console.log(`[QA] Stopped running effect`);
+  const { slot } = req.body || {};
+  const slotsActive = Object.keys(runningQaEffects);
+  if (slotsActive.length > 0) {
+    console.log(`[QA] Stopping ${slot || 'all'} effect(s) (active: ${slotsActive.join(', ')})`);
   }
-  stopRunningEffect();
+  stopRunningEffect(slot || undefined);
   res.json({ ok: true });
 });
 
@@ -2218,7 +2246,7 @@ function applySceneStaticValues(scene) {
 function processSceneEffects(scene, startTime) {
   const fixMap = db.getFixtureChannelMap();
   const channelUpdates = {};
-  const elapsed = (Date.now() - startTime) / 1000;
+  const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
 
   for (const entry of scene.entries) {
     if (!entry.effect_id) continue;
@@ -2784,7 +2812,7 @@ function processSequenceAtTime(deckNum, timeMs) {
         const effect = db.getEffect(cue.effect_id);
         if (effect && isFixtureCompatibleWithEffect(effect, fixMap)) {
           const channelCtx = buildChannelCtx(ch, fixMap);
-          value = computeEffectValue(effect, ch.type, progress, channelVals, cue.effect_params || {}, channelCtx);
+          value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, channelVals, cue.effect_params || {}, channelCtx);
           // If the effect doesn't control this channel (e.g. motion effect → color channels),
           // fall back to the cue's base channel value so colours/dimmer still get sent.
           if (value === null || value === undefined) {

@@ -102,6 +102,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
   }
   // Non-mover effects must NEVER write to pan/tilt channels
   if (!MOVING_HEAD_EFFECT_TYPES.has(type) && PAN_TILT.has(channelType)) return null;
+  // Color effects must only affect color/intensity channels (not gobo, prism, focus, etc.)
+  if (COLOR_EFFECT_TYPES.has(type) && !COLOR_CHANNELS.has(channelType)) return null;
 
   // Helper: resolve channels-per-cell (legacy heuristic)
   const getCpp = () => params.channels_per_cell || data.channels_per_cell || 3;
@@ -134,6 +136,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ══════════════════════════════════════════════════════════════════════
 
     case 'pulse': {
+      // Pulse only color/white channels; pass dimmer through unchanged
+      if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
       const freq = params.frequency || data.frequency || 1;
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       return val * (0.5 + 0.5 * Math.sin(progress * freq * 2 * Math.PI));
@@ -149,6 +153,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'strobe': {
+      // Strobe only color/white channels; pass dimmer through unchanged
+      if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
       const hz = params.frequency || data.frequency || 10;
       const period = 1 / hz;
       const phase = (progress % period) / period;
@@ -157,6 +163,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'color_fade': {
+      // Only fade actual color channels; pass dimmer through unchanged
+      if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
       const startColor = data.start_color || {};
       const endColor = data.end_color || {};
       const startVal = startColor[channelType] !== undefined ? startColor[channelType] : 0;
