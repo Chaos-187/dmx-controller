@@ -1473,37 +1473,42 @@ app.delete('/api/effects/:id', (req, res) => {
 
 let runningQaEffect = null; // { timer, effectId, fixtureIds }
 
-function stopRunningEffect() {
+function stopRunningEffect(skipBlackout) {
   if (runningQaEffect) {
-    // Send zeros to all affected channels to clean up
-    const fixMap = db.getFixtureChannelMap();
-    const channelUpdates = {};
-    for (const fixtureId of runningQaEffect.fixtureIds) {
-      const fix = fixMap.find(f => f.id === fixtureId);
-      if (!fix) continue;
-      for (const ch of fix.channels) {
-        if (['red','green','blue','white','dimmer','pan','tilt'].includes(ch.type)) {
-          if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
-          // Reset color/dimmer to 0, but pan/tilt to center (128)
-          channelUpdates[fix.universe][ch.dmx_address] = (ch.type === 'pan' || ch.type === 'tilt') ? 128 : 0;
+    clearInterval(runningQaEffect.timer);
+    if (!skipBlackout) {
+      // Send cleanup values: color/dimmer to 0, pan/tilt to home
+      const fixMap = db.getFixtureChannelMap();
+      const channelUpdates = {};
+      for (const fixtureId of runningQaEffect.fixtureIds) {
+        const fix = fixMap.find(f => f.id === fixtureId);
+        if (!fix) continue;
+        for (const ch of fix.channels) {
+          if (['red','green','blue','white','dimmer','pan','tilt'].includes(ch.type)) {
+            if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
+            // Reset color/dimmer to 0, but pan/tilt to home position
+            let resetVal = 0;
+            if (ch.type === 'pan') resetVal = fix.home_pan ?? 128;
+            else if (ch.type === 'tilt') resetVal = fix.home_tilt ?? 128;
+            channelUpdates[fix.universe][ch.dmx_address] = resetVal;
+          }
+        }
+      }
+      for (const [u, chMap] of Object.entries(channelUpdates)) {
+        const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
+        if (channels.length > 0) {
+          artnetServer.setChannels(+u, channels);
+          dmxUsbServer.setChannels(+u, channels);
         }
       }
     }
-    for (const [u, chMap] of Object.entries(channelUpdates)) {
-      const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
-      if (channels.length > 0) {
-        artnetServer.setChannels(+u, channels);
-        dmxUsbServer.setChannels(+u, channels);
-      }
-    }
-    clearInterval(runningQaEffect.timer);
     runningQaEffect = null;
   }
 }
 
 app.post('/api/effects/run', (req, res) => {
   const { effectId, fixtureIds } = req.body;
-  stopRunningEffect();
+  stopRunningEffect(true); // skip blackout — new effect takes over immediately
 
   const effect = db.getEffect(effectId);
   if (!effect) return res.status(404).json({ error: 'Effect not found' });
@@ -2237,7 +2242,7 @@ function processSceneEffects(scene, startTime) {
           progress = elapsed;
         }
 
-        const baseValues = entry.channel_values || { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
+        const baseValues = { dimmer: 255, ...(entry.channel_values || { red: 255, green: 255, blue: 255, white: 255 }) };
         const channelCtx = buildChannelCtx(ch, fix);
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
@@ -2320,7 +2325,11 @@ function blackoutSceneFixtures(scene) {
       const u = fix.universe;
       if (!channelUpdates[u]) channelUpdates[u] = {};
       for (const ch of fix.channels) {
-        channelUpdates[u][ch.dmx_address] = 0;
+        // Send pan/tilt to home position, everything else to 0
+        let resetVal = 0;
+        if (ch.type === 'pan') resetVal = fix.home_pan ?? 128;
+        else if (ch.type === 'tilt') resetVal = fix.home_tilt ?? 128;
+        channelUpdates[u][ch.dmx_address] = resetVal;
       }
     }
   }
@@ -2779,7 +2788,8 @@ function processSequenceAtTime(deckNum, timeMs) {
           // If the effect doesn't control this channel (e.g. motion effect → color channels),
           // fall back to the cue's base channel value so colours/dimmer still get sent.
           if (value === null || value === undefined) {
-            value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
+            value = channelVals[ch.type] !== undefined ? channelVals[ch.type]
+                  : (ch.type === 'dimmer' ? 255 : null);
           }
         }
       }

@@ -94,8 +94,12 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
   channelCtx = channelCtx || { channel_number: 1, total_channels: 1 };
 
   // ── Channel-type guards ─────────────────────────────────────────────
-  // Moving head effects only produce values for pan/tilt channels
-  if (MOVING_HEAD_EFFECT_TYPES.has(type) && !PAN_TILT.has(channelType)) return null;
+  // Moving head effects only produce values for pan/tilt channels,
+  // but always pass through the dimmer so the light actually turns on.
+  if (MOVING_HEAD_EFFECT_TYPES.has(type) && !PAN_TILT.has(channelType)) {
+    if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
+    return null;
+  }
   // Non-mover effects must NEVER write to pan/tilt channels
   if (!MOVING_HEAD_EFFECT_TYPES.has(type) && PAN_TILT.has(channelType)) return null;
 
