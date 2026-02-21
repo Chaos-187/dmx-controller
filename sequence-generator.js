@@ -14,20 +14,20 @@
 const colorPalettes = {
   vibrant: {
     label: 'Vibrant',
-    intro:     [[ {r:0,g:40,b:180},   {r:30,g:80,b:220}  ], [ {r:20,g:0,b:140},   {r:60,g:20,b:200}  ], [ {r:10,g:60,b:120}, {r:40,g:100,b:180} ]],
-    verse:     [[ {r:0,g:200,b:80},   {r:0,g:120,b:255}   ], [ {r:60,g:180,b:0},   {r:0,g:200,b:150}  ], [ {r:120,g:80,b:255}, {r:0,g:180,b:120} ]],
+    intro:     [[ {r:180,g:0,b:60},   {r:0,g:40,b:200}    ], [ {r:0,g:40,b:180},   {r:160,g:0,b:120}  ], [ {r:120,g:0,b:200}, {r:200,g:60,b:0}   ]],
+    verse:     [[ {r:255,g:0,b:40},   {r:0,g:180,b:120}   ], [ {r:0,g:200,b:80},   {r:255,g:60,b:0}   ], [ {r:200,g:0,b:180}, {r:0,g:120,b:255}  ], [ {r:255,g:120,b:0}, {r:0,g:200,b:200} ]],
     chorus:    [[ {r:255,g:0,b:60},   {r:255,g:100,b:0}   ], [ {r:255,g:0,b:200},  {r:255,g:60,b:0}   ], [ {r:200,g:0,b:255}, {r:255,g:0,b:80}  ], [ {r:255,g:40,b:0}, {r:200,g:0,b:200} ]],
-    bridge:    [[ {r:255,g:200,b:0},  {r:200,g:80,b:255}  ], [ {r:180,g:255,b:0},  {r:0,g:180,b:255}  ]],
-    breakdown: [[ {r:0,g:180,b:255},  {r:0,g:60,b:180}    ], [ {r:0,g:120,b:200},  {r:20,g:0,b:100}   ]],
+    bridge:    [[ {r:255,g:200,b:0},  {r:200,g:0,b:160}   ], [ {r:255,g:0,b:100},  {r:0,g:180,b:255}  ], [ {r:180,g:255,b:0}, {r:255,g:40,b:80}  ]],
+    breakdown: [[ {r:0,g:100,b:200},  {r:120,g:0,b:100}   ], [ {r:100,g:0,b:160},  {r:0,g:80,b:180}   ]],
     buildup:   [[ {r:255,g:120,b:0},  {r:255,g:0,b:120}   ], [ {r:200,g:80,b:0},   {r:255,g:40,b:200} ]],
-    drop:      [[ {r:200,g:0,b:255},  {r:255,g:0,b:0}     ], [ {r:255,g:0,b:120},  {r:0,g:0,b:255}    ], [ {r:255,g:50,b:0}, {r:200,g:0,b:255} ], [ {r:255,g:0,b:0}, {r:255,g:255,b:0} ]],
-    outro:     [[ {r:80,g:60,b:120},  {r:20,g:10,b:40}    ], [ {r:60,g:80,b:100},  {r:10,g:20,b:30}   ]],
+    drop:      [[ {r:255,g:0,b:0},    {r:0,g:0,b:255}     ], [ {r:255,g:0,b:120},  {r:255,g:255,b:0}  ], [ {r:255,g:50,b:0}, {r:200,g:0,b:255} ], [ {r:255,g:0,b:0}, {r:0,g:255,b:0} ]],
+    outro:     [[ {r:120,g:30,b:80},  {r:20,g:10,b:40}    ], [ {r:80,g:40,b:100},  {r:40,g:10,b:30}   ]],
   },
   neon: {
     label: 'Neon',
-    intro:     [[ {r:0,g:255,b:100},  {r:0,g:100,b:255}   ], [ {r:100,g:0,b:255},  {r:0,g:255,b:200}  ]],
-    verse:     [[ {r:0,g:255,b:0},    {r:255,g:0,b:255}   ], [ {r:0,g:255,b:255},  {r:255,g:255,b:0}  ], [ {r:255,g:0,b:200}, {r:0,g:255,b:100} ]],
-    chorus:    [[ {r:255,g:0,b:255},  {r:0,g:255,b:0}     ], [ {r:255,g:255,b:0},  {r:0,g:255,b:255}  ], [ {r:0,g:200,b:255}, {r:255,g:0,b:200} ]],
+    intro:     [[ {r:255,g:0,b:80},   {r:0,g:100,b:255}   ], [ {r:100,g:0,b:255},  {r:0,g:255,b:200}  ]],
+    verse:     [[ {r:255,g:0,b:100},  {r:0,g:255,b:0}     ], [ {r:0,g:255,b:255},  {r:255,g:255,b:0}  ], [ {r:255,g:0,b:200}, {r:0,g:255,b:100} ], [ {r:255,g:60,b:0}, {r:0,g:200,b:255} ]],
+    chorus:    [[ {r:255,g:0,b:255},  {r:0,g:255,b:0}     ], [ {r:255,g:255,b:0},  {r:255,g:0,b:0}    ], [ {r:0,g:200,b:255}, {r:255,g:0,b:200} ]],
     bridge:    [[ {r:200,g:255,b:0},  {r:0,g:200,b:255}   ], [ {r:255,g:0,b:150},  {r:0,g:255,b:150}  ]],
     breakdown: [[ {r:0,g:100,b:255},  {r:0,g:60,b:150}    ], [ {r:80,g:0,b:200},   {r:0,g:150,b:200}  ]],
     buildup:   [[ {r:255,g:255,b:0},  {r:255,g:0,b:255}   ], [ {r:0,g:255,b:0},    {r:255,g:100,b:0}  ]],
@@ -203,18 +203,18 @@ function resolveGenrePreset(genreStr) {
 // Palettes are now externalized into colorPalettes above.
 
 const sectionStyles = {
-  intro:     { intensity: [0.15, 0.55], beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
-  verse:     { intensity: [0.45, 0.7],  beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
-  chorus:    { intensity: [0.8, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.2,  strobeDurationBeats: 0.5,  cuePerBars: 1 },
-  bridge:    { intensity: [0.4, 0.65],  beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
-  breakdown: { intensity: [0.1, 0.35],  beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
-  buildup:   { intensity: [0.25, 0.95], beatColorChange: true,  beatColorBars: 1, strobeChance: 0.15, strobeDurationBeats: 0.25, cuePerBars: 1, rampIntensity: true, buildEnergy: true },
-  drop:      { intensity: [0.9, 1.0],   beatColorChange: true,  beatColorBars: 0.5, strobeChance: 0.35, strobeDurationBeats: 0.5, cuePerBars: 0.5, dropEnergy: true },
-  outro:     { intensity: [0.5, 0.1],   beatColorChange: false, strobeChance: 0,    cuePerBars: 4, fadeOut: true },
+  intro:     { intensity: [0.4, 0.75],  beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
+  verse:     { intensity: [0.65, 0.9],   beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
+  chorus:    { intensity: [0.85, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.2,  strobeDurationBeats: 0.5,  cuePerBars: 1 },
+  bridge:    { intensity: [0.6, 0.8],    beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
+  breakdown: { intensity: [0.3, 0.55],   beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
+  buildup:   { intensity: [0.45, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.15, strobeDurationBeats: 0.25, cuePerBars: 1, rampIntensity: true, buildEnergy: true },
+  drop:      { intensity: [0.9, 1.0],    beatColorChange: true,  beatColorBars: 0.5, strobeChance: 0.35, strobeDurationBeats: 0.5, cuePerBars: 0.5, dropEnergy: true },
+  outro:     { intensity: [0.6, 0.2],    beatColorChange: false, strobeChance: 0,    cuePerBars: 4, fadeOut: true },
 };
 
 const defaultStyle = {
-  intensity: [0.4, 0.6],
+  intensity: [0.6, 0.8],
   beatColorChange: false,
   strobeChance: 0,
   cuePerBars: 2,
@@ -246,6 +246,56 @@ function lerpColor(c1, c2, t) {
 
 function rgbToHex(r, g, b) {
   return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Snap a time value to the nearest actual beat in the fluid beat array.
+ * Uses binary search for efficiency.
+ *
+ * @param {number}   timeMs – target time
+ * @param {number[]} beats  – sorted array of beat times (ms)
+ * @returns {number} nearest beat time
+ */
+function snapToBeat(timeMs, beats) {
+  if (!beats || beats.length === 0) return timeMs;
+  // Binary search for insertion point
+  let lo = 0, hi = beats.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (beats[mid] < timeMs) lo = mid + 1;
+    else hi = mid;
+  }
+  // lo is the first beat >= timeMs; compare with lo-1 for closest
+  if (lo === 0) return beats[0];
+  if (lo >= beats.length) return beats[beats.length - 1];
+  const distPrev = Math.abs(timeMs - beats[lo - 1]);
+  const distNext = Math.abs(timeMs - beats[lo]);
+  return distPrev <= distNext ? beats[lo - 1] : beats[lo];
+}
+
+/**
+ * Snap a time value to the nearest bar boundary (every 4th beat) in
+ * the fluid beat array.
+ *
+ * @param {number}   timeMs – target time
+ * @param {number[]} beats  – sorted array of beat times (ms)
+ * @returns {number} nearest bar-start beat time
+ */
+function snapToBar(timeMs, beats) {
+  if (!beats || beats.length < 4) return snapToBeat(timeMs, beats);
+  // Build bar starts (every 4th beat)
+  // We search through bar starts for the nearest
+  let bestDist = Infinity, bestTime = timeMs;
+  for (let i = 0; i < beats.length; i += 4) {
+    const dist = Math.abs(beats[i] - timeMs);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestTime = beats[i];
+    } else if (beats[i] > timeMs + bestDist) {
+      break; // past the closest, no need to continue
+    }
+  }
+  return bestTime;
 }
 
 /** Seeded pseudo-random for deterministic results per track */
@@ -351,7 +401,10 @@ function generateSequence(opts) {
   const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
 
   const cues = [];
-  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs };
+  // Build snapBeat/snapBar functions bound to this track's fluid beat grid
+  const snapBeat = (t) => snapToBeat(t, beats);
+  const snapBar  = (t) => snapToBar(t, beats);
+  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats };
 
   // Multi-cell fixtures get dedicated per-cell patterns, so exclude them
   // from the main section/bar generator to avoid master cues competing.
@@ -467,7 +520,7 @@ function resolveMultiCellConflicts(cues, multiCellFixtures) {
 // ─── Section-based generation ───────────────────────────────────────────────
 
 function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx) {
-  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes } = ctx;
+  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBeat, snapBar } = ctx;
 
   // BPM-adaptive: slow songs get fade transitions, fast songs get snappy statics
   // bpmFactor: 0 = slow (≤90), 1 = fast (≥150)
@@ -483,8 +536,11 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
     for (let si = 0; si < sections.length; si++) {
       const sec = sections[si];
       const style = sectionStyles[sec.label] || defaultStyle;
-      const secStartMs = Math.round(sec.start_ms);
-      const secEndMs = Math.round(sec.end_ms);
+      // Snap inner section boundaries to the nearest beat so cues lock to
+      // the beat grid.  Keep track edges (first start, last end) unsnapped
+      // so the sequence covers the full track without gaps.
+      const secStartMs = si === 0 ? 0 : snapBeat(Math.round(sec.start_ms));
+      const secEndMs = si === sections.length - 1 ? Math.round(durationMs) : snapBeat(Math.round(sec.end_ms));
       const secDurMs = secEndMs - secStartMs;
       if (secDurMs <= 0) continue;
 
@@ -498,28 +554,48 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       const numCues = Math.max(1, Math.floor(secDurMs / cueBarMs));
 
       for (let ci = 0; ci < numCues; ci++) {
-        const cueStart = secStartMs + ci * cueBarMs;
-        const cueEnd = Math.min(cueStart + cueBarMs, secEndMs);
-        const cueDur = cueEnd - cueStart;
+        // Snap each cue start to nearest bar boundary on the beat grid
+        const rawCueStart = secStartMs + ci * cueBarMs;
+        const cueStart = ci === 0 ? secStartMs : snapBar(rawCueStart);
+        const rawNextStart = rawCueStart + cueBarMs;
+        const nextCueStart = ci < numCues - 1 ? snapBar(rawNextStart) : secEndMs;
+        let cueDur = nextCueStart - cueStart;
+        // Guard: ensure minimum cue duration (half a bar) and no negative/tiny cues
+        if (cueDur < barMs * 0.5) cueDur = Math.min(barMs, secEndMs - cueStart);
         if (cueDur <= 0) continue;
 
         // Progress through section (0..1)
         const secProgress = numCues > 1 ? ci / (numCues - 1) : 0.5;
 
-        // Pick palette
+        // Pick palette — rotate through palettes for visual variety
         const paletteCount = palettes.length;
         let paletteIdx;
         if (style.beatColorChange) {
           const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
           paletteIdx = (fiIdx + si + Math.floor(ci / adjustedBars)) % paletteCount;
         } else {
-          paletteIdx = (fiIdx + si) % paletteCount;
+          // Even for non-beat-color-change sections, rotate palettes
+          // every 4 cues so long sections don't look flat
+          paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % paletteCount;
         }
         const palette = palettes[paletteIdx];
 
-        // Calculate intensity with genre multiplier
-        let startIntensity = Math.min(1, style.intensity[0] * preset.intensityMult);
-        let endIntensity = Math.min(1, style.intensity[1] * preset.intensityMult);
+        // ── Energy-driven intensity ──────────────────────────────────
+        // Use actual analysed energy at this cue's position to modulate
+        // the base intensity.  High-energy moments get brighter.
+        let energyMod = 1.0;
+        if (energyLevels.length > 0) {
+          const cueTimeMid = cueStart + cueDur * 0.5;
+          const closest = energyLevels.reduce((best, e) =>
+            Math.abs(e.time_ms - cueTimeMid) < Math.abs(best.time_ms - cueTimeMid) ? e : best
+          );
+          // Map energy (0-1) to a 0.75–1.15 multiplier so quiet = slightly dimmer, loud = brighter
+          energyMod = 0.75 + Math.min(1, closest.energy) * 0.4;
+        }
+
+        // Calculate intensity with genre multiplier and energy modulation
+        let startIntensity = Math.min(1, style.intensity[0] * preset.intensityMult * energyMod);
+        let endIntensity = Math.min(1, style.intensity[1] * preset.intensityMult * energyMod);
 
         if (style.rampIntensity) {
           startIntensity = style.intensity[0] + (style.intensity[1] - style.intensity[0]) * secProgress;
@@ -554,8 +630,9 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         const endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
 
         if (hasDimmer) {
-          startVals.dimmer = Math.round(startIntensity * 255);
-          endVals.dimmer = Math.round(endIntensity * 255);
+          // Dimmer at full — intensity is already baked into the RGB values
+          startVals.dimmer = 255;
+          endVals.dimmer = 255;
         }
         if (hasWhite) {
           startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.25);
@@ -646,33 +723,69 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         }
       }
 
-      // ── Color accent pulses on every 8th bar in verses ──────────────
-      if (preset.accentPulses && (sec.label === 'verse' || sec.label === 'bridge') && secDurMs > barMs * 8) {
+      // ── Energy-driven accent pulses in verses/bridges ───────────────
+      // Instead of rigid 8-bar intervals, find energy peaks within the
+      // section and place accent pulses at those natural intensity spikes.
+      if (preset.accentPulses && (sec.label === 'verse' || sec.label === 'bridge') && secDurMs > barMs * 4) {
         const accentPaletteList = getSectionPalettes(paletteKey, sec.label);
         const accentPalette = accentPaletteList[(fiIdx + si + 1) % accentPaletteList.length];
-        const accentColor = applyIntensity(accentPalette[0], 0.9);
-        const accentEnd = applyIntensity(accentPalette[1], 0.5);
 
-        for (let barOffset = barMs * 7; barOffset < secDurMs; barOffset += barMs * 8) {
-          const pulseStart = secStartMs + barOffset;
-          const pulseDur = Math.round(beatMs * 2);
-          if (pulseStart + pulseDur > secEndMs) break;
+        // Collect energy samples within this section
+        const sectionEnergy = energyLevels.filter(e => e.time_ms >= secStartMs && e.time_ms < secEndMs);
 
-          const pulseVals = { red: accentColor.r, green: accentColor.g, blue: accentColor.b };
-          const pulseEnd = { red: accentEnd.r, green: accentEnd.g, blue: accentEnd.b };
-          if (hasDimmer) { pulseVals.dimmer = 230; pulseEnd.dimmer = 150; }
+        if (sectionEnergy.length >= 4) {
+          // Find local energy peaks (higher than neighbours) with minimum spacing
+          const minSpacingMs = barMs * 3;  // at least 3 bars apart
+          const avgEnergy = sectionEnergy.reduce((s, e) => s + e.energy, 0) / sectionEnergy.length;
+          const threshold = avgEnergy * 1.15;  // 15% above average
 
-          cues.push({
-            lane,
-            start_ms: Math.round(pulseStart),
-            duration_ms: pulseDur,
-            cue_type: 'static',
-            fixture_id: fix.id,
-            channel_values: pulseVals,
-            end_channel_values: pulseEnd,
-            color: rgbToHex(accentColor.r, accentColor.g, accentColor.b),
-            label: 'accent',
-          });
+          const peaks = [];
+          for (let ei = 1; ei < sectionEnergy.length - 1; ei++) {
+            const e = sectionEnergy[ei];
+            if (e.energy > threshold &&
+                e.energy >= sectionEnergy[ei - 1].energy &&
+                e.energy >= sectionEnergy[ei + 1].energy) {
+              // Enforce minimum spacing from last peak
+              if (peaks.length === 0 || e.time_ms - peaks[peaks.length - 1].time_ms >= minSpacingMs) {
+                peaks.push(e);
+              }
+            }
+          }
+
+          // Fallback: if no peaks found, use every 4th bar
+          const accentTimes = peaks.length > 0
+            ? peaks.map(p => p.time_ms)
+            : Array.from({ length: Math.floor(secDurMs / (barMs * 4)) }, (_, i) => secStartMs + (i + 1) * barMs * 4);
+
+          for (const accentTime of accentTimes) {
+            const pulseStart = snapBeat(accentTime);
+            const pulseDur = Math.round(beatMs * 2);
+            if (pulseStart + pulseDur > secEndMs || pulseStart < secStartMs) continue;
+
+            // Scale accent brightness by the energy level at that point
+            const peakEnergy = sectionEnergy.reduce((best, e) =>
+              Math.abs(e.time_ms - accentTime) < Math.abs(best.time_ms - accentTime) ? e : best
+            );
+            const accentIntensity = 0.6 + Math.min(1, peakEnergy.energy) * 0.4;
+            const accentColor = applyIntensity(accentPalette[0], accentIntensity);
+            const accentEnd = applyIntensity(accentPalette[1], accentIntensity * 0.55);
+
+            const pulseVals = { red: accentColor.r, green: accentColor.g, blue: accentColor.b };
+            const pulseEnd = { red: accentEnd.r, green: accentEnd.g, blue: accentEnd.b };
+            if (hasDimmer) { pulseVals.dimmer = 255; pulseEnd.dimmer = 255; }
+
+            cues.push({
+              lane,
+              start_ms: Math.round(pulseStart),
+              duration_ms: pulseDur,
+              cue_type: 'static',
+              fixture_id: fix.id,
+              channel_values: pulseVals,
+              end_channel_values: pulseEnd,
+              color: rgbToHex(accentColor.r, accentColor.g, accentColor.b),
+              label: 'accent',
+            });
+          }
         }
       }
 
@@ -690,21 +803,18 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
 // ─── Bar-based fallback generation ──────────────────────────────────────────
 
 function generateBarBased(cues, fixtures, ctx) {
-  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs } = ctx;
+  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBar, beats } = ctx;
 
   // BPM-adaptive
   const useFades = bpmFactor < 0.5;
   const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
-
-  // Offset bar grid by first beat so cues align to musical bars
-  const barOffset = firstBeatMs || 0;
 
   // Use verse/chorus palettes from the selected theme
   const versePalettes = getSectionPalettes(paletteKey, 'verse');
   const chorusPalettes = getSectionPalettes(paletteKey, 'chorus');
   const allPalettes = [...versePalettes, ...chorusPalettes];
 
-  const totalBars = Math.floor((durationMs - barOffset) / barMs);
+  const totalBars = Math.floor(durationMs / barMs);
   const sectionBars = Math.max(1, Math.round(2 / (preset.cueDensityMult * bpmDensityScale)));
 
   for (let fiIdx = 0; fiIdx < fixtures.length; fiIdx++) {
@@ -716,8 +826,9 @@ function generateBarBased(cues, fixtures, ctx) {
     for (let bar = 0; bar < totalBars; bar += sectionBars) {
       const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
       const palette = allPalettes[(paletteIdx + fiIdx) % allPalettes.length];
-      const startMs = barOffset + bar * barMs;
-      const durMs = Math.min(sectionBars * barMs, durationMs - startMs);
+      const startMs = snapBar(bar * barMs);
+      const endMs = snapBar((bar + sectionBars) * barMs);
+      const durMs = Math.min(endMs - startMs, durationMs - startMs);
       if (durMs <= 0) break;
 
       const intensity = Math.min(1, 0.7 * preset.intensityMult);
@@ -727,9 +838,9 @@ function generateBarBased(cues, fixtures, ctx) {
       const endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
 
       if (hasDimmer) {
-        const dimVal = Math.min(255, Math.round(200 * preset.intensityMult));
-        startVals.dimmer = dimVal;
-        endVals.dimmer = dimVal;
+        // Dimmer at full — intensity is already baked into the RGB values
+        startVals.dimmer = 255;
+        endVals.dimmer = 255;
       }
       if (hasWhite) {
         startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.2);
@@ -865,7 +976,14 @@ function buildFixturePositions(moverPresets, movers, rand) {
  * Multi-mover setups get mirrored or offset positions for visual variety.
  */
 function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets) {
-  const { barMs, rand, preset, durationMs } = ctx;
+  const { barMs, beatMs, rand, preset, durationMs, snapBar, bpmFactor } = ctx;
+
+  // BPM-adaptive movement scaling:
+  //  - bpmFactor 0 (≤90 BPM) → moveDensity ~0.7 (slower, fewer moves)
+  //  - bpmFactor 1 (≥150 BPM) → moveDensity ~1.6 (faster, more frequent moves)
+  const moveDensityScale = 0.7 + 0.9 * bpmFactor;
+  // Range boost: high-BPM songs use wider pan/tilt sweeps
+  const rangeBoost = 1.0 + 0.4 * bpmFactor;  // 1.0–1.4×
 
   // Build per-fixture position lists from saved presets + hardcoded fallback
   const perFixPositions = buildFixturePositions(moverPresets, movers, rand);
@@ -885,37 +1003,55 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
     const mirror = mi % 2 === 1; // odd movers mirror pan
 
     if (useSections) {
-      for (const sec of sections) {
+      for (let si = 0; si < sections.length; si++) {
+        const sec = sections[si];
         const style = MOVEMENT_STYLES[sec.label] || DEFAULT_MOVEMENT;
-        const secStartMs = Math.round(sec.start_ms);
-        const secEndMs = Math.round(sec.end_ms);
+        // Snap section boundaries; keep first/last edges unsnapped for full coverage
+        const secStartMs = si === 0 ? 0 : snapBar(Math.round(sec.start_ms));
+        const secEndMs = si === sections.length - 1 ? Math.round(durationMs) : Math.round(sec.end_ms);
         const secDurMs = secEndMs - secStartMs;
         if (secDurMs <= 0) continue;
 
-        // Adjust movement density with genre preset
-        const barsPerMove = Math.max(1, Math.round(style.barsPerMove / preset.cueDensityMult));
+        // Adjust movement density with genre preset AND BPM factor
+        const barsPerMove = Math.max(0.5, Math.round((style.barsPerMove / (preset.cueDensityMult * moveDensityScale)) * 2) / 2);
         const moveDurMs = barsPerMove * barMs;
         const numMoves = Math.max(1, Math.floor(secDurMs / moveDurMs));
 
+        // Scale position range by section style, BPM, and genre
+        const effectiveRange = Math.min(1, style.range * rangeBoost);
+
         for (let ci = 0; ci < numMoves; ci++) {
-          const moveStart = secStartMs + ci * moveDurMs;
-          const moveEnd = Math.min(moveStart + moveDurMs, secEndMs);
-          const dur = moveEnd - moveStart;
+          const moveStart = ci === 0 ? secStartMs : snapBar(secStartMs + ci * moveDurMs);
+          const moveEnd = ci < numMoves - 1
+            ? snapBar(secStartMs + (ci + 1) * moveDurMs)
+            : secEndMs;
+          let dur = moveEnd - moveStart;
+          // Guard: ensure minimum move duration (1 bar)
+          if (dur < barMs) dur = Math.min(barMs, secEndMs - moveStart);
           if (dur <= 0) continue;
 
           const from = posOrder[posIdx % posOrder.length];
           posIdx++;
           const to = posOrder[posIdx % posOrder.length];
 
-          const startPan = mirror ? (255 - from.pan) : from.pan;
-          const endPan = mirror ? (255 - to.pan) : to.pan;
+          // Apply range scaling: lerp positions toward center to reduce range,
+          // or use full positions for high range
+          const centerPan = 128, centerTilt = 128;
+          const fromPan = Math.round(centerPan + (from.pan - centerPan) * effectiveRange);
+          const fromTilt = Math.round(centerTilt + (from.tilt - centerTilt) * effectiveRange);
+          const toPan = Math.round(centerPan + (to.pan - centerPan) * effectiveRange);
+          const toTilt = Math.round(centerTilt + (to.tilt - centerTilt) * effectiveRange);
 
-          const startVals = { pan: startPan, tilt: from.tilt };
-          const endVals = { pan: endPan, tilt: to.tilt };
+          const startPan = mirror ? (255 - fromPan) : fromPan;
+          const endPan = mirror ? (255 - toPan) : toPan;
 
-          // Add gobo changes on chorus/drop sections
-          if (hasGobo && (sec.label === 'chorus' || sec.label === 'drop')) {
-            startVals.gobo = Math.floor(rand() * 8) * 16; // select a gobo pattern
+          const startVals = { pan: startPan, tilt: fromTilt };
+          const endVals = { pan: endPan, tilt: toTilt };
+
+          // Add gobo changes on high-energy sections
+          if (hasGobo && (sec.label === 'chorus' || sec.label === 'drop'
+              || (sec.label === 'buildup' && bpmFactor > 0.5))) {
+            startVals.gobo = Math.floor(rand() * 8) * 16;
           }
 
           cues.push({
@@ -932,13 +1068,13 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
         }
       }
     } else {
-      // No sections — sweep through positions every few bars
+      // No sections — sweep through positions every few bars (BPM-adaptive)
       const totalBars = Math.floor(durationMs / barMs);
-      const barsPerMove = Math.max(1, Math.round(4 / preset.cueDensityMult));
+      const barsPerMove = Math.max(1, Math.round(4 / (preset.cueDensityMult * moveDensityScale)));
 
       for (let bar = 0; bar < totalBars; bar += barsPerMove) {
-        const startMs = bar * barMs;
-        const endMs = Math.min((bar + barsPerMove) * barMs, durationMs);
+        const startMs = snapBar(bar * barMs);
+        const endMs = Math.min(snapBar((bar + barsPerMove) * barMs), durationMs);
         const dur = endMs - startMs;
         if (dur <= 0) continue;
 
@@ -1125,7 +1261,6 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
       const typesMap = SECTION_EFFECT_TYPES[label] || DEFAULT_EFFECT_TYPES;
       const sectionPalette = getSectionPalettes(paletteKey, label);
-      const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
 
       // Each fixture-type group picks its own effect but stays consistent within the group
       for (const [typeName, group] of groupEntries) {
@@ -1137,12 +1272,16 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
         const maxDur = Math.min(sectionDuration, barMs * 8);
         const effectDurationMs = Math.max(barMs * 2, maxDur);
         let t = sectionStart;
+        let segIdx = 0;
 
         while (t < sectionEnd) {
           const dur = Math.min(effectDurationMs, sectionEnd - t);
           if (dur < barMs) break;
+          // Rotate palette per segment for colour variety within long sections
+          const baseColor = sectionPalette[segIdx % sectionPalette.length];
           emitGroupCues(group, effect, t, dur, baseColor, groupLanes[typeName], useCascade);
           t += effectDurationMs;
+          segIdx++;
         }
       }
     }
@@ -1192,9 +1331,9 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
 const CELL_PATTERN_MAP = {
   intro:     ['fill_sweep', 'color_wave', 'breathe'],
-  verse:     ['chase_slow', 'alternate', 'color_wave', 'breathe'],
-  chorus:    ['chase', 'alternate', 'scatter'],
-  bridge:    ['color_wave', 'alternate', 'breathe'],
+  verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase'],
+  chorus:    ['chase', 'alternate', 'scatter', 'all_flash'],
+  bridge:    ['color_wave', 'alternate', 'chase_slow'],
   breakdown: ['fill_sweep', 'breathe'],
   buildup:   ['build_reveal', 'chase_accel'],
   drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
@@ -1207,7 +1346,11 @@ const CELL_PATTERN_MAP = {
  * per-cell cues.
  */
 function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
-  const { barMs, beatMs, rand, paletteKey, preset } = ctx;
+  const { barMs, beatMs, rand, paletteKey, preset, snapBeat } = ctx;
+
+  // Sub-phrase length in bars — longer sections get broken into sub-phrases
+  // for visual variety instead of one pattern for the entire section.
+  const SUB_PHRASE_BARS = 8;
 
   for (const fix of multiCellFixtures) {
     const cellCount = fix.cell_count || 0;
@@ -1221,43 +1364,86 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
 
     for (const section of sections) {
       const label = section.label || 'verse';
-      const secStartMs = Math.round(section.start_ms);
+      // Snap section start to beat grid for tight beat coupling
+      const secStartMs = snapBeat(Math.round(section.start_ms));
       const secEndMs = Math.round(section.end_ms);
       const secDurMs = secEndMs - secStartMs;
       if (secDurMs < barMs) continue;
 
       const patterns = CELL_PATTERN_MAP[label] || CELL_PATTERN_MAP.verse;
-      const pattern = patterns[Math.floor(rand() * patterns.length)];
-
-      const palettes = getSectionPalettes(paletteKey, label);
+      const allPalettes = getSectionPalettes(paletteKey, label);
       const style = sectionStyles[label] || defaultStyle;
       const baseIntensity = Math.min(1, ((style.intensity[0] + style.intensity[1]) / 2) * preset.intensityMult);
 
-      const patternCtx = {
-        fix, lane, cellCount, secStartMs, secEndMs, secDurMs,
-        palettes, baseIntensity, hasDimmer, hasWhite, label,
-        ...ctx,
-      };
+      // Determine how many sub-phrases fit in this section
+      const subPhraseMs = SUB_PHRASE_BARS * barMs;
+      const numSubPhrases = Math.max(1, Math.floor(secDurMs / subPhraseMs));
+      // Only sub-phrase if section is long enough (>= 2 sub-phrases)
+      const useSubPhrases = numSubPhrases >= 2 && label !== 'buildup';
 
-      switch (pattern) {
-        case 'chase_slow':    cellPatternChase(cues, patternCtx, 'slow'); break;
-        case 'chase':         cellPatternChase(cues, patternCtx, 'medium'); break;
-        case 'chase_fast':    cellPatternChase(cues, patternCtx, 'fast'); break;
-        case 'chase_accel':   cellPatternChaseAccel(cues, patternCtx); break;
-        case 'alternate':     cellPatternAlternate(cues, patternCtx, 'normal'); break;
-        case 'alternate_fast': cellPatternAlternate(cues, patternCtx, 'fast'); break;
-        case 'color_wave':    cellPatternColorWave(cues, patternCtx); break;
-        case 'scatter':       cellPatternScatter(cues, patternCtx, false); break;
-        case 'scatter_strobe': cellPatternScatter(cues, patternCtx, true); break;
-        case 'fill_sweep':    cellPatternFillSweep(cues, patternCtx); break;
-        case 'build_reveal':  cellPatternBuildReveal(cues, patternCtx); break;
-        case 'all_flash':     cellPatternAllFlash(cues, patternCtx); break;
-        case 'breathe':       cellPatternBreathe(cues, patternCtx); break;
+      if (useSubPhrases) {
+        // Break section into sub-phrases, each gets a different pattern & palette
+        let lastPattern = '';
+        for (let sp = 0; sp < numSubPhrases; sp++) {
+          const spStart = secStartMs + sp * subPhraseMs;
+          const spEnd = sp === numSubPhrases - 1 ? secEndMs : secStartMs + (sp + 1) * subPhraseMs;
+          const spDur = spEnd - spStart;
+          if (spDur < barMs) continue;
+
+          // Pick a pattern different from the previous sub-phrase
+          let pattern;
+          for (let tries = 0; tries < 5; tries++) {
+            pattern = patterns[Math.floor(rand() * patterns.length)];
+            if (pattern !== lastPattern || patterns.length <= 1) break;
+          }
+          lastPattern = pattern;
+
+          // Rotate palette for each sub-phrase
+          const palettes = [allPalettes[sp % allPalettes.length]];
+          // Include a second palette for contrast
+          if (allPalettes.length > 1) palettes.push(allPalettes[(sp + 1) % allPalettes.length]);
+
+          const patternCtx = {
+            fix, lane, cellCount, secStartMs: spStart, secEndMs: spEnd, secDurMs: spDur,
+            palettes, baseIntensity, hasDimmer, hasWhite, label,
+            ...ctx,
+          };
+
+          _dispatchCellPattern(cues, pattern, patternCtx);
+        }
+      } else {
+        // Short section — single pattern
+        const pattern = patterns[Math.floor(rand() * patterns.length)];
+        const patternCtx = {
+          fix, lane, cellCount, secStartMs, secEndMs, secDurMs,
+          palettes: allPalettes, baseIntensity, hasDimmer, hasWhite, label,
+          ...ctx,
+        };
+        _dispatchCellPattern(cues, pattern, patternCtx);
       }
     }
   }
 
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+}
+
+/** Dispatch a cell pattern by name */
+function _dispatchCellPattern(cues, pattern, ctx) {
+  switch (pattern) {
+    case 'chase_slow':     cellPatternChase(cues, ctx, 'slow'); break;
+    case 'chase':          cellPatternChase(cues, ctx, 'medium'); break;
+    case 'chase_fast':     cellPatternChase(cues, ctx, 'fast'); break;
+    case 'chase_accel':    cellPatternChaseAccel(cues, ctx); break;
+    case 'alternate':      cellPatternAlternate(cues, ctx, 'normal'); break;
+    case 'alternate_fast': cellPatternAlternate(cues, ctx, 'fast'); break;
+    case 'color_wave':     cellPatternColorWave(cues, ctx); break;
+    case 'scatter':        cellPatternScatter(cues, ctx, false); break;
+    case 'scatter_strobe': cellPatternScatter(cues, ctx, true); break;
+    case 'fill_sweep':     cellPatternFillSweep(cues, ctx); break;
+    case 'build_reveal':   cellPatternBuildReveal(cues, ctx); break;
+    case 'all_flash':      cellPatternAllFlash(cues, ctx); break;
+    case 'breathe':        cellPatternBreathe(cues, ctx); break;
+  }
 }
 
 /**
@@ -1267,8 +1453,9 @@ function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, l
   const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
   const endVals = endColor ? { red: endColor.r, green: endColor.g, blue: endColor.b } : {};
   if (p.hasDimmer) {
-    startVals.dimmer = Math.round(Math.max(startColor.r, startColor.g, startColor.b));
-    if (endColor) endVals.dimmer = Math.round(Math.max(endColor.r, endColor.g, endColor.b));
+    // Dimmer at full — intensity is already baked into the RGB values
+    startVals.dimmer = 255;
+    if (endColor) endVals.dimmer = 255;
   }
   if (p.hasWhite) {
     startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.15);

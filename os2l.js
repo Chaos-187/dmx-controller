@@ -290,6 +290,27 @@ function handleButtonAction(data) {
 
 // ─── Action Executor ────────────────────────────────────────────────────────
 
+/**
+ * Mark fixture IDs as overridden by an OS2L button action (suppresses sequence output)
+ * or release them back to sequence control.
+ */
+function setOs2lOverride(fixtureIds, activate) {
+  if (activate) {
+    for (const id of fixtureIds) touchOverrides.os2lOverrideFixtures.add(id);
+  } else {
+    for (const id of fixtureIds) touchOverrides.os2lOverrideFixtures.delete(id);
+  }
+}
+
+/** Get all fixture IDs from the channel map, optionally filtered by group. */
+function getAffectedFixtureIds(groupId) {
+  const channelMap = db.getFixtureChannelMap();
+  if (groupId) {
+    return channelMap.filter(f => (f.group_ids || []).includes(groupId)).map(f => f.id);
+  }
+  return channelMap.map(f => f.id);
+}
+
 function executeMapAction(map, activate) {
   let actionData;
   try {
@@ -321,6 +342,8 @@ function executeMapAction(map, activate) {
     case 'set_channels': {
       const universe = actionData.universe || 1;
       const channels = actionData.channels || [];
+      // Override all fixtures so the sequence doesn't fight these raw channel writes
+      setOs2lOverride(getAffectedFixtureIds(), activate);
       if (channels.length && dmxOutputEnabled) {
         if (activate) {
           artnetServer.setChannels(universe, channels);
@@ -338,6 +361,8 @@ function executeMapAction(map, activate) {
     case 'full_on': {
       const universe = actionData.universe || 1;
       const val = activate ? 255 : 0;
+      // Override all fixtures
+      setOs2lOverride(getAffectedFixtureIds(), activate);
       const ch = [];
       for (let i = 1; i <= 512; i++) ch.push({ ch: i, val });
       if (dmxOutputEnabled) {
@@ -350,6 +375,8 @@ function executeMapAction(map, activate) {
 
     case 'scene': {
       const fixtures = actionData.fixtures || [];
+      // Override all fixtures (raw scene targets arbitrary channels)
+      setOs2lOverride(getAffectedFixtureIds(), activate);
       for (const f of fixtures) {
         const u = f.universe || 1;
         if (f.channels && f.channels.length && dmxOutputEnabled) {
@@ -371,13 +398,16 @@ function executeMapAction(map, activate) {
       const strobeSpeed = parseInt(db.getConfig('strobe_speed') || '200', 10);
       const channelMap = db.getFixtureChannelMap();
       const channelUpdates = {};
+      const strobeFixtureIds = [];
 
       for (const fix of channelMap) {
         const u = fix.universe;
         if (!channelUpdates[u]) channelUpdates[u] = [];
+        let fixAffected = false;
         for (const ch of fix.channels) {
           if (ch.type === 'strobe') {
             channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? strobeSpeed : 0 });
+            fixAffected = true;
           } else if (ch.ranges) {
             const strobeRange = ch.ranges.find(r => r.type === 'strobe');
             if (strobeRange) {
@@ -385,9 +415,11 @@ function executeMapAction(map, activate) {
                 ? Math.round(strobeRange.min + (strobeSpeed / 255) * (strobeRange.max - strobeRange.min))
                 : 0;
               channelUpdates[u].push({ ch: ch.dmx_address, val: mapped });
+              fixAffected = true;
             }
           }
         }
+        if (fixAffected) strobeFixtureIds.push(fix.id);
       }
 
       if (dmxOutputEnabled) {
@@ -396,6 +428,8 @@ function executeMapAction(map, activate) {
           dmxUsbServer.setChannels(+u, channels);
         }
       }
+      // Override strobe-affected fixtures so sequence doesn't fight
+      setOs2lOverride(strobeFixtureIds, activate);
       broadcast({ type: 'os2l_action', action: 'strobe', map: map.name, active: activate });
       break;
     }
@@ -405,9 +439,11 @@ function executeMapAction(map, activate) {
       const { red = 0, green = 0, blue = 0, white = 0, group_id } = actionData;
       const channelMap = db.getFixtureChannelMap();
       const channelUpdates = {};
+      const colorFixtureIds = [];
 
       for (const fix of channelMap) {
         if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+        colorFixtureIds.push(fix.id);
         const u = fix.universe;
         if (!channelUpdates[u]) channelUpdates[u] = [];
         for (const ch of fix.channels) {
@@ -428,6 +464,8 @@ function executeMapAction(map, activate) {
           dmxUsbServer.setChannels(+u, channels);
         }
       }
+      // Override color-affected fixtures so sequence doesn't fight
+      setOs2lOverride(colorFixtureIds, activate);
       broadcast({ type: 'os2l_action', action: 'color', map: map.name, active: activate });
       break;
     }
@@ -445,6 +483,8 @@ function executeMapAction(map, activate) {
           if (fixtureIds.length > 0) {
             const slot = getEffectSlot(effect.type);
             stopRunningEffect(slot, true);
+            // Override effect-targeted fixtures so sequence doesn't fight
+            setOs2lOverride(fixtureIds, true);
             const startTime = Date.now();
             const fixMap = channelMap;
 
@@ -465,7 +505,14 @@ function executeMapAction(map, activate) {
                   let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
                   if (value !== null && value !== undefined) {
                     if (!chUpdates[fix.universe]) chUpdates[fix.universe] = {};
-                    let finalVal = applyMasterDimmer(Math.max(0, Math.min(255, Math.round(value))), ch.type);
+                    let finalVal = Math.max(0, Math.min(255, Math.round(value)));
+                    // Master dimmer: only scale dimmer channel on fixtures that have one
+                    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+                    if (fixHasDimmer) {
+                      if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
+                    } else {
+                      finalVal = applyMasterDimmer(finalVal, ch.type);
+                    }
                     chUpdates[fix.universe][ch.dmx_address] = applyInvert(finalVal, ch);
                   }
                 }
@@ -483,6 +530,11 @@ function executeMapAction(map, activate) {
           }
         }
       } else {
+        // Deactivate: release override for fixtures in all running effect slots
+        for (const slot of Object.keys(runningQaEffects)) {
+          const entry = runningQaEffects[slot];
+          if (entry && entry.fixtureIds) setOs2lOverride(entry.fixtureIds, false);
+        }
         stopRunningEffect(undefined, false);
       }
       broadcast({ type: 'os2l_action', action: 'effect', map: map.name, active: activate });
@@ -492,8 +544,11 @@ function executeMapAction(map, activate) {
     case 'scene_activate': {
       const { scene_id } = actionData;
       if (activate && scene_id) {
+        // Override all fixtures — scene controls full rig
+        setOs2lOverride(getAffectedFixtureIds(), true);
         activateScene(scene_id);
       } else {
+        setOs2lOverride(getAffectedFixtureIds(), false);
         deactivateScene();
       }
       broadcast({ type: 'os2l_action', action: 'scene_activate', map: map.name, active: activate });

@@ -1,11 +1,11 @@
 /**
- * Audio Waveform Analyzer  (v3 — multi-band, improved sections)
+ * Audio Waveform Analyzer  (v4 — fluid beat grid)
  *
  * Uses ffmpeg to decode audio files to raw PCM, then computes:
  *   - Waveform peaks with per-band (bass / mid / treble) energy
  *   - True RMS energy levels over time (per-band)
- *   - Beat positions derived from BPM + beatgrid
- *   - Structural sections with multi-band novelty detection
+ *   - Fluid beat positions detected from bass onsets, guided by BPM
+ *   - Structural sections using beat-derived variable-width bars
  *
  * Looks for a local ffmpeg.exe in the project directory first, then falls back
  * to system PATH.  No ffprobe dependency — metadata is parsed from ffmpeg stderr.
@@ -17,7 +17,7 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 4;
+const ANALYSIS_VERSION = 6;
 const DEFAULTS = {
   TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
@@ -139,6 +139,177 @@ function probeFile(filePath) {
   });
 }
 
+// ─── Fluid Beat Detection ───────────────────────────────────────────────────
+
+/**
+ * Detect actual beat positions from bass energy data, guided by BPM.
+ *
+ * Instead of a rigid grid (firstBeat + n * beatMs), this finds real onset
+ * peaks in the bass energy and snaps/fills using the BPM as a guide.
+ * The result is a "fluid" beat grid that flexes with the actual music
+ * while staying musically coherent.
+ *
+ * Algorithm:
+ * 1. Compute a bass onset strength function from energy segments.
+ * 2. Find local peaks that exceed an adaptive threshold.
+ * 3. Use BPM-guided window to assign each peak to the nearest expected
+ *    beat position, rejecting duplicates and filling gaps.
+ * 4. Return actual beat times (not evenly spaced).
+ *
+ * @param {Array}  energySegments – [{time_ms, bass, energy, ...}, ...]
+ * @param {number} bpm            – reference BPM from metadata
+ * @param {number} durationMs     – track duration in ms
+ * @param {number} [firstBeatMs=0] – first beat hint from metadata
+ * @returns {number[]} beat times in ms (sorted)
+ */
+function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
+  if (!energySegments.length || bpm <= 0) return [];
+
+  const expectedBeatMs = 60000 / bpm;
+  // Tolerance: how far an onset can be from the expected beat to claim it
+  const tolerance = expectedBeatMs * 0.35;  // ±35% of a beat interval
+
+  // ── 1. Build onset strength from bass energy differences ──────────
+  const onsets = [];
+  for (let i = 1; i < energySegments.length; i++) {
+    const prev = energySegments[i - 1];
+    const curr = energySegments[i];
+    const bassDiff = (curr.bass || curr.energy) - (prev.bass || prev.energy);
+    // Only positive rises are onsets
+    onsets.push({
+      time_ms: curr.time_ms,
+      strength: Math.max(0, bassDiff),
+    });
+  }
+
+  if (onsets.length === 0) return [];
+
+  // ── 2. Adaptive threshold for onset peaks ─────────────────────────
+  // Use a running mean + std approach over a local window (~2 bars)
+  const windowSize = Math.max(4, Math.round((expectedBeatMs * 8) / (energySegments[1].time_ms - energySegments[0].time_ms)));
+
+  const onsetPeaks = [];
+  for (let i = 0; i < onsets.length; i++) {
+    // Local window stats
+    const loIdx = Math.max(0, i - windowSize);
+    const hiIdx = Math.min(onsets.length - 1, i + windowSize);
+    let sum = 0, count = 0;
+    for (let j = loIdx; j <= hiIdx; j++) { sum += onsets[j].strength; count++; }
+    const localMean = sum / count;
+
+    let sqSum = 0;
+    for (let j = loIdx; j <= hiIdx; j++) {
+      const d = onsets[j].strength - localMean;
+      sqSum += d * d;
+    }
+    const localStd = Math.sqrt(sqSum / count);
+    const threshold = localMean + localStd * 0.8;
+
+    // Is this a local peak? (higher than threshold and higher than neighbours)
+    if (onsets[i].strength > threshold && onsets[i].strength > 0) {
+      const isLocalMax =
+        (i === 0 || onsets[i].strength >= onsets[i - 1].strength) &&
+        (i === onsets.length - 1 || onsets[i].strength >= onsets[i + 1].strength);
+      if (isLocalMax) {
+        onsetPeaks.push(onsets[i].time_ms);
+      }
+    }
+  }
+
+  // ── 3. Build guided beat grid, then attract to nearest onset ──────
+  // Start with a nominal grid from firstBeat, then let each beat snap
+  // to the nearest detected onset within tolerance.
+  const phase = firstBeatMs >= 0 ? firstBeatMs : 0;
+  const beats = [];
+  let gridTime = phase;
+
+  // Walk backwards from phase to cover any intro before the first beat
+  if (phase > expectedBeatMs) {
+    let t = phase - expectedBeatMs;
+    const preBeats = [];
+    while (t >= 0) {
+      preBeats.push(t);
+      t -= expectedBeatMs;
+    }
+    preBeats.reverse();
+    for (const bt of preBeats) beats.push(bt);
+  }
+
+  // Walk forward through the track
+  while (gridTime < durationMs) {
+    beats.push(gridTime);
+    gridTime += expectedBeatMs;
+  }
+
+  // Now snap each beat to the nearest onset within tolerance
+  const fluidBeats = [];
+  let onsetIdx = 0; // running pointer into sorted onsetPeaks
+
+  for (let bi = 0; bi < beats.length; bi++) {
+    const expected = beats[bi];
+
+    // Advance onset pointer to the region near this beat
+    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx] < expected - tolerance) {
+      onsetIdx++;
+    }
+
+    // Find the closest onset within tolerance
+    let bestOnset = -1;
+    let bestDist = tolerance + 1;
+    for (let oi = Math.max(0, onsetIdx - 1); oi < onsetPeaks.length; oi++) {
+      const dist = Math.abs(onsetPeaks[oi] - expected);
+      if (dist > tolerance) {
+        if (onsetPeaks[oi] > expected + tolerance) break;
+        continue;
+      }
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestOnset = onsetPeaks[oi];
+      }
+    }
+
+    if (bestOnset >= 0) {
+      // Snap to onset — but verify it wouldn't create a beat too close to the previous
+      const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
+      if (bestOnset - prevBeat >= expectedBeatMs * 0.5) {
+        fluidBeats.push(Math.round(bestOnset));
+      } else {
+        // Too close to previous — keep the grid position
+        if (expected - prevBeat >= expectedBeatMs * 0.5) {
+          fluidBeats.push(Math.round(expected));
+        }
+      }
+    } else {
+      // No onset nearby — keep the grid position (fill the gap)
+      const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
+      if (expected - prevBeat >= expectedBeatMs * 0.5) {
+        fluidBeats.push(Math.round(expected));
+      }
+    }
+  }
+
+  return fluidBeats;
+}
+
+/**
+ * Derive bar start times from fluid beats (every 4 beats = 1 bar).
+ * Returns array of {start_ms, end_ms} for each bar.
+ *
+ * @param {number[]} beats – sorted beat times
+ * @param {number} durationMs
+ * @returns {Array<{start_ms: number, end_ms: number}>}
+ */
+function beatsToBarBoundaries(beats, durationMs) {
+  if (beats.length < 4) return [];
+  const bars = [];
+  for (let i = 0; i < beats.length; i += 4) {
+    const start = beats[i];
+    const end = i + 4 < beats.length ? beats[i + 4] : durationMs;
+    bars.push({ start_ms: start, end_ms: end });
+  }
+  return bars;
+}
+
 // ─── Section Detection ──────────────────────────────────────────────────────
 
 /**
@@ -187,21 +358,18 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
-  // Offset: align bar grid to the first beat position so section boundaries
-  // fall on actual musical phrase boundaries rather than absolute time = 0.
-  const barOffset = firstBeatMs || 0;
-
-  const beatMs = 60000 / bpm;
-  const barMs  = beatMs * 4;
-  const totalBars = Math.floor((durationMs - barOffset) / barMs);
+  // ── Derive fluid bars from actual beat positions ──────────────────────
+  // Each bar = 4 consecutive beats.  Bar timing flexes with the audio.
+  const bars = beatsToBarBoundaries(beats, durationMs);
+  const totalBars = bars.length;
   if (totalBars < SECTION_MIN_BARS * 2) return [];
 
-  // ── 1. Per-bar energy averages (offset by first beat) ─────────────────
+  // ── 1. Per-bar energy averages (using actual bar boundaries) ──────────
   function barAverages(field) {
     const arr = [];
     for (let bar = 0; bar < totalBars; bar++) {
-      const barStart = barOffset + bar * barMs;
-      const barEnd   = barStart + barMs;
+      const barStart = bars[bar].start_ms;
+      const barEnd   = bars[bar].end_ms;
       const inBar = energySegments.filter(s => s.time_ms >= barStart && s.time_ms < barEnd);
       arr.push(inBar.length > 0
         ? inBar.reduce((sum, s) => sum + (s[field] || s.energy || 0), 0) / inBar.length
@@ -395,8 +563,9 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   for (let s = 0; s < finalBoundaries.length; s++) {
     const startBar = finalBoundaries[s];
     const endBar   = s + 1 < finalBoundaries.length ? finalBoundaries[s + 1] : totalBars;
-    const startMs  = Math.round(barOffset + startBar * barMs);
-    const endMs    = Math.round(barOffset + endBar * barMs);
+    // Use actual bar start/end times from the fluid grid
+    const startMs  = startBar < bars.length ? bars[startBar].start_ms : Math.round(durationMs);
+    const endMs    = endBar < bars.length ? bars[endBar].start_ms : Math.round(durationMs);
     const numBars  = (endBar - startBar) || 1;
 
     // Average energies in this section
@@ -481,6 +650,12 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     } else {
       merged.push(sections[i]);
     }
+  }
+
+  // Ensure sections cover the full track duration
+  if (merged.length > 0) {
+    merged[0].start_ms = 0;
+    merged[merged.length - 1].end_ms = Math.round(durationMs);
   }
 
   return merged;
@@ -694,21 +869,14 @@ function analyzeTrack(filePath, opts = {}) {
         treble: parseFloat(Math.min(1, p.treble / normRef).toFixed(4)),
       }));
 
-      // Generate beat grid from BPM
-      const beats = [];
+      // Generate fluid beat grid from audio energy + BPM guide
       const bpm = opts.bpm || 0;
-      if (bpm > 0) {
-        const beatIntervalMs = 60000 / bpm;
-        const startOffset = (opts.beatgridPos || 0) * 1000; // beatgridPos is in seconds
-        let t = startOffset;
-        while (t < durationMs) {
-          if (t >= 0) beats.push(Math.round(t));
-          t += beatIntervalMs;
-        }
-      }
-
-      // Detect structural sections (pass multi-band energy, offset by first beat)
       const firstBeatMs = (opts.beatgridPos || 0) * 1000;
+      const beats = bpm > 0
+        ? detectBeats(energySegments, bpm, durationMs, firstBeatMs)
+        : [];
+
+      // Detect structural sections using fluid beats
       const sections = detectSections(energySegments, beats, durationMs, bpm, cfg, firstBeatMs);
 
       resolve({
@@ -734,4 +902,4 @@ function analyzeTrack(filePath, opts = {}) {
 
 // ─── Export ─────────────────────────────────────────────────────────────────
 
-module.exports = { analyzeTrack, checkFfmpeg, probeFile, detectSections, ANALYSIS_VERSION, SECTION_COLORS, DEFAULTS };
+module.exports = { analyzeTrack, checkFfmpeg, probeFile, detectSections, detectBeats, beatsToBarBoundaries, ANALYSIS_VERSION, SECTION_COLORS, DEFAULTS };

@@ -252,6 +252,8 @@ function handleOs2lSubscribed(data) {
 
               // Now auto-load if enabled
               if (seqAutoLoad) {
+                // Clear any OS2L button overrides so the new sequence controls all fixtures
+                touchOverrides.os2lOverrideFixtures.clear();
                 stopPlaybackTimer(deck);
                 activeSequences[deck] = { sequence: generatedSeq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
                 broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
@@ -279,6 +281,8 @@ function handleOs2lSubscribed(data) {
 
         if (seq && seqAutoLoad) {
           // Auto-load the matched sequence onto this deck
+          // Clear any OS2L button overrides so the new sequence controls all fixtures
+          touchOverrides.os2lOverrideFixtures.clear();
           stopPlaybackTimer(deck);
           activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
           broadcast({ type: 'seq_loaded', deck, sequence: seq });
@@ -827,6 +831,7 @@ const touchOverrides = {
   blackoutHold: false,           // true while blackout is held (OS2L or touch)
   masterDimmer: 255,             // 0-255 master dimmer level (scales all intensity/color output)
   effectSpeed: 1.0,              // master effect speed multiplier (0.1 – 3.0)
+  os2lOverrideFixtures: new Set(), // fixture IDs currently controlled by an OS2L button action
 };
 
 app.get('/api/dmx/output', (req, res) => {
@@ -1284,7 +1289,15 @@ app.post('/api/effects/run', (req, res) => {
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
-          let finalVal = applyMasterDimmer(Math.max(0, Math.min(255, Math.round(value))), ch.type);
+          let finalVal = Math.max(0, Math.min(255, Math.round(value)));
+          // Master dimmer: only scale dimmer channel on fixtures that have one,
+          // otherwise scale RGB directly (avoids double-dipping via hw dimmer)
+          const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+          if (fixHasDimmer) {
+            if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
+          } else {
+            finalVal = applyMasterDimmer(finalVal, ch.type);
+          }
           channelUpdates[fix.universe][ch.dmx_address] = applyInvert(finalVal, ch);
         }
       }
@@ -1984,7 +1997,14 @@ function processSceneEffects(scene, startTime) {
         if (value !== null && value !== undefined) {
           const u = fix.universe;
           if (!channelUpdates[u]) channelUpdates[u] = {};
-          let finalVal = applyMasterDimmer(Math.max(0, Math.min(255, Math.round(value))), ch.type);
+          let finalVal = Math.max(0, Math.min(255, Math.round(value)));
+          // Master dimmer: only scale dimmer channel on fixtures that have one
+          const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+          if (fixHasDimmer) {
+            if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
+          } else {
+            finalVal = applyMasterDimmer(finalVal, ch.type);
+          }
           channelUpdates[u][ch.dmx_address] = applyInvert(finalVal, ch);
         }
       }
@@ -2011,13 +2031,19 @@ function resolveEntryFixtures(entry, fixMap) {
  * Apply channel_values to a fixture's channels in the update map.
  */
 function applyChannelValues(fix, channelValues, channelUpdates) {
+  const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
   for (const ch of fix.channels) {
     const val = channelValues[ch.type];
     if (val !== undefined && val !== null) {
       const u = fix.universe;
       if (!channelUpdates[u]) channelUpdates[u] = {};
       let mapped = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
-      mapped = applyMasterDimmer(mapped, ch.type);
+      // Master dimmer: only scale dimmer channel on fixtures that have one
+      if (fixHasDimmer) {
+        if (ch.type === 'dimmer') mapped = applyMasterDimmer(mapped, ch.type);
+      } else {
+        mapped = applyMasterDimmer(mapped, ch.type);
+      }
       channelUpdates[u][ch.dmx_address] = applyInvert(mapped, ch);
     }
   }
@@ -2277,6 +2303,8 @@ function handleSequenceCommand(ws, msg) {
     case 'load': {
       const seq = db.getSequence(sequenceId);
       if (!seq) return ws.send(JSON.stringify({ type: 'seq_error', error: 'Sequence not found' }));
+      // Clear any OS2L button overrides so the sequence controls all fixtures
+      touchOverrides.os2lOverrideFixtures.clear();
       stopPlaybackTimer(deck);
       activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
       broadcast({ type: 'seq_loaded', deck, sequence: seq });
@@ -2448,6 +2476,9 @@ function processSequenceAtTime(deckNum, timeMs) {
     // Skip fixtures disabled from the touch interface
     if (touchOverrides.disabledFixtures.has(fixtureId)) continue;
 
+    // Skip fixtures currently overridden by an OS2L button action
+    if (touchOverrides.os2lOverrideFixtures.has(fixtureId)) continue;
+
     // Find the fixture in fixture channel map (cache this?)
     const fixMap = db.getFixtureChannelMap().find(f => f.id === fixtureId);
     if (!fixMap) continue;
@@ -2529,8 +2560,19 @@ function processSequenceAtTime(deckNum, timeMs) {
         if (deckLevel < 1) {
           finalValue = Math.round(finalValue * deckLevel);
         }
-        // Scale by master dimmer
-        finalValue = applyMasterDimmer(finalValue, ch.type);
+        // Scale by master dimmer — for fixtures WITH a dimmer channel, only apply
+        // to the dimmer itself (the fixture hardware multiplies dimmer × RGB, so
+        // scaling RGB as well would double-dip). For RGB-only fixtures, apply to
+        // the colour channels directly since there's no other way to dim.
+        const fixHasDimmer = fixMap.channels.some(c => c.type === 'dimmer');
+        if (fixHasDimmer) {
+          if (ch.type === 'dimmer') {
+            finalValue = applyMasterDimmer(finalValue, ch.type);
+          }
+          // RGB/white/amber/uv: do NOT scale — dimmer carries the master dim
+        } else {
+          finalValue = applyMasterDimmer(finalValue, ch.type);
+        }
         // Map through channel sub-ranges (e.g. dimmer 0-255 → DMX 8-134)
         if (!skipRangeMap) {
           finalValue = mapValueToRange(finalValue, ch, ch.type);
