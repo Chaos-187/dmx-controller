@@ -17,7 +17,7 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 10;
+const ANALYSIS_VERSION = 11;
 const DEFAULTS = {
   TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
@@ -364,7 +364,7 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const SECTION_MIN_BARS    = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
   const SECTION_WINDOW_BARS = cfg.SECTION_WINDOW_BARS || DEFAULTS.SECTION_WINDOW_BARS;
   const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
-  const MAX_SECTION_BARS    = 12;   // force-split any section longer than this
+  const MAX_SECTION_BARS    = 16;   // force-split any section longer than this
   const MAX_INTRO_BARS     = 8;    // intro/outro can't exceed this many bars
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
@@ -486,10 +486,16 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       // Local peak check: must be highest within ±1 bar
       if ((i === 1 || novelty[i] >= novelty[i - 1]) &&
           (i === totalBars - 1 || novelty[i] >= novelty[i + 1])) {
-        // Snap to nearest 4-bar boundary if within 2 bars
+        // Snap to nearest 8-bar boundary first (natural phrase length),
+        // falling back to 4-bar if 8-bar is too far away
+        const nearest8 = Math.round(i / 8) * 8;
         const nearest4 = Math.round(i / 4) * 4;
-        const snapped = (Math.abs(nearest4 - i) <= 2 && nearest4 > lastBoundary && nearest4 < totalBars)
-          ? nearest4 : i;
+        let snapped = i;
+        if (Math.abs(nearest8 - i) <= 2 && nearest8 > lastBoundary && nearest8 < totalBars) {
+          snapped = nearest8;
+        } else if (Math.abs(nearest4 - i) <= 2 && nearest4 > lastBoundary && nearest4 < totalBars) {
+          snapped = nearest4;
+        }
         if (snapped > lastBoundary) {
           boundaries.push(snapped);
           lastBoundary = snapped;
@@ -648,69 +654,263 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     });
   }
 
-  // ── 6. Classify each section ──────────────────────────────────────────
-  //   Uses energy zones, gradient (rising/falling), spectral character,
-  //   and position — then refined by sequential awareness.
+  // ── 6. Section classification via spectral clustering ─────────────────
+  //   Instead of absolute energy thresholds (which fail when energy is
+  //   fairly uniform across the song), group sections by multi-feature
+  //   similarity.  Similar-sounding sections cluster together; labels are
+  //   assigned by cluster energy rank, position, and structural role.
 
-  // Normalise gradient for threshold comparisons
+  const allSectionEnergies = sectionFeats.map(f => f.energy);
+  const energyMin = Math.min(...allSectionEnergies);
+  const energyMax = Math.max(...allSectionEnergies);
+  const energySpan = (energyMax - energyMin) || 1;
+  const maxCV = Math.max(...sectionFeats.map(f => f.energyCV), 1e-9);
+
+  /**
+   * Distance between two sections using spectral shape (band ratios),
+   * energy level, and internal dynamics (coefficient of variation).
+   * Returns a value in roughly 0–1 range.
+   */
+  function sectionDist(i, j) {
+    const fi = sectionFeats[i], fj = sectionFeats[j];
+    // Spectral shape: Euclidean distance of band-energy ratios.
+    // Using ratios (not absolute levels) captures timbral character
+    // independent of overall loudness.
+    const db = fi.bassRatio - fj.bassRatio;
+    const dt = fi.trebleRatio - fj.trebleRatio;
+    const iMid = Math.max(0, 1 - fi.bassRatio - fi.trebleRatio);
+    const jMid = Math.max(0, 1 - fj.bassRatio - fj.trebleRatio);
+    const dm = iMid - jMid;
+    const shapeDist = Math.min(1, Math.sqrt(db * db + dm * dm + dt * dt) / 0.5);
+    // Normalized energy difference (0–1)
+    const eDist = Math.abs(fi.energy - fj.energy) / energySpan;
+    // Dynamics difference (0–1)
+    const cvDist = Math.abs(fi.energyCV - fj.energyCV) / maxCV;
+    // Weighted: shape 40%, energy 40%, dynamics 20%
+    return shapeDist * 0.40 + eDist * 0.40 + cvDist * 0.20;
+  }
+
+  const numSections = sectionFeats.length;
+  const sectionLabels = new Array(numSections).fill('verse');
+
+  if (numSections >= 3) {
+    // ── Build pairwise distance matrix ──────────────────────────────────
+    const distMx = [];
+    for (let i = 0; i < numSections; i++) {
+      distMx[i] = new Float64Array(numSections);
+    }
+    for (let i = 0; i < numSections; i++) {
+      for (let j = i + 1; j < numSections; j++) {
+        const d = sectionDist(i, j);
+        distMx[i][j] = d;
+        distMx[j][i] = d;
+      }
+    }
+
+    // ── Adaptive merge threshold from distance distribution ─────────────
+    // Find the largest *relative* gap in sorted pairwise distances.
+    // This naturally finds the boundary between "same-type" distances
+    // (small, within-cluster) and "different-type" distances (larger,
+    // between-cluster), adapting to the song's contrast level.
+    const allDists = [];
+    for (let i = 0; i < numSections; i++) {
+      for (let j = i + 1; j < numSections; j++) allDists.push(distMx[i][j]);
+    }
+    allDists.sort((a, b) => a - b);
+
+    let mergeThreshold = 0.10; // fallback
+    if (allDists.length >= 3) {
+      let bestScore = 0;
+      for (let i = 1; i < allDists.length; i++) {
+        const gap = allDists[i] - allDists[i - 1];
+        const relGap = allDists[i] > 0.01 ? gap / allDists[i] : 0;
+        if (relGap > bestScore) {
+          bestScore = relGap;
+          mergeThreshold = (allDists[i - 1] + allDists[i]) / 2;
+        }
+      }
+      mergeThreshold = Math.max(0.03, Math.min(0.30, mergeThreshold));
+    }
+
+    // ── Agglomerative clustering (average linkage) ──────────────────────
+    // Start with each section in its own cluster; merge closest pair each
+    // iteration until distance exceeds the adaptive threshold.
+    let clusters = sectionFeats.map((_, i) => [i]);
+
+    function avgLinkage(c1, c2) {
+      let sum = 0, count = 0;
+      for (const a of c1) {
+        for (const b of c2) { sum += distMx[a][b]; count++; }
+      }
+      return count > 0 ? sum / count : Infinity;
+    }
+
+    while (clusters.length > 2) {
+      let bestI = -1, bestJ = -1, bestDist = Infinity;
+      for (let ci = 0; ci < clusters.length; ci++) {
+        for (let cj = ci + 1; cj < clusters.length; cj++) {
+          const d = avgLinkage(clusters[ci], clusters[cj]);
+          if (d < bestDist) { bestDist = d; bestI = ci; bestJ = cj; }
+        }
+      }
+      if (bestDist > mergeThreshold) break;
+      clusters[bestI] = clusters[bestI].concat(clusters[bestJ]);
+      clusters.splice(bestJ, 1);
+    }
+
+    // ── Compute cluster properties and rank by energy ───────────────────
+    const clusterProps = clusters.map(members => ({
+      members,
+      avgEnergy: members.reduce((s, m) => s + sectionFeats[m].energy, 0) / members.length,
+      avgBR: members.reduce((s, m) => s + sectionFeats[m].bassRatio, 0) / members.length,
+      count: members.length,
+    }));
+    clusterProps.sort((a, b) => b.avgEnergy - a.avgEnergy);
+
+    // ── Assign labels to clusters ───────────────────────────────────────
+    if (clusterProps.length >= 3) {
+      // Highest energy → chorus/drop; Lowest → verse; Middle → bridge if rare
+      for (const idx of clusterProps[0].members) {
+        sectionLabels[idx] = clusterProps[0].avgBR > brP75 ? 'drop' : 'chorus';
+      }
+      for (const idx of clusterProps[clusterProps.length - 1].members) {
+        sectionLabels[idx] = 'verse';
+      }
+      for (let c = 1; c < clusterProps.length - 1; c++) {
+        const label = clusterProps[c].count <= 2 ? 'bridge' : 'verse';
+        for (const idx of clusterProps[c].members) sectionLabels[idx] = label;
+      }
+    } else if (clusterProps.length === 2) {
+      // Two clusters: higher energy = chorus, lower = verse
+      for (const idx of clusterProps[0].members) {
+        sectionLabels[idx] = clusterProps[0].avgBR > brP75 ? 'drop' : 'chorus';
+      }
+      for (const idx of clusterProps[1].members) {
+        sectionLabels[idx] = 'verse';
+      }
+    } else {
+      // Single cluster — all sections too similar to separate.
+      // Split by relative energy within the cluster.
+      const midE = (energyMin + energyMax) / 2;
+      for (let s = 0; s < numSections; s++) {
+        sectionLabels[s] = sectionFeats[s].energy > midE ? 'chorus' : 'verse';
+      }
+    }
+
+  } else {
+    // Fewer than 3 sections — use simple energy percentiles
+    for (let s = 0; s < numSections; s++) {
+      const f = sectionFeats[s];
+      if (f.energy >= p75) sectionLabels[s] = f.bassHigh ? 'drop' : 'chorus';
+      else if (f.energy <= p25) sectionLabels[s] = 'verse';
+      else sectionLabels[s] = f.energy >= p50 ? 'chorus' : 'verse';
+    }
+  }
+
+  // ── 7. Position and gradient overrides ────────────────────────────────
+  //   Intro/outro, buildup, breakdown depend on position and energy context
+  //   rather than spectral similarity, so they override cluster labels.
   const gradients = sectionFeats.map(f => f.gradient);
   const gradMax = Math.max(...gradients.map(Math.abs), 1e-9);
 
-  const sections = [];
-
-  for (let s = 0; s < sectionFeats.length; s++) {
+  for (let s = 0; s < numSections; s++) {
     const f = sectionFeats[s];
-    const normGrad = f.gradient / gradMax;  // -1..+1 range
+    const normGrad = f.gradient / gradMax;
 
-    let label;
-
-    // ── Intro: only the very first section, capped at MAX_INTRO_BARS ──
+    // Intro: first section if moderate/low energy and short
     if (s === 0 && f.numBars <= MAX_INTRO_BARS && f.energy < p75) {
-      label = 'intro';
-
-    // ── Outro: only the very last section, capped at MAX_INTRO_BARS ──
-    } else if (s === sectionFeats.length - 1 && f.numBars <= MAX_INTRO_BARS &&
-               f.energy < p75 && (normGrad < 0.1 || f.energy <= p50)) {
-      label = 'outro';
-
-    // ── Buildup: rising energy gradient, not already high energy ──
-    //    Classic buildup: energy ramps up, often ends high
-    } else if (normGrad > 0.25 && f.energy < p75 && f.nextEnergy > f.energy * 1.15) {
-      label = 'buildup';
-
-    // ── Buildup: low energy with strong increase to next section ──
-    } else if (f.energy <= p50 && f.nextEnergy > p75) {
-      label = 'buildup';
-
-    // ── Drop: very high energy with strong bass (p75+, bass-dominant) ──
-    } else if (f.energy >= p75 && f.bassHigh) {
-      label = 'drop';
-
-    // ── Breakdown: dramatic energy drop from previous AND very low energy ──
-    //    Must be well below p25 AND preceded by a high-energy section.
-    //    This avoids labelling normal low-energy sections as breakdown.
-    } else if (f.energy <= p25 && f.prevEnergy > p75) {
-      label = 'breakdown';
-
-    // ── Breakdown: very low energy AND falling gradient ──
-    } else if (f.energy <= p25 && normGrad < -0.1) {
-      label = 'breakdown';
-
-    // ── Chorus: high energy (≥ p75) ──
-    } else if (f.energy >= p75) {
-      label = 'chorus';
-
-    // ── Moderate energy: verse or chorus depending on context ──
-    } else if (f.energy >= p50) {
-      // Above median but below p75 — chorus if clearly above neighbours
-      const aboveNeighbours = f.energy > f.prevEnergy * 1.15 && f.energy > f.nextEnergy * 1.05;
-      label = aboveNeighbours ? 'chorus' : 'verse';
-
-    } else {
-      // Below median → verse (not breakdown; breakdowns are structural, not just quiet)
-      label = 'verse';
+      sectionLabels[s] = 'intro';
     }
+    // Outro: last section if moderate/low energy, fading/stable, and short
+    else if (s === numSections - 1 && f.numBars <= MAX_INTRO_BARS &&
+             f.energy < p75 && (normGrad < 0.1 || f.energy <= p50)) {
+      sectionLabels[s] = 'outro';
+    }
+    // Buildup: rising gradient with next section significantly higher
+    else if (normGrad > 0.2 && f.energy < p75 && f.nextEnergy > f.energy * 1.15) {
+      sectionLabels[s] = 'buildup';
+    }
+    // Buildup: low energy leading into high-energy section
+    else if (f.energy <= p50 && f.nextEnergy > p75) {
+      sectionLabels[s] = 'buildup';
+    }
+    // Breakdown: very low energy after a high-energy section
+    else if (f.energy <= p25 && f.prevEnergy > p75) {
+      sectionLabels[s] = 'breakdown';
+    }
+    // Breakdown: very low energy with falling gradient (not intro/outro)
+    else if (f.energy <= p25 && normGrad < -0.1 && s > 0 && s < numSections - 1) {
+      sectionLabels[s] = 'breakdown';
+    }
+  }
 
+  // ── 8. Sequential refinement ──────────────────────────────────────────
+  //   After buildup → drop/chorus; after drop/chorus → breakdown if energy dips.
+  for (let i = 0; i < numSections; i++) {
+    // Buildup followed by high energy → ensure next is drop or chorus
+    if (sectionLabels[i] === 'buildup' && i + 1 < numSections) {
+      const nf = sectionFeats[i + 1];
+      if (nf.energy >= p75 && nf.bassHigh && sectionLabels[i + 1] !== 'intro') {
+        sectionLabels[i + 1] = 'drop';
+      } else if (nf.energy >= p75 && sectionLabels[i + 1] === 'verse') {
+        sectionLabels[i + 1] = 'chorus';
+      }
+    }
+    // After drop → dramatic dip = breakdown
+    if (sectionLabels[i] === 'drop' && i + 1 < numSections) {
+      const nf = sectionFeats[i + 1];
+      if (nf.energy <= p25 && sectionLabels[i + 1] !== 'outro') {
+        sectionLabels[i + 1] = 'breakdown';
+      }
+    }
+    // Chorus → dramatic energy dip = breakdown
+    if (sectionLabels[i] === 'chorus' && i + 1 < numSections) {
+      const nf = sectionFeats[i + 1];
+      if (nf.energy <= p25 && nf.energy < sectionFeats[i].energy * 0.5 &&
+          sectionLabels[i + 1] !== 'outro' && sectionLabels[i + 1] !== 'buildup') {
+        sectionLabels[i + 1] = 'breakdown';
+      }
+    }
+  }
+
+  // ── 9. Bridge detection — spectrally unique verses ────────────────────
+  //   A verse that is spectrally distant from the majority of verses is
+  //   likely a bridge (different melody/instrumentation, one-off section).
+  if (numSections >= 5) {
+    const verseIdxs = [];
+    for (let i = 0; i < numSections; i++) {
+      if (sectionLabels[i] === 'verse') verseIdxs.push(i);
+    }
+    if (verseIdxs.length >= 2) {
+      // Compute the centroid fingerprint of all verses
+      const centroid = [0, 0, 0];
+      for (const vi of verseIdxs) {
+        centroid[0] += sectionFeats[vi].fingerprint[0];
+        centroid[1] += sectionFeats[vi].fingerprint[1];
+        centroid[2] += sectionFeats[vi].fingerprint[2];
+      }
+      centroid[0] /= verseIdxs.length;
+      centroid[1] /= verseIdxs.length;
+      centroid[2] /= verseIdxs.length;
+
+      for (const vi of verseIdxs) {
+        const fp = sectionFeats[vi].fingerprint;
+        const dist = cosineDist(centroid, fp);
+        const eDiff = Math.abs(sectionFeats[vi].energy -
+          verseIdxs.reduce((s, v) => s + sectionFeats[v].energy, 0) / verseIdxs.length) / eRange;
+        // Spectrally distant from the verse centroid → bridge
+        if (dist > 0.10 || eDiff > 0.20) {
+          sectionLabels[vi] = 'bridge';
+        }
+      }
+    }
+  }
+
+  // ── 10. Build final sections array ────────────────────────────────────
+  const sections = [];
+  for (let s = 0; s < numSections; s++) {
+    const f = sectionFeats[s];
+    const label = sectionLabels[s];
     sections.push({
       start_ms: f.startMs,
       end_ms:   Math.min(f.endMs, durationMs),
@@ -718,102 +918,12 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       color:  SECTION_COLORS[label] || SECTION_COLORS.unknown,
       energy: parseFloat(f.energy.toFixed(4)),
       bars:   f.numBars,
-      _idx:   s,  // temporary index for refinement passes
     });
   }
 
-  // ── 7. Sequential-awareness refinement ────────────────────────────────
-  //   - After buildup → next high-energy section becomes 'drop'
-  //   - After drop/chorus → next low-energy section becomes 'breakdown'
-  //   - Buildup can't be the first or last section (relabel)
-
-  for (let i = 0; i < sections.length; i++) {
-    const f = sectionFeats[i];
-
-    // Buildup followed by high energy → ensure next is 'drop' or 'chorus'
-    if (sections[i].label === 'buildup' && i + 1 < sections.length) {
-      const next = sections[i + 1];
-      const nf   = sectionFeats[i + 1];
-      if (nf.energy >= p75 && nf.bassHigh) {
-        next.label = 'drop';
-        next.color = SECTION_COLORS.drop;
-      } else if (nf.energy >= p75) {
-        next.label = 'chorus';
-        next.color = SECTION_COLORS.chorus;
-      }
-    }
-
-    // After drop → only a dramatic energy dip becomes 'breakdown'
-    if (sections[i].label === 'drop' && i + 1 < sections.length) {
-      const next = sections[i + 1];
-      const nf   = sectionFeats[i + 1];
-      if (nf.energy <= p25 && next.label !== 'outro') {
-        next.label = 'breakdown';
-        next.color = SECTION_COLORS.breakdown;
-      }
-    }
-
-    // Chorus → only a very large energy drop becomes 'breakdown'
-    if (sections[i].label === 'chorus' && i + 1 < sections.length) {
-      const next = sections[i + 1];
-      const nf   = sectionFeats[i + 1];
-      if (nf.energy <= p25 && nf.energy < f.energy * 0.5 &&
-          next.label !== 'outro' && next.label !== 'buildup') {
-        next.label = 'breakdown';
-        next.color = SECTION_COLORS.breakdown;
-      }
-    }
-  }
-
-  // ── 8. Bridge detection via spectral similarity ───────────────────────
-  //   Find the first 'verse'; any later 'verse' with significantly different
-  //   spectral fingerprint gets relabelled 'bridge'.
-  const firstVerse = sections.find(s => s.label === 'verse');
-  if (firstVerse) {
-    const fv = sectionFeats[firstVerse._idx];
-    for (let i = 0; i < sections.length; i++) {
-      if (sections[i].label !== 'verse' || i === firstVerse._idx) continue;
-      const sf = sectionFeats[i];
-      // Cosine distance between spectral fingerprints
-      const dist = cosineDist(fv.fingerprint, sf.fingerprint);
-      // Also check energy difference
-      const eDiff = Math.abs(sf.energy - fv.energy) / eRange;
-      // If spectrally different enough, it's a bridge
-      if (dist > 0.15 || eDiff > 0.25) {
-        sections[i].label = 'bridge';
-        sections[i].color = SECTION_COLORS.bridge;
-      }
-    }
-  }
-
-  // ── 9. Repetition matching ────────────────────────────────────────────
-  //   Sections with very similar spectral fingerprints should share labels.
-  //   Only promote: if a 'verse' is highly similar to a 'chorus', keep the
-  //   label from whichever was classified first (don't downgrade).
-  for (let i = 0; i < sections.length; i++) {
-    for (let j = i + 1; j < sections.length; j++) {
-      if (sections[i].label === sections[j].label) continue;  // already same
-      const fi = sectionFeats[i], fj = sectionFeats[j];
-      const dist = cosineDist(fi.fingerprint, fj.fingerprint);
-      const eDiff = Math.abs(fi.energy - fj.energy) / eRange;
-      // Very similar sections (cosine dist < 0.06 AND energy within 12%)
-      if (dist < 0.06 && eDiff < 0.12) {
-        // Position-dependent labels should never propagate or be overwritten
-        const posLabels = new Set(['intro', 'outro']);
-        if (posLabels.has(sections[i].label) || posLabels.has(sections[j].label)) continue;
-        // Use the label from the earlier section (first-occurrence wins)
-        sections[j].label = sections[i].label;
-        sections[j].color = SECTION_COLORS[sections[i].label] || SECTION_COLORS.unknown;
-      }
-    }
-  }
-
-  // Clean up temporary indices
-  for (const sec of sections) delete sec._idx;
-
-  // ── 10. Conservative merge: only merge tiny (<= 4 bar) same-label neighbours
-  //    Also merge same-label neighbours where both are ≤ 8 bars and
-  //    their combined length won't exceed 16 bars.
+  // ── 11. Conservative merge: same-label neighbours ─────────────────────
+  //    Merge adjacent sections with the same label when both are short
+  //    enough that the combined section stays within MAX_SECTION_BARS.
   if (sections.length === 0) return [];
   const merged = [sections[0]];
   for (let i = 1; i < sections.length; i++) {

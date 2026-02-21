@@ -912,16 +912,19 @@ const MOVER_POSITIONS = [
  *  - bridge: moderate movement
  */
 const MOVEMENT_STYLES = {
-  intro:     { barsPerMove: 8, range: 0.4, speed: 'slow' },
-  verse:     { barsPerMove: 4, range: 0.5, speed: 'medium' },
-  chorus:    { barsPerMove: 2, range: 0.8, speed: 'fast' },
-  bridge:    { barsPerMove: 4, range: 0.5, speed: 'medium' },
-  breakdown: { barsPerMove: 8, range: 0.3, speed: 'slow' },
-  buildup:   { barsPerMove: 1, range: 0.8, speed: 'fast' },
+  intro:     { barsPerMove: 4,   range: 0.4, speed: 'slow' },
+  verse:     { barsPerMove: 2,   range: 0.5, speed: 'medium' },
+  chorus:    { barsPerMove: 1,   range: 0.8, speed: 'fast' },
+  bridge:    { barsPerMove: 2,   range: 0.5, speed: 'medium' },
+  breakdown: { barsPerMove: 4,   range: 0.3, speed: 'slow' },
+  buildup:   { barsPerMove: 0.5, range: 0.8, speed: 'fast' },
   drop:      { barsPerMove: 0.5, range: 1.0, speed: 'fast' },
-  outro:     { barsPerMove: 8, range: 0.3, speed: 'slow' },
+  outro:     { barsPerMove: 4,   range: 0.3, speed: 'slow' },
 };
-const DEFAULT_MOVEMENT = { barsPerMove: 4, range: 0.5, speed: 'medium' };
+const DEFAULT_MOVEMENT = { barsPerMove: 2, range: 0.5, speed: 'medium' };
+
+// Speed channel DMX values — most movers use 0 = fastest, 255 = slowest
+const SPEED_DMX = { slow: 200, medium: 140, fast: 40 };
 
 /**
  * Build per-fixture position lists from saved mover presets.
@@ -979,9 +982,9 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
   const { barMs, beatMs, rand, preset, durationMs, snapBar, bpmFactor } = ctx;
 
   // BPM-adaptive movement scaling:
-  //  - bpmFactor 0 (≤90 BPM) → moveDensity ~0.7 (slower, fewer moves)
-  //  - bpmFactor 1 (≥150 BPM) → moveDensity ~1.6 (faster, more frequent moves)
-  const moveDensityScale = 0.7 + 0.9 * bpmFactor;
+  //  - bpmFactor 0 (≤90 BPM) → moveDensity ~0.8 (slower, fewer moves)
+  //  - bpmFactor 1 (≥150 BPM) → moveDensity ~2.0 (faster, more frequent moves)
+  const moveDensityScale = 0.8 + 1.2 * bpmFactor;
   // Range boost: high-BPM songs use wider pan/tilt sweeps
   const rangeBoost = 1.0 + 0.4 * bpmFactor;  // 1.0–1.4×
 
@@ -998,6 +1001,7 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
     const existingCue = cues.find(c => c.fixture_id === fix.id);
     const lane = existingCue ? existingCue.lane : mi;
     const hasGobo = fix.channels.some(ch => ch.type === 'gobo');
+    const hasSpeed = fix.channels.some(ch => ch.type === 'speed');
 
     let posIdx = mi; // offset per mover for variety
     const mirror = mi % 2 === 1; // odd movers mirror pan
@@ -1048,6 +1052,15 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
           const startVals = { pan: startPan, tilt: fromTilt };
           const endVals = { pan: endPan, tilt: toTilt };
 
+          // Set speed channel (motor speed) — faster on energetic sections
+          if (hasSpeed) {
+            const baseSpeedDmx = SPEED_DMX[style.speed] || SPEED_DMX.medium;
+            // Make motor even faster at high BPM
+            const bpmSpeedBoost = Math.round(baseSpeedDmx * (1 - bpmFactor * 0.3));
+            startVals.speed = Math.max(0, bpmSpeedBoost);
+            endVals.speed = startVals.speed;
+          }
+
           // Add gobo changes on high-energy sections
           if (hasGobo && (sec.label === 'chorus' || sec.label === 'drop'
               || (sec.label === 'buildup' && bpmFactor > 0.5))) {
@@ -1085,14 +1098,23 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
         const startPan = mirror ? (255 - from.pan) : from.pan;
         const endPan = mirror ? (255 - to.pan) : to.pan;
 
+        const chVals = { pan: startPan, tilt: from.tilt };
+        const endChVals = { pan: endPan, tilt: to.tilt };
+
+        if (hasSpeed) {
+          const baseSpeedDmx = SPEED_DMX.medium;
+          chVals.speed = Math.max(0, Math.round(baseSpeedDmx * (1 - bpmFactor * 0.3)));
+          endChVals.speed = chVals.speed;
+        }
+
         cues.push({
           lane,
           start_ms: Math.round(startMs),
           duration_ms: Math.round(dur),
           cue_type: 'fade',
           fixture_id: fix.id,
-          channel_values: { pan: startPan, tilt: from.tilt },
-          end_channel_values: { pan: endPan, tilt: to.tilt },
+          channel_values: chVals,
+          end_channel_values: endChVals,
           color: '#4488ff',
           label: 'move',
         });
@@ -1102,6 +1124,41 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
 
   // Re-sort after adding movement cues
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+
+  // ── De-overlap movement cues per fixture ──────────────────────────────
+  // At section boundaries two movement cues for the same fixture can overlap.
+  // For each mover, walk its movement cues chronologically and trim (or remove)
+  // any cue that is superseded by the next one.
+  for (const fix of movers) {
+    // Collect indices of movement cues for this fixture
+    const moveIdxs = [];
+    for (let i = 0; i < cues.length; i++) {
+      if (cues[i].fixture_id === fix.id && cues[i].label === 'move') moveIdxs.push(i);
+    }
+    if (moveIdxs.length < 2) continue;
+
+    // Walk backwards so splicing doesn't shift indices we haven't visited
+    const toRemove = new Set();
+    for (let j = 0; j < moveIdxs.length - 1; j++) {
+      const curr = cues[moveIdxs[j]];
+      const next = cues[moveIdxs[j + 1]];
+      const currEnd = curr.start_ms + curr.duration_ms;
+      if (currEnd > next.start_ms) {
+        // Overlap detected — trim current cue to end where next begins
+        const trimmed = next.start_ms - curr.start_ms;
+        if (trimmed <= 0) {
+          // Current cue starts at or after next — remove it entirely
+          toRemove.add(moveIdxs[j]);
+        } else {
+          curr.duration_ms = trimmed;
+        }
+      }
+    }
+    if (toRemove.size > 0) {
+      const sorted = [...toRemove].sort((a, b) => b - a);
+      for (const idx of sorted) cues.splice(idx, 1);
+    }
+  }
 }
 
 // ─── Effect Cue Generation (non-movers only) ───────────────────────────────
@@ -1342,8 +1399,10 @@ const CELL_PATTERN_MAP = {
 
 /**
  * Main multi-cell pattern orchestrator.
- * For each multi-cell fixture and section, picks a pattern type and generates
- * per-cell cues.
+ * Groups multi-cell fixtures by type_name and, for high-energy sections,
+ * cascades patterns across all fixtures in each group — treating them as
+ * one large virtual fixture so chases/waves sweep from fixture to fixture.
+ * Calmer sections still get independent per-fixture patterns for variety.
  */
 function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
   const { barMs, beatMs, rand, paletteKey, preset, snapBeat } = ctx;
@@ -1352,15 +1411,20 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
   // for visual variety instead of one pattern for the entire section.
   const SUB_PHRASE_BARS = 8;
 
+  // ── Group multi-cell fixtures by type_name for cross-fixture cascading ──
+  const fixtureGroups = {};  // { type_name: [fix, fix, ...] }
   for (const fix of multiCellFixtures) {
-    const cellCount = fix.cell_count || 0;
-    if (cellCount < 2) continue;
+    if ((fix.cell_count || 0) < 2) continue;
+    const key = fix.type_name || `unknown_${fix.id}`;
+    if (!fixtureGroups[key]) fixtureGroups[key] = [];
+    fixtureGroups[key].push(fix);
+  }
 
-    // Find existing lane for this fixture
-    const existingCue = cues.find(c => c.fixture_id === fix.id);
-    const lane = existingCue ? existingCue.lane : 0;
-    const hasDimmer = fix.channels.some(ch => ch.type === 'dimmer');
-    const hasWhite = fix.channels.some(ch => ch.type === 'white');
+  // Section labels that strongly favour cross-fixture cascade
+  const CASCADE_SECTIONS = new Set(['chorus', 'drop', 'buildup']);
+
+  for (const [typeName, group] of Object.entries(fixtureGroups)) {
+    const canCascade = group.length > 1;
 
     for (const section of sections) {
       const label = section.label || 'verse';
@@ -1369,6 +1433,46 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
       const secEndMs = Math.round(section.end_ms);
       const secDurMs = secEndMs - secStartMs;
       if (secDurMs < barMs) continue;
+
+      // Decide: cross-fixture cascade or independent per-fixture patterns.
+      // High-energy sections always cascade; others have a 50 % chance.
+      const useCascade = canCascade && (
+        CASCADE_SECTIONS.has(label) || rand() > 0.5
+      );
+
+      // Build fixture context(s) — either one virtual context spanning
+      // all fixtures or one context per fixture (original behaviour).
+      const fixtureContexts = [];
+      if (useCascade) {
+        // Build virtual cell array: cells concatenated across all fixtures
+        const virtualCells = [];
+        for (const fix of group) {
+          for (let c = 1; c <= fix.cell_count; c++) {
+            virtualCells.push({ fix, cell: c });
+          }
+        }
+        const refFix = group[0];
+        const existingCue = cues.find(c => c.fixture_id === refFix.id);
+        fixtureContexts.push({
+          fix: refFix,
+          lane: existingCue ? existingCue.lane : 0,
+          cellCount: virtualCells.length,
+          virtualCells,
+          hasDimmer: refFix.channels.some(ch => ch.type === 'dimmer'),
+          hasWhite: refFix.channels.some(ch => ch.type === 'white'),
+        });
+      } else {
+        for (const fix of group) {
+          const existingCue = cues.find(c => c.fixture_id === fix.id);
+          fixtureContexts.push({
+            fix,
+            lane: existingCue ? existingCue.lane : 0,
+            cellCount: fix.cell_count,
+            hasDimmer: fix.channels.some(ch => ch.type === 'dimmer'),
+            hasWhite: fix.channels.some(ch => ch.type === 'white'),
+          });
+        }
+      }
 
       const patterns = CELL_PATTERN_MAP[label] || CELL_PATTERN_MAP.verse;
       const allPalettes = getSectionPalettes(paletteKey, label);
@@ -1381,45 +1485,49 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
       // Only sub-phrase if section is long enough (>= 2 sub-phrases)
       const useSubPhrases = numSubPhrases >= 2 && label !== 'buildup';
 
-      if (useSubPhrases) {
-        // Break section into sub-phrases, each gets a different pattern & palette
-        let lastPattern = '';
-        for (let sp = 0; sp < numSubPhrases; sp++) {
-          const spStart = secStartMs + sp * subPhraseMs;
-          const spEnd = sp === numSubPhrases - 1 ? secEndMs : secStartMs + (sp + 1) * subPhraseMs;
-          const spDur = spEnd - spStart;
-          if (spDur < barMs) continue;
+      for (const fCtx of fixtureContexts) {
+        if (useSubPhrases) {
+          // Break section into sub-phrases, each gets a different pattern & palette
+          let lastPattern = '';
+          for (let sp = 0; sp < numSubPhrases; sp++) {
+            const spStart = secStartMs + sp * subPhraseMs;
+            const spEnd = sp === numSubPhrases - 1 ? secEndMs : secStartMs + (sp + 1) * subPhraseMs;
+            const spDur = spEnd - spStart;
+            if (spDur < barMs) continue;
 
-          // Pick a pattern different from the previous sub-phrase
-          let pattern;
-          for (let tries = 0; tries < 5; tries++) {
-            pattern = patterns[Math.floor(rand() * patterns.length)];
-            if (pattern !== lastPattern || patterns.length <= 1) break;
+            // Pick a pattern different from the previous sub-phrase
+            let pattern;
+            for (let tries = 0; tries < 5; tries++) {
+              pattern = patterns[Math.floor(rand() * patterns.length)];
+              if (pattern !== lastPattern || patterns.length <= 1) break;
+            }
+            lastPattern = pattern;
+
+            // Rotate palette for each sub-phrase
+            const palettes = [allPalettes[sp % allPalettes.length]];
+            // Include a second palette for contrast
+            if (allPalettes.length > 1) palettes.push(allPalettes[(sp + 1) % allPalettes.length]);
+
+            const patternCtx = {
+              ...fCtx,
+              secStartMs: spStart, secEndMs: spEnd, secDurMs: spDur,
+              palettes, baseIntensity, label,
+              ...ctx,
+            };
+
+            _dispatchCellPattern(cues, pattern, patternCtx);
           }
-          lastPattern = pattern;
-
-          // Rotate palette for each sub-phrase
-          const palettes = [allPalettes[sp % allPalettes.length]];
-          // Include a second palette for contrast
-          if (allPalettes.length > 1) palettes.push(allPalettes[(sp + 1) % allPalettes.length]);
-
+        } else {
+          // Short section — single pattern
+          const pattern = patterns[Math.floor(rand() * patterns.length)];
           const patternCtx = {
-            fix, lane, cellCount, secStartMs: spStart, secEndMs: spEnd, secDurMs: spDur,
-            palettes, baseIntensity, hasDimmer, hasWhite, label,
+            ...fCtx,
+            secStartMs, secEndMs, secDurMs,
+            palettes: allPalettes, baseIntensity, label,
             ...ctx,
           };
-
           _dispatchCellPattern(cues, pattern, patternCtx);
         }
-      } else {
-        // Short section — single pattern
-        const pattern = patterns[Math.floor(rand() * patterns.length)];
-        const patternCtx = {
-          fix, lane, cellCount, secStartMs, secEndMs, secDurMs,
-          palettes: allPalettes, baseIntensity, hasDimmer, hasWhite, label,
-          ...ctx,
-        };
-        _dispatchCellPattern(cues, pattern, patternCtx);
       }
     }
   }
@@ -1447,9 +1555,29 @@ function _dispatchCellPattern(cues, pattern, ctx) {
 }
 
 /**
+ * Resolve a virtual cell index to actual fixture + cell.
+ * When p.virtualCells is set (cross-fixture cascade mode), the cell index
+ * spans all fixtures in the group. Otherwise it maps 1:1 to p.fix.
+ */
+function _resolveCell(p, cell) {
+  if (p.virtualCells) {
+    const idx = cell - 1;
+    if (idx < 0 || idx >= p.virtualCells.length) return null;
+    const vc = p.virtualCells[idx];
+    return { fix: vc.fix, cell: vc.cell };
+  }
+  return { fix: p.fix, cell };
+}
+
+/**
  * Helper: create a per-cell cue.
+ * Supports virtual cells for cross-fixture cascade — when p.virtualCells is
+ * present, the cell index is resolved to the correct fixture + cell.
  */
 function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, label) {
+  const resolved = _resolveCell(p, cell);
+  if (!resolved) return;
+
   const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
   const endVals = endColor ? { red: endColor.r, green: endColor.g, blue: endColor.b } : {};
   if (p.hasDimmer) {
@@ -1466,8 +1594,8 @@ function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, l
     start_ms: Math.round(startMs),
     duration_ms: Math.round(Math.max(10, durMs)),
     cue_type: cueType || 'static',
-    fixture_id: p.fix.id,
-    cell,
+    fixture_id: resolved.fix.id,
+    cell: resolved.cell,
     channel_values: startVals,
     end_channel_values: endVals,
     color: rgbToHex(startColor.r, startColor.g, startColor.b),
@@ -1623,13 +1751,15 @@ function cellPatternScatter(cues, p, strobeMode) {
       if (dur <= 0) break;
 
       if (strobeMode && !noStrobes) {
-        // Strobe flash
+        // Strobe flash — resolve virtual cell for cross-fixture cascade
+        const resolved = _resolveCell(p, cell);
+        if (!resolved) continue;
         const strobeVals = { red: color.r, green: color.g, blue: color.b, strobe_hz: 15 };
         if (p.hasDimmer) strobeVals.dimmer = 255;
         if (p.hasWhite) strobeVals.white = 200;
         cues.push({
           lane: p.lane, start_ms: Math.round(t), duration_ms: Math.round(dur),
-          cue_type: 'strobe', fixture_id: p.fix.id, cell,
+          cue_type: 'strobe', fixture_id: resolved.fix.id, cell: resolved.cell,
           channel_values: strobeVals, end_channel_values: {},
           color: '#ffffff', label: 'scatter',
         });
@@ -1740,11 +1870,13 @@ function cellPatternAllFlash(cues, p) {
     // Add strobe burst every 4 beats in drop
     if (!noStrobes && palIdx % 4 === 3) {
       for (let cell = 1; cell <= cellCount; cell++) {
+        const resolved = _resolveCell(p, cell);
+        if (!resolved) continue;
         const strobeVals = { red: 255, green: 255, blue: 255, strobe_hz: 18 };
         if (p.hasDimmer) strobeVals.dimmer = 255;
         cues.push({
           lane: p.lane, start_ms: Math.round(t), duration_ms: Math.round(Math.min(beatMs * 0.5, dur)),
-          cue_type: 'strobe', fixture_id: p.fix.id, cell,
+          cue_type: 'strobe', fixture_id: resolved.fix.id, cell: resolved.cell,
           channel_values: strobeVals, end_channel_values: {},
           color: '#ffffff', label: 'strobe',
         });

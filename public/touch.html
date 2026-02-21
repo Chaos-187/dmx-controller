@@ -316,6 +316,7 @@
   <div class="section">
     <h2>Movement Presets</h2>
     <div id="moverPresetGrid" class="preset-grid"></div>
+    <div style="margin-top:10px;text-align:center"><button class="btn" style="background:var(--border);color:var(--text);font-size:14px;padding:12px 28px" onclick="clearMovementOverride()">Clear Override</button></div>
   </div>
   <div class="section">
     <h2>Manual Position</h2>
@@ -736,6 +737,20 @@ function sendDMX(byUniverse) {
   }
 }
 
+// Override notification — tells the server-side sequence engine to skip
+// overridden channel types so the touch DMX writes aren't overwritten.
+function notifyOverride(type, fixtureIds, active) {
+  if (!fixtureIds || !fixtureIds.length) return;
+  fetch('/api/touch/' + type + '-override', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fixtureIds, active })
+  }).catch(() => {});
+}
+
+function getFixtureIdsFromTargets(targets) {
+  return targets.filter(f => fixtureEnabled[f.id] !== false).map(f => f.id);
+}
+
 // Color Override
 function sendColorOverride() {
   if (selectedColor === null) return;
@@ -758,6 +773,7 @@ function sendColorOverride() {
     }
   );
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 function clearColorOverrideDMX() {
@@ -767,6 +783,7 @@ function clearColorOverrideDMX() {
     () => 0
   );
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), false);
 }
 
 function onIntensityChange(val) {
@@ -776,6 +793,7 @@ function onIntensityChange(val) {
 }
 
 function clearColorOverride() {
+  clearColorOverrideDMX();
   selectedColor = null;
   renderColorActive();
 }
@@ -901,9 +919,11 @@ function blackoutFixture(fixId) {
 function sendMoverPreset(preset) {
   if (!preset.positions) return;
   const byUniverse = {};
+  const affectedIds = [];
   for (const pos of preset.positions) {
     const f = fixtures.find(fx => fx.id === pos.fixture_id);
     if (!f || fixtureEnabled[f.id] === false) continue;
+    affectedIds.push(f.id);
     const u = f.universe || 1;
     if (!byUniverse[u]) byUniverse[u] = [];
     for (const ch of f.channels) {
@@ -912,6 +932,13 @@ function sendMoverPreset(preset) {
     }
   }
   sendDMX(byUniverse);
+  notifyOverride('movement', affectedIds, true);
+}
+
+function clearMovementOverride() {
+  const movers = getEnabledFixtures().filter(f =>
+    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt'));
+  notifyOverride('movement', movers.map(f => f.id), false);
 }
 
 function sendManualPosition() {
@@ -929,6 +956,7 @@ function sendManualPosition() {
     (ch) => ch.type === 'pan' ? pan : ch.type === 'tilt' ? tilt : speed
   );
   sendDMX(updates);
+  notifyOverride('movement', movers.map(f => f.id), true);
 }
 
 // Quick Actions (dispatched by data-action)
@@ -953,6 +981,7 @@ function actionFullWhite() {
     () => 255
   );
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 function actionFullColor() {
@@ -973,6 +1002,7 @@ function actionDimWarm() {
     }
   );
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 function actionAllOff() {
@@ -983,6 +1013,8 @@ function actionAllOff() {
     for (const ch of f.channels) byUniverse[u].push({ ch: ch.dmx_address, val: 0 });
   }
   sendDMX(byUniverse);
+  notifyOverride('color', fixtures.map(f => f.id), false);
+  notifyOverride('movement', fixtures.map(f => f.id), false);
 }
 
 function actionUVMode() {
@@ -997,6 +1029,7 @@ function actionUVMode() {
     }
   );
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 </script>
 </body>

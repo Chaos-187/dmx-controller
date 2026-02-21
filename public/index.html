@@ -1980,6 +1980,19 @@
           </div>
 
           <div class="config-card" style="margin-top:16px">
+            <h4>Playback</h4>
+            <div class="config-row">
+              <label>When Sequence Ends</label>
+              <select id="cfgSeqEndAction" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);font-size:12px">
+                <option value="none">Do nothing</option>
+                <option value="blackout">Blackout all fixtures</option>
+                <option value="scene">Activate default scene</option>
+              </select>
+              <span style="font-size:11px;color:var(--text-dim);margin-left:8px">Action taken when a sequence reaches the end of the track</span>
+            </div>
+          </div>
+
+          <div class="config-card" style="margin-top:16px">
             <h4>Mixer Integration</h4>
             <div class="config-row">
               <label>Crossfader Sequence Gating</label>
@@ -4327,6 +4340,7 @@ async function loadSequencerConfig() {
   document.getElementById('cfgSeqNoStrobes').checked = config.seq_no_strobes === '1';
   document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
   document.getElementById('cfgSeqDeckFaderDimmer').checked = config.seq_deck_fader_dimmer === '1';
+  document.getElementById('cfgSeqEndAction').value = config.seq_end_action || 'none';
 
   // Load linked sequences
   const seqs = await fetch('/api/sequences').then(r => r.json());
@@ -4357,6 +4371,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_no_strobes', document.getElementById('cfgSeqNoStrobes').checked ? '1' : '0'],
     ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],
     ['seq_deck_fader_dimmer', document.getElementById('cfgSeqDeckFaderDimmer').checked ? '1' : '0'],
+    ['seq_end_action', document.getElementById('cfgSeqEndAction').value],
   ], 'btnSaveSeqConfig');
 });
 

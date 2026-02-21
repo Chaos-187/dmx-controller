@@ -491,6 +491,7 @@ input[type=range]::-moz-range-thumb{
 
     <div class="section-label">Presets</div>
     <div class="chip-row" id="moverPresetGrid"></div>
+    <div style="margin-top:6px"><button class="clear-btn-sm" onclick="clearMovementOverride()">Clear Override</button></div>
 
     <div class="section-label">Manual</div>
     <div class="slider-wrap"><span class="slider-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="slider-val" id="panVal">128</span></div>
@@ -1008,12 +1009,26 @@ function sendDMX(byUniverse) {
   }
 }
 
+/* ─── Override Notification ────────────────────────────── */
+function notifyOverride(type, fixtureIds, active) {
+  if (!fixtureIds || !fixtureIds.length) return;
+  fetch('/api/touch/' + type + '-override', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fixtureIds, active })
+  }).catch(() => {});
+}
+
+function getFixtureIdsFromTargets(targets) {
+  return targets.filter(f => fixtureEnabled[f.id] !== false).map(f => f.id);
+}
+
 /* ─── Color Override ───────────────────────────────────────── */
 function sendColorOverride() {
   if (selectedColor === null) return;
   const c = COLORS[selectedColor];
   const scale = colorIntensity / 255;
-  const updates = buildChannelUpdates(getTargetFixtures(),
+  const targets = getTargetFixtures();
+  const updates = buildChannelUpdates(targets,
     ch => ['red','green','blue','white','amber','uv','dimmer'].includes(ch.type),
     ch => {
       switch (ch.type) {
@@ -1028,15 +1043,18 @@ function sendColorOverride() {
       }
     });
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 function clearColorOverrideDMX() {
-  const updates = buildChannelUpdates(getTargetFixtures(),
+  const targets = getTargetFixtures();
+  const updates = buildChannelUpdates(targets,
     ch => ['red','green','blue','white','amber','uv'].includes(ch.type), () => 0);
   sendDMX(updates);
+  notifyOverride('color', getFixtureIdsFromTargets(targets), false);
 }
 
-function clearColorOverride() { selectedColor = null; renderColorActive(); }
+function clearColorOverride() { clearColorOverrideDMX(); selectedColor = null; renderColorActive(); }
 
 /* ─── Output / Blackout ────────────────────────────────────── */
 function toggleOutput() {
@@ -1138,9 +1156,11 @@ function blackoutFixture(fixId) {
 function sendMoverPreset(preset) {
   if (!preset.positions) return;
   const byUniverse = {};
+  const affectedIds = [];
   for (const pos of preset.positions) {
     const f = fixtures.find(fx => fx.id === pos.fixture_id);
     if (!f || fixtureEnabled[f.id] === false) continue;
+    affectedIds.push(f.id);
     const u = f.universe || 1;
     if (!byUniverse[u]) byUniverse[u] = [];
     for (const ch of f.channels) {
@@ -1149,6 +1169,13 @@ function sendMoverPreset(preset) {
     }
   }
   sendDMX(byUniverse);
+  notifyOverride('movement', affectedIds, true);
+}
+
+function clearMovementOverride() {
+  const movers = getEnabledFixtures().filter(f =>
+    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt'));
+  notifyOverride('movement', movers.map(f => f.id), false);
 }
 
 function sendManualPosition() {
@@ -1161,6 +1188,7 @@ function sendManualPosition() {
     ch => ch.type === 'pan' || ch.type === 'tilt' || ch.type === 'speed',
     ch => ch.type === 'pan' ? pan : ch.type === 'tilt' ? tilt : speed);
   sendDMX(updates);
+  notifyOverride('movement', movers.map(f => f.id), true);
 }
 
 /* ─── Quick Actions ────────────────────────────────────────── */
@@ -1178,8 +1206,10 @@ function runAction(action, on) {
 }
 
 function actionFullWhite() {
-  sendDMX(buildChannelUpdates(getEnabledFixtures(),
+  const targets = getEnabledFixtures();
+  sendDMX(buildChannelUpdates(targets,
     ch => ['red','green','blue','white','dimmer'].includes(ch.type), () => 255));
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 function actionFullColor() {
@@ -1188,7 +1218,8 @@ function actionFullColor() {
 }
 
 function actionDimWarm() {
-  sendDMX(buildChannelUpdates(getEnabledFixtures(),
+  const targets = getEnabledFixtures();
+  sendDMX(buildChannelUpdates(targets,
     ch => ['red','green','blue','white','amber','dimmer'].includes(ch.type),
     ch => {
       switch (ch.type) {
@@ -1197,6 +1228,7 @@ function actionDimWarm() {
         default: return 0;
       }
     }));
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 function actionAllOff() {
@@ -1207,10 +1239,13 @@ function actionAllOff() {
     for (const ch of f.channels) byUniverse[u].push({ ch: ch.dmx_address, val: 0 });
   }
   sendDMX(byUniverse);
+  notifyOverride('color', fixtures.map(f => f.id), false);
+  notifyOverride('movement', fixtures.map(f => f.id), false);
 }
 
 function actionUVMode() {
-  sendDMX(buildChannelUpdates(getEnabledFixtures(),
+  const targets = getEnabledFixtures();
+  sendDMX(buildChannelUpdates(targets,
     ch => ['red','green','blue','white','uv','dimmer'].includes(ch.type),
     ch => {
       switch (ch.type) {
@@ -1218,6 +1253,7 @@ function actionUVMode() {
         default: return 0;
       }
     }));
+  notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
 /* ═══════════════════════════════════════════════════════════════

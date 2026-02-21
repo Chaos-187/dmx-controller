@@ -254,20 +254,26 @@ function handleOs2lSubscribed(data) {
               if (seqAutoLoad) {
                 // Clear any OS2L button overrides so the new sequence controls all fixtures
                 touchOverrides.os2lOverrideFixtures.clear();
+                touchOverrides.colorOverrideFixtures.clear();
+                touchOverrides.movementOverrideFixtures.clear();
                 stopPlaybackTimer(deck);
                 activeSequences[deck] = { sequence: generatedSeq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
                 broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
-                console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck}`);
+                console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck} (duration=${generatedSeq.duration_ms}ms)`);
 
-                const seqAutoPlay = db.getConfig('seq_auto_play') === '1';
-                const deckIsPlaying = state.decks[deck] && state.decks[deck].play;
-                if (seqAutoPlay && deckIsPlaying) {
+                // Always start playback if the deck is currently playing.
+                // The deck state is checked directly from the OS2L state.
+                const deckPlayState = state.decks[deck] && state.decks[deck].play;
+                const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
+                console.log(`[SEQ] Deck ${deck} play state: ${JSON.stringify(deckPlayState)} → deckIsPlaying=${deckIsPlaying}`);
+                if (deckIsPlaying) {
                   activeSequences[deck].playing = true;
+                  activeSequences[deck].vdjDriven = true;
                   startPlaybackTimer(deck);
                   broadcast({ type: 'seq_playing', deck, playing: true });
-                  console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
-                } else if (seqAutoPlay && !deckIsPlaying) {
-                  console.log(`[SEQ] Deck ${deck} is paused — sequence loaded but not started`);
+                  console.log(`[SEQ] Auto-playing generated sequence on deck ${deck}`);
+                } else {
+                  console.log(`[SEQ] Deck ${deck} is not playing — sequence loaded but not started`);
                 }
               }
             } catch (ge) {
@@ -283,20 +289,25 @@ function handleOs2lSubscribed(data) {
           // Auto-load the matched sequence onto this deck
           // Clear any OS2L button overrides so the new sequence controls all fixtures
           touchOverrides.os2lOverrideFixtures.clear();
+          touchOverrides.colorOverrideFixtures.clear();
+          touchOverrides.movementOverrideFixtures.clear();
           stopPlaybackTimer(deck);
           activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
           broadcast({ type: 'seq_loaded', deck, sequence: seq });
-          console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} for "${state.decks[deck].filename}"`);
+          console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} (duration=${seq.duration_ms}ms)`);
 
-          const seqAutoPlay = db.getConfig('seq_auto_play') === '1';
-          const deckIsPlaying = state.decks[deck] && state.decks[deck].play;
-          if (seqAutoPlay && deckIsPlaying) {
+          // Always start playback if the deck is currently playing
+          const deckPlayState = state.decks[deck] && state.decks[deck].play;
+          const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
+          console.log(`[SEQ] Deck ${deck} play state: ${JSON.stringify(deckPlayState)} → deckIsPlaying=${deckIsPlaying}`);
+          if (deckIsPlaying) {
             activeSequences[deck].playing = true;
+            activeSequences[deck].vdjDriven = true;
             startPlaybackTimer(deck);
             broadcast({ type: 'seq_playing', deck, playing: true });
             console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
-          } else if (seqAutoPlay && !deckIsPlaying) {
-            console.log(`[SEQ] Deck ${deck} is paused — sequence loaded but not started`);
+          } else {
+            console.log(`[SEQ] Deck ${deck} is not playing — sequence loaded but not started`);
           }
         } else if (seqAutoUnload && activeSequences[deck]) {
           // No matching sequence — unload the current one
@@ -319,16 +330,30 @@ function handleOs2lSubscribed(data) {
         broadcast({ type: 'seq_playing', deck, playing: true });
         console.log(`[SEQ] Deck ${deck} playing — resuming sequence`);
       } else if (!deckNowPlaying && activeSequences[deck].playing) {
-        // Deck paused — pause the sequence
-        activeSequences[deck].playing = false;
-        if (playbackTimers[deck]) {
-          const ds = activeSequences[deck];
-          ds.currentTimeMs = ds.startOffset != null ? ds.startOffset + (Date.now() - ds.startWall) : ds.currentTimeMs;
+        // Deck stopped — check if this is a natural track end or a manual pause.
+        const ds = activeSequences[deck];
+        // Update currentTimeMs from standlone timer if active (non-VDJ)
+        if (!ds.vdjDriven && playbackTimers[deck] && ds.startOffset != null) {
+          ds.currentTimeMs = ds.startOffset + (Date.now() - ds.startWall);
         }
-        stopPlaybackTimer(deck);
-        blackoutDeckFixtures(deck);
-        broadcast({ type: 'seq_playing', deck, playing: false });
-        console.log(`[SEQ] Deck ${deck} paused — pausing sequence`);
+        // VDJ-driven: currentTimeMs is already set by the last time event
+
+        const seqDur = ds.sequence && ds.sequence.duration_ms;
+        const nearEnd = seqDur && ds.currentTimeMs >= seqDur - 5000;
+        const endAction = _cachedMixerConfig.endAction;
+        console.log(`[SEQ] Deck ${deck} stopped. currentTimeMs=${Math.round(ds.currentTimeMs)} seqDur=${seqDur} nearEnd=${nearEnd} endAction=${endAction}`);
+
+        if (nearEnd && endAction && endAction !== 'none') {
+          // Natural track end — apply configured end action
+          applySequenceEndAction(deck);
+        } else {
+          // Manual pause — standard blackout
+          ds.playing = false;
+          stopPlaybackTimer(deck);
+          blackoutDeckFixtures(deck);
+          broadcast({ type: 'seq_playing', deck, playing: false });
+          console.log(`[SEQ] Deck ${deck} paused — pausing sequence`);
+        }
       }
     }
 
@@ -832,6 +857,8 @@ const touchOverrides = {
   masterDimmer: 255,             // 0-255 master dimmer level (scales all intensity/color output)
   effectSpeed: 1.0,              // master effect speed multiplier (0.1 – 3.0)
   os2lOverrideFixtures: new Set(), // fixture IDs currently controlled by an OS2L button action
+  colorOverrideFixtures: new Set(),    // fixture IDs with color overridden from touch UI
+  movementOverrideFixtures: new Set(), // fixture IDs with movement overridden from touch UI
 };
 
 app.get('/api/dmx/output', (req, res) => {
@@ -921,6 +948,28 @@ app.post('/api/touch/effect-speed', (req, res) => {
   broadcast({ type: 'effectSpeed', value: val });
   console.log(`[TOUCH] Effect speed = ${val.toFixed(2)}x`);
   res.json({ ok: true, effectSpeed: val });
+});
+
+app.post('/api/touch/color-override', (req, res) => {
+  const { fixtureIds, active } = req.body;
+  if (!Array.isArray(fixtureIds)) return res.status(400).json({ error: 'fixtureIds required' });
+  for (const id of fixtureIds) {
+    if (active) touchOverrides.colorOverrideFixtures.add(id);
+    else touchOverrides.colorOverrideFixtures.delete(id);
+  }
+  console.log(`[TOUCH] Color override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.colorOverrideFixtures.size})`);
+  res.json({ ok: true });
+});
+
+app.post('/api/touch/movement-override', (req, res) => {
+  const { fixtureIds, active } = req.body;
+  if (!Array.isArray(fixtureIds)) return res.status(400).json({ error: 'fixtureIds required' });
+  for (const id of fixtureIds) {
+    if (active) touchOverrides.movementOverrideFixtures.add(id);
+    else touchOverrides.movementOverrideFixtures.delete(id);
+  }
+  console.log(`[TOUCH] Movement override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.movementOverrideFixtures.size})`);
+  res.json({ ok: true });
 });
 
 // ─── OS2L Button Maps API (delegated to os2l module) ────────────────────────
@@ -2261,10 +2310,11 @@ const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... 
 const playbackTimers = {};   // { deckNum: intervalId }
 
 // Cached mixer integration settings (refreshed on config save / startup)
-let _cachedMixerConfig = { crossfaderGating: false, deckFaderDimmer: false };
+let _cachedMixerConfig = { crossfaderGating: false, deckFaderDimmer: false, endAction: 'none' };
 function refreshMixerConfig() {
   _cachedMixerConfig.crossfaderGating = db.getConfig('seq_crossfader_gating') === '1';
   _cachedMixerConfig.deckFaderDimmer = db.getConfig('seq_deck_fader_dimmer') === '1';
+  _cachedMixerConfig.endAction = db.getConfig('seq_end_action') || 'none'; // none | blackout | scene
 }
 // Refresh on startup after DB is ready
 try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ }
@@ -2289,6 +2339,12 @@ function startPlaybackTimer(deck) {
     const elapsedMs = Date.now() - ds.startWall;
     ds.currentTimeMs = ds.startOffset + elapsedMs;
 
+    // Check if sequence has ended
+    if (ds.sequence && ds.sequence.duration_ms && ds.currentTimeMs >= ds.sequence.duration_ms) {
+      applySequenceEndAction(deck);
+      return;
+    }
+
     processSequenceAtTime(deck, ds.currentTimeMs);
 
     // Broadcast playhead position to frontend
@@ -2303,6 +2359,40 @@ function stopPlaybackTimer(deck) {
     clearInterval(playbackTimers[deck]);
     delete playbackTimers[deck];
     console.log(`[SEQ] Stopped playback timer for deck ${deck}`);
+  }
+}
+
+/**
+ * Apply the configured action when a sequence reaches the end of the track.
+ * Options: 'none' (keep last values), 'blackout' (zero all), 'scene' (activate default scene).
+ */
+function applySequenceEndAction(deck) {
+  const ds = activeSequences[deck];
+  if (!ds) return;
+  // Prevent repeated triggers
+  if (ds._endActionApplied) return;
+  ds._endActionApplied = true;
+
+  ds.playing = false;
+  stopPlaybackTimer(deck);
+  broadcast({ type: 'seq_playing', deck, playing: false });
+
+  const action = _cachedMixerConfig.endAction;
+  if (action === 'blackout') {
+    blackoutDeckFixtures(deck);
+    console.log(`[SEQ] Sequence ended on deck ${deck} — blackout`);
+  } else if (action === 'scene') {
+    // Blackout first, then activate the default scene
+    blackoutDeckFixtures(deck);
+    const defaultScene = db.getDefaultScene();
+    if (defaultScene) {
+      activateScene(defaultScene.id);
+      console.log(`[SEQ] Sequence ended on deck ${deck} — activated default scene "${defaultScene.name}"`);
+    } else {
+      console.log(`[SEQ] Sequence ended on deck ${deck} — no default scene set, staying dark`);
+    }
+  } else {
+    console.log(`[SEQ] Sequence ended on deck ${deck} — no action`);
   }
 }
 
@@ -2386,6 +2476,7 @@ function handleSequenceCommand(ws, msg) {
       const seekMs = Math.max(0, msg.timeMs || 0);
       if (activeSequences[deck]) {
         activeSequences[deck].currentTimeMs = seekMs;
+        activeSequences[deck]._endActionApplied = false; // allow end action to fire again
         if (activeSequences[deck].playing) {
           // Reset the wall-clock reference so the timer continues from the new position
           activeSequences[deck].startWall = Date.now();
@@ -2470,6 +2561,12 @@ function processSequenceAtTime(deckNum, timeMs) {
   const seq = deckSeq.sequence;
   const cues = seq.cues || [];
 
+  // ── Sequence end detection (VDJ-driven playback) ──
+  if (seq.duration_ms && timeMs >= seq.duration_ms && !deckSeq._endActionApplied) {
+    applySequenceEndAction(deckNum);
+    return;
+  }
+
   if (!dmxOutputEnabled) return;
 
   // ── Touch blackout hold: suppress all playback output ──
@@ -2523,6 +2620,10 @@ function processSequenceAtTime(deckNum, timeMs) {
     // Skip fixtures currently overridden by an OS2L button action
     if (touchOverrides.os2lOverrideFixtures.has(fixtureId)) continue;
 
+    // Check if this fixture has touch color/movement overrides active
+    const hasColorOverride = touchOverrides.colorOverrideFixtures.has(fixtureId);
+    const hasMovementOverride = touchOverrides.movementOverrideFixtures.has(fixtureId);
+
     // Find the fixture in fixture channel map (cache this?)
     const fixMap = db.getFixtureChannelMap().find(f => f.id === fixtureId);
     if (!fixMap) continue;
@@ -2536,6 +2637,10 @@ function processSequenceAtTime(deckNum, timeMs) {
       // Cell filtering: if cue targets a specific cell, only apply to that cell's channels
       if (cue.cell != null && ch.cell != null && ch.cell !== cue.cell) continue;
       // If cue targets a cell but channel has no cell assignment (master channel), still apply
+      // Skip channels that are overridden by touch UI
+      if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
+      if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
+
       let value = null;
       let skipRangeMap = false; // true when value is already mapped to a specific range
 
@@ -2629,7 +2734,8 @@ function processSequenceAtTime(deckNum, timeMs) {
         if (!channelUpdates[universe]) channelUpdates[universe] = {};
         let finalValue = Math.max(0, Math.min(255, Math.round(value)));
         // Scale by deck fader level (acts as master dimmer for this deck's sequence)
-        if (deckLevel < 1) {
+        // Only apply to intensity/color channels — NOT pan/tilt/speed/gobo etc.
+        if (deckLevel < 1 && DIMMABLE_CHANNELS.has(ch.type)) {
           finalValue = Math.round(finalValue * deckLevel);
         }
         // Scale by master dimmer — for fixtures WITH a dimmer channel, only apply
