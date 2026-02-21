@@ -417,6 +417,7 @@
         <option value="strobe">Strobe</option>
         <option value="chase">Chase</option>
         <option value="effect">Effect</option>
+        <option value="movement">Movement Preset</option>
       </select>
       <label>Start (s)</label>
       <input type="number" id="seqPropStart" step="0.001" min="0">
@@ -429,6 +430,10 @@
       <label>Effect</label>
       <select id="seqPropEffect">
         <option value="">None</option>
+      </select>
+      <label id="seqPropMoverPresetLabel" style="display:none">Movement Preset</label>
+      <select id="seqPropMoverPreset" style="display:none">
+        <option value="">-- Select Preset --</option>
       </select>
     </div>
     <div class="seq-color-channels" id="seqColorChannels"></div>

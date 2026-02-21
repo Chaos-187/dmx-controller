@@ -17,7 +17,7 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 6;
+const ANALYSIS_VERSION = 10;
 const DEFAULTS = {
   TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
@@ -166,8 +166,13 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
   if (!energySegments.length || bpm <= 0) return [];
 
   const expectedBeatMs = 60000 / bpm;
-  // Tolerance: how far an onset can be from the expected beat to claim it
-  const tolerance = expectedBeatMs * 0.35;  // ±35% of a beat interval
+  // Tolerance: how far an onset can be from the expected grid beat to attract it.
+  // Keep tight (±15%) so beats never drift more than ~70ms at 128 BPM.
+  const tolerance = expectedBeatMs * 0.15;
+
+  const segDt = energySegments.length > 1
+    ? energySegments[1].time_ms - energySegments[0].time_ms
+    : 50;
 
   // ── 1. Build onset strength from bass energy differences ──────────
   const onsets = [];
@@ -175,7 +180,6 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
     const prev = energySegments[i - 1];
     const curr = energySegments[i];
     const bassDiff = (curr.bass || curr.energy) - (prev.bass || prev.energy);
-    // Only positive rises are onsets
     onsets.push({
       time_ms: curr.time_ms,
       strength: Math.max(0, bassDiff),
@@ -185,12 +189,12 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
   if (onsets.length === 0) return [];
 
   // ── 2. Adaptive threshold for onset peaks ─────────────────────────
-  // Use a running mean + std approach over a local window (~2 bars)
-  const windowSize = Math.max(4, Math.round((expectedBeatMs * 8) / (energySegments[1].time_ms - energySegments[0].time_ms)));
+  // Use a running mean + std over a local window (~2 bars).
+  // Require onsets to be well above local noise (1.2×std).
+  const windowSize = Math.max(4, Math.round((expectedBeatMs * 8) / segDt));
 
-  const onsetPeaks = [];
+  const onsetPeaks = [];  // { time_ms, strength }
   for (let i = 0; i < onsets.length; i++) {
-    // Local window stats
     const loIdx = Math.max(0, i - windowSize);
     const hiIdx = Math.min(onsets.length - 1, i + windowSize);
     let sum = 0, count = 0;
@@ -203,24 +207,23 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
       sqSum += d * d;
     }
     const localStd = Math.sqrt(sqSum / count);
-    const threshold = localMean + localStd * 0.8;
+    const threshold = localMean + localStd * 1.2;  // stricter: was 0.8
 
-    // Is this a local peak? (higher than threshold and higher than neighbours)
     if (onsets[i].strength > threshold && onsets[i].strength > 0) {
       const isLocalMax =
         (i === 0 || onsets[i].strength >= onsets[i - 1].strength) &&
         (i === onsets.length - 1 || onsets[i].strength >= onsets[i + 1].strength);
       if (isLocalMax) {
-        onsetPeaks.push(onsets[i].time_ms);
+        onsetPeaks.push({ time_ms: onsets[i].time_ms, strength: onsets[i].strength });
       }
     }
   }
 
   // ── 3. Build guided beat grid, then attract to nearest onset ──────
-  // Start with a nominal grid from firstBeat, then let each beat snap
-  // to the nearest detected onset within tolerance.
+  // The grid from VDJ's firstBeat + BPM is the ground truth timing.
+  // Onsets only nudge beats slightly (blended) instead of hard-snapping.
   const phase = firstBeatMs >= 0 ? firstBeatMs : 0;
-  const beats = [];
+  const gridBeats = [];
   let gridTime = phase;
 
   // Walk backwards from phase to cover any intro before the first beat
@@ -232,60 +235,67 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
       t -= expectedBeatMs;
     }
     preBeats.reverse();
-    for (const bt of preBeats) beats.push(bt);
+    for (const bt of preBeats) gridBeats.push(bt);
   }
 
   // Walk forward through the track
   while (gridTime < durationMs) {
-    beats.push(gridTime);
+    gridBeats.push(gridTime);
     gridTime += expectedBeatMs;
   }
 
-  // Now snap each beat to the nearest onset within tolerance
+  // Snap each grid beat toward the nearest strong onset within tolerance.
+  // Use weighted blending: blend = 0.5 × (1 - dist/tolerance) so nearby
+  // onsets pull harder but the grid is never fully abandoned.
   const fluidBeats = [];
-  let onsetIdx = 0; // running pointer into sorted onsetPeaks
+  let onsetIdx = 0;
 
-  for (let bi = 0; bi < beats.length; bi++) {
-    const expected = beats[bi];
+  for (let bi = 0; bi < gridBeats.length; bi++) {
+    const expected = gridBeats[bi];
 
-    // Advance onset pointer to the region near this beat
-    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx] < expected - tolerance) {
+    // Advance onset pointer
+    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx].time_ms < expected - tolerance) {
       onsetIdx++;
     }
 
-    // Find the closest onset within tolerance
-    let bestOnset = -1;
-    let bestDist = tolerance + 1;
+    // Find the strongest onset within tolerance (prefer strongest, not closest)
+    let bestOnset = null;
+    let bestScore = 0;
     for (let oi = Math.max(0, onsetIdx - 1); oi < onsetPeaks.length; oi++) {
-      const dist = Math.abs(onsetPeaks[oi] - expected);
+      const o = onsetPeaks[oi];
+      const dist = Math.abs(o.time_ms - expected);
       if (dist > tolerance) {
-        if (onsetPeaks[oi] > expected + tolerance) break;
+        if (o.time_ms > expected + tolerance) break;
         continue;
       }
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestOnset = onsetPeaks[oi];
+      // Score: prefer strong onsets that are close to the grid position
+      const proximityWeight = 1 - dist / tolerance;  // 1 = exact match, 0 = edge
+      const score = o.strength * proximityWeight;
+      if (score > bestScore) {
+        bestScore = score;
+        bestOnset = o;
       }
     }
 
-    if (bestOnset >= 0) {
-      // Snap to onset — but verify it wouldn't create a beat too close to the previous
-      const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
-      if (bestOnset - prevBeat >= expectedBeatMs * 0.5) {
-        fluidBeats.push(Math.round(bestOnset));
-      } else {
-        // Too close to previous — keep the grid position
-        if (expected - prevBeat >= expectedBeatMs * 0.5) {
-          fluidBeats.push(Math.round(expected));
-        }
-      }
+    let finalTime;
+    if (bestOnset) {
+      // Blend toward onset: 50% weight, scaled by proximity
+      const dist = Math.abs(bestOnset.time_ms - expected);
+      const blendWeight = 0.5 * (1 - dist / tolerance);
+      finalTime = expected + (bestOnset.time_ms - expected) * blendWeight;
     } else {
-      // No onset nearby — keep the grid position (fill the gap)
-      const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
-      if (expected - prevBeat >= expectedBeatMs * 0.5) {
-        fluidBeats.push(Math.round(expected));
-      }
+      finalTime = expected;
     }
+
+    // Enforce minimum spacing: at least 75% of expected beat interval
+    const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
+    if (finalTime - prevBeat >= expectedBeatMs * 0.75) {
+      fluidBeats.push(Math.round(finalTime));
+    } else if (expected - prevBeat >= expectedBeatMs * 0.75) {
+      // Onset would bunch up — use pure grid position instead
+      fluidBeats.push(Math.round(expected));
+    }
+    // else: skip entirely (shouldn't happen with a clean grid)
   }
 
   return fluidBeats;
@@ -354,7 +364,8 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const SECTION_MIN_BARS    = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
   const SECTION_WINDOW_BARS = cfg.SECTION_WINDOW_BARS || DEFAULTS.SECTION_WINDOW_BARS;
   const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
-  const MAX_SECTION_BARS    = 16;   // force-split any section longer than this
+  const MAX_SECTION_BARS    = 12;   // force-split any section longer than this
+  const MAX_INTRO_BARS     = 8;    // intro/outro can't exceed this many bars
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
@@ -544,8 +555,7 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     for (let i = 0; i < totalBars; i += 8) finalBoundaries.push(i);
   }
 
-  // ── 5. Classify each section ──────────────────────────────────────────
-  // Use percentile-based energy zones for clearer separation
+  // ── 5. Compute per-section features ────────────────────────────────────
   const p25 = eSorted[Math.floor(eSorted.length * 0.25)];
   const p50 = eSorted[Math.floor(eSorted.length * 0.50)];
   const p75 = eSorted[Math.floor(eSorted.length * 0.75)];
@@ -554,29 +564,65 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   // Bass ratio percentiles
   const bassRatios = smBass.map((b, i) => smTotal[i] > 0 ? b / smTotal[i] : 0);
   const sortedBR = [...bassRatios].sort((a, b) => a - b);
-  const brP50 = sortedBR[Math.floor(sortedBR.length * 0.50)];
   const brP75 = sortedBR[Math.floor(sortedBR.length * 0.75)];
 
-  const sections = [];
-  let verseCount = 0, chorusCount = 0;
+  // Treble ratio for spectral centroid
+  const trebleRatios = smTreble.map((t, i) => smTotal[i] > 0 ? t / smTotal[i] : 0);
 
+  // Build section feature objects
+  const sectionFeats = [];
   for (let s = 0; s < finalBoundaries.length; s++) {
     const startBar = finalBoundaries[s];
     const endBar   = s + 1 < finalBoundaries.length ? finalBoundaries[s + 1] : totalBars;
-    // Use actual bar start/end times from the fluid grid
     const startMs  = startBar < bars.length ? bars[startBar].start_ms : Math.round(durationMs);
     const endMs    = endBar < bars.length ? bars[endBar].start_ms : Math.round(durationMs);
     const numBars  = (endBar - startBar) || 1;
 
-    // Average energies in this section
-    let secTotal = 0, secBass = 0;
+    // Average energies and spectral bands
+    let secTotal = 0, secBass = 0, secMid = 0, secTreble = 0;
     for (let b = startBar; b < endBar; b++) {
-      secTotal += smTotal[b] || 0;
-      secBass  += smBass[b]  || 0;
+      secTotal  += smTotal[b]  || 0;
+      secBass   += smBass[b]   || 0;
+      secMid    += smMid[b]    || 0;
+      secTreble += smTreble[b] || 0;
     }
-    secTotal /= numBars;
-    secBass  /= numBars;
-    const secBassRatio = secTotal > 0 ? secBass / secTotal : 0;
+    secTotal  /= numBars;
+    secBass   /= numBars;
+    secMid    /= numBars;
+    secTreble /= numBars;
+    const bassRatio   = secTotal > 0 ? secBass / secTotal : 0;
+    const trebleRatio = secTotal > 0 ? secTreble / secTotal : 0;
+
+    // Energy gradient (slope) — linear regression of energy over bars
+    let gradient = 0;
+    if (numBars >= 2) {
+      const barEnergies = [];
+      for (let b = startBar; b < endBar; b++) barEnergies.push(smTotal[b] || 0);
+      const n = barEnergies.length;
+      const xMean = (n - 1) / 2;
+      const yMean = barEnergies.reduce((a, b) => a + b, 0) / n;
+      let num = 0, den = 0;
+      for (let i = 0; i < n; i++) {
+        num += (i - xMean) * (barEnergies[i] - yMean);
+        den += (i - xMean) * (i - xMean);
+      }
+      gradient = den > 0 ? num / den : 0;
+    }
+
+    // Energy stability (coefficient of variation within section)
+    let energyStdDev = 0;
+    if (numBars >= 2) {
+      let sq = 0;
+      for (let b = startBar; b < endBar; b++) {
+        const diff = (smTotal[b] || 0) - secTotal;
+        sq += diff * diff;
+      }
+      energyStdDev = Math.sqrt(sq / numBars);
+    }
+    const energyCV = secTotal > 0 ? energyStdDev / secTotal : 0;
+
+    // Spectral fingerprint for similarity matching
+    const fingerprint = [secBass, secMid, secTreble];
 
     // Neighbour energies
     let nextEnergy = 0, prevEnergy = 0;
@@ -591,59 +637,192 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       prevEnergy /= (startBar - pStart) || 1;
     }
 
-    const position  = startMs / durationMs;
-    const bassHigh  = secBassRatio > brP75;
-
-    // Classify
-    let label;
-    if (position < 0.06 && secTotal < p75) {
-      label = 'intro';
-    } else if (position > 0.88 && secTotal < p75) {
-      label = 'outro';
-    } else if (secTotal <= p25 && nextEnergy > p50) {
-      label = 'buildup';
-    } else if (secTotal <= p25 && prevEnergy > p50) {
-      label = 'breakdown';
-    } else if (secTotal <= p25) {
-      label = 'breakdown';
-    } else if (secTotal < p50) {
-      // Below-median energy  →  verse or bridge
-      verseCount++;
-      label = (verseCount > 1 && verseCount % 2 === 0) ? 'bridge' : 'verse';
-    } else if (secTotal >= p90 && bassHigh) {
-      label = 'drop';
-    } else if (secTotal >= p75) {
-      // High energy → chorus or drop
-      chorusCount++;
-      label = (bassHigh && secTotal >= p90) ? 'drop' : 'chorus';
-    } else {
-      // p50..p75  →  verse or chorus depending on neighbour contrast
-      const aboveNeighbours = secTotal > prevEnergy * 1.1 || secTotal > nextEnergy * 1.1;
-      if (aboveNeighbours) {
-        chorusCount++;
-        label = 'chorus';
-      } else {
-        verseCount++;
-        label = 'verse';
-      }
-    }
-
-    sections.push({
-      start_ms: startMs,
-      end_ms:   Math.min(endMs, durationMs),
-      label,
-      color:  SECTION_COLORS[label] || SECTION_COLORS.unknown,
-      energy: parseFloat(secTotal.toFixed(4)),
-      bars:   numBars,
+    sectionFeats.push({
+      startBar, endBar, startMs, endMs, numBars,
+      energy: secTotal, bassRatio, trebleRatio,
+      gradient, energyCV, fingerprint,
+      nextEnergy, prevEnergy,
+      position: startMs / durationMs,
+      endPosition: endMs / durationMs,
+      bassHigh: bassRatio > brP75,
     });
   }
 
-  // ── 6. Conservative merge: only merge tiny (<= 4 bar) same-label neighbours
+  // ── 6. Classify each section ──────────────────────────────────────────
+  //   Uses energy zones, gradient (rising/falling), spectral character,
+  //   and position — then refined by sequential awareness.
+
+  // Normalise gradient for threshold comparisons
+  const gradients = sectionFeats.map(f => f.gradient);
+  const gradMax = Math.max(...gradients.map(Math.abs), 1e-9);
+
+  const sections = [];
+
+  for (let s = 0; s < sectionFeats.length; s++) {
+    const f = sectionFeats[s];
+    const normGrad = f.gradient / gradMax;  // -1..+1 range
+
+    let label;
+
+    // ── Intro: only the very first section, capped at MAX_INTRO_BARS ──
+    if (s === 0 && f.numBars <= MAX_INTRO_BARS && f.energy < p75) {
+      label = 'intro';
+
+    // ── Outro: only the very last section, capped at MAX_INTRO_BARS ──
+    } else if (s === sectionFeats.length - 1 && f.numBars <= MAX_INTRO_BARS &&
+               f.energy < p75 && (normGrad < 0.1 || f.energy <= p50)) {
+      label = 'outro';
+
+    // ── Buildup: rising energy gradient, not already high energy ──
+    //    Classic buildup: energy ramps up, often ends high
+    } else if (normGrad > 0.25 && f.energy < p75 && f.nextEnergy > f.energy * 1.15) {
+      label = 'buildup';
+
+    // ── Buildup: low energy with strong increase to next section ──
+    } else if (f.energy <= p50 && f.nextEnergy > p75) {
+      label = 'buildup';
+
+    // ── Drop: very high energy with strong bass (p75+, bass-dominant) ──
+    } else if (f.energy >= p75 && f.bassHigh) {
+      label = 'drop';
+
+    // ── Breakdown: dramatic energy drop from previous AND very low energy ──
+    //    Must be well below p25 AND preceded by a high-energy section.
+    //    This avoids labelling normal low-energy sections as breakdown.
+    } else if (f.energy <= p25 && f.prevEnergy > p75) {
+      label = 'breakdown';
+
+    // ── Breakdown: very low energy AND falling gradient ──
+    } else if (f.energy <= p25 && normGrad < -0.1) {
+      label = 'breakdown';
+
+    // ── Chorus: high energy (≥ p75) ──
+    } else if (f.energy >= p75) {
+      label = 'chorus';
+
+    // ── Moderate energy: verse or chorus depending on context ──
+    } else if (f.energy >= p50) {
+      // Above median but below p75 — chorus if clearly above neighbours
+      const aboveNeighbours = f.energy > f.prevEnergy * 1.15 && f.energy > f.nextEnergy * 1.05;
+      label = aboveNeighbours ? 'chorus' : 'verse';
+
+    } else {
+      // Below median → verse (not breakdown; breakdowns are structural, not just quiet)
+      label = 'verse';
+    }
+
+    sections.push({
+      start_ms: f.startMs,
+      end_ms:   Math.min(f.endMs, durationMs),
+      label,
+      color:  SECTION_COLORS[label] || SECTION_COLORS.unknown,
+      energy: parseFloat(f.energy.toFixed(4)),
+      bars:   f.numBars,
+      _idx:   s,  // temporary index for refinement passes
+    });
+  }
+
+  // ── 7. Sequential-awareness refinement ────────────────────────────────
+  //   - After buildup → next high-energy section becomes 'drop'
+  //   - After drop/chorus → next low-energy section becomes 'breakdown'
+  //   - Buildup can't be the first or last section (relabel)
+
+  for (let i = 0; i < sections.length; i++) {
+    const f = sectionFeats[i];
+
+    // Buildup followed by high energy → ensure next is 'drop' or 'chorus'
+    if (sections[i].label === 'buildup' && i + 1 < sections.length) {
+      const next = sections[i + 1];
+      const nf   = sectionFeats[i + 1];
+      if (nf.energy >= p75 && nf.bassHigh) {
+        next.label = 'drop';
+        next.color = SECTION_COLORS.drop;
+      } else if (nf.energy >= p75) {
+        next.label = 'chorus';
+        next.color = SECTION_COLORS.chorus;
+      }
+    }
+
+    // After drop → only a dramatic energy dip becomes 'breakdown'
+    if (sections[i].label === 'drop' && i + 1 < sections.length) {
+      const next = sections[i + 1];
+      const nf   = sectionFeats[i + 1];
+      if (nf.energy <= p25 && next.label !== 'outro') {
+        next.label = 'breakdown';
+        next.color = SECTION_COLORS.breakdown;
+      }
+    }
+
+    // Chorus → only a very large energy drop becomes 'breakdown'
+    if (sections[i].label === 'chorus' && i + 1 < sections.length) {
+      const next = sections[i + 1];
+      const nf   = sectionFeats[i + 1];
+      if (nf.energy <= p25 && nf.energy < f.energy * 0.5 &&
+          next.label !== 'outro' && next.label !== 'buildup') {
+        next.label = 'breakdown';
+        next.color = SECTION_COLORS.breakdown;
+      }
+    }
+  }
+
+  // ── 8. Bridge detection via spectral similarity ───────────────────────
+  //   Find the first 'verse'; any later 'verse' with significantly different
+  //   spectral fingerprint gets relabelled 'bridge'.
+  const firstVerse = sections.find(s => s.label === 'verse');
+  if (firstVerse) {
+    const fv = sectionFeats[firstVerse._idx];
+    for (let i = 0; i < sections.length; i++) {
+      if (sections[i].label !== 'verse' || i === firstVerse._idx) continue;
+      const sf = sectionFeats[i];
+      // Cosine distance between spectral fingerprints
+      const dist = cosineDist(fv.fingerprint, sf.fingerprint);
+      // Also check energy difference
+      const eDiff = Math.abs(sf.energy - fv.energy) / eRange;
+      // If spectrally different enough, it's a bridge
+      if (dist > 0.15 || eDiff > 0.25) {
+        sections[i].label = 'bridge';
+        sections[i].color = SECTION_COLORS.bridge;
+      }
+    }
+  }
+
+  // ── 9. Repetition matching ────────────────────────────────────────────
+  //   Sections with very similar spectral fingerprints should share labels.
+  //   Only promote: if a 'verse' is highly similar to a 'chorus', keep the
+  //   label from whichever was classified first (don't downgrade).
+  for (let i = 0; i < sections.length; i++) {
+    for (let j = i + 1; j < sections.length; j++) {
+      if (sections[i].label === sections[j].label) continue;  // already same
+      const fi = sectionFeats[i], fj = sectionFeats[j];
+      const dist = cosineDist(fi.fingerprint, fj.fingerprint);
+      const eDiff = Math.abs(fi.energy - fj.energy) / eRange;
+      // Very similar sections (cosine dist < 0.06 AND energy within 12%)
+      if (dist < 0.06 && eDiff < 0.12) {
+        // Position-dependent labels should never propagate or be overwritten
+        const posLabels = new Set(['intro', 'outro']);
+        if (posLabels.has(sections[i].label) || posLabels.has(sections[j].label)) continue;
+        // Use the label from the earlier section (first-occurrence wins)
+        sections[j].label = sections[i].label;
+        sections[j].color = SECTION_COLORS[sections[i].label] || SECTION_COLORS.unknown;
+      }
+    }
+  }
+
+  // Clean up temporary indices
+  for (const sec of sections) delete sec._idx;
+
+  // ── 10. Conservative merge: only merge tiny (<= 4 bar) same-label neighbours
+  //    Also merge same-label neighbours where both are ≤ 8 bars and
+  //    their combined length won't exceed 16 bars.
   if (sections.length === 0) return [];
   const merged = [sections[0]];
   for (let i = 1; i < sections.length; i++) {
     const prev = merged[merged.length - 1];
-    if (sections[i].label === prev.label && prev.bars <= 4 && sections[i].bars <= 4) {
+    const canMerge = sections[i].label === prev.label && (
+      (prev.bars <= 4 && sections[i].bars <= 4) ||
+      (prev.bars <= 8 && sections[i].bars <= 8 && prev.bars + sections[i].bars <= MAX_SECTION_BARS)
+    );
+    if (canMerge) {
       prev.end_ms = sections[i].end_ms;
       prev.bars  += sections[i].bars;
       prev.energy = (prev.energy + sections[i].energy) / 2;

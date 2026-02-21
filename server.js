@@ -1121,30 +1121,51 @@ app.post('/api/tracks/analyze-batch', async (req, res) => {
   // Return immediately, process in background
   res.json({ status: 'started', count: track_ids.length });
 
+  const CONCURRENCY = 4;
+  const analysisCfg = getAnalysisConfig();
   let completed = 0;
   let failed = 0;
+
+  // Filter out invalid/in-progress tracks upfront
+  const workItems = [];
   for (const trackId of track_ids) {
     if (analysisInProgress.has(trackId)) { failed++; continue; }
     const track = db.getTrack(trackId);
     if (!track || !track.filepath || !require('fs').existsSync(track.filepath)) { failed++; continue; }
+    workItems.push({ trackId, track });
+  }
 
-    analysisInProgress.set(trackId, true);
-    try {
-      const result = await audioAnalyzer.analyzeTrack(track.filepath, {
-        bpm: track.bpm || 0,
-        beatgridPos: track.beatgrid_pos || 0,
-        config: getAnalysisConfig(),
+  // Process in parallel batches
+  for (let i = 0; i < workItems.length; i += CONCURRENCY) {
+    const batch = workItems.slice(i, i + CONCURRENCY);
+
+    // Mark all in-progress
+    for (const item of batch) analysisInProgress.set(item.trackId, true);
+
+    const results = await Promise.allSettled(batch.map(async (item) => {
+      const result = await audioAnalyzer.analyzeTrack(item.track.filepath, {
+        bpm: item.track.bpm || 0,
+        beatgridPos: item.track.beatgrid_pos || 0,
+        config: analysisCfg,
       });
-      db.upsertTrackAnalysis(trackId, result);
-      completed++;
-      broadcast({ type: 'analysis_complete', track_id: trackId, progress: { completed, failed, total: track_ids.length } });
-    } catch (e) {
-      failed++;
-      console.error(`[Analysis] Batch error for track ${trackId}: ${e.message}`);
-    } finally {
+      return { trackId: item.trackId, result };
+    }));
+
+    // Process results (DB writes are fast and serial)
+    for (let j = 0; j < results.length; j++) {
+      const trackId = batch[j].trackId;
       analysisInProgress.delete(trackId);
+      if (results[j].status === 'fulfilled') {
+        db.upsertTrackAnalysis(trackId, results[j].value.result);
+        completed++;
+        broadcast({ type: 'analysis_complete', track_id: trackId, progress: { completed, failed, total: track_ids.length } });
+      } else {
+        failed++;
+        console.error(`[Analysis] Batch error for track ${trackId}: ${results[j].reason?.message || results[j].reason}`);
+      }
     }
   }
+
   console.log(`[Analysis] Batch complete: ${completed} succeeded, ${failed} failed out of ${track_ids.length}`);
   broadcast({ type: 'analysis_batch_complete', completed, failed, total: track_ids.length });
 });
@@ -1818,57 +1839,80 @@ app.post('/api/sequences/generate-batch', async (req, res) => {
 
   const fixtures = db.getFixtureChannelMap();
   const allEffects = db.getEffects();
+  const analysisCfg = getAnalysisConfig();
   let completed = 0, failed = 0, skipped = 0;
 
+  // ── Parallel worker pool ──────────────────────────────────────────────
+  // Analysis is IO-heavy (ffmpeg subprocess), so we can run several at once.
+  // Sequence generation + DB writes are fast and serialized via SQLite anyway.
+  const CONCURRENCY = 4;
+
+  // Phase 1: Run analysis in parallel batches (this is the slow part)
+  const analysisCache = new Map(); // trackId → analysis object or null
+
+  // Filter to only tracks that need work
+  const workItems = [];
   for (const trackId of track_ids) {
-    try {
-      const track = db.getTrack(trackId);
-      if (!track) { failed++; continue; }
+    const track = db.getTrack(trackId);
+    if (!track) { failed++; continue; }
+    const existing = db.getSequenceByTrackId(track.id);
+    if (existing && !overwrite) { skipped++; continue; }
+    workItems.push({ trackId, track, existingSeq: existing });
+  }
 
-      const existing = db.getSequenceByTrackId(track.id);
-      if (existing && !overwrite) { skipped++; continue; }
-      if (existing) db.deleteSequence(existing.id);
-
-      let analysis = db.getTrackAnalysis(track.id);
-
-      // Auto-analyze if no analysis exists
-      if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
-        try {
-          const ffmpegOk = await audioAnalyzer.checkFfmpeg();
-          if (ffmpegOk) {
-            const result = await audioAnalyzer.analyzeTrack(track.filepath, {
-              bpm: track.bpm || 0, beatgridPos: track.beatgrid_pos || 0,
-              config: getAnalysisConfig(),
-            });
-            db.upsertTrackAnalysis(track.id, result);
-            analysis = db.getTrackAnalysis(track.id);
-            broadcast({ type: 'analysis_complete', track_id: track.id });
-          }
-        } catch (e) {
-          console.warn(`[BulkGen] Auto-analysis failed for track ${trackId}: ${e.message}`);
+  // Parallel analysis with concurrency limit
+  async function analyzeOne(item) {
+    let analysis = db.getTrackAnalysis(item.track.id);
+    if (!analysis && item.track.filepath && require('fs').existsSync(item.track.filepath)) {
+      try {
+        const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+        if (ffmpegOk) {
+          const result = await audioAnalyzer.analyzeTrack(item.track.filepath, {
+            bpm: item.track.bpm || 0, beatgridPos: item.track.beatgrid_pos || 0,
+            config: analysisCfg,
+          });
+          db.upsertTrackAnalysis(item.track.id, result);
+          analysis = db.getTrackAnalysis(item.track.id);
+          broadcast({ type: 'analysis_complete', track_id: item.track.id });
         }
+      } catch (e) {
+        console.warn(`[BulkGen] Auto-analysis failed for track ${item.trackId}: ${e.message}`);
       }
+    }
+    return { item, analysis };
+  }
 
-      const { cues, bpm, durationMs } = sequenceGenerator.generateSequence({
-        track, fixtures, analysis,
-        palette: palette || undefined,
-        genre: genre || undefined,
-        effects: allEffects,
-        moverPresets: db.getMoverPresets(),
-        noStrobes: db.getConfig('seq_no_strobes') === '1',
-      });
+  // Process in parallel batches of CONCURRENCY
+  for (let i = 0; i < workItems.length; i += CONCURRENCY) {
+    const batch = workItems.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(item => analyzeOne(item)));
 
-      const seq = db.createSequence({
-        name: track.title || track.filename || 'Untitled',
-        track_id: track.id, bpm, duration_ms: durationMs,
-      });
-      if (cues.length > 0) db.bulkUpdateCues(seq.id, cues);
+    // Phase 2: Generate sequences from analysis results (fast, serial)
+    for (const { item, analysis } of results) {
+      try {
+        if (item.existingSeq) db.deleteSequence(item.existingSeq.id);
 
-      completed++;
-      broadcast({ type: 'seq_batch_progress', completed, failed, skipped, total: track_ids.length, track_id: trackId });
-    } catch (e) {
-      failed++;
-      console.error(`[BulkGen] Error for track ${trackId}: ${e.message}`);
+        const { cues, bpm, durationMs } = sequenceGenerator.generateSequence({
+          track: item.track, fixtures, analysis,
+          palette: palette || undefined,
+          genre: genre || undefined,
+          effects: allEffects,
+          moverPresets: db.getMoverPresets(),
+          noStrobes: db.getConfig('seq_no_strobes') === '1',
+        });
+
+        const seq = db.createSequence({
+          name: item.track.title || item.track.filename || 'Untitled',
+          track_id: item.track.id, bpm, duration_ms: durationMs,
+        });
+        if (cues.length > 0) db.bulkUpdateCues(seq.id, cues);
+
+        completed++;
+        broadcast({ type: 'seq_batch_progress', completed, failed, skipped, total: track_ids.length, track_id: item.trackId });
+      } catch (e) {
+        failed++;
+        console.error(`[BulkGen] Error for track ${item.trackId}: ${e.message}`);
+      }
     }
   }
 
@@ -2548,6 +2592,34 @@ function processSequenceAtTime(deckNum, timeMs) {
           if (value === null || value === undefined) {
             value = channelVals[ch.type] !== undefined ? channelVals[ch.type]
                   : (ch.type === 'dimmer' ? 255 : null);
+          }
+        }
+      } else if (cue.cue_type === 'movement' && channelVals.mover_preset_id) {
+        // Movement preset: cycle through saved positions over the cue duration
+        const preset = db.getMoverPreset(channelVals.mover_preset_id);
+        if (preset && preset.positions && preset.positions.length > 0) {
+          // Find position for this specific fixture
+          const fixPositions = preset.positions.filter(p => p.fixture_id === fixtureId);
+          if (fixPositions.length > 0) {
+            // Cycle through the fixture's positions over the cue duration
+            const totalSteps = fixPositions.length;
+            const stepProgress = (progress * totalSteps) % totalSteps;
+            const stepIdx = Math.floor(stepProgress);
+            const stepFrac = stepProgress - stepIdx;
+            const curr = fixPositions[stepIdx % totalSteps];
+            const next = fixPositions[(stepIdx + 1) % totalSteps];
+            // Smooth interpolation between positions
+            if (ch.type === 'pan' && curr.pan !== undefined) {
+              value = Math.round(curr.pan + (next.pan - curr.pan) * stepFrac);
+            } else if (ch.type === 'tilt' && curr.tilt !== undefined) {
+              value = Math.round(curr.tilt + (next.tilt - curr.tilt) * stepFrac);
+            } else if (ch.type === 'speed') {
+              value = curr.speed !== undefined ? curr.speed : null;
+            } else {
+              // For non-movement channels (dimmer, color), pass through base values
+              value = channelVals[ch.type] !== undefined ? channelVals[ch.type]
+                    : (ch.type === 'dimmer' ? 255 : null);
+            }
           }
         }
       }

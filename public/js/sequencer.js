@@ -24,22 +24,26 @@ let seqDragState = null;
 let seqIsDraggingPlayhead = false;
 let seqEditingEffectId = null;
 let seqExpandedFixtures = new Set(); // fixture IDs whose cells are expanded
+let seqMoverPresets = []; // cached mover presets for movement cue type
 
 async function loadSequencer() {
   if (!seqLoaded) {
     seqLoaded = true;
     setupSequencerEvents();
   }
-  const [seqRes, fixRes, effRes] = await Promise.all([
+  const [seqRes, fixRes, effRes, mpRes] = await Promise.all([
     fetch('/api/sequences').then(r => r.json()),
     fetch('/api/fixture-channel-map').then(r => r.json()),
     fetch('/api/effects').then(r => r.json()),
+    fetch('/api/mover-presets').then(r => r.json()),
   ]);
   seqSequences = seqRes;
   seqFixtures = fixRes;
   seqEffects = effRes;
+  seqMoverPresets = mpRes;
 
   refreshEffectDropdown();
+  refreshMoverPresetDropdown();
   renderEffectsList();
   renderSeqSelector();
   if (seqCurrentId) {
@@ -54,6 +58,20 @@ function refreshEffectDropdown() {
   for (const eff of seqEffects) {
     effSel.innerHTML += `<option value="${eff.id}">${esc(eff.name)} (${eff.type})</option>`;
   }
+}
+
+function refreshMoverPresetDropdown() {
+  const sel = document.getElementById('seqPropMoverPreset');
+  sel.innerHTML = '<option value="">-- Select Preset --</option>';
+  for (const mp of seqMoverPresets) {
+    sel.innerHTML += `<option value="${mp.id}">${esc(mp.name)}</option>`;
+  }
+}
+
+function updateMoverPresetVisibility(cueType) {
+  const show = cueType === 'movement';
+  document.getElementById('seqPropMoverPresetLabel').style.display = show ? '' : 'none';
+  document.getElementById('seqPropMoverPreset').style.display = show ? '' : 'none';
 }
 
 function renderSeqSelector() {
@@ -135,7 +153,11 @@ function renderCueBlock(cue) {
   } else {
     bgStyle = `background:${startColor}`;
   }
-  const typeLabel = cue.label || (cue.cue_type === 'solid' ? '' : cue.cue_type);
+  let typeLabel = cue.label || (cue.cue_type === 'solid' ? '' : cue.cue_type);
+  if (cue.cue_type === 'movement' && chV.mover_preset_id) {
+    const mp = seqMoverPresets.find(p => p.id === chV.mover_preset_id);
+    if (mp) typeLabel = mp.name;
+  }
   return `<div class="seq-cue${selected}" data-cue-id="${cue.id}" ` +
     `style="left:${left}px;width:${width}px;${bgStyle}" ` +
     `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s - ${(cue.duration_ms/1000).toFixed(2)}s)">` +
@@ -811,6 +833,11 @@ function setupSequencerEvents() {
       if (hzEl) channelValues.strobe_hz = +hzEl.value;
     }
 
+    if (type === 'movement') {
+      const presetId = document.getElementById('seqPropMoverPreset').value;
+      if (presetId) channelValues.mover_preset_id = +presetId;
+    }
+
     const update = {
       cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs),
       label, color, channel_values: channelValues,
@@ -836,6 +863,7 @@ function setupSequencerEvents() {
   document.getElementById('seqPropType').addEventListener('change', () => {
     if (seqSelectedCueId) {
       const newType = document.getElementById('seqPropType').value;
+      updateMoverPresetVisibility(newType);
       renderCueChannelSliders(seqSelectedCueId, newType);
     }
   });
@@ -1166,6 +1194,13 @@ function showCueProperties(cue) {
   }
   document.getElementById('seqPropEffect').value = cue.effect_id || '';
 
+  // Show/hide mover preset dropdown based on cue type
+  updateMoverPresetVisibility(cueType);
+  if (cueType === 'movement') {
+    const chV2 = cue.channel_values || {};
+    document.getElementById('seqPropMoverPreset').value = chV2.mover_preset_id || '';
+  }
+
   // Build channel sliders based on stored type
   renderCueChannelSliders(cue.id, cueType);
 }
@@ -1275,6 +1310,15 @@ function renderCueChannelSliders(cueId, cueType) {
 
   if (cueType === 'effect') {
     html += '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Effect parameters are controlled by the selected effect above.</div>';
+  }
+
+  if (cueType === 'movement') {
+    const presetId = chVals.mover_preset_id;
+    const preset = presetId ? seqMoverPresets.find(p => p.id === presetId) : null;
+    html += '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">' +
+      'Select a Movement Preset above. The fixture will cycle through the preset positions over the cue duration.' +
+      (preset ? `<div style="margin-top:4px;color:var(--cyan)">Preset: <strong>${esc(preset.name)}</strong> (${preset.positions.length} positions)</div>` : '') +
+      '</div>';
   }
 
   chContainer.innerHTML = html;
