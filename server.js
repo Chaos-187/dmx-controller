@@ -256,25 +256,23 @@ function handleOs2lSubscribed(data) {
                 touchOverrides.os2lOverrideFixtures.clear();
                 touchOverrides.colorOverrideFixtures.clear();
                 touchOverrides.movementOverrideFixtures.clear();
+                deactivateScene(); // Stop any scene effect loop from end-action
                 stopPlaybackTimer(deck);
+                blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
                 activeSequences[deck] = { sequence: generatedSeq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
                 broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
                 console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck} (duration=${generatedSeq.duration_ms}ms)`);
 
-                // Always start playback if the deck is currently playing.
-                // The deck state is checked directly from the OS2L state.
-                const deckPlayState = state.decks[deck] && state.decks[deck].play;
-                const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
-                console.log(`[SEQ] Deck ${deck} play state: ${JSON.stringify(deckPlayState)} → deckIsPlaying=${deckIsPlaying}`);
-                if (deckIsPlaying) {
-                  activeSequences[deck].playing = true;
-                  activeSequences[deck].vdjDriven = true;
-                  startPlaybackTimer(deck);
-                  broadcast({ type: 'seq_playing', deck, playing: true });
-                  console.log(`[SEQ] Auto-playing generated sequence on deck ${deck}`);
-                } else {
-                  console.log(`[SEQ] Deck ${deck} is not playing — sequence loaded but not started`);
-                }
+                // Always start playback after auto-generation. The generation
+                // was triggered by a track-load event, so the deck is active.
+                // Play state may be stale (VDJ sent play:0 for the old track
+                // during async generation). If the deck truly isn't playing,
+                // the play sync handler will pause on the next play:0 event.
+                activeSequences[deck].playing = true;
+                activeSequences[deck].vdjDriven = true;
+                startPlaybackTimer(deck);
+                broadcast({ type: 'seq_playing', deck, playing: true });
+                console.log(`[SEQ] Auto-playing generated sequence on deck ${deck}`);
               }
             } catch (ge) {
               console.error(`[SEQ] Auto-generate failed for track ${track ? track.id : '?'}: ${ge.message}`);
@@ -291,7 +289,9 @@ function handleOs2lSubscribed(data) {
           touchOverrides.os2lOverrideFixtures.clear();
           touchOverrides.colorOverrideFixtures.clear();
           touchOverrides.movementOverrideFixtures.clear();
+          deactivateScene(); // Stop any scene effect loop from end-action
           stopPlaybackTimer(deck);
+          blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
           activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
           broadcast({ type: 'seq_loaded', deck, sequence: seq });
           console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} (duration=${seq.duration_ms}ms)`);
@@ -325,7 +325,9 @@ function handleOs2lSubscribed(data) {
       const deckNowPlaying = state.decks[deck].play;  // already normalized to 1/0
       if (deckNowPlaying && !activeSequences[deck].playing) {
         // Deck started playing — resume the sequence
+        deactivateScene(); // Stop any scene effect loop from end-action
         activeSequences[deck].playing = true;
+        activeSequences[deck]._endActionApplied = false; // Reset so next end-action can fire
         startPlaybackTimer(deck);
         broadcast({ type: 'seq_playing', deck, playing: true });
         console.log(`[SEQ] Deck ${deck} playing — resuming sequence`);
@@ -2439,7 +2441,9 @@ function handleSequenceCommand(ws, msg) {
       if (!seq) return ws.send(JSON.stringify({ type: 'seq_error', error: 'Sequence not found' }));
       // Clear any OS2L button overrides so the sequence controls all fixtures
       touchOverrides.os2lOverrideFixtures.clear();
+      deactivateScene(); // Stop any scene effect loop from end-action
       stopPlaybackTimer(deck);
+      blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
       activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
       broadcast({ type: 'seq_loaded', deck, sequence: seq });
       console.log(`[SEQ] Loaded sequence "${seq.name}" on deck ${deck}`);
