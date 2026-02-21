@@ -201,6 +201,7 @@ footer {
 .log-entry .log-type.cmd { color: var(--green); }
 .log-entry .log-type.subscribed { color: var(--cyan); }
 .log-entry .log-type.connection { color: var(--yellow); }
+.log-entry .log-type.server { color: #ff80ab; }
 .log-entry .log-type.event { color: var(--text-dim); }
 .log-entry .log-data { color: var(--text-dim); word-break: break-all; }
 .log-auto-scroll { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }

@@ -226,6 +226,7 @@
     .tracks-table .trk-bpm { color: var(--yellow); font-variant-numeric: tabular-nums; text-align: right; }
     .tracks-table .trk-key { color: var(--blue); }
     .tracks-table .trk-genre { color: var(--text-dim); max-width: 120px; }
+    .tracks-table .trk-path { color: var(--text-dim); font-size: 11px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tracks-table .trk-duration { color: var(--text-dim); font-variant-numeric: tabular-nums; text-align: right; }
     .tracks-table .trk-source {
       font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;
@@ -578,6 +579,7 @@
               <th>Title</th>
               <th>Artist</th>
               <th>Genre</th>
+              <th>Path</th>
               <th style="width:60px;text-align:right">BPM</th>
               <th style="width:40px">Key</th>
               <th style="width:60px;text-align:right">Duration</th>
@@ -801,6 +803,7 @@ function renderTracks(tracks, total) {
       <td class="trk-title" title="${esc(t.filepath)}">${esc(t.title || t.filename)}</td>
       <td class="trk-artist">${esc(t.author)}</td>
       <td class="trk-genre">${esc(t.genre)}</td>
+      <td class="trk-path" title="${esc(t.filepath)}">${esc(t.filepath)}</td>
       <td class="trk-bpm">${bpmStr}</td>
       <td class="trk-key">${esc(t.key)}</td>
       <td class="trk-duration">${formatDuration(t.song_length)}</td>
@@ -1621,9 +1624,15 @@ connect();
 loadSequencer();
 loadTracksPage();
 
-// If opened with ?seq=ID, auto-load that sequence
+// If opened with ?seq=ID&deck=N, auto-load that sequence and sync to that deck
 const urlParams = new URLSearchParams(window.location.search);
 const seqIdParam = urlParams.get('seq');
+const deckParam = urlParams.get('deck');
+if (deckParam) {
+  seqDeck = +deckParam;
+  const deckSel = document.getElementById('seqDeckSel');
+  if (deckSel) deckSel.value = deckParam;
+}
 if (seqIdParam) {
   // Wait for initial load, then select
   setTimeout(() => {

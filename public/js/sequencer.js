@@ -1707,7 +1707,12 @@ async function deleteEffect(id) {
 function handleSeqWsMessage(msg) {
   if (msg.type === 'seq_loaded') {
     if (msg.deck === seqDeck && msg.sequence) {
-      // Could auto-select the sequence in the UI
+      // Auto-load the sequence into the editor if it matches our deck
+      if (!seqCurrentSeq || seqCurrentSeq.id !== msg.sequence.id) {
+        const sel = document.getElementById('seqSelector');
+        if (sel) sel.value = msg.sequence.id;
+        loadSequenceById(msg.sequence.id);
+      }
     }
   } else if (msg.type === 'seq_unloaded') {
     if (msg.deck === seqDeck) {

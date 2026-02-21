@@ -34,7 +34,6 @@ if (process.pkg) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const net = require('net');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
@@ -46,6 +45,7 @@ const db = require('./db');
 const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
 const audioAnalyzer = require('./audio-analyzer');
+const os2l = require('./os2l');
 const { WebUSB } = require('usb');
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -82,49 +82,6 @@ for (let d = 1; d <= 4; d++) {
   };
 }
 
-// ─── VDJ Subscription Builder ───────────────────────────────────────────────
-
-let activeVdjSocket = null; // Track current VDJ TCP socket for re-subscribing
-
-function buildSubscriptionMessage() {
-  const subs = db.getEnabledSubscriptions();
-  const triggers = subs.map(s => s.trigger);
-  const freq = db.getConfig('subscription_frequency') || '25';
-  return JSON.stringify({ evt: 'subscribe', trigger: triggers, frequency: freq });
-}
-
-function sendSubscription() {
-  if (!activeVdjSocket || activeVdjSocket.destroyed) return;
-  const msg = buildSubscriptionMessage();
-  activeVdjSocket.write(msg);
-  console.log(`[OS2L] Subscription sent (${msg.length} bytes, ${JSON.parse(msg).trigger.length} triggers)`);
-}
-
-// ─── Trigger Parser ─────────────────────────────────────────────────────────
-
-function parseTrigger(trigger) {
-  const m = trigger.match(/^deck (\d+) (.+)$/);
-  if (!m) return { deck: null, key: trigger };
-
-  const deck = parseInt(m[1]);
-  const param = m[2];
-
-  if (param.startsWith("get_text '%SOUNDSWITCH_ID'")) return { deck, key: 'soundswitch_id' };
-  if (param === 'get_filepath') return { deck, key: 'filepath' };
-  if (param === 'get_genre') return { deck, key: 'genre' };
-  if (param === 'level') return { deck, key: 'level' };
-  if (param === 'get_time elapsed absolute') return { deck, key: 'time' };
-  if (param === 'get_beatpos') return { deck, key: 'beatpos' };
-  if (param === 'get_firstbeat') return { deck, key: 'firstbeat' };
-  if (param === 'get_bpm') return { deck, key: 'bpm' };
-  if (param === 'play') return { deck, key: 'play' };
-  if (param === 'loop') return { deck, key: 'loop' };
-  if (param === 'get_loop') return { deck, key: 'get_loop' };
-  if (param.includes('loop_roll')) return { deck, key: 'loop_roll' };
-
-  return { deck, key: param };
-}
-
 // ─── WebSocket Broadcast ────────────────────────────────────────────────────
 
 let wsClients = new Set();
@@ -138,6 +95,31 @@ function broadcast(data) {
   }
 }
 
+// ─── Console Log Interception (broadcast to WebSocket clients) ────────────
+
+const _origLog = console.log;
+const _origWarn = console.warn;
+const _origError = console.error;
+
+function _broadcastLog(level, args) {
+  const message = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  // Avoid broadcasting state/throttle noise
+  broadcast({ type: 'server_log', level, message, ts: Date.now() });
+}
+
+console.log = function (...args) {
+  _origLog.apply(console, args);
+  _broadcastLog('info', args);
+};
+console.warn = function (...args) {
+  _origWarn.apply(console, args);
+  _broadcastLog('warn', args);
+};
+console.error = function (...args) {
+  _origError.apply(console, args);
+  _broadcastLog('error', args);
+};
+
 // Throttled state broadcast (send full state at ~30fps max)
 let broadcastTimer = null;
 function scheduleBroadcast() {
@@ -148,21 +130,22 @@ function scheduleBroadcast() {
   }, 33); // ~30fps
 }
 
-// ─── OS2L Message Handler ───────────────────────────────────────────────────
+// ─── OS2L Message Handler (subscribed triggers) ────────────────────────────
+// This callback is invoked by os2l.js when a "subscribed" event arrives.
+// It stays here because it's tightly coupled with the sequencer subsystem.
 
-function handleMessage(data) {
-  // Broadcast every raw OS2L message for the event log
-  broadcast({ type: 'log', ts: Date.now(), raw: data });
-
-  const evt = data.evt;
-
-  if (evt === 'subscribed') {
+function handleOs2lSubscribed(data) {
     const trigger = data.trigger;
     const value = data.value;
 
     if (!trigger) return;
 
-    const { deck, key } = parseTrigger(trigger);
+    const { deck, key } = os2l.parseTrigger(trigger);
+
+    // Debug: log filepath events to confirm deck 2 is receiving data
+    if (key === 'filepath') {
+      if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} filepath = "${value}"`);
+    }
 
     if (key === 'crossfader') {
       state.crossfader = value;
@@ -202,9 +185,11 @@ function handleMessage(data) {
       const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
       const seqAutoUnload = db.getConfig('seq_auto_unload') === '1';
       const seqAutoGenerate = db.getConfig('seq_auto_generate') === '1';
+      if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} auto-load=${seqAutoLoad} auto-unload=${seqAutoUnload} auto-gen=${seqAutoGenerate}`);
       if (seqAutoLoad || seqAutoUnload || seqAutoGenerate) {
         const track = db.getTrackByPath(value);
         let seq = track ? db.getSequenceByTrackId(track.id) : null;
+        if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} track=${track ? track.id : 'null'} seq=${seq ? seq.id : 'null'}`);
 
         // Auto-generate sequence if none exists and feature is enabled
         if (!seq && track && seqAutoGenerate) {
@@ -215,7 +200,10 @@ function handleMessage(data) {
               let analysis = db.getTrackAnalysis(track.id);
 
               // Auto-analyze if needed (use live firstbeat as fallback)
-              if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
+              // Use the OS2L filepath (value) for file access since the DB may have a stale drive letter
+              const actualFilePath = value;
+              const fileExists = actualFilePath ? require('fs').existsSync(actualFilePath) : false;
+              if (!analysis && actualFilePath && fileExists) {
                 try {
                   const ffmpegOk = await audioAnalyzer.checkFfmpeg();
                   if (ffmpegOk) {
@@ -224,7 +212,8 @@ function handleMessage(data) {
                     if (!analysisBeatgridPos && liveFirstbeatForAnalysis > 0) {
                       analysisBeatgridPos = liveFirstbeatForAnalysis > 60 ? liveFirstbeatForAnalysis / 1000 : liveFirstbeatForAnalysis;
                     }
-                    const result = await audioAnalyzer.analyzeTrack(track.filepath, {
+                    console.log(`[SEQ] Auto-analyzing "${track.title || track.filename}" before sequence generation...`);
+                    const result = await audioAnalyzer.analyzeTrack(actualFilePath, {
                       bpm: track.bpm || 0,
                       beatgridPos: analysisBeatgridPos,
                       config: getAnalysisConfig(),
@@ -349,251 +338,6 @@ function handleMessage(data) {
     }
 
     scheduleBroadcast();
-  } else if (evt === 'beat') {
-    broadcast({ type: 'beat', data });
-  } else if (evt === 'btn') {
-    broadcast({ type: 'btn', data });
-    handleOs2lButtonAction(data);
-  } else if (evt === 'cmd') {
-    broadcast({ type: 'cmd', data });
-  } else {
-    broadcast({ type: 'event', evt, data });
-  }
-}
-
-// ─── OS2L TCP Server ────────────────────────────────────────────────────────
-
-const os2lServer = net.createServer((socket) => {
-  const addr = `${socket.remoteAddress}:${socket.remotePort}`;
-  console.log(`[OS2L] VirtualDJ connected from ${addr}`);
-
-  state.connected = true;
-  state.vdjAddress = addr;
-  activeVdjSocket = socket;
-  broadcast({ type: 'connection', connected: true, address: addr });
-
-  // Send subscription from database
-  sendSubscription();
-
-  let buffer = '';
-
-  socket.on('data', (chunk) => {
-    buffer += chunk.toString('utf-8');
-
-    // Process newline-delimited JSON
-    let idx;
-    while ((idx = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.substring(0, idx).trim();
-      buffer = buffer.substring(idx + 1);
-      if (line) {
-        try {
-          handleMessage(JSON.parse(line));
-        } catch (e) {
-          // Try parsing as standalone JSON
-        }
-      }
-    }
-
-    // Try parsing remaining buffer as complete JSON
-    if (buffer.trim()) {
-      try {
-        const parsed = JSON.parse(buffer.trim());
-        handleMessage(parsed);
-        buffer = '';
-      } catch (e) {
-        // Incomplete, wait for more data
-      }
-    }
-  });
-
-  socket.on('close', () => {
-    console.log(`[OS2L] VirtualDJ disconnected: ${addr}`);
-    state.connected = false;
-    state.vdjAddress = null;
-    if (activeVdjSocket === socket) activeVdjSocket = null;
-    broadcast({ type: 'connection', connected: false });
-  });
-
-  socket.on('error', (err) => {
-    console.error(`[OS2L] Socket error: ${err.message}`);
-  });
-});
-
-// ─── OS2L Button Action Handler ─────────────────────────────────────────────
-
-// Track active toggle states: Set of map IDs currently "on"
-const activeToggles = new Set();
-
-function handleOs2lButtonAction(data) {
-  const btnName = data.name || data.button || '';
-  const btnState = data.state;  // OS2L state: 1 = on/pressed, 0 = off/released
-  const maps = db.getEnabledButtonMaps();
-
-  for (const map of maps) {
-    // Match by os2l_event type and value pattern
-    const matchValue = map.os2l_value.trim();
-    if (!matchValue) continue;
-
-    // Support wildcard (*) or exact match
-    let matched = false;
-    if (matchValue === '*') {
-      matched = true;
-    } else if (btnName.toLowerCase() === matchValue.toLowerCase()) {
-      matched = true;
-    }
-    if (!matched) continue;
-
-    const toggleMode = map.toggle_mode || 'fire';
-
-    // Normalise state: "on"/1/"1" → true, "off"/0/"0" → false, undefined → null
-    let stateOn = null;
-    if (btnState === 'on' || btnState === 1 || btnState === '1') stateOn = true;
-    else if (btnState === 'off' || btnState === 0 || btnState === '0') stateOn = false;
-
-    // For toggle mode, use OS2L state to determine on/off
-    if (toggleMode === 'toggle') {
-      if (stateOn === true) {
-        activeToggles.add(map.id);
-        executeMapAction(map, true);
-      } else if (stateOn === false) {
-        activeToggles.delete(map.id);
-        executeMapAction(map, false);
-      }
-      // If state is undefined, treat as a simple toggle flip
-      else {
-        if (activeToggles.has(map.id)) {
-          activeToggles.delete(map.id);
-          executeMapAction(map, false);
-        } else {
-          activeToggles.add(map.id);
-          executeMapAction(map, true);
-        }
-      }
-    } else {
-      // 'fire' mode — execute on every event regardless of state
-      executeMapAction(map, true);
-    }
-  }
-}
-
-function executeMapAction(map, activate) {
-  let actionData;
-  try {
-    actionData = JSON.parse(map.action_data || '{}');
-  } catch (e) {
-    actionData = {};
-  }
-
-  const stateLabel = activate ? 'ON' : 'OFF';
-  console.log(`[OS2L] Button map "${map.name}" → ${map.action_type} [${stateLabel}]`);
-
-  switch (map.action_type) {
-    case 'blackout':
-      touchOverrides.blackoutHold = activate;
-      if (activate) {
-        // Save current DMX state then blackout
-        artnetServer.saveBuffers();
-        dmxUsbServer.saveBuffers();
-        artnetServer.blackout();
-        dmxUsbServer.blackout();
-      } else {
-        // Restore pre-blackout DMX state
-        artnetServer.restoreBuffers();
-        dmxUsbServer.restoreBuffers();
-      }
-      broadcast({ type: 'os2l_action', action: 'blackout', map: map.name, active: activate });
-      broadcast({ type: 'touchBlackoutHold', active: activate });
-      break;
-
-    case 'set_channels': {
-      // action_data: { universe: 1, channels: [{ ch: 1, val: 255 }, ...] }
-      const universe = actionData.universe || 1;
-      const channels = actionData.channels || [];
-      if (channels.length && dmxOutputEnabled) {
-        if (activate) {
-          artnetServer.setChannels(universe, channels);
-          dmxUsbServer.setChannels(universe, channels);
-        } else {
-          // Deactivate: set those channels to 0
-          const offChannels = channels.map(c => ({ ch: c.ch, val: 0 }));
-          artnetServer.setChannels(universe, offChannels);
-          dmxUsbServer.setChannels(universe, offChannels);
-        }
-      }
-      broadcast({ type: 'os2l_action', action: 'set_channels', map: map.name, active: activate });
-      break;
-    }
-
-    case 'full_on': {
-      const universe = actionData.universe || 1;
-      const val = activate ? 255 : 0;
-      const ch = [];
-      for (let i = 1; i <= 512; i++) ch.push({ ch: i, val });
-      if (dmxOutputEnabled) {
-        artnetServer.setChannels(universe, ch);
-        dmxUsbServer.setChannels(universe, ch);
-      }
-      broadcast({ type: 'os2l_action', action: 'full_on', map: map.name, active: activate });
-      break;
-    }
-
-    case 'scene': {
-      // action_data: { fixtures: [{ universe, channels: [{ ch, val }] }] }
-      const fixtures = actionData.fixtures || [];
-      for (const f of fixtures) {
-        const u = f.universe || 1;
-        if (f.channels && f.channels.length && dmxOutputEnabled) {
-          if (activate) {
-            artnetServer.setChannels(u, f.channels);
-            dmxUsbServer.setChannels(u, f.channels);
-          } else {
-            const offChannels = f.channels.map(c => ({ ch: c.ch, val: 0 }));
-            artnetServer.setChannels(u, offChannels);
-            dmxUsbServer.setChannels(u, offChannels);
-          }
-        }
-      }
-      broadcast({ type: 'os2l_action', action: 'scene', map: map.name, active: activate });
-      break;
-    }
-
-    case 'strobe': {
-      // Use saved strobe speed config + fixture channel map (range-aware)
-      const strobeSpeed = parseInt(db.getConfig('strobe_speed') || '200', 10);
-      const channelMap = db.getFixtureChannelMap();
-      const channelUpdates = {}; // { universe: [{ ch, val }] }
-
-      for (const fix of channelMap) {
-        const u = fix.universe;
-        if (!channelUpdates[u]) channelUpdates[u] = [];
-        for (const ch of fix.channels) {
-          if (ch.type === 'strobe') {
-            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? strobeSpeed : 0 });
-          } else if (ch.ranges) {
-            const strobeRange = ch.ranges.find(r => r.type === 'strobe');
-            if (strobeRange) {
-              const mapped = activate
-                ? Math.round(strobeRange.min + (strobeSpeed / 255) * (strobeRange.max - strobeRange.min))
-                : 0;
-              channelUpdates[u].push({ ch: ch.dmx_address, val: mapped });
-            }
-          }
-        }
-      }
-
-      if (dmxOutputEnabled) {
-        for (const [u, channels] of Object.entries(channelUpdates)) {
-          artnetServer.setChannels(+u, channels);
-          dmxUsbServer.setChannels(+u, channels);
-        }
-      }
-      broadcast({ type: 'os2l_action', action: 'strobe', map: map.name, active: activate });
-      break;
-    }
-
-    default:
-      console.warn(`[OS2L] Unknown action type: ${map.action_type}`);
-  }
 }
 
 // ─── Express Web Server ─────────────────────────────────────────────────────
@@ -759,9 +503,9 @@ app.post('/api/subscriptions/:id/toggle', (req, res) => {
 });
 
 app.post('/api/subscriptions/resend', (req, res) => {
-  sendSubscription();
+  os2l.sendSubscription();
   const subs = db.getEnabledSubscriptions();
-  res.json({ sent: true, count: subs.length, connected: !!activeVdjSocket && !activeVdjSocket.destroyed });
+  res.json({ sent: true, count: subs.length, connected: os2l.isConnected() });
 });
 
 // ─── Mover Presets API ──────────────────────────────────────────────────────
@@ -1174,53 +918,9 @@ app.post('/api/touch/effect-speed', (req, res) => {
   res.json({ ok: true, effectSpeed: val });
 });
 
-// ─── OS2L Button Maps API ───────────────────────────────────────────────────
+// ─── OS2L Button Maps API (delegated to os2l module) ────────────────────────
 
-app.get('/api/os2l-button-maps', (req, res) => {
-  res.json(db.getButtonMaps());
-});
-
-app.get('/api/os2l-button-maps/:id', (req, res) => {
-  const m = db.getButtonMap(+req.params.id);
-  m ? res.json(m) : res.status(404).json({ error: 'Not found' });
-});
-
-app.post('/api/os2l-button-maps', (req, res) => {
-  const result = db.createButtonMap(req.body);
-  if (result.error) return res.status(400).json(result);
-  res.status(201).json(result);
-});
-
-app.put('/api/os2l-button-maps/:id', (req, res) => {
-  const result = db.updateButtonMap(+req.params.id, req.body);
-  if (!result) return res.status(404).json({ error: 'Not found' });
-  if (result.error) return res.status(400).json(result);
-  res.json(result);
-});
-
-app.delete('/api/os2l-button-maps/:id', (req, res) => {
-  db.deleteButtonMap(+req.params.id);
-  res.json({ deleted: true });
-});
-
-app.post('/api/os2l-button-maps/:id/toggle', (req, res) => {
-  const result = db.toggleButtonMap(+req.params.id);
-  if (!result) return res.status(404).json({ error: 'Not found' });
-  res.json(result);
-});
-
-app.post('/api/os2l-button-maps/test/:id', (req, res) => {
-  const map = db.getButtonMap(+req.params.id);
-  if (!map) return res.status(404).json({ error: 'Not found' });
-  // Test fires with state=1 (activate)
-  handleOs2lButtonAction({ name: map.os2l_value, button: map.os2l_value, state: 1 });
-  res.json({ ok: true, tested: map.name });
-});
-
-// Get active toggle states
-app.get('/api/os2l-button-maps/active-toggles', (req, res) => {
-  res.json([...activeToggles]);
-});
+os2l.registerRoutes(app);
 
 // ─── Tracks API ─────────────────────────────────────────────────────────────
 
@@ -1958,6 +1658,19 @@ app.get('/api/sequences/by-track/:trackId', (req, res) => {
   s ? res.json(s) : res.status(404).json({ error: 'No sequence for this track' });
 });
 
+// Expose palette/genre options for the UI (must be before :id route)
+const sequenceGenerator = require('./sequence-generator');
+app.get('/api/sequences/generate-options', (req, res) => {
+  const palettes = sequenceGenerator.PALETTE_KEYS.map(k => ({
+    key: k, label: sequenceGenerator.colorPalettes[k].label,
+  }));
+  palettes.push({ key: 'random', label: 'Random' });
+  const genres = Object.entries(sequenceGenerator.genrePresets).map(([k, v]) => ({
+    key: k, label: v.label,
+  }));
+  res.json({ palettes, genres });
+});
+
 app.get('/api/sequences/:id', (req, res) => {
   const s = db.getSequence(+req.params.id);
   s ? res.json(s) : res.status(404).json({ error: 'Not found' });
@@ -2011,20 +1724,6 @@ app.put('/api/sequences/:id/cues/bulk', (req, res) => {
 });
 
 // ─── Auto-Generate Sequence ─────────────────────────────────────────────────
-
-const sequenceGenerator = require('./sequence-generator');
-
-// Expose palette/genre options for the UI
-app.get('/api/sequences/generate-options', (req, res) => {
-  const palettes = sequenceGenerator.PALETTE_KEYS.map(k => ({
-    key: k, label: sequenceGenerator.colorPalettes[k].label,
-  }));
-  palettes.push({ key: 'random', label: 'Random' });
-  const genres = Object.entries(sequenceGenerator.genrePresets).map(([k, v]) => ({
-    key: k, label: v.label,
-  }));
-  res.json({ palettes, genres });
-});
 
 app.post('/api/sequences/generate/:trackId', async (req, res) => {
   const track = db.getTrack(+req.params.trackId);
@@ -2879,6 +2578,9 @@ wss.on('connection', (ws) => {
   for (const [deck, seqState] of Object.entries(activeSequences)) {
     if (seqState.sequence) {
       ws.send(JSON.stringify({ type: 'seq_loaded', deck: +deck, sequence: seqState.sequence }));
+      if (seqState.playing) {
+        ws.send(JSON.stringify({ type: 'seq_playing', deck: +deck, playing: true }));
+      }
     }
   }
 
@@ -3006,6 +2708,28 @@ artnetServer.start(artnetNodes, artnetRate);
 // Start DMX USB output server (multi-device manager)
 const dmxUsbServer = new DmxUsbServer();
 
+// Initialise OS2L module with all dependencies
+os2l.init({
+  db,
+  broadcast,
+  state,
+  artnetServer,
+  dmxUsbServer,
+  touchOverrides,
+  runningQaEffects,
+  getDmxOutputEnabled: () => dmxOutputEnabled,
+  getEffectSlot,
+  stopRunningEffect,
+  activateScene,
+  deactivateScene,
+  buildChannelCtx,
+  computeEffectValue,
+  isFixtureCompatibleWithEffect,
+  applyMasterDimmer,
+  applyInvert,
+  onMessage: handleOs2lSubscribed,
+});
+
 // Auto-connect enabled USB devices
 (async function autoConnectUsbDevices() {
   const devices = db.getEnabledUsbDevices();
@@ -3043,9 +2767,7 @@ const dmxUsbServer = new DmxUsbServer();
   }
 })();
 
-os2lServer.listen(OS2L_PORT, '0.0.0.0', () => {
-  console.log(`[OS2L] TCP server listening on port ${OS2L_PORT}`);
-});
+os2l.startServer(OS2L_PORT);
 
 httpServer.listen(WEB_PORT, () => {
   console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT}`);
@@ -3061,7 +2783,8 @@ process.on('SIGINT', async () => {
   await dmxUsbServer.shutdownAll();
   if (mdnsResponder) mdnsResponder.destroy();
   if (bonjour) bonjour.destroy();
-  os2lServer.close();
+  const os2lSrv = os2l.getServer();
+  if (os2lSrv) os2lSrv.close();
   httpServer.close();
   process.exit(0);
 });

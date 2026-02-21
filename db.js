@@ -1202,7 +1202,19 @@ function getTrack(id) {
 }
 
 function getTrackByPath(filepath) {
-  return db.prepare('SELECT * FROM tracks WHERE filepath = ?').get(filepath);
+  // Try exact match first
+  const exact = db.prepare('SELECT * FROM tracks WHERE filepath = ?').get(filepath);
+  if (exact) return exact;
+
+  // Fall back to drive-letter-agnostic match (e.g. E:\Music\... vs H:\Music\...)
+  // Compare everything after the drive letter (e.g. "\Music\...")
+  const driveMatch = filepath.match(/^[A-Za-z]:\\/);
+  if (driveMatch) {
+    const pathAfterDrive = filepath.substring(2); // strip "X:" keep "\Music\..."
+    return db.prepare('SELECT * FROM tracks WHERE SUBSTR(filepath, 3) = ?').get(pathAfterDrive);
+  }
+
+  return null;
 }
 
 function updateTrackBeatgridPos(trackId, beatgridPos) {
@@ -1518,6 +1530,7 @@ function deleteEffect(id) {
 function getSequences() {
   return db.prepare(`
     SELECT ls.*, t.title as track_title, t.author as track_author, t.filename as track_filename,
+           t.filepath as track_filepath,
            (SELECT COUNT(*) FROM sequence_cues sc WHERE sc.sequence_id = ls.id) as cue_count
     FROM light_sequences ls
     LEFT JOIN tracks t ON ls.track_id = t.id

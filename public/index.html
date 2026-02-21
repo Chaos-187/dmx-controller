@@ -129,7 +129,7 @@
     }
     .tab-btn:hover { color: var(--text); }
     .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .tab-page { display: none; padding: 20px; max-width: 1600px; margin: 0 auto; }
+    .tab-page { display: none; padding: 20px; margin: 0 auto; }
     .tab-page.active { display: block; }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -213,6 +213,8 @@
     .deck-seq .seq-state.loaded { background: #1a2a4e; color: var(--blue); }
     .deck-seq .seq-state.playing { background: var(--accent); color: #fff; }
     .deck-seq .seq-time { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 42px; text-align: right; }
+    .deck-seq .seq-open { font-size: 9px; padding: 2px 8px; border-radius: 3px; background: rgba(0,229,255,.15); color: var(--cyan); border: 1px solid rgba(0,229,255,.25); cursor: pointer; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; white-space: nowrap; }
+    .deck-seq .seq-open:hover { background: rgba(0,229,255,.3); }
 
     /* Event log */
     .event-log {
@@ -1335,12 +1337,12 @@
 <div class="tab-page" id="page-dmxcontrol">
 
   <div class="dmx-subtabs">
-    <button class="dmx-subtab active" data-dmxsub="manual">Manual</button>
-    <button class="dmx-subtab" data-dmxsub="quickactions">Quick Actions</button>
+    <button class="dmx-subtab active" data-dmxsub="quickactions">Quick Actions</button>
+    <button class="dmx-subtab" data-dmxsub="manual">Manual</button>
   </div>
 
   <!-- Sub-page: Manual Faders -->
-  <div class="dmx-subpage active" id="dmxsub-manual">
+  <div class="dmx-subpage" id="dmxsub-manual">
     <div class="dmx-channel-range" style="margin-bottom:12px">
       <label>Universe:</label>
       <select id="dmxCtrlUniverse" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;">
@@ -1373,7 +1375,20 @@
   </div>
 
   <!-- Sub-page: Quick Actions -->
-  <div class="dmx-subpage" id="dmxsub-quickactions">
+  <div class="dmx-subpage active" id="dmxsub-quickactions">
+    <div class="qa-section">
+      <h3>Master</h3>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+        <label style="font-size:12px;color:var(--text-dim);white-space:nowrap">Master Dimmer</label>
+        <input type="range" id="qaMasterDimmer" min="0" max="255" value="0" style="flex:1;accent-color:var(--cyan)">
+        <span id="qaMasterDimmerVal" style="font-size:13px;font-weight:600;color:var(--cyan);min-width:32px;text-align:right">0</span>
+      </div>
+      <div class="qa-grid">
+        <button class="qa-btn" style="background:#fff;color:#000;border-color:#ccc" data-qa-type="dimmer" data-qa-val="255">Dimmer Full</button>
+        <button class="qa-btn" style="background:#333;color:#fff;border-color:#555" data-qa-type="dimmer" data-qa-val="0">Dimmer Off</button>
+        <button class="qa-btn" style="background:#111;color:#f55;border-color:#f55" data-qa-type="all" data-qa-val="0">Blackout</button>
+      </div>
+    </div>
     <div class="qa-mode-switch">
       <label>Mode:</label>
       <select id="qaModeSelect">
@@ -1471,19 +1486,6 @@
         <span style="font-size:11px;color:var(--cyan)" id="qaMoveSpeedVal">128</span>
       </div>
       <div class="qa-grid" id="qaMoveGrid"></div>
-    </div>
-    <div class="qa-section">
-      <h3>Master</h3>
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-        <label style="font-size:12px;color:var(--text-dim);white-space:nowrap">Master Dimmer</label>
-        <input type="range" id="qaMasterDimmer" min="0" max="255" value="0" style="flex:1;accent-color:var(--cyan)">
-        <span id="qaMasterDimmerVal" style="font-size:13px;font-weight:600;color:var(--cyan);min-width:32px;text-align:right">0</span>
-      </div>
-      <div class="qa-grid">
-        <button class="qa-btn" style="background:#fff;color:#000;border-color:#ccc" data-qa-type="dimmer" data-qa-val="255">Dimmer Full</button>
-        <button class="qa-btn" style="background:#333;color:#fff;border-color:#555" data-qa-type="dimmer" data-qa-val="0">Dimmer Off</button>
-        <button class="qa-btn" style="background:#111;color:#f55;border-color:#f55" data-qa-type="all" data-qa-val="0">Blackout</button>
-      </div>
     </div>
     <div class="qa-status" id="qaStatus">No fixtures loaded. Add fixtures with colour channel types (red, green, blue, etc.) to use Quick Actions.</div>
   </div>
@@ -2009,6 +2011,7 @@
                 <th>Sequence</th>
                 <th>Track</th>
                 <th>Artist</th>
+                <th>Path</th>
                 <th>Duration</th>
                 <th>Cues</th>
               </tr>
@@ -2310,6 +2313,7 @@
               <button class="filter-btn" data-filter="btn">Btn</button>
               <button class="filter-btn" data-filter="cmd">Cmd</button>
               <button class="filter-btn" data-filter="connection">Connection</button>
+              <button class="filter-btn" data-filter="server">Server</button>
             </div>
             <div id="logEntries"></div>
           </div>
@@ -2339,6 +2343,18 @@
                   <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                     <input type="checkbox" id="settingDmxOnStartup" style="accent-color:var(--accent);width:18px;height:18px">
                     <span id="settingDmxOnStartupLabel" style="font-size:12px">Off</span>
+                  </label>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Debug Logging</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Enable verbose debug logging for OS2L messages, deck subscriptions, and auto-generation. Logs appear in the Event Log with the Server filter.</div>
+                </td>
+                <td>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <input type="checkbox" id="settingDebugLogging" style="accent-color:var(--accent);width:18px;height:18px">
+                    <span id="settingDebugLoggingLabel" style="font-size:12px">Off</span>
                   </label>
                 </td>
               </tr>
@@ -2678,11 +2694,16 @@
     <div class="form-group">
       <label>Action Type</label>
       <select id="bmActionType">
+        <option value="color">Color (RGBW)</option>
+        <option value="color_preset">Color Preset</option>
+        <option value="effect">Run Effect</option>
+        <option value="scene_activate">Activate Scene</option>
         <option value="blackout">Blackout (all channels to 0)</option>
         <option value="full_on">Full On (all channels to 255)</option>
-        <option value="set_channels">Set Specific Channels</option>
-        <option value="scene">Scene (multi-fixture preset)</option>
-        <option value="strobe">Set Strobe Channel</option>
+        <option value="strobe">Strobe</option>
+        <option value="master_dimmer">Master Dimmer</option>
+        <option value="set_channels">Set Specific Channels (JSON)</option>
+        <option value="scene">Scene JSON (legacy)</option>
       </select>
     </div>
     <div class="form-group">
@@ -2697,6 +2718,75 @@
       </div>
     </div>
     <div id="bmActionDataSection">
+      <!-- Color RGBW fields -->
+      <div id="bmColorFields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>R</label><input type="number" id="bmColorR" min="0" max="255" value="255"></div>
+          <div class="form-group"><label>G</label><input type="number" id="bmColorG" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>B</label><input type="number" id="bmColorB" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>W</label><input type="number" id="bmColorW" min="0" max="255" value="0"></div>
+        </div>
+        <div class="form-group">
+          <label>Target Group (optional)</label>
+          <select id="bmColorGroup"><option value="">All Fixtures</option></select>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <label style="font-size:12px;color:var(--text-dim)">Preview:</label>
+          <div id="bmColorPreview" style="width:40px;height:24px;border-radius:4px;border:1px solid var(--panel-border);background:#ff0000"></div>
+        </div>
+      </div>
+      <!-- Color preset dropdown -->
+      <div id="bmColorPresetFields" style="display:none">
+        <div class="form-group">
+          <label>Color Preset</label>
+          <select id="bmColorPreset">
+            <option value="red" data-r="255" data-g="0" data-b="0" data-w="0">Red</option>
+            <option value="green" data-r="0" data-g="255" data-b="0" data-w="0">Green</option>
+            <option value="blue" data-r="0" data-g="0" data-b="255" data-w="0">Blue</option>
+            <option value="white" data-r="0" data-g="0" data-b="0" data-w="255">White</option>
+            <option value="amber" data-r="255" data-g="191" data-b="0" data-w="0">Amber</option>
+            <option value="uv" data-r="75" data-g="0" data-b="130" data-w="0">UV</option>
+            <option value="yellow" data-r="255" data-g="255" data-b="0" data-w="0">Yellow</option>
+            <option value="magenta" data-r="255" data-g="0" data-b="255" data-w="0">Magenta</option>
+            <option value="cyan" data-r="0" data-g="255" data-b="255" data-w="0">Cyan</option>
+            <option value="warm_white" data-r="255" data-g="200" data-b="100" data-w="255">Warm White</option>
+            <option value="cool_white" data-r="200" data-g="220" data-b="255" data-w="255">Cool White</option>
+            <option value="pink" data-r="255" data-g="105" data-b="180" data-w="0">Pink</option>
+            <option value="orange" data-r="255" data-g="140" data-b="0" data-w="0">Orange</option>
+            <option value="lime" data-r="180" data-g="255" data-b="0" data-w="0">Lime</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Target Group (optional)</label>
+          <select id="bmColorPresetGroup"><option value="">All Fixtures</option></select>
+        </div>
+      </div>
+      <!-- Effect dropdown -->
+      <div id="bmEffectFields" style="display:none">
+        <div class="form-group">
+          <label>Effect</label>
+          <select id="bmEffectSelect"></select>
+        </div>
+        <div class="form-group">
+          <label>Target Group (optional)</label>
+          <select id="bmEffectGroup"><option value="">All Fixtures</option></select>
+        </div>
+      </div>
+      <!-- Scene dropdown -->
+      <div id="bmSceneFields" style="display:none">
+        <div class="form-group">
+          <label>Scene</label>
+          <select id="bmSceneSelect"></select>
+        </div>
+      </div>
+      <!-- Master dimmer value -->
+      <div id="bmDimmerFields" style="display:none">
+        <div class="form-group">
+          <label>Dimmer Value (0-255)</label>
+          <input type="number" id="bmDimmerValue" min="0" max="255" value="255" style="width:120px">
+        </div>
+      </div>
+      <!-- Raw JSON (for set_channels & legacy scene) -->
       <div class="form-group" id="bmChannelsGroup" style="display:none">
         <label>Channel Data (JSON)</label>
         <textarea id="bmActionData" rows="5" style="width:100%;padding:8px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;font-family:'Cascadia Code','Consolas',monospace" placeholder='{"universe":1,"channels":[{"ch":1,"val":255}]}'></textarea>
@@ -2789,6 +2879,7 @@ function buildDeckPanels(count) {
           <span class="seq-name" id="seq-name-${d}">—</span>
           <span class="seq-state loaded" id="seq-state-${d}">Loaded</span>
           <span class="seq-time" id="seq-time-${d}"></span>
+          <button class="seq-open" id="seq-open-${d}" onclick="openDeckSequencer(${d})" title="Open in Sequencer">Sequencer &#8599;</button>
         </div>
       </div>`;
     decksContainer.appendChild(el);
@@ -2827,6 +2918,8 @@ function connect() {
       document.getElementById('qaEffectSpeed').value = pct;
       document.getElementById('qaEffectSpeedVal').textContent = msg.value.toFixed(2) + '×';
     }
+    else if (msg.type === 'os2l_button_map_created') { loadButtonMaps(); }
+    else if (msg.type === 'server_log') { logEvent({ evtType: 'server', raw: { level: msg.level, message: msg.message }, ts: msg.ts }); }
     else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     else logEvent({ evtType: msg.type || 'event', raw: msg });
   };
@@ -2894,14 +2987,20 @@ function updateState(state) {
 // ═══════════════════════════════════════════════════════════════
 //  Sequence Status on Deck Cards
 // ═══════════════════════════════════════════════════════════════
-const deckSeqState = {}; // { deckNum: { name, playing } }
+const deckSeqState = {}; // { deckNum: { id, name, playing } }
+
+function openDeckSequencer(deck) {
+  const info = deckSeqState[deck];
+  if (!info || !info.id) return;
+  window.open(`sequencer.html?seq=${info.id}&deck=${deck}`, '_blank');
+}
 
 function handleSeqWsMessage(msg) {
   const d = msg.deck;
   if (!d) return;
 
   if (msg.type === 'seq_loaded') {
-    deckSeqState[d] = { name: msg.sequence?.name || '?', playing: false };
+    deckSeqState[d] = { id: msg.sequence?.id || null, name: msg.sequence?.name || '?', playing: false };
     updateDeckSeqUI(d);
   } else if (msg.type === 'seq_unloaded') {
     delete deckSeqState[d];
@@ -2936,6 +3035,8 @@ function updateDeckSeqUI(d) {
   stateEl.textContent = info.playing ? 'Playing' : 'Loaded';
   stateEl.className = 'seq-state ' + (info.playing ? 'playing' : 'loaded');
   if (!info.playing) timeEl.textContent = '';
+  const openBtn = document.getElementById(`seq-open-${d}`);
+  if (openBtn) openBtn.style.display = info.id ? '' : 'none';
 }
 
 function buildNowPlayingBar() {
@@ -3055,6 +3156,9 @@ function logEvent(info) {
     summary = `${raw.trigger || ''} = ${JSON.stringify(raw.value ?? '')}`;
   } else if (evtType === 'beat' && raw) {
     summary = `pos=${raw.pos ?? ''} strength=${raw.strength ?? ''} bpm=${raw.bpm ?? ''}`;
+  } else if (evtType === 'server' && raw) {
+    const lvl = raw.level === 'error' ? '❌' : raw.level === 'warn' ? '⚠️' : 'ℹ️';
+    summary = `${lvl} ${raw.message || ''}`;
   } else if (evtType === 'connection') {
     summary = raw?.connected ? `VDJ connected: ${raw.address || ''}` : 'VDJ disconnected';
   } else {
@@ -4236,6 +4340,7 @@ async function loadSequencerConfig() {
       <td>${esc(s.name)}</td>
       <td>${esc(s.track_title || '—')}</td>
       <td>${esc(s.track_author || '—')}</td>
+      <td style="font-size:11px;color:var(--text-dim);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.track_filepath || '')}">${esc(s.track_filepath || '—')}</td>
       <td>${dur}</td>
       <td>${s.cue_count || 0}</td>`;
     tbody.appendChild(tr);
@@ -4682,6 +4787,13 @@ async function loadAppSettings() {
     chk.checked = isOn;
     lbl.textContent = isOn ? 'On' : 'Off';
 
+    // Debug logging
+    const dbgChk = document.getElementById('settingDebugLogging');
+    const dbgLbl = document.getElementById('settingDebugLoggingLabel');
+    const dbgOn = config.debug_logging === '1';
+    dbgChk.checked = dbgOn;
+    dbgLbl.textContent = dbgOn ? 'On' : 'Off';
+
     // Analysis settings
     if (config.analysis_target_peaks)       document.getElementById('settingAnalysisPeaks').value       = config.analysis_target_peaks;
     if (config.analysis_sample_rate)        document.getElementById('settingAnalysisSampleRate').value   = config.analysis_sample_rate;
@@ -4704,6 +4816,20 @@ document.getElementById('settingDmxOnStartup').addEventListener('change', async 
     });
   } catch(e) {
     console.error('Failed to save setting', e);
+  }
+});
+
+document.getElementById('settingDebugLogging').addEventListener('change', async function() {
+  const val = this.checked ? '1' : '0';
+  document.getElementById('settingDebugLoggingLabel').textContent = this.checked ? 'On' : 'Off';
+  try {
+    await fetch('/api/config/debug_logging', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: val }),
+    });
+  } catch(e) {
+    console.error('Failed to save debug logging setting', e);
   }
 });
 
@@ -6578,8 +6704,13 @@ const ACTION_TYPE_LABELS = {
   blackout: 'Blackout',
   full_on: 'Full On',
   set_channels: 'Set Channels',
-  scene: 'Scene',
+  scene: 'Scene (JSON)',
   strobe: 'Strobe',
+  color: 'Color',
+  color_preset: 'Color Preset',
+  effect: 'Effect',
+  scene_activate: 'Scene',
+  master_dimmer: 'Master Dimmer',
 };
 
 const TOGGLE_MODE_LABELS = {
@@ -6592,7 +6723,12 @@ const ACTION_HINTS = {
   full_on: 'No additional data needed — all channels will be set to 255. Optionally set universe: <code>{"universe":1}</code>',
   set_channels: 'Specify universe and channels:<br><code>{"universe":1,"channels":[{"ch":1,"val":255},{"ch":2,"val":128}]}</code>',
   scene: 'Multi-fixture preset:<br><code>{"fixtures":[{"universe":1,"channels":[{"ch":1,"val":255}]}]}</code>',
-  strobe: 'Set a strobe channel:<br><code>{"universe":1,"channel":7,"value":255}</code>',
+  strobe: 'Strobe will be sent to all fixtures with strobe-capable channels using the configured strobe speed.',
+  color: 'Set RGBW values to send to all colour fixtures.',
+  color_preset: 'Choose a colour preset from the dropdown.',
+  effect: 'Select an effect to run on your fixtures.',
+  scene_activate: 'Select a static scene to activate.',
+  master_dimmer: 'Set the master dimmer level (0-255).',
 };
 
 async function loadButtonMaps() {
@@ -6625,15 +6761,44 @@ async function loadButtonMaps() {
 
 function updateActionHint() {
   const type = document.getElementById('bmActionType').value;
-  const group = document.getElementById('bmChannelsGroup');
+  const jsonGroup = document.getElementById('bmChannelsGroup');
   const hint = document.getElementById('bmActionHint');
-  if (type === 'blackout' || type === 'full_on') {
-    group.style.display = 'none';
-  } else {
-    group.style.display = '';
+  // Hide all conditional sections
+  document.getElementById('bmColorFields').style.display = 'none';
+  document.getElementById('bmColorPresetFields').style.display = 'none';
+  document.getElementById('bmEffectFields').style.display = 'none';
+  document.getElementById('bmSceneFields').style.display = 'none';
+  document.getElementById('bmDimmerFields').style.display = 'none';
+  jsonGroup.style.display = 'none';
+
+  if (type === 'color') {
+    document.getElementById('bmColorFields').style.display = '';
+    updateBmColorPreview();
+  } else if (type === 'color_preset') {
+    document.getElementById('bmColorPresetFields').style.display = '';
+  } else if (type === 'effect') {
+    document.getElementById('bmEffectFields').style.display = '';
+  } else if (type === 'scene_activate') {
+    document.getElementById('bmSceneFields').style.display = '';
+  } else if (type === 'master_dimmer') {
+    document.getElementById('bmDimmerFields').style.display = '';
+  } else if (type === 'set_channels' || type === 'scene') {
+    jsonGroup.style.display = '';
   }
   hint.innerHTML = ACTION_HINTS[type] || '';
 }
+
+function updateBmColorPreview() {
+  const r = document.getElementById('bmColorR').value || 0;
+  const g = document.getElementById('bmColorG').value || 0;
+  const b = document.getElementById('bmColorB').value || 0;
+  document.getElementById('bmColorPreview').style.background = `rgb(${r},${g},${b})`;
+}
+
+// Wire up live colour preview
+['bmColorR','bmColorG','bmColorB','bmColorW'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateBmColorPreview);
+});
 
 document.getElementById('bmActionType').addEventListener('change', updateActionHint);
 
@@ -6644,6 +6809,29 @@ async function openBtnMapModal(mapId) {
   document.getElementById('btnMapModalTitle').textContent = mapId ? 'Edit Button Mapping' : 'Add Button Mapping';
   document.getElementById('btnMapError').textContent = '';
 
+  // Populate effects dropdown
+  try {
+    const effects = await (await fetch('/api/effects')).json();
+    const efxSel = document.getElementById('bmEffectSelect');
+    efxSel.innerHTML = effects.map(e => `<option value="${e.id}">${esc(e.name)} (${e.type})</option>`).join('');
+  } catch(e) {}
+
+  // Populate scenes dropdown
+  try {
+    const scenes = await (await fetch('/api/scenes')).json();
+    const scnSel = document.getElementById('bmSceneSelect');
+    scnSel.innerHTML = scenes.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  } catch(e) {}
+
+  // Populate group dropdowns
+  try {
+    const groups = await (await fetch('/api/groups')).json();
+    const groupOpts = '<option value="">All Fixtures</option>' + groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+    document.getElementById('bmColorGroup').innerHTML = groupOpts;
+    document.getElementById('bmColorPresetGroup').innerHTML = groupOpts;
+    document.getElementById('bmEffectGroup').innerHTML = groupOpts;
+  } catch(e) {}
+
   if (mapId) {
     const m = await (await fetch(`/api/os2l-button-maps/${mapId}`)).json();
     document.getElementById('bmName').value = m.name;
@@ -6651,14 +6839,44 @@ async function openBtnMapModal(mapId) {
     document.getElementById('bmOs2lValue').value = m.os2l_value;
     document.getElementById('bmActionType').value = m.action_type;
     document.getElementById('bmToggleMode').value = m.toggle_mode || 'fire';
-    document.getElementById('bmActionData').value = m.action_data || '{}';
+
+    // Populate type-specific fields from action_data
+    let ad = {};
+    try { ad = JSON.parse(m.action_data || '{}'); } catch(e) {}
+
+    if (m.action_type === 'color' && ad.preset) {
+      // Saved as color but was a color_preset
+      document.getElementById('bmActionType').value = 'color_preset';
+      document.getElementById('bmColorPreset').value = ad.preset;
+      if (ad.group_id) document.getElementById('bmColorPresetGroup').value = ad.group_id;
+    } else if (m.action_type === 'color') {
+      document.getElementById('bmColorR').value = ad.red || 0;
+      document.getElementById('bmColorG').value = ad.green || 0;
+      document.getElementById('bmColorB').value = ad.blue || 0;
+      document.getElementById('bmColorW').value = ad.white || 0;
+      if (ad.group_id) document.getElementById('bmColorGroup').value = ad.group_id;
+    } else if (m.action_type === 'effect') {
+      if (ad.effect_id) document.getElementById('bmEffectSelect').value = ad.effect_id;
+      if (ad.group_id) document.getElementById('bmEffectGroup').value = ad.group_id;
+    } else if (m.action_type === 'scene_activate') {
+      if (ad.scene_id) document.getElementById('bmSceneSelect').value = ad.scene_id;
+    } else if (m.action_type === 'master_dimmer') {
+      document.getElementById('bmDimmerValue').value = ad.value !== undefined ? ad.value : 255;
+    } else {
+      document.getElementById('bmActionData').value = m.action_data || '{}';
+    }
   } else {
     document.getElementById('bmName').value = '';
     document.getElementById('bmOs2lEvent').value = 'btn';
     document.getElementById('bmOs2lValue').value = '';
-    document.getElementById('bmActionType').value = 'blackout';
+    document.getElementById('bmActionType').value = 'color';
     document.getElementById('bmToggleMode').value = 'fire';
     document.getElementById('bmActionData').value = '{}';
+    document.getElementById('bmColorR').value = 255;
+    document.getElementById('bmColorG').value = 0;
+    document.getElementById('bmColorB').value = 0;
+    document.getElementById('bmColorW').value = 0;
+    document.getElementById('bmDimmerValue').value = 255;
   }
   updateActionHint();
   document.getElementById('btnMapModal').classList.add('open');
@@ -6692,13 +6910,46 @@ document.getElementById('btnSaveBtnMap').addEventListener('click', async () => {
   const os2l_value = document.getElementById('bmOs2lValue').value.trim();
   const action_type = document.getElementById('bmActionType').value;
   const toggle_mode = document.getElementById('bmToggleMode').value;
-  let action_data = document.getElementById('bmActionData').value.trim() || '{}';
+  let action_data = '{}';
 
   if (!name) return showError('btnMapError', 'Name is required');
   if (!os2l_value) return showError('btnMapError', 'OS2L value is required');
 
-  // Validate JSON for action data (if not blackout/full_on)
-  if (action_type !== 'blackout' && action_type !== 'full_on') {
+  // Build action_data based on action type
+  if (action_type === 'color') {
+    const r = +document.getElementById('bmColorR').value || 0;
+    const g = +document.getElementById('bmColorG').value || 0;
+    const b = +document.getElementById('bmColorB').value || 0;
+    const w = +document.getElementById('bmColorW').value || 0;
+    const gid = document.getElementById('bmColorGroup').value;
+    const data = { red: r, green: g, blue: b, white: w };
+    if (gid) data.group_id = +gid;
+    action_data = JSON.stringify(data);
+  } else if (action_type === 'color_preset') {
+    const sel = document.getElementById('bmColorPreset');
+    const opt = sel.options[sel.selectedIndex];
+    const r = +opt.dataset.r, g = +opt.dataset.g, b = +opt.dataset.b, w = +opt.dataset.w;
+    const gid = document.getElementById('bmColorPresetGroup').value;
+    const data = { preset: sel.value, red: r, green: g, blue: b, white: w };
+    if (gid) data.group_id = +gid;
+    // Save as 'color' action_type on the server since it's functionally the same
+    action_data = JSON.stringify(data);
+  } else if (action_type === 'effect') {
+    const eid = +document.getElementById('bmEffectSelect').value;
+    const gid = document.getElementById('bmEffectGroup').value;
+    if (!eid) return showError('btnMapError', 'Please select an effect');
+    const data = { effect_id: eid };
+    if (gid) data.group_id = +gid;
+    action_data = JSON.stringify(data);
+  } else if (action_type === 'scene_activate') {
+    const sid = +document.getElementById('bmSceneSelect').value;
+    if (!sid) return showError('btnMapError', 'Please select a scene');
+    action_data = JSON.stringify({ scene_id: sid });
+  } else if (action_type === 'master_dimmer') {
+    const val = +document.getElementById('bmDimmerValue').value;
+    action_data = JSON.stringify({ value: Math.max(0, Math.min(255, val)) });
+  } else if (action_type === 'set_channels' || action_type === 'scene') {
+    action_data = document.getElementById('bmActionData').value.trim() || '{}';
     try {
       JSON.parse(action_data);
     } catch (e) {
@@ -6706,7 +6957,10 @@ document.getElementById('btnSaveBtnMap').addEventListener('click', async () => {
     }
   }
 
-  const body = { name, os2l_event, os2l_value, action_type, action_data, toggle_mode };
+  // For color_preset, store as 'color' on the server
+  const save_action_type = action_type === 'color_preset' ? 'color' : action_type;
+
+  const body = { name, os2l_event, os2l_value, action_type: save_action_type, action_data, toggle_mode };
   const url = editId ? `/api/os2l-button-maps/${editId}` : '/api/os2l-button-maps';
   const method = editId ? 'PUT' : 'POST';
 
