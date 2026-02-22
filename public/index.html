@@ -1509,6 +1509,7 @@
       <button class="config-sidebar-btn" data-cfgtab="sequencer"><span class="cfg-icon">&#9836;</span>Sequencer</button>
       <button class="config-sidebar-btn" data-cfgtab="touch-actions"><span class="cfg-icon">&#9654;</span>Touch Actions</button>
       <button class="config-sidebar-btn" data-cfgtab="database"><span class="cfg-icon">&#128451;</span>Database</button>
+      <button class="config-sidebar-btn" data-cfgtab="export-import"><span class="cfg-icon">&#128230;</span>Export / Import</button>
       <button class="config-sidebar-btn" data-cfgtab="network"><span class="cfg-icon">&#127760;</span>Network</button>
       <button class="config-sidebar-btn" data-cfgtab="event-log"><span class="cfg-icon">&#9776;</span>Event Log</button>
       <div style="flex:1"></div>
@@ -2447,6 +2448,80 @@
 
           <div style="margin-top:24px;padding:16px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
             <p style="font-size:12px;color:var(--text-dim)">&#128712; Analysis settings only affect new analyses. To apply changes to previously-analyzed tracks, re-analyze them from the sequencer library.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Export / Import ─── -->
+      <div class="config-sub-page" id="cfgpage-export-import">
+        <div class="config-section">
+          <h3>Export / Import</h3>
+          <p class="config-desc">Export your fixture setup, effects, mover presets, and scenes to a JSON file for backup or transfer. Import from a previously exported file to restore or merge configurations.</p>
+
+          <!-- Export -->
+          <div class="config-card" style="margin-top:20px">
+            <h4>Export</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Select what to include in the export file. All selected items will be saved as a single JSON file.</p>
+
+            <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Types
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="groups" checked style="accent-color:var(--accent)"> Groups
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="effects" checked style="accent-color:var(--accent)"> Effects
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
+              </label>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btnExport">&#128190; Download Export File</button>
+          </div>
+
+          <!-- Import -->
+          <div class="config-card" style="margin-top:20px">
+            <h4>Import</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Upload a previously exported JSON file. Existing items with matching names will be updated; new items will be created.</p>
+
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <input type="file" id="importFile" accept=".json" style="font-size:12px">
+            </div>
+
+            <div id="importPreview" style="display:none;margin-bottom:16px;padding:12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
+              <div style="font-size:12px;font-weight:600;margin-bottom:8px">File Contents:</div>
+              <div id="importPreviewList" style="font-size:12px;color:var(--text-dim)"></div>
+              <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Types
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="groups" checked style="accent-color:var(--accent)"> Groups
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="effects" checked style="accent-color:var(--accent)"> Effects
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
+                </label>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-sm" id="btnImport" disabled>&#128230; Import Selected</button>
+            <div id="importResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:12px"></div>
           </div>
         </div>
       </div>
@@ -7304,6 +7379,141 @@ function handleSceneWsMessage(msg) {
     updateSceneActiveUI();
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  Export / Import
+// ═══════════════════════════════════════════════════════════════
+
+document.getElementById('btnExport').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('/api/export');
+    if (!resp.ok) throw new Error('Export failed');
+    const data = await resp.json();
+
+    // Filter to only selected sections
+    const selected = [...document.querySelectorAll('.export-cb:checked')].map(cb => cb.value);
+    const filtered = { _format: data._format, _version: data._version, _exported: data._exported };
+    for (const key of selected) {
+      if (data[key]) filtered[key] = data[key];
+    }
+
+    const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dmx-export-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+  }
+});
+
+let importFileData = null;
+
+document.getElementById('importFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  const preview = document.getElementById('importPreview');
+  const previewList = document.getElementById('importPreviewList');
+  const btnImport = document.getElementById('btnImport');
+  const resultDiv = document.getElementById('importResult');
+  resultDiv.style.display = 'none';
+
+  if (!file) {
+    preview.style.display = 'none';
+    btnImport.disabled = true;
+    importFileData = null;
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (data._format !== 'dmx-controller-export') {
+        alert('Not a valid DMX Controller export file.');
+        importFileData = null;
+        preview.style.display = 'none';
+        btnImport.disabled = true;
+        return;
+      }
+      importFileData = data;
+
+      // Show preview of contents
+      const counts = [];
+      const sections = ['fixture_types', 'fixtures', 'groups', 'effects', 'mover_presets', 'scenes'];
+      const labels = { fixture_types: 'Fixture Types', fixtures: 'Fixtures', groups: 'Groups', effects: 'Effects', mover_presets: 'Mover Presets', scenes: 'Scenes' };
+      for (const s of sections) {
+        const cb = preview.querySelector(`.import-cb[value="${s}"]`);
+        if (data[s] && data[s].length > 0) {
+          counts.push(`${data[s].length} ${labels[s]}`);
+          if (cb) { cb.closest('label').style.display = ''; cb.checked = true; }
+        } else {
+          if (cb) { cb.closest('label').style.display = 'none'; cb.checked = false; }
+        }
+      }
+      previewList.textContent = counts.join(', ') || 'No data found';
+      if (data._exported) {
+        previewList.textContent += ` (exported ${new Date(data._exported).toLocaleString()})`;
+      }
+      preview.style.display = '';
+      btnImport.disabled = false;
+    } catch (err) {
+      alert('Failed to parse file: ' + err.message);
+      importFileData = null;
+      preview.style.display = 'none';
+      btnImport.disabled = true;
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('btnImport').addEventListener('click', async () => {
+  if (!importFileData) return;
+
+  const selected = [...document.querySelectorAll('.import-cb:checked')].map(cb => cb.value);
+  if (selected.length === 0) { alert('Select at least one section to import.'); return; }
+
+  if (!confirm(`Import ${selected.length} section(s)? Existing items with matching names will be updated.`)) return;
+
+  const resultDiv = document.getElementById('importResult');
+  try {
+    const payload = { ...importFileData, _import_sections: selected };
+    const resp = await fetch('/api/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || 'Import failed');
+
+    const lines = [];
+    if (result.fixture_types) lines.push(`${result.fixture_types} fixture types`);
+    if (result.fixtures) lines.push(`${result.fixtures} fixtures`);
+    if (result.groups) lines.push(`${result.groups} groups`);
+    if (result.effects) lines.push(`${result.effects} effects`);
+    if (result.mover_presets) lines.push(`${result.mover_presets} mover presets`);
+    if (result.scenes) lines.push(`${result.scenes} scenes`);
+
+    resultDiv.style.display = '';
+    resultDiv.style.background = 'rgba(0,180,80,.12)';
+    resultDiv.style.border = '1px solid rgba(0,180,80,.3)';
+    resultDiv.innerHTML = `<strong>&#10003; Import complete:</strong> ${lines.join(', ') || 'No items imported'}`;
+    if (result.errors && result.errors.length > 0) {
+      resultDiv.innerHTML += `<br><br><strong>Warnings:</strong><br>` + result.errors.map(e => `• ${e}`).join('<br>');
+      resultDiv.style.background = 'rgba(255,180,0,.12)';
+      resultDiv.style.border = '1px solid rgba(255,180,0,.3)';
+    }
+
+    // Refresh the UI
+    loadFixtures(); loadGroups();
+  } catch (e) {
+    resultDiv.style.display = '';
+    resultDiv.style.background = 'rgba(255,60,60,.12)';
+    resultDiv.style.border = '1px solid rgba(255,60,60,.3)';
+    resultDiv.innerHTML = `<strong>&#10007; Import failed:</strong> ${e.message}`;
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  Boot

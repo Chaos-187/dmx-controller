@@ -582,6 +582,263 @@ app.get('/api/version', (req, res) => {
 
 // ─── Config API ─────────────────────────────────────────────────────────────
 
+// ─── Export / Import API ────────────────────────────────────────────────────
+
+app.get('/api/export', (req, res) => {
+  // Export fixture types, fixtures, groups, effects, mover presets, and scenes
+  const fixtureTypes = db.getFixtureTypes();
+  const fixtures = db.getFixtures().map(f => {
+    // Include full fixture info with type reference by name+manufacturer
+    const ft = fixtureTypes.find(t => t.id === f.fixture_type_id);
+    return {
+      name: f.name,
+      fixture_type_name: ft ? ft.name : null,
+      fixture_type_manufacturer: ft ? ft.manufacturer : null,
+      universe: f.universe,
+      address: f.address,
+      output_type: f.output_type,
+      notes: f.notes,
+      invert_pan: f.invert_pan,
+      invert_tilt: f.invert_tilt,
+      home_pan: f.home_pan,
+      home_tilt: f.home_tilt,
+    };
+  });
+  const groups = db.getGroups().map(g => {
+    // Resolve fixture IDs to fixture names for portability
+    const allFix = db.getFixtures();
+    return {
+      name: g.name,
+      color: g.color,
+      fixture_names: g.fixture_ids.map(id => {
+        const f = allFix.find(x => x.id === id);
+        return f ? f.name : null;
+      }).filter(Boolean),
+    };
+  });
+  const effects = db.getEffects().map(e => ({
+    name: e.name,
+    type: e.type,
+    category: e.category,
+    fixture_target: e.fixture_target,
+    effect_data: e.effect_data,
+    duration_beats: e.duration_beats,
+  }));
+  const moverPresets = db.getMoverPresets().map(p => {
+    // Resolve fixture IDs in positions to fixture names for portability
+    const allFix = db.getFixtures();
+    return {
+      name: p.name,
+      sort_order: p.sort_order,
+      positions: p.positions.map(pos => {
+        const f = allFix.find(x => x.id === pos.fixture_id);
+        return { ...pos, fixture_name: f ? f.name : null };
+      }),
+    };
+  });
+  const scenes = db.getScenes().map(s => {
+    const scene = db.getScene(s.id);
+    const allFix = db.getFixtures();
+    const allGroups = db.getGroups();
+    const allEffects = db.getEffects();
+    return {
+      name: scene.name,
+      description: scene.description,
+      priority: scene.priority,
+      is_default: scene.is_default,
+      entries: scene.entries.map(e => {
+        const fix = e.fixture_id ? allFix.find(x => x.id === e.fixture_id) : null;
+        const grp = e.group_id ? allGroups.find(x => x.id === e.group_id) : null;
+        const eff = e.effect_id ? allEffects.find(x => x.id === e.effect_id) : null;
+        return {
+          fixture_name: fix ? fix.name : null,
+          group_name: grp ? grp.name : null,
+          channel_values: e.channel_values,
+          effect_name: eff ? eff.name : null,
+          effect_params: e.effect_params,
+          label: e.label,
+          sort_order: e.sort_order,
+        };
+      }),
+    };
+  });
+
+  const data = {
+    _format: 'dmx-controller-export',
+    _version: 1,
+    _exported: new Date().toISOString(),
+    fixture_types: fixtureTypes.map(t => ({
+      name: t.name,
+      manufacturer: t.manufacturer,
+      category: t.category,
+      channels: t.channels.map(ch => ({
+        channel_number: ch.channel_number,
+        name: ch.name,
+        type: ch.type,
+        default_value: ch.default_value,
+        min_value: ch.min_value,
+        max_value: ch.max_value,
+        ranges: ch.ranges,
+        cell: ch.cell,
+        invert: ch.invert,
+      })),
+    })),
+    fixtures,
+    groups,
+    effects,
+    mover_presets: moverPresets,
+    scenes,
+  };
+  res.setHeader('Content-Disposition', `attachment; filename="dmx-export-${Date.now()}.json"`);
+  res.json(data);
+});
+
+app.post('/api/import', (req, res) => {
+  try {
+    const data = req.body;
+    if (!data || data._format !== 'dmx-controller-export') {
+      return res.status(400).json({ error: 'Invalid export file format' });
+    }
+
+    const results = { fixture_types: 0, fixtures: 0, groups: 0, effects: 0, mover_presets: 0, scenes: 0, errors: [] };
+    const sections = Array.isArray(data._import_sections) ? data._import_sections : null;
+
+    // 1. Import fixture types
+    if (data.fixture_types && (!sections || sections.includes('fixture_types'))) {
+      for (const ft of data.fixture_types) {
+        try {
+          const existing = db.getFixtureTypes().find(t => t.name === ft.name && t.manufacturer === ft.manufacturer);
+          if (existing) {
+            db.updateFixtureType(existing.id, ft);
+          } else {
+            db.createFixtureType(ft);
+          }
+          results.fixture_types++;
+        } catch (e) { results.errors.push(`Fixture type "${ft.name}": ${e.message}`); }
+      }
+    }
+
+    // 2. Import fixtures (needs fixture types to be resolved)
+    if (data.fixtures && (!sections || sections.includes('fixtures'))) {
+      for (const f of data.fixtures) {
+        try {
+          const ft = db.getFixtureTypes().find(t => t.name === f.fixture_type_name && (!f.fixture_type_manufacturer || t.manufacturer === f.fixture_type_manufacturer));
+          if (!ft) { results.errors.push(`Fixture "${f.name}": type "${f.fixture_type_name}" not found`); continue; }
+          const existing = db.getFixtures().find(x => x.name === f.name);
+          if (existing) {
+            db.updateFixture(existing.id, { ...f, fixture_type_id: ft.id });
+          } else {
+            db.createFixture({ ...f, fixture_type_id: ft.id });
+          }
+          results.fixtures++;
+        } catch (e) { results.errors.push(`Fixture "${f.name}": ${e.message}`); }
+      }
+    }
+
+    // 3. Import groups (needs fixtures to be resolved)
+    if (data.groups && (!sections || sections.includes('groups'))) {
+      for (const g of data.groups) {
+        try {
+          const allFix = db.getFixtures();
+          const fixtureIds = (g.fixture_names || []).map(n => {
+            const f = allFix.find(x => x.name === n);
+            return f ? f.id : null;
+          }).filter(Boolean);
+          const existing = db.getGroups().find(x => x.name === g.name);
+          if (existing) {
+            db.updateGroup(existing.id, { name: g.name, color: g.color });
+            db.setGroupFixtures(existing.id, fixtureIds);
+          } else {
+            const created = db.createGroup({ name: g.name, color: g.color });
+            if (created && !created.error) db.setGroupFixtures(created.id, fixtureIds);
+          }
+          results.groups++;
+        } catch (e) { results.errors.push(`Group "${g.name}": ${e.message}`); }
+      }
+    }
+
+    // 4. Import effects
+    if (data.effects && (!sections || sections.includes('effects'))) {
+      for (const eff of data.effects) {
+        try {
+          const existing = db.getEffects().find(e => e.name === eff.name);
+          if (existing) {
+            db.updateEffect(existing.id, eff);
+          } else {
+            db.createEffect(eff);
+          }
+          results.effects++;
+        } catch (e) { results.errors.push(`Effect "${eff.name}": ${e.message}`); }
+      }
+    }
+
+    // 5. Import mover presets (needs fixtures for position mapping)
+    if (data.mover_presets && (!sections || sections.includes('mover_presets'))) {
+      for (const mp of data.mover_presets) {
+        try {
+          const allFix = db.getFixtures();
+          const positions = (mp.positions || []).map(pos => {
+            if (pos.fixture_name) {
+              const f = allFix.find(x => x.name === pos.fixture_name);
+              if (f) return { ...pos, fixture_id: f.id };
+            }
+            return pos;
+          });
+          const existing = db.getMoverPresets().find(p => p.name === mp.name);
+          if (existing) {
+            db.updateMoverPreset(existing.id, { name: mp.name, positions });
+          } else {
+            db.createMoverPreset({ name: mp.name, positions });
+          }
+          results.mover_presets++;
+        } catch (e) { results.errors.push(`Mover preset "${mp.name}": ${e.message}`); }
+      }
+    }
+
+    // 6. Import scenes (needs fixtures, groups, and effects)
+    if (data.scenes && (!sections || sections.includes('scenes'))) {
+      for (const sc of data.scenes) {
+        try {
+          const allFix = db.getFixtures();
+          const allGroups = db.getGroups();
+          const allEffects = db.getEffects();
+          const existing = db.getScenes().find(s => s.name === sc.name);
+          let scene;
+          if (existing) {
+            scene = db.updateScene(existing.id, { name: sc.name, description: sc.description, priority: sc.priority, is_default: sc.is_default });
+            // Delete existing entries before re-importing
+            const oldEntries = db.getSceneEntries(existing.id);
+            for (const oe of oldEntries) db.deleteSceneEntry(oe.id);
+          } else {
+            scene = db.createScene({ name: sc.name, description: sc.description, priority: sc.priority, is_default: sc.is_default });
+          }
+          if (scene && !scene.error && sc.entries) {
+            for (const entry of sc.entries) {
+              const fixId = entry.fixture_name ? (allFix.find(x => x.name === entry.fixture_name) || {}).id : null;
+              const grpId = entry.group_name ? (allGroups.find(x => x.name === entry.group_name) || {}).id : null;
+              const effId = entry.effect_name ? (allEffects.find(x => x.name === entry.effect_name) || {}).id : null;
+              db.createSceneEntry(scene.id, {
+                fixture_id: fixId || null,
+                group_id: grpId || null,
+                channel_values: entry.channel_values,
+                effect_id: effId || null,
+                effect_params: entry.effect_params,
+                label: entry.label,
+                sort_order: entry.sort_order,
+              });
+            }
+          }
+          results.scenes++;
+        } catch (e) { results.errors.push(`Scene "${sc.name}": ${e.message}`); }
+      }
+    }
+
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/config', (req, res) => {
   res.json(db.getAllConfig());
 });
