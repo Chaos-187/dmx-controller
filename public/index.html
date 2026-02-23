@@ -366,18 +366,67 @@
     .fixture-card-actions { display: flex; gap: 6px; margin-top: 10px; }
 
     /* ═══════════════════════════════════════════════════════════════
-       Fixture Types Tab (tab 3)
+       Fixture Library Tab (tab 3)
        ═══════════════════════════════════════════════════════════════ */
-    .types-list { display: flex; flex-direction: column; gap: 8px; }
-    .type-row {
-      display: flex; align-items: center; gap: 16px;
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
-      padding: 12px 16px; transition: border-color .2s;
+    /* Fixture library table */
+    .types-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .types-table th {
+      text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim);
+      border-bottom: 2px solid var(--panel-border); position: sticky; top: 0;
+      background: var(--bg); z-index: 1;
     }
-    .type-row:hover { border-color: var(--panel-border); }
-    .type-name { font-size: 14px; font-weight: 600; min-width: 180px; }
-    .type-meta { font-size: 12px; color: var(--text-dim); flex: 1; display: flex; gap: 16px; }
-    .type-actions { display: flex; gap: 6px; }
+    .types-table td { padding: 7px 10px; border-bottom: 1px solid var(--panel-border); vertical-align: middle; }
+    .types-table tr:hover td { background: rgba(255,255,255,.03); }
+    .types-table .lib-name { font-weight: 600; color: var(--text); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .types-table .lib-mfr { color: var(--text-dim); white-space: nowrap; }
+    .types-table .lib-cat {
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+      padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+      background: rgba(0,176,255,.12); color: var(--cyan); display: inline-block;
+    }
+    .types-table .lib-modes { display: flex; flex-wrap: wrap; gap: 4px; }
+    .mode-badge {
+      font-size: 11px; padding: 2px 6px; border-radius: 4px;
+      background: rgba(255,255,255,.06); border: 1px solid var(--panel-border);
+      color: var(--text); display: inline-flex; align-items: center; gap: 4px;
+    }
+    .mode-badge .mode-ch { color: var(--cyan); font-weight: 600; }
+    .types-table .lib-actions { white-space: nowrap; text-align: right; }
+    .types-table .lib-actions .btn { padding: 3px 10px; font-size: 11px; }
+
+    /* Library pagination bar */
+    .lib-pagination { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--panel-border); gap: 8px; }
+    .lib-pagination .pag-pages { display: flex; align-items: center; gap: 2px; }
+    .lib-pagination .pag-btn {
+      min-width: 28px; height: 28px; padding: 0 6px; border: 1px solid var(--panel-border);
+      border-radius: 4px; background: var(--input-bg); color: var(--text); font-size: 12px;
+      cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+      transition: background .15s, border-color .15s;
+    }
+    .lib-pagination .pag-btn:hover:not(:disabled):not(.active) { background: rgba(255,255,255,.08); border-color: var(--text-dim); }
+    .lib-pagination .pag-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; cursor: default; }
+    .lib-pagination .pag-btn:disabled { opacity: .35; cursor: default; }
+    .lib-pagination .pag-ellipsis { padding: 0 4px; color: var(--text-dim); }
+    .lib-pagination select { padding: 4px 6px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 4px; color: var(--text); font-size: 12px; }
+
+    /* Mode editor in type modal */
+    .mode-tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+    .mode-tab {
+      font-size: 12px; padding: 5px 12px; border-radius: 6px 6px 0 0;
+      background: var(--input-bg); border: 1px solid var(--input-border); border-bottom: none;
+      color: var(--text-dim); cursor: pointer; transition: all .15s; position: relative;
+    }
+    .mode-tab:hover { color: var(--text); background: rgba(255,255,255,.08); }
+    .mode-tab.active { background: var(--panel); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+    .mode-tab .mode-tab-remove {
+      margin-left: 6px; font-size: 14px; color: var(--text-dim); cursor: pointer; line-height: 1;
+    }
+    .mode-tab .mode-tab-remove:hover { color: var(--danger); }
+    .mode-tab-add { font-size: 18px; color: var(--accent); padding: 4px 10px; cursor: pointer; background: none; border: 1px dashed var(--input-border); border-radius: 6px; }
+    .mode-tab-add:hover { border-color: var(--accent); background: rgba(0,176,255,.08); }
+    .mode-header-fields { display: flex; gap: 10px; margin-bottom: 10px; }
+    .mode-header-fields input { flex: 1; }
 
     /* ═══════════════════════════════════════════════════════════════
        Integrated Universe Map (inside Fixtures tab)
@@ -1150,7 +1199,6 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="decks">Decks</button>
   <button class="tab-btn" data-tab="fixtures">Fixtures</button>
-  <button class="tab-btn" data-tab="types">Fixture Types</button>
   <button class="tab-btn" data-tab="scenes">Scenes</button>
   <button class="tab-btn" data-tab="dmxcontrol">DMX Control</button>
   <a href="sequencer.html" class="tab-btn" style="text-decoration:none">Sequencer</a>
@@ -1244,16 +1292,6 @@
       <div style="font-size:10px;color:var(--text-dim);margin-top:6px">Drag fixtures from above and drop onto the universe map to assign their DMX address.</div>
     </div>
   </div>
-</div>
-
-<!-- ══════════════════════════════════════════════════════════════
-     TAB 3 — FIXTURE TYPES
-     ══════════════════════════════════════════════════════════════ -->
-<div class="tab-page" id="page-types">
-  <div class="fixtures-toolbar">
-    <button class="btn btn-primary" id="btnAddType">+ Add Fixture Type</button>
-  </div>
-  <div class="types-list" id="typesList"></div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════
@@ -1508,6 +1546,7 @@
       <button class="config-sidebar-btn" data-cfgtab="movers"><span class="cfg-icon">&#10146;</span>Movers</button>
       <button class="config-sidebar-btn" data-cfgtab="sequencer"><span class="cfg-icon">&#9836;</span>Sequencer</button>
       <button class="config-sidebar-btn" data-cfgtab="touch-actions"><span class="cfg-icon">&#9654;</span>Touch Actions</button>
+      <button class="config-sidebar-btn" data-cfgtab="fixture-library"><span class="cfg-icon">&#128161;</span>Fixture Library</button>
       <button class="config-sidebar-btn" data-cfgtab="database"><span class="cfg-icon">&#128451;</span>Database</button>
       <button class="config-sidebar-btn" data-cfgtab="export-import"><span class="cfg-icon">&#128230;</span>Export / Import</button>
       <button class="config-sidebar-btn" data-cfgtab="network"><span class="cfg-icon">&#127760;</span>Network</button>
@@ -2465,7 +2504,7 @@
 
             <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Types
+                <input type="checkbox" class="export-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library
               </label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
                 <input type="checkbox" class="export-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
@@ -2500,7 +2539,7 @@
               <div id="importPreviewList" style="font-size:12px;color:var(--text-dim)"></div>
               <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px">
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Types
+                  <input type="checkbox" class="import-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library
                 </label>
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
                   <input type="checkbox" class="import-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
@@ -2523,6 +2562,54 @@
             <button class="btn btn-primary btn-sm" id="btnImport" disabled>&#128230; Import Selected</button>
             <div id="importResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:12px"></div>
           </div>
+        </div>
+      </div>
+
+      <!-- ─── Fixture Library ─── -->
+      <div class="config-sub-page" id="cfgpage-fixture-library">
+        <div class="config-section">
+          <h3>Fixture Library</h3>
+          <p class="config-desc">Manage fixture types used by your fixtures. Import from OFL library files or create custom types.</p>
+          <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+            <button class="btn btn-primary btn-sm" id="btnAddType">+ Add Fixture Type</button>
+            <button class="btn btn-secondary btn-sm" id="btnImportOFL">⬇ Import from OFL File</button>
+            <input type="file" id="oflFileInput" accept=".json" style="display:none">
+          </div>
+          <!-- Import progress panel (hidden by default) -->
+          <div id="oflImportPanel" style="display:none;background:var(--panel-bg);border:1px solid var(--panel-border);border-radius:8px;padding:16px;margin-bottom:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <h3 style="margin:0;font-size:14px;color:var(--accent)">Import Fixtures from OFL Library</h3>
+              <button class="btn btn-secondary btn-sm" id="btnCloseOflPanel">✕ Close</button>
+            </div>
+            <div id="oflSummary" style="font-size:12px;color:var(--text-dim);margin-bottom:10px"></div>
+            <div id="oflFixtureList" style="max-height:400px;overflow-y:auto;margin-bottom:12px"></div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <button class="btn btn-secondary btn-sm" id="btnOflSelectAll">Select All</button>
+              <button class="btn btn-secondary btn-sm" id="btnOflSelectNone">Select None</button>
+              <span style="flex:1"></span>
+              <span id="oflSelectedCount" style="font-size:12px;color:var(--text-dim)"></span>
+              <button class="btn btn-primary" id="btnOflImportSelected">Import Selected</button>
+            </div>
+            <div id="oflImportResults" style="margin-top:10px;font-size:12px;display:none"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <input type="text" id="filterLibraryName" placeholder="Search by name or manufacturer…" style="flex:1;max-width:280px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+            <select id="filterLibraryCategory" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;min-width:120px">
+              <option value="">All Categories</option>
+            </select>
+            <select id="filterLibraryManufacturer" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;min-width:140px">
+              <option value="">All Manufacturers</option>
+            </select>
+            <span style="flex:1"></span>
+            <span id="libraryCount" style="font-size:12px;color:var(--text-dim)"></span>
+          </div>
+          <div style="max-height:calc(100vh - 360px);overflow-y:auto;border:1px solid var(--panel-border);border-radius:8px">
+            <table class="types-table" id="typesTable">
+              <thead><tr><th>Name</th><th>Manufacturer</th><th>Category</th><th>Modes</th><th style="text-align:right">Actions</th></tr></thead>
+              <tbody id="typesList"></tbody>
+            </table>
+          </div>
+          <div class="lib-pagination" id="libraryPagination"></div>
         </div>
       </div>
 
@@ -2579,6 +2666,10 @@
     <div class="form-group">
       <label>Fixture Type</label>
       <select id="fTypeId"></select>
+    </div>
+    <div class="form-group">
+      <label>Mode</label>
+      <select id="fModeId"></select>
     </div>
     <div class="form-group">
       <label>Output Type</label>
@@ -2676,7 +2767,15 @@
       </div>
     </div>
     <div class="form-group">
-      <label>Channels</label>
+      <label>Modes</label>
+      <div class="mode-tabs" id="modeTabs"></div>
+      <div class="mode-header-fields" id="modeHeaderFields">
+        <input type="text" id="tModeName" placeholder="Mode name (e.g. 16-bit)" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+        <input type="text" id="tModeShortName" placeholder="Short name (e.g. 16b)" style="width:100px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Channels <span id="chCountLabel" style="font-size:11px;color:var(--text-dim)"></span></label>
       <div class="channels-editor" id="channelsEditor"></div>
       <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
     </div>
@@ -2919,7 +3018,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('page-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'fixtures') { loadFixtures(); loadGroups(); loadUniverseMap(); }
-    if (btn.dataset.tab === 'types') loadTypes();
     if (btn.dataset.tab === 'scenes') loadScenes();
     if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
     if (btn.dataset.tab === 'config') loadConfigPage();
@@ -3308,7 +3406,7 @@ document.getElementById('btnClearFixtureFilters').addEventListener('click', () =
 async function loadFixtures() {
   const [fixtures, types] = await Promise.all([
     fetch('/api/fixtures').then(r=>r.json()),
-    fetch('/api/fixture-types').then(r=>r.json())
+    fetch('/api/fixture-types/summaries').then(r=>r.json())
   ]);
   fixtureTypesCache = types;
   _allFixtures = fixtures;
@@ -3424,8 +3522,7 @@ function renderFixtureCards(fixtures) {
       clearDropHighlights(bar);
     });
 
-    const type = fixtureTypesCache.find(t => t.id === f.fixture_type_id);
-    const channels = type ? type.channels : [];
+    const channels = f.channels || [];
 
     // Build channel type summary instead of listing every channel
     const typeCounts = {};
@@ -3451,7 +3548,7 @@ function renderFixtureCards(fixtures) {
     card.innerHTML = `
       <div class="fixture-card-header">
         <span class="fixture-card-name">${esc(f.name)}</span>
-        <span class="fixture-card-type">${esc(f.type_name)}</span>
+        <span class="fixture-card-type">${esc(f.type_name)}${f.mode_name ? ' <span style="color:var(--cyan);font-size:10px">[' + esc(f.mode_name) + ']</span>' : ''}</span>
       </div>
       <div class="fixture-card-meta">
         <span>U${f.universe} &middot; Ch ${f.address}&ndash;${f.address + f.channel_count - 1}</span>
@@ -3474,22 +3571,54 @@ document.getElementById('btnAddFixture').addEventListener('click', () => openFix
 
 async function openFixtureModal(fixtureId) {
   if (fixtureTypesCache.length === 0) {
-    fixtureTypesCache = await fetch('/api/fixture-types').then(r=>r.json());
+    fixtureTypesCache = await fetch('/api/fixture-types/summaries').then(r=>r.json());
   }
   const sel = document.getElementById('fTypeId');
   sel.innerHTML = fixtureTypesCache.map(t =>
-    `<option value="${t.id}">${esc(t.name)} (${t.channel_count}ch)</option>`
+    `<option value="${t.id}">${esc(t.name)} (${(t.modes && t.modes.length > 0 ? t.modes[0].channel_count : t.channel_count) || '?'}ch)</option>`
   ).join('');
 
-  // Helper: show/hide invert row based on selected fixture type
-  function updateInvertVisibility() {
+  function updateModeDropdown() {
     const typeId = +document.getElementById('fTypeId').value;
     const ft = fixtureTypesCache.find(t => t.id === typeId);
-    const hasPanTilt = ft && ft.channels && ft.channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
+    const modeSel = document.getElementById('fModeId');
+    if (ft && ft.modes && ft.modes.length > 0) {
+      modeSel.innerHTML = ft.modes.map(m =>
+        `<option value="${m.id}">${esc(m.name || 'Default')} (${m.channel_count}ch)</option>`
+      ).join('');
+      modeSel.parentElement.style.display = ft.modes.length > 1 ? '' : 'none';
+    } else {
+      modeSel.innerHTML = '<option value="">Default</option>';
+      modeSel.parentElement.style.display = 'none';
+    }
+  }
+
+  // Cache full fixture type data (with channels) fetched on demand, keyed by type id
+  let _ftChannelCache = {};
+  // Helper: show/hide invert row based on selected fixture type
+  async function updateInvertVisibility() {
+    const typeId = +document.getElementById('fTypeId').value;
+    const modeId = +document.getElementById('fModeId').value;
+    // Fetch full type data (with channels) if not cached
+    if (!_ftChannelCache[typeId]) {
+      try {
+        _ftChannelCache[typeId] = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json());
+      } catch(e) { _ftChannelCache[typeId] = null; }
+    }
+    const ft = _ftChannelCache[typeId];
+    let channels = [];
+    if (ft && ft.modes) {
+      const mode = ft.modes.find(m => m.id === modeId) || ft.modes[0];
+      channels = mode ? mode.channels || [] : [];
+    } else if (ft) {
+      channels = ft.channels || [];
+    }
+    const hasPanTilt = channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
     document.getElementById('fInvertRow').style.display = hasPanTilt ? 'flex' : 'none';
     document.getElementById('fHomeRow').style.display = hasPanTilt ? 'flex' : 'none';
   }
-  sel.onchange = updateInvertVisibility;
+  sel.onchange = () => { updateModeDropdown(); updateInvertVisibility(); };
+  document.getElementById('fModeId').onchange = updateInvertVisibility;
 
   if (fixtureId) {
     const f = await fetch(`/api/fixtures/${fixtureId}`).then(r=>r.json());
@@ -3497,6 +3626,8 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fixtureEditId').value = f.id;
     document.getElementById('fName').value = f.name;
     document.getElementById('fTypeId').value = f.fixture_type_id;
+    updateModeDropdown();
+    if (f.mode_id) document.getElementById('fModeId').value = f.mode_id;
     document.getElementById('fOutputType').value = f.output_type || 'artnet';
     document.getElementById('fUniverse').value = f.universe;
     document.getElementById('fAddress').value = f.address;
@@ -3521,6 +3652,7 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fHomePanVal').textContent = '128';
     document.getElementById('fHomeTilt').value = 128;
     document.getElementById('fHomeTiltVal').textContent = '128';
+    updateModeDropdown();
   }
   updateInvertVisibility();
   document.getElementById('fixtureError').textContent = '';
@@ -3535,19 +3667,19 @@ function sendHomePanTiltLive() {
   if (!editId) return;
   const fix = _allFixtures.find(f => f.id === +editId);
   if (!fix) return;
-  const ft = fixtureTypesCache.find(t => t.id === fix.fixture_type_id);
-  if (!ft || !ft.channels) return;
+  // Use channels directly from the fixture (loaded from DB)
+  const channels = fix.channels || [];
   const panVal = +document.getElementById('fHomePan').value;
   const tiltVal = +document.getElementById('fHomeTilt').value;
-  const channels = [];
-  for (const ch of ft.channels) {
-    if (ch.type === 'pan') channels.push({ ch: fix.address + ch.channel_number - 1, val: panVal });
-    if (ch.type === 'tilt') channels.push({ ch: fix.address + ch.channel_number - 1, val: tiltVal });
+  const dmxChannels = [];
+  for (const ch of channels) {
+    if (ch.type === 'pan') dmxChannels.push({ ch: fix.address + ch.channel_number - 1, val: panVal });
+    if (ch.type === 'tilt') dmxChannels.push({ ch: fix.address + ch.channel_number - 1, val: tiltVal });
   }
-  if (channels.length) {
+  if (dmxChannels.length) {
     fetch('/api/dmx/channels', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ universe: fix.universe, channels }),
+      body: JSON.stringify({ universe: fix.universe, channels: dmxChannels }),
     });
   }
 }
@@ -3569,9 +3701,11 @@ window.deleteFixture = async (id, name) => {
 
 document.getElementById('btnSaveFixture').addEventListener('click', async () => {
   const editId = document.getElementById('fixtureEditId').value;
+  const modeIdVal = document.getElementById('fModeId').value;
   const body = {
     name: document.getElementById('fName').value.trim(),
     fixture_type_id: +document.getElementById('fTypeId').value,
+    mode_id: modeIdVal ? +modeIdVal : null,
     output_type: document.getElementById('fOutputType').value,
     universe: +document.getElementById('fUniverse').value,
     address: +document.getElementById('fAddress').value,
@@ -3594,35 +3728,353 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
 });
 
 // ═══════════════════════════════════════════════════════════════
-//  Fixture Types CRUD
+//  Fixture Library CRUD + OFL Import
 // ═══════════════════════════════════════════════════════════════
-async function loadTypes() {
-  const types = await fetch('/api/fixture-types').then(r=>r.json());
-  fixtureTypesCache = types;
-  const list = document.getElementById('typesList');
-  list.innerHTML = '';
-  for (const t of types) {
-    const row = document.createElement('div');
-    row.className = 'type-row';
-    row.innerHTML = `
-      <span class="type-name">${esc(t.name)}</span>
-      <span class="type-meta">
-        <span>${esc(t.manufacturer||'—')}</span>
-        <span>${CATEGORY_LABELS[t.category]||t.category}</span>
-        <span>${t.channel_count}ch</span>
-        <span style="color:var(--text-dim)">${t.channels.map(c=>c.name).join(', ')}</span>
-      </span>
-      <span class="type-actions">
-        <button class="btn btn-secondary btn-sm" onclick="editType(${t.id})">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id},'${esc(t.name).replace(/'/g,"\\'")}')">Delete</button>
-      </span>`;
-    list.appendChild(row);
+let _libraryPage = { types: [], total: 0, page: 1, pageSize: 50, loading: false };
+
+function _libGotoPage(page) {
+  _libraryPage.page = page;
+  loadTypes();
+}
+
+async function loadTypes(resetPage) {
+  if (_libraryPage.loading) return;
+  _libraryPage.loading = true;
+  if (resetPage) _libraryPage.page = 1;
+
+  const q = (document.getElementById('filterLibraryName').value || '').trim();
+  const cat = document.getElementById('filterLibraryCategory').value;
+  const mfr = document.getElementById('filterLibraryManufacturer').value;
+  const offset = (_libraryPage.page - 1) * _libraryPage.pageSize;
+
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (cat) params.set('category', cat);
+  if (mfr) params.set('manufacturer', mfr);
+  params.set('limit', _libraryPage.pageSize);
+  params.set('offset', offset);
+
+  try {
+    const data = await fetch('/api/fixture-types/search?' + params).then(r => r.json());
+    _libraryPage.types = data.types;
+    _libraryPage.total = data.total;
+
+    // Populate filter dropdowns (returned on first page)
+    if (data.categories) {
+      const catSel = document.getElementById('filterLibraryCategory');
+      const prevCat = catSel.value;
+      catSel.innerHTML = '<option value="">All Categories</option>' + data.categories.map(c => `<option value="${c}">${CATEGORY_LABELS[c]||c}</option>`).join('');
+      catSel.value = prevCat;
+    }
+    if (data.manufacturers) {
+      const mfrSel = document.getElementById('filterLibraryManufacturer');
+      const prevMfr = mfrSel.value;
+      mfrSel.innerHTML = '<option value="">All Manufacturers</option>' + data.manufacturers.map(m => `<option value="${m}">${esc(m)}</option>`).join('');
+      mfrSel.value = prevMfr;
+    }
+
+    renderLibraryList();
+  } catch (e) {
+    console.error('Library search error:', e);
+  } finally {
+    _libraryPage.loading = false;
   }
 }
+
+function renderLibraryList() {
+  const { types, total, page, pageSize } = _libraryPage;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total > 0 ? (page - 1) * pageSize + 1 : 0;
+  const to = Math.min(page * pageSize, total);
+  document.getElementById('libraryCount').textContent = total > 0
+    ? `${from}\u2013${to} of ${total}`
+    : '0 fixture types';
+
+  // Render rows
+  const tbody = document.getElementById('typesList');
+  tbody.innerHTML = '';
+  for (const t of types) {
+    const modes = t.modes || [];
+    const modeBadges = modes.length > 0
+      ? modes.map(m => `<span class="mode-badge">${esc(m.short_name || m.name)} <span class="mode-ch">${m.channel_count}ch</span></span>`).join('')
+      : `<span class="mode-badge">Default <span class="mode-ch">${t.channel_count}ch</span></span>`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="lib-name" title="${esc(t.name)}">${esc(t.name)}</td>
+      <td class="lib-mfr">${esc(t.manufacturer || '—')}</td>
+      <td><span class="lib-cat">${CATEGORY_LABELS[t.category] || t.category}</span></td>
+      <td><div class="lib-modes">${modeBadges}</div></td>
+      <td class="lib-actions">
+        <button class="btn btn-secondary btn-sm" onclick="editType(${t.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id},'${esc(t.name).replace(/'/g, "\\'")}')">Delete</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  // Pagination bar
+  const pagBar = document.getElementById('libraryPagination');
+  if (totalPages <= 1) { pagBar.innerHTML = ''; return; }
+
+  let html = '<div class="pag-pages">';
+  html += `<button class="pag-btn" ${page <= 1 ? 'disabled' : ''} onclick="_libGotoPage(${page - 1})">&lsaquo;</button>`;
+
+  // Build page number buttons with ellipsis
+  const pages = _buildPageNumbers(page, totalPages);
+  for (const p of pages) {
+    if (p === '...') {
+      html += '<span class="pag-ellipsis">\u2026</span>';
+    } else {
+      html += `<button class="pag-btn${p === page ? ' active' : ''}" onclick="_libGotoPage(${p})">${p}</button>`;
+    }
+  }
+
+  html += `<button class="pag-btn" ${page >= totalPages ? 'disabled' : ''} onclick="_libGotoPage(${page + 1})">&rsaquo;</button>`;
+  html += '</div>';
+
+  // Page size selector
+  html += '<div style="display:flex;align-items:center;gap:6px">';
+  html += '<span>Show</span><select onchange="_libraryPage.pageSize=+this.value;_libGotoPage(1)">';
+  for (const s of [25, 50, 100, 200]) {
+    html += `<option value="${s}"${s === pageSize ? ' selected' : ''}>${s}</option>`;
+  }
+  html += '</select><span>per page</span></div>';
+
+  pagBar.innerHTML = html;
+}
+
+function _buildPageNumbers(current, total) {
+  const delta = 1;
+  const pages = [];
+  const rangeStart = Math.max(2, current - delta);
+  const rangeEnd = Math.min(total - 1, current + delta);
+
+  pages.push(1);
+  if (rangeStart > 2) pages.push('...');
+  for (let i = rangeStart; i <= rangeEnd; i++) pages.push(i);
+  if (rangeEnd < total - 1) pages.push('...');
+  if (total > 1) pages.push(total);
+  return pages;
+}
+
+// Library filter events — debounced server-side search
+let _libSearchTimer = null;
+function triggerLibrarySearch() {
+  clearTimeout(_libSearchTimer);
+  _libSearchTimer = setTimeout(() => loadTypes(true), 250);
+}
+document.getElementById('filterLibraryName').addEventListener('input', triggerLibrarySearch);
+document.getElementById('filterLibraryCategory').addEventListener('change', () => loadTypes(true));
+document.getElementById('filterLibraryManufacturer').addEventListener('change', () => loadTypes(true));
+
+// ─── OFL Import ─────────────────────────────────────────────────────────────
+let _oflParsedData = null;
+let _oflPreview = null;
+
+document.getElementById('btnImportOFL').addEventListener('click', () => {
+  document.getElementById('oflFileInput').click();
+});
+
+document.getElementById('oflFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = ''; // reset for re-upload
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    _oflParsedData = data;
+
+    // Get preview summary
+    const res = await fetch('/api/fixture-library/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: text,
+    });
+    _oflPreview = await res.json();
+
+    renderOflPanel();
+  } catch (err) {
+    alert('Failed to parse OFL file: ' + err.message);
+  }
+});
+
+function renderOflPanel() {
+  const panel = document.getElementById('oflImportPanel');
+  panel.style.display = '';
+  document.getElementById('oflImportResults').style.display = 'none';
+
+  const summary = document.getElementById('oflSummary');
+  const totalModes = _oflPreview.fixtures.reduce((s,f) => s + f.modes.length, 0);
+  summary.textContent = `Found ${_oflPreview.count} fixture(s) with ${totalModes} total mode(s).`;
+
+  const list = document.getElementById('oflFixtureList');
+  list.innerHTML = '';
+
+  // One entry per fixture (modes shown inline)
+  for (let idx = 0; idx < _oflPreview.fixtures.length; idx++) {
+    const fix = _oflPreview.fixtures[idx];
+    const modesSummary = fix.modes.map(m => `${m.name} (${m.channelCount}ch)`).join(', ');
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--panel-border);font-size:12px;cursor:pointer';
+    row.innerHTML = `
+      <input type="checkbox" class="ofl-fixture-check" data-idx="${idx}" checked style="accent-color:var(--accent)">
+      <span style="flex:1;color:var(--text);font-weight:500">${esc(fix.name)}</span>
+      <span style="color:var(--text-dim)">${esc(fix.manufacturer)}</span>
+      <span style="color:var(--text-dim)">${fix.categories.join(', ')}</span>
+      <span style="color:var(--cyan);font-size:11px">${esc(modesSummary)}</span>`;
+    list.appendChild(row);
+  }
+
+  updateOflSelectedCount();
+}
+
+function updateOflSelectedCount() {
+  const checks = document.querySelectorAll('.ofl-fixture-check');
+  const checked = [...checks].filter(c => c.checked).length;
+  document.getElementById('oflSelectedCount').textContent = `${checked} of ${checks.length} selected`;
+}
+
+document.getElementById('oflImportPanel').addEventListener('change', (e) => {
+  if (e.target.classList.contains('ofl-fixture-check')) updateOflSelectedCount();
+});
+
+document.getElementById('btnOflSelectAll').addEventListener('click', () => {
+  document.querySelectorAll('.ofl-fixture-check').forEach(c => c.checked = true);
+  updateOflSelectedCount();
+});
+
+document.getElementById('btnOflSelectNone').addEventListener('click', () => {
+  document.querySelectorAll('.ofl-fixture-check').forEach(c => c.checked = false);
+  updateOflSelectedCount();
+});
+
+document.getElementById('btnCloseOflPanel').addEventListener('click', () => {
+  document.getElementById('oflImportPanel').style.display = 'none';
+  _oflParsedData = null;
+  _oflPreview = null;
+});
+
+document.getElementById('btnOflImportSelected').addEventListener('click', async () => {
+  if (!_oflParsedData) return;
+
+  const checks = document.querySelectorAll('.ofl-fixture-check');
+  const selected = [...checks].filter(c => c.checked).map(c => +c.dataset.idx);
+  if (selected.length === 0) return alert('No fixtures selected');
+
+  const btn = document.getElementById('btnOflImportSelected');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+
+  try {
+    const res = await fetch('/api/fixture-library/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: _oflParsedData, selectedFixtures: selected }),
+    });
+    const result = await res.json();
+
+    const resultsEl = document.getElementById('oflImportResults');
+    resultsEl.style.display = '';
+    if (result.error) {
+      resultsEl.innerHTML = `<div style="color:var(--danger)">Error: ${esc(result.error)}</div>`;
+    } else {
+      let html = `<div style="color:var(--green)">Imported: ${result.imported} | Updated: ${result.updated}</div>`;
+      if (result.errors && result.errors.length > 0) {
+        html += `<div style="color:var(--warning);margin-top:4px">${result.errors.length} error(s):</div>`;
+        html += result.errors.slice(0, 20).map(e => `<div style="color:var(--text-dim);padding-left:12px;font-size:11px">${esc(e)}</div>`).join('');
+        if (result.errors.length > 20) html += `<div style="color:var(--text-dim);padding-left:12px">…and ${result.errors.length - 20} more</div>`;
+      }
+      resultsEl.innerHTML = html;
+      // Refresh the library list
+      loadTypes();
+    }
+  } catch (err) {
+    alert('Import failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import Selected';
+  }
+});
 
 document.getElementById('btnAddType').addEventListener('click', () => openTypeModal());
 
 let typeChannels = [];
+let typeModes = []; // Array of { name, short_name, channels[] }
+let activeMode = 0; // Index of currently active mode tab
+
+function saveModeChannels() {
+  // Save current channel editor state into the active mode
+  if (typeModes[activeMode]) {
+    typeModes[activeMode].channels = typeChannels.map(ch => ({...ch}));
+  }
+}
+
+function switchToMode(idx) {
+  saveModeChannels();
+  activeMode = idx;
+  const m = typeModes[activeMode];
+  typeChannels = (m.channels || []).map(ch => ({...ch}));
+  document.getElementById('tModeName').value = m.name || '';
+  document.getElementById('tModeShortName').value = m.short_name || '';
+  renderModeTabs();
+  renderChannelsEditor();
+  updateMultiCellVisibility();
+  updateDuplicateHint();
+}
+
+function renderModeTabs() {
+  const tabs = document.getElementById('modeTabs');
+  tabs.innerHTML = '';
+  typeModes.forEach((m, i) => {
+    const tab = document.createElement('span');
+    tab.className = 'mode-tab' + (i === activeMode ? ' active' : '');
+    const chCount = m.channels ? m.channels.length : 0;
+    tab.innerHTML = `${esc(m.name || 'Mode ' + (i+1))} <span style="color:var(--cyan);font-size:10px">${chCount}ch</span>` +
+      (typeModes.length > 1 ? `<span class="mode-tab-remove" data-midx="${i}">&times;</span>` : '');
+    tab.addEventListener('click', (e) => {
+      if (e.target.classList.contains('mode-tab-remove')) return;
+      switchToMode(i);
+    });
+    tabs.appendChild(tab);
+  });
+  // Remove mode handler
+  tabs.querySelectorAll('.mode-tab-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const mi = +btn.dataset.midx;
+      if (typeModes.length <= 1) return;
+      if (!confirm(`Remove mode "${typeModes[mi].name || 'Mode ' + (mi+1)}"?`)) return;
+      typeModes.splice(mi, 1);
+      if (activeMode >= typeModes.length) activeMode = typeModes.length - 1;
+      switchToMode(activeMode);
+    });
+  });
+  // Add mode button
+  const addBtn = document.createElement('button');
+  addBtn.className = 'mode-tab-add';
+  addBtn.type = 'button';
+  addBtn.textContent = '+';
+  addBtn.title = 'Add mode';
+  addBtn.addEventListener('click', () => {
+    saveModeChannels();
+    typeModes.push({ name: '', short_name: '', channels: [] });
+    switchToMode(typeModes.length - 1);
+  });
+  tabs.appendChild(addBtn);
+  // Update channel count label
+  document.getElementById('chCountLabel').textContent = `(${typeChannels.length} in this mode)`;
+}
+
+// Update mode name/shortName on field change
+document.getElementById('tModeName').addEventListener('input', (e) => {
+  if (typeModes[activeMode]) {
+    typeModes[activeMode].name = e.target.value;
+    renderModeTabs();
+  }
+});
+document.getElementById('tModeShortName').addEventListener('input', (e) => {
+  if (typeModes[activeMode]) typeModes[activeMode].short_name = e.target.value;
+});
 
 function renderChannelsEditor() {
   const ed = document.getElementById('channelsEditor');
@@ -3759,13 +4211,15 @@ function renderChannelsEditor() {
   });
 }
 
-window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); };
+window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs(); };
 
 document.getElementById('btnAddChannel').addEventListener('click', () => {
   const num = typeChannels.length + 1;
   typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255, ranges: null, cell: null });
   renderChannelsEditor();
   updateDuplicateHint();
+  saveModeChannels();
+  renderModeTabs();
 });
 
 /* Category change — show/hide multi-cell builder */
@@ -3814,6 +4268,8 @@ document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
   typeChannels.forEach((ch, i) => { ch.channel_number = i + 1; });
   renderChannelsEditor();
   updateDuplicateHint();
+  saveModeChannels();
+  renderModeTabs();
 
   const hint = document.getElementById('tMultiCellHint');
   hint.textContent = `Built ${masterChannels.length} master + ${cellChannels.length} cell channels (${cellCount} cells × ${pattern.length}ch)`;
@@ -3828,15 +4284,29 @@ async function openTypeModal(typeId) {
     document.getElementById('tName').value = t.name;
     document.getElementById('tManufacturer').value = t.manufacturer || '';
     document.getElementById('tCategory').value = t.category;
-    typeChannels = t.channels.map(c => ({...c}));
+    // Load modes
+    if (t.modes && t.modes.length > 0) {
+      typeModes = t.modes.map(m => ({
+        name: m.name,
+        short_name: m.short_name || '',
+        channels: (m.channels || []).map(c => ({...c})),
+      }));
+    } else {
+      typeModes = [{ name: 'Default', short_name: '', channels: t.channels ? t.channels.map(c => ({...c})) : [] }];
+    }
   } else {
     document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
     document.getElementById('typeEditId').value = '';
     document.getElementById('tName').value = '';
     document.getElementById('tManufacturer').value = '';
     document.getElementById('tCategory').value = 'par';
-    typeChannels = [];
+    typeModes = [{ name: 'Default', short_name: '', channels: [] }];
   }
+  activeMode = 0;
+  typeChannels = (typeModes[0].channels || []).map(ch => ({...ch}));
+  document.getElementById('tModeName').value = typeModes[0].name || '';
+  document.getElementById('tModeShortName').value = typeModes[0].short_name || '';
+  renderModeTabs();
   renderChannelsEditor();
   updateMultiCellVisibility();
   // Reset duplicate section
@@ -3859,25 +4329,31 @@ window.deleteType = async (id, name) => {
 
 document.getElementById('btnSaveType').addEventListener('click', async () => {
   const editId = document.getElementById('typeEditId').value;
-  typeChannels.forEach((ch, i) => ch.channel_number = i + 1);
-  // Strip temp UI flags before sending
-  const cleanChannels = typeChannels.map(ch => {
-    const clean = { ...ch };
-    delete clean._rangesOpen;
-    delete clean.id;
-    delete clean.fixture_type_id;
-    // Ensure empty ranges arrays become null
-    if (clean.ranges && clean.ranges.length === 0) clean.ranges = null;
-    return clean;
+  // Save current mode's channels
+  saveModeChannels();
+
+  // Build modes array
+  const modes = typeModes.map(m => {
+    const channels = (m.channels || []).map((ch, i) => {
+      const clean = { ...ch, channel_number: i + 1 };
+      delete clean._rangesOpen;
+      delete clean.id;
+      delete clean.fixture_type_id;
+      delete clean.mode_id;
+      if (clean.ranges && clean.ranges.length === 0) clean.ranges = null;
+      return clean;
+    });
+    return { name: m.name || 'Default', short_name: m.short_name || '', channels };
   });
+
   const body = {
     name: document.getElementById('tName').value.trim(),
     manufacturer: document.getElementById('tManufacturer').value.trim(),
     category: document.getElementById('tCategory').value,
-    channels: cleanChannels,
+    modes,
   };
   if (!body.name) return showError('typeError', 'Name is required');
-  if (body.channels.length === 0) return showError('typeError', 'Add at least one channel');
+  if (modes.every(m => m.channels.length === 0)) return showError('typeError', 'Add at least one channel to at least one mode');
 
   const url = editId ? `/api/fixture-types/${editId}` : '/api/fixture-types';
   const method = editId ? 'PUT' : 'POST';
@@ -3940,6 +4416,8 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
   typeChannels.forEach((ch, i) => { ch.channel_number = i + 1; ch.default_value = i + 1; });
   renderChannelsEditor();
   updateDuplicateHint();
+  saveModeChannels();
+  renderModeTabs();
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('typeError').textContent = '';
 });
@@ -4179,6 +4657,7 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     if (btn.dataset.cfgtab === 'database') loadDatabaseConfig();
     if (btn.dataset.cfgtab === 'network') loadNetworkConfig();
     if (btn.dataset.cfgtab === 'app-settings') loadAppSettings();
+    if (btn.dataset.cfgtab === 'fixture-library') loadTypes();
     if (btn.dataset.cfgtab === 'about') loadAboutInfo();
   });
 });
@@ -7442,7 +7921,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       // Show preview of contents
       const counts = [];
       const sections = ['fixture_types', 'fixtures', 'groups', 'effects', 'mover_presets', 'scenes'];
-      const labels = { fixture_types: 'Fixture Types', fixtures: 'Fixtures', groups: 'Groups', effects: 'Effects', mover_presets: 'Mover Presets', scenes: 'Scenes' };
+      const labels = { fixture_types: 'Fixture Library', fixtures: 'Fixtures', groups: 'Groups', effects: 'Effects', mover_presets: 'Mover Presets', scenes: 'Scenes' };
       for (const s of sections) {
         const cb = preview.querySelector(`.import-cb[value="${s}"]`);
         if (data[s] && data[s].length > 0) {
@@ -7488,7 +7967,7 @@ document.getElementById('btnImport').addEventListener('click', async () => {
     if (!resp.ok) throw new Error(result.error || 'Import failed');
 
     const lines = [];
-    if (result.fixture_types) lines.push(`${result.fixture_types} fixture types`);
+    if (result.fixture_types) lines.push(`${result.fixture_types} fixture library entries`);
     if (result.fixtures) lines.push(`${result.fixtures} fixtures`);
     if (result.groups) lines.push(`${result.groups} groups`);
     if (result.effects) lines.push(`${result.effects} effects`);

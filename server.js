@@ -46,6 +46,7 @@ const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
 const audioAnalyzer = require('./audio-analyzer');
 const os2l = require('./os2l');
+const fixtureLibrary = require('./fixture-library');
 const { WebUSB } = require('usb');
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -374,14 +375,80 @@ function handleOs2lSubscribed(data) {
 // ─── Express Web Server ─────────────────────────────────────────────────────
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '200mb' }));
 app.use('/lib', express.static(path.join(__dirname, 'node_modules/waveform-data/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Fixture Library Import API ──────────────────────────────────────────────
+
+// Preview an OFL fixture library file (returns summary without importing)
+app.post('/api/fixture-library/preview', (req, res) => {
+  try {
+    const summary = fixtureLibrary.summarizeOflLibrary(req.body);
+    res.json(summary);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Import fixtures from OFL format into the fixture library
+app.post('/api/fixture-library/import', (req, res) => {
+  try {
+    const { data, selectedFixtures } = req.body;
+    const parsed = fixtureLibrary.parseOflLibrary(data);
+    const results = { imported: 0, updated: 0, skipped: 0, errors: [...parsed.errors] };
+
+    // If selectedFixtures specified, filter to only those indices
+    let toImport = parsed.fixtures;
+    if (selectedFixtures && Array.isArray(selectedFixtures)) {
+      const selectedSet = new Set(selectedFixtures);
+      toImport = parsed.fixtures.filter((_, i) => selectedSet.has(i));
+    }
+
+    for (const ft of toImport) {
+      try {
+        // Check for existing fixture type with same name + manufacturer
+        const existing = db.getFixtureTypes().find(
+          t => t.name === ft.name && t.manufacturer === ft.manufacturer
+        );
+        if (existing) {
+          db.updateFixtureType(existing.id, ft);
+          results.updated++;
+        } else {
+          db.createFixtureType(ft);
+          results.imported++;
+        }
+      } catch (e) {
+        results.errors.push(`"${ft.name}": ${e.message}`);
+      }
+    }
+
+    results.total = results.imported + results.updated;
+    res.json(results);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
 // ─── Fixture Type API ───────────────────────────────────────────────────────
 
 app.get('/api/fixture-types', (req, res) => {
   res.json(db.getFixtureTypes());
+});
+
+// Lightweight summaries for dropdowns (no channels data)
+app.get('/api/fixture-types/summaries', (req, res) => {
+  res.json(db.getFixtureTypeSummaries());
+});
+
+// Paginated search for fixture library tab
+app.get('/api/fixture-types/search', (req, res) => {
+  const search = req.query.q || '';
+  const category = req.query.category || '';
+  const manufacturer = req.query.manufacturer || '';
+  const limit = Math.min(Math.max(+req.query.limit || 50, 1), 200);
+  const offset = Math.max(+req.query.offset || 0, 0);
+  res.json(db.searchFixtureTypes({ search, category, manufacturer, limit, offset }));
 });
 
 app.get('/api/fixture-types/:id', (req, res) => {
@@ -588,12 +655,14 @@ app.get('/api/export', (req, res) => {
   // Export fixture types, fixtures, groups, effects, mover presets, and scenes
   const fixtureTypes = db.getFixtureTypes();
   const fixtures = db.getFixtures().map(f => {
-    // Include full fixture info with type reference by name+manufacturer
+    // Include full fixture info with type reference by name+manufacturer+mode
     const ft = fixtureTypes.find(t => t.id === f.fixture_type_id);
+    const mode = ft ? (ft.modes || []).find(m => m.id === f.mode_id) : null;
     return {
       name: f.name,
       fixture_type_name: ft ? ft.name : null,
       fixture_type_manufacturer: ft ? ft.manufacturer : null,
+      mode_name: mode ? mode.name : null,
       universe: f.universe,
       address: f.address,
       output_type: f.output_type,
@@ -671,16 +740,20 @@ app.get('/api/export', (req, res) => {
       name: t.name,
       manufacturer: t.manufacturer,
       category: t.category,
-      channels: t.channels.map(ch => ({
-        channel_number: ch.channel_number,
-        name: ch.name,
-        type: ch.type,
-        default_value: ch.default_value,
-        min_value: ch.min_value,
-        max_value: ch.max_value,
-        ranges: ch.ranges,
-        cell: ch.cell,
-        invert: ch.invert,
+      modes: (t.modes || []).map(m => ({
+        name: m.name,
+        short_name: m.short_name,
+        channels: (m.channels || []).map(ch => ({
+          channel_number: ch.channel_number,
+          name: ch.name,
+          type: ch.type,
+          default_value: ch.default_value,
+          min_value: ch.min_value,
+          max_value: ch.max_value,
+          ranges: ch.ranges,
+          cell: ch.cell,
+          invert: ch.invert,
+        })),
       })),
     })),
     fixtures,
@@ -724,11 +797,17 @@ app.post('/api/import', (req, res) => {
         try {
           const ft = db.getFixtureTypes().find(t => t.name === f.fixture_type_name && (!f.fixture_type_manufacturer || t.manufacturer === f.fixture_type_manufacturer));
           if (!ft) { results.errors.push(`Fixture "${f.name}": type "${f.fixture_type_name}" not found`); continue; }
+          // Resolve mode by name, fall back to first mode
+          let modeId = null;
+          if (ft.modes && ft.modes.length > 0) {
+            const mode = f.mode_name ? ft.modes.find(m => m.name === f.mode_name) : null;
+            modeId = mode ? mode.id : ft.modes[0].id;
+          }
           const existing = db.getFixtures().find(x => x.name === f.name);
           if (existing) {
-            db.updateFixture(existing.id, { ...f, fixture_type_id: ft.id });
+            db.updateFixture(existing.id, { ...f, fixture_type_id: ft.id, mode_id: modeId });
           } else {
-            db.createFixture({ ...f, fixture_type_id: ft.id });
+            db.createFixture({ ...f, fixture_type_id: ft.id, mode_id: modeId });
           }
           results.fixtures++;
         } catch (e) { results.errors.push(`Fixture "${f.name}": ${e.message}`); }

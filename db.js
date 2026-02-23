@@ -49,9 +49,19 @@ function init() {
       updated_at    TEXT    DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS fixture_type_modes (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
+      name            TEXT    NOT NULL DEFAULT 'Default',
+      short_name      TEXT    DEFAULT '',
+      channel_count   INTEGER NOT NULL DEFAULT 1,
+      sort_order      INTEGER DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS fixture_type_channels (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
+      mode_id         INTEGER REFERENCES fixture_type_modes(id) ON DELETE CASCADE,
       channel_number  INTEGER NOT NULL,
       name            TEXT    NOT NULL,
       type            TEXT    NOT NULL DEFAULT 'dimmer',
@@ -59,7 +69,7 @@ function init() {
       min_value       INTEGER DEFAULT 0,
       max_value       INTEGER DEFAULT 255,
       ranges          TEXT    DEFAULT NULL,
-      UNIQUE(fixture_type_id, channel_number)
+      UNIQUE(mode_id, channel_number)
     );
 
     CREATE TABLE IF NOT EXISTS fixtures (
@@ -364,6 +374,10 @@ function init() {
     db.exec("ALTER TABLE effects ADD COLUMN fixture_target TEXT DEFAULT 'all'");
     console.log('[DB] Migrated effects: added fixture_target column');
   }
+
+  // Migrate: fixture_type_modes — create default modes for existing fixture types
+  // and link channels and fixtures to their modes
+  migrateToModes();
 
   // Seed subscriptions if empty
   const subCount = db.prepare('SELECT COUNT(*) as c FROM subscriptions').get().c;
@@ -766,113 +780,224 @@ function getAllConfig() {
   return obj;
 }
 
+// ─── Migrate to Modes ───────────────────────────────────────────────────────
+
+function migrateToModes() {
+  // Check if mode_id column exists on fixture_type_channels
+  const cols = db.prepare("PRAGMA table_info(fixture_type_channels)").all();
+  const hasModeId = cols.some(c => c.name === 'mode_id');
+
+  if (hasModeId) {
+    // Already migrated — check if UNIQUE constraint needs fixing
+    // (old migrations added mode_id but kept UNIQUE(fixture_type_id, channel_number))
+    // We detect this by checking the SQL for the table
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='fixture_type_channels'").get();
+    if (tableInfo && tableInfo.sql && tableInfo.sql.includes('UNIQUE(fixture_type_id, channel_number)')) {
+      console.log('[DB] Fixing UNIQUE constraint on fixture_type_channels (mode_id, channel_number)...');
+      _rebuildChannelsTableConstraint();
+    }
+
+    // Also ensure fixtures have mode_id
+    try { db.prepare("SELECT mode_id FROM fixtures LIMIT 1").get(); } catch (e) {
+      db.exec("ALTER TABLE fixtures ADD COLUMN mode_id INTEGER");
+      console.log('[DB] Migrated fixtures: added mode_id column');
+    }
+    // Backfill any fixtures missing mode_id (shouldn't happen, but safety net)
+    const needFix = db.prepare("SELECT f.id, f.fixture_type_id FROM fixtures f WHERE f.mode_id IS NULL").all();
+    if (needFix.length > 0) {
+      const upd = db.prepare("UPDATE fixtures SET mode_id = ? WHERE id = ?");
+      for (const f of needFix) {
+        const mode = db.prepare("SELECT id FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order LIMIT 1").get(f.fixture_type_id);
+        if (mode) upd.run(mode.id, f.id);
+      }
+      console.log(`[DB] Backfilled mode_id for ${needFix.length} fixture(s)`);
+    }
+    return;
+  }
+
+  console.log('[DB] Migrating to modes-based fixture architecture...');
+
+  // 1. Add mode_id column to fixture_type_channels
+  db.exec("ALTER TABLE fixture_type_channels ADD COLUMN mode_id INTEGER");
+
+  // 2. Add mode_id column to fixtures  
+  try { db.prepare("SELECT mode_id FROM fixtures LIMIT 1").get(); } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN mode_id INTEGER");
+  }
+
+  // 3. For each existing fixture type, create a "Default" mode and re-link
+  const types = db.prepare("SELECT id, name, channel_count FROM fixture_types").all();
+  const insertMode = db.prepare(
+    "INSERT INTO fixture_type_modes (fixture_type_id, name, short_name, channel_count, sort_order) VALUES (?, ?, ?, ?, 0)"
+  );
+  const linkChannels = db.prepare(
+    "UPDATE fixture_type_channels SET mode_id = ? WHERE fixture_type_id = ? AND mode_id IS NULL"
+  );
+  const linkFixtures = db.prepare(
+    "UPDATE fixtures SET mode_id = ? WHERE fixture_type_id = ? AND mode_id IS NULL"
+  );
+
+  const migrate = db.transaction(() => {
+    for (const t of types) {
+      const modeResult = insertMode.run(t.id, 'Default', '', t.channel_count);
+      const modeId = modeResult.lastInsertRowid;
+      linkChannels.run(modeId, t.id);
+      linkFixtures.run(modeId, t.id);
+    }
+  });
+  migrate();
+
+  // 4. Rebuild table to change UNIQUE constraint from (fixture_type_id, channel_number) to (mode_id, channel_number)
+  _rebuildChannelsTableConstraint();
+
+  console.log(`[DB] Created default modes for ${types.length} fixture type(s) and linked channels/fixtures`);
+}
+
+/**
+ * Rebuild fixture_type_channels table to use UNIQUE(mode_id, channel_number) instead of (fixture_type_id, channel_number).
+ * SQLite doesn't support ALTER TABLE to drop/change constraints, so we recreate the table.
+ */
+function _rebuildChannelsTableConstraint() {
+  // Check which columns exist (cell, invert, ranges may or may not be present)
+  const cols = db.prepare("PRAGMA table_info(fixture_type_channels)").all().map(c => c.name);
+
+  db.exec(`
+    CREATE TABLE fixture_type_channels_new (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
+      mode_id         INTEGER REFERENCES fixture_type_modes(id) ON DELETE CASCADE,
+      channel_number  INTEGER NOT NULL,
+      name            TEXT    NOT NULL,
+      type            TEXT    NOT NULL DEFAULT 'dimmer',
+      default_value   INTEGER DEFAULT 0,
+      min_value       INTEGER DEFAULT 0,
+      max_value       INTEGER DEFAULT 255,
+      ranges          TEXT    DEFAULT NULL,
+      cell            INTEGER DEFAULT NULL,
+      invert          INTEGER DEFAULT 0,
+      UNIQUE(mode_id, channel_number)
+    )
+  `);
+
+  // Copy data — use only columns that exist in source
+  const copyColumns = ['id', 'fixture_type_id', 'mode_id', 'channel_number', 'name', 'type', 'default_value', 'min_value', 'max_value', 'ranges', 'cell', 'invert']
+    .filter(c => cols.includes(c));
+  const colList = copyColumns.join(', ');
+  db.exec(`INSERT INTO fixture_type_channels_new (${colList}) SELECT ${colList} FROM fixture_type_channels`);
+  db.exec('DROP TABLE fixture_type_channels');
+  db.exec('ALTER TABLE fixture_type_channels_new RENAME TO fixture_type_channels');
+  console.log('[DB] Rebuilt fixture_type_channels with UNIQUE(mode_id, channel_number)');
+}
+
 // ─── Seed Default Fixture Types ─────────────────────────────────────────────
 
 function seedDefaults() {
   const insertType = db.prepare(
     `INSERT INTO fixture_types (name, manufacturer, category, channel_count) VALUES (?, ?, ?, ?)`
   );
-  const insertCh = db.prepare(
-    `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, ranges)
-     VALUES (?, ?, ?, ?, ?, ?)`
+  const insertMode = db.prepare(
+    `INSERT INTO fixture_type_modes (fixture_type_id, name, short_name, channel_count, sort_order) VALUES (?, ?, ?, ?, 0)`
   );
+  const insertCh = db.prepare(
+    `INSERT INTO fixture_type_channels (fixture_type_id, mode_id, channel_number, name, type, default_value, ranges)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  /** Helper: create type + default mode, returns { typeId, modeId } */
+  const addType = (name, mfr, cat, chCount) => {
+    const r = insertType.run(name, mfr, cat, chCount);
+    const typeId = r.lastInsertRowid;
+    const m = insertMode.run(typeId, 'Default', '', chCount);
+    return { typeId, modeId: m.lastInsertRowid };
+  };
   /** Helper: insert channel without ranges */
-  const ch = (typeId, num, name, type, def) => insertCh.run(typeId, num, name, type, def || 0, null);
+  const ch = (typeId, modeId, num, name, type, def) => insertCh.run(typeId, modeId, num, name, type, def || 0, null);
   /** Helper: insert channel with ranges */
-  const chR = (typeId, num, name, type, def, ranges) => insertCh.run(typeId, num, name, type, def || 0, JSON.stringify(ranges));
+  const chR = (typeId, modeId, num, name, type, def, ranges) => insertCh.run(typeId, modeId, num, name, type, def || 0, JSON.stringify(ranges));
 
   const seed = db.transaction(() => {
     // 1 — Generic RGB Par (3ch)
-    let r = insertType.run('Generic RGB Par', 'Generic', 'par', 3);
-    let id = r.lastInsertRowid;
-    ch(id, 1, 'Red', 'red', 0);
-    ch(id, 2, 'Green', 'green', 0);
-    ch(id, 3, 'Blue', 'blue', 0);
+    let { typeId, modeId } = addType('Generic RGB Par', 'Generic', 'par', 3);
+    ch(typeId, modeId, 1, 'Red', 'red', 0);
+    ch(typeId, modeId, 2, 'Green', 'green', 0);
+    ch(typeId, modeId, 3, 'Blue', 'blue', 0);
 
     // 2 — Generic RGBW Par (4ch)
-    r = insertType.run('Generic RGBW Par', 'Generic', 'par', 4);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Red', 'red', 0);
-    ch(id, 2, 'Green', 'green', 0);
-    ch(id, 3, 'Blue', 'blue', 0);
-    ch(id, 4, 'White', 'white', 0);
+    ({ typeId, modeId } = addType('Generic RGBW Par', 'Generic', 'par', 4));
+    ch(typeId, modeId, 1, 'Red', 'red', 0);
+    ch(typeId, modeId, 2, 'Green', 'green', 0);
+    ch(typeId, modeId, 3, 'Blue', 'blue', 0);
+    ch(typeId, modeId, 4, 'White', 'white', 0);
 
     // 3 — Generic Dimmer (1ch)
-    r = insertType.run('Generic Dimmer', 'Generic', 'dimmer', 1);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Dimmer', 'dimmer', 0);
+    ({ typeId, modeId } = addType('Generic Dimmer', 'Generic', 'dimmer', 1));
+    ch(typeId, modeId, 1, 'Dimmer', 'dimmer', 0);
 
     // 4 — RGB Par + Dimmer (4ch)
-    r = insertType.run('RGB Par + Dimmer', 'Generic', 'par', 4);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Dimmer', 'dimmer', 0);
-    ch(id, 2, 'Red', 'red', 0);
-    ch(id, 3, 'Green', 'green', 0);
-    ch(id, 4, 'Blue', 'blue', 0);
+    ({ typeId, modeId } = addType('RGB Par + Dimmer', 'Generic', 'par', 4));
+    ch(typeId, modeId, 1, 'Dimmer', 'dimmer', 0);
+    ch(typeId, modeId, 2, 'Red', 'red', 0);
+    ch(typeId, modeId, 3, 'Green', 'green', 0);
+    ch(typeId, modeId, 4, 'Blue', 'blue', 0);
 
     // 5 — Generic Moving Head (16ch)
-    r = insertType.run('Generic Moving Head', 'Generic', 'moving_head', 16);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Pan', 'pan', 128);
-    ch(id, 2, 'Pan Fine', 'pan_fine', 0);
-    ch(id, 3, 'Tilt', 'tilt', 128);
-    ch(id, 4, 'Tilt Fine', 'tilt_fine', 0);
-    ch(id, 5, 'Speed', 'speed', 0);
-    ch(id, 6, 'Dimmer', 'dimmer', 0);
-    ch(id, 7, 'Strobe', 'strobe', 0);
-    ch(id, 8, 'Red', 'red', 0);
-    ch(id, 9, 'Green', 'green', 0);
-    ch(id, 10, 'Blue', 'blue', 0);
-    ch(id, 11, 'White', 'white', 0);
-    ch(id, 12, 'Color Wheel', 'color_wheel', 0);
-    ch(id, 13, 'Gobo', 'gobo', 0);
-    ch(id, 14, 'Gobo Rotation', 'gobo_rotation', 0);
-    ch(id, 15, 'Prism', 'prism', 0);
-    ch(id, 16, 'Focus', 'focus', 128);
+    ({ typeId, modeId } = addType('Generic Moving Head', 'Generic', 'moving_head', 16));
+    ch(typeId, modeId, 1, 'Pan', 'pan', 128);
+    ch(typeId, modeId, 2, 'Pan Fine', 'pan_fine', 0);
+    ch(typeId, modeId, 3, 'Tilt', 'tilt', 128);
+    ch(typeId, modeId, 4, 'Tilt Fine', 'tilt_fine', 0);
+    ch(typeId, modeId, 5, 'Speed', 'speed', 0);
+    ch(typeId, modeId, 6, 'Dimmer', 'dimmer', 0);
+    ch(typeId, modeId, 7, 'Strobe', 'strobe', 0);
+    ch(typeId, modeId, 8, 'Red', 'red', 0);
+    ch(typeId, modeId, 9, 'Green', 'green', 0);
+    ch(typeId, modeId, 10, 'Blue', 'blue', 0);
+    ch(typeId, modeId, 11, 'White', 'white', 0);
+    ch(typeId, modeId, 12, 'Color Wheel', 'color_wheel', 0);
+    ch(typeId, modeId, 13, 'Gobo', 'gobo', 0);
+    ch(typeId, modeId, 14, 'Gobo Rotation', 'gobo_rotation', 0);
+    ch(typeId, modeId, 15, 'Prism', 'prism', 0);
+    ch(typeId, modeId, 16, 'Focus', 'focus', 128);
 
     // 6 — Strobe (2ch)
-    r = insertType.run('Generic Strobe', 'Generic', 'strobe', 2);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Dimmer', 'dimmer', 0);
-    ch(id, 2, 'Strobe Speed', 'strobe', 0);
+    ({ typeId, modeId } = addType('Generic Strobe', 'Generic', 'strobe', 2));
+    ch(typeId, modeId, 1, 'Dimmer', 'dimmer', 0);
+    ch(typeId, modeId, 2, 'Strobe Speed', 'strobe', 0);
 
     // 7 — Fog Machine (1ch)
-    r = insertType.run('Generic Fog Machine', 'Generic', 'fog', 1);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Output', 'dimmer', 0);
+    ({ typeId, modeId } = addType('Generic Fog Machine', 'Generic', 'fog', 1));
+    ch(typeId, modeId, 1, 'Output', 'dimmer', 0);
 
     // 8 — 14ch Moving Head with ranges (matches common RGBW moving head spec)
-    r = insertType.run('Moving Head 14ch', 'Generic', 'moving_head', 14);
-    id = r.lastInsertRowid;
-    ch(id, 1, 'Pan', 'pan', 128);
-    ch(id, 2, 'Pan Fine', 'pan_fine', 0);
-    ch(id, 3, 'Tilt', 'tilt', 128);
-    ch(id, 4, 'Tilt Fine', 'tilt_fine', 0);
-    ch(id, 5, 'Pan/Tilt Speed', 'speed', 0);
-    chR(id, 6, 'Dimmer / Strobe', 'dimmer', 0, [
+    ({ typeId, modeId } = addType('Moving Head 14ch', 'Generic', 'moving_head', 14));
+    ch(typeId, modeId, 1, 'Pan', 'pan', 128);
+    ch(typeId, modeId, 2, 'Pan Fine', 'pan_fine', 0);
+    ch(typeId, modeId, 3, 'Tilt', 'tilt', 128);
+    ch(typeId, modeId, 4, 'Tilt Fine', 'tilt_fine', 0);
+    ch(typeId, modeId, 5, 'Pan/Tilt Speed', 'speed', 0);
+    chR(typeId, modeId, 6, 'Dimmer / Strobe', 'dimmer', 0, [
       { min: 0, max: 7, label: 'No function', type: 'other' },
       { min: 8, max: 134, label: 'Dimmer', type: 'dimmer' },
       { min: 135, max: 239, label: 'Strobe 0-40Hz', type: 'strobe' },
       { min: 240, max: 255, label: 'Open', type: 'other' }
     ]);
-    ch(id, 7, 'Red', 'red', 0);
-    ch(id, 8, 'Green', 'green', 0);
-    ch(id, 9, 'Blue', 'blue', 0);
-    ch(id, 10, 'White', 'white', 0);
-    chR(id, 11, 'Color Mix/Effect', 'color_wheel', 0, [
+    ch(typeId, modeId, 7, 'Red', 'red', 0);
+    ch(typeId, modeId, 8, 'Green', 'green', 0);
+    ch(typeId, modeId, 9, 'Blue', 'blue', 0);
+    ch(typeId, modeId, 10, 'White', 'white', 0);
+    chR(typeId, modeId, 11, 'Color Mix/Effect', 'color_wheel', 0, [
       { min: 0, max: 223, label: 'Color Mixed', type: 'color_wheel' },
       { min: 224, max: 240, label: 'Gradient slow→fast', type: 'macro' },
       { min: 241, max: 255, label: 'Color jump slow→fast', type: 'macro' }
     ]);
-    ch(id, 12, 'Color Speed', 'speed', 0);
-    chR(id, 13, 'Movement/Effect', 'macro', 0, [
+    ch(typeId, modeId, 12, 'Color Speed', 'speed', 0);
+    chR(typeId, modeId, 13, 'Movement/Effect', 'macro', 0, [
       { min: 0, max: 3, label: 'DMX control', type: 'other' },
       { min: 4, max: 102, label: 'Auto 1', type: 'macro' },
       { min: 103, max: 152, label: 'Auto 2', type: 'macro' },
       { min: 153, max: 203, label: 'Auto 3', type: 'macro' },
       { min: 204, max: 255, label: 'Sound', type: 'macro' }
     ]);
-    chR(id, 14, 'Reset', 'other', 0, [
+    chR(typeId, modeId, 14, 'Reset', 'other', 0, [
       { min: 0, max: 254, label: 'No function', type: 'other' },
       { min: 255, max: 255, label: 'Factory Reset', type: 'other' }
     ]);
@@ -883,73 +1008,207 @@ function seedDefaults() {
 
 // ─── Fixture Types CRUD ─────────────────────────────────────────────────────
 
-function getFixtureTypes() {
-  const types = db.prepare('SELECT * FROM fixture_types ORDER BY category, name').all();
-  for (const t of types) {
-    t.channels = db.prepare(
-      'SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number'
-    ).all(t.id);
-    for (const ch of t.channels) {
+/** Attach modes (with channels) to a fixture type object */
+function _attachModes(t) {
+  t.modes = db.prepare(
+    'SELECT * FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order, id'
+  ).all(t.id);
+  for (const m of t.modes) {
+    m.channels = db.prepare(
+      'SELECT * FROM fixture_type_channels WHERE mode_id = ? ORDER BY channel_number'
+    ).all(m.id);
+    for (const ch of m.channels) {
       ch.ranges = ch.ranges ? JSON.parse(ch.ranges) : null;
     }
   }
+  // Legacy compat: expose first mode's channels as t.channels
+  t.channels = t.modes.length > 0 ? t.modes[0].channels : [];
+  return t;
+}
+
+function getFixtureTypes() {
+  const types = db.prepare('SELECT * FROM fixture_types ORDER BY category, name').all();
+  for (const t of types) _attachModes(t);
   return types;
+}
+
+/**
+ * Lightweight list of fixture types for dropdowns (no channels or mode details).
+ * Returns: [{ id, name, manufacturer, category, channel_count, modes: [{ id, name, short_name, channel_count }] }]
+ */
+function getFixtureTypeSummaries() {
+  const types = db.prepare('SELECT id, name, manufacturer, category, channel_count FROM fixture_types ORDER BY category, name').all();
+  const modeStmt = db.prepare('SELECT id, name, short_name, channel_count FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order, id');
+  for (const t of types) {
+    t.modes = modeStmt.all(t.id);
+    // Legacy compat
+    t.channels = [];
+  }
+  return types;
+}
+
+/**
+ * Server-side paginated search for fixture library.
+ * @param {Object} opts
+ * @param {string} [opts.search] - search name/manufacturer
+ * @param {string} [opts.category] - filter by category
+ * @param {string} [opts.manufacturer] - filter by manufacturer
+ * @param {number} [opts.limit=50] - page size
+ * @param {number} [opts.offset=0] - offset
+ * @returns {{ types: Array, total: number, categories: string[], manufacturers: string[] }}
+ */
+function searchFixtureTypes({ search, category, manufacturer, limit = 50, offset = 0 } = {}) {
+  const where = [];
+  const params = [];
+  if (search) {
+    where.push("(ft.name LIKE ? COLLATE NOCASE OR ft.manufacturer LIKE ? COLLATE NOCASE)");
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  if (category) {
+    where.push("ft.category = ?");
+    params.push(category);
+  }
+  if (manufacturer) {
+    where.push("ft.manufacturer = ?");
+    params.push(manufacturer);
+  }
+  const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
+
+  // Total count
+  const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM fixture_types ft ${whereClause}`).get(...params);
+  const total = countRow.cnt;
+
+  // Paginated results (lightweight — no channels)
+  const types = db.prepare(
+    `SELECT ft.* FROM fixture_types ft ${whereClause} ORDER BY ft.category, ft.name LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset);
+
+  // Attach modes summary (no channels inside modes — lightweight)
+  const modeStmt = db.prepare(
+    'SELECT id, name, short_name, channel_count FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order, id'
+  );
+  for (const t of types) {
+    t.modes = modeStmt.all(t.id);
+  }
+
+  // Get all categories and manufacturers for filter dropdowns (only on first page to avoid waste)
+  let categories = [];
+  let manufacturers = [];
+  if (offset === 0) {
+    categories = db.prepare("SELECT DISTINCT category FROM fixture_types ORDER BY category").all().map(r => r.category);
+    manufacturers = db.prepare("SELECT DISTINCT manufacturer FROM fixture_types WHERE manufacturer != '' ORDER BY manufacturer").all().map(r => r.manufacturer);
+  }
+
+  return { types, total, categories, manufacturers };
 }
 
 function getFixtureType(id) {
   const t = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(id);
   if (!t) return null;
-  t.channels = db.prepare(
-    'SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number'
-  ).all(t.id);
-  for (const ch of t.channels) {
-    ch.ranges = ch.ranges ? JSON.parse(ch.ranges) : null;
-  }
-  return t;
+  return _attachModes(t);
 }
 
-function createFixtureType({ name, manufacturer, category, channels }) {
-  const channel_count = channels ? channels.length : 1;
+function createFixtureType({ name, manufacturer, category, channels, modes }) {
+  // Support both modes-based and legacy channels-only creation
+  const modesData = modes && modes.length > 0
+    ? modes
+    : [{ name: 'Default', short_name: '', channels: channels || [] }];
+
+  const channel_count = modesData[0].channels ? modesData[0].channels.length : 0;
   const r = db.prepare(
     `INSERT INTO fixture_types (name, manufacturer, category, channel_count) VALUES (?, ?, ?, ?)`
   ).run(name, manufacturer || '', category || 'other', channel_count);
+  const typeId = r.lastInsertRowid;
 
-  const id = r.lastInsertRowid;
-  if (channels && channels.length) {
-    const ins = db.prepare(
-      `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell, invert)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    const insertAll = db.transaction(() => {
-      for (const ch of channels) {
-        const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null, ch.invert ? 1 : 0);
+  const insModeStmt = db.prepare(
+    `INSERT INTO fixture_type_modes (fixture_type_id, name, short_name, channel_count, sort_order) VALUES (?, ?, ?, ?, ?)`
+  );
+  const insChStmt = db.prepare(
+    `INSERT INTO fixture_type_channels (fixture_type_id, mode_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell, invert)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  const insertAll = db.transaction(() => {
+    for (let mi = 0; mi < modesData.length; mi++) {
+      const mode = modesData[mi];
+      const mChCount = mode.channels ? mode.channels.length : 0;
+      const mResult = insModeStmt.run(typeId, mode.name || 'Default', mode.short_name || '', mChCount, mi);
+      const modeId = mResult.lastInsertRowid;
+
+      if (mode.channels && mode.channels.length) {
+        for (const ch of mode.channels) {
+          const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
+          insChStmt.run(typeId, modeId, ch.channel_number, ch.name, ch.type || 'dimmer',
+            ch.default_value || 0, ch.min_value || 0, ch.max_value || 255,
+            rangesJson, ch.cell || null, ch.invert ? 1 : 0);
+        }
       }
-    });
-    insertAll();
-  }
-  return getFixtureType(id);
+    }
+  });
+  insertAll();
+
+  return getFixtureType(typeId);
 }
 
-function updateFixtureType(id, { name, manufacturer, category, channels }) {
+function updateFixtureType(id, { name, manufacturer, category, channels, modes }) {
   const existing = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(id);
   if (!existing) return null;
 
+  // Support both modes-based and legacy channels-only updates
+  const modesData = modes && modes.length > 0
+    ? modes
+    : channels
+      ? [{ name: 'Default', short_name: '', channels }]
+      : null;
+
   const update = db.transaction(() => {
-    const channel_count = channels ? channels.length : existing.channel_count;
+    const channel_count = modesData
+      ? (modesData[0].channels ? modesData[0].channels.length : 0)
+      : existing.channel_count;
     db.prepare(
       `UPDATE fixture_types SET name=?, manufacturer=?, category=?, channel_count=?, updated_at=datetime('now') WHERE id=?`
     ).run(name || existing.name, manufacturer ?? existing.manufacturer, category || existing.category, channel_count, id);
 
-    if (channels) {
+    if (modesData) {
+      // Get existing mode IDs so we can update fixtures that referenced them
+      const oldModes = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ?').all(id);
+
+      // Delete old modes and channels
       db.prepare('DELETE FROM fixture_type_channels WHERE fixture_type_id = ?').run(id);
-      const ins = db.prepare(
-        `INSERT INTO fixture_type_channels (fixture_type_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell, invert)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      db.prepare('DELETE FROM fixture_type_modes WHERE fixture_type_id = ?').run(id);
+
+      const insModeStmt = db.prepare(
+        `INSERT INTO fixture_type_modes (fixture_type_id, name, short_name, channel_count, sort_order) VALUES (?, ?, ?, ?, ?)`
       );
-      for (const ch of channels) {
-        const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
-        ins.run(id, ch.channel_number, ch.name, ch.type || 'dimmer', ch.default_value || 0, ch.min_value || 0, ch.max_value || 255, rangesJson, ch.cell || null, ch.invert ? 1 : 0);
+      const insChStmt = db.prepare(
+        `INSERT INTO fixture_type_channels (fixture_type_id, mode_id, channel_number, name, type, default_value, min_value, max_value, ranges, cell, invert)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+
+      const newModeIds = [];
+      for (let mi = 0; mi < modesData.length; mi++) {
+        const mode = modesData[mi];
+        const mChCount = mode.channels ? mode.channels.length : 0;
+        const mResult = insModeStmt.run(id, mode.name || 'Default', mode.short_name || '', mChCount, mi);
+        const modeId = mResult.lastInsertRowid;
+        newModeIds.push(modeId);
+
+        if (mode.channels && mode.channels.length) {
+          for (const ch of mode.channels) {
+            const rangesJson = ch.ranges ? (typeof ch.ranges === 'string' ? ch.ranges : JSON.stringify(ch.ranges)) : null;
+            insChStmt.run(id, modeId, ch.channel_number, ch.name, ch.type || 'dimmer',
+              ch.default_value || 0, ch.min_value || 0, ch.max_value || 255,
+              rangesJson, ch.cell || null, ch.invert ? 1 : 0);
+          }
+        }
+      }
+
+      // Re-link fixtures: map old mode positions to new mode positions
+      if (oldModes.length > 0 && newModeIds.length > 0) {
+        for (let i = 0; i < oldModes.length; i++) {
+          const newModeId = newModeIds[Math.min(i, newModeIds.length - 1)];
+          db.prepare('UPDATE fixtures SET mode_id = ? WHERE mode_id = ?').run(newModeId, oldModes[i].id);
+        }
       }
     }
   });
@@ -970,51 +1229,78 @@ function deleteFixtureType(id) {
 // ─── Fixtures CRUD ──────────────────────────────────────────────────────────
 
 function getFixtures() {
-  return db.prepare(`
-    SELECT f.*, ft.name as type_name, ft.category, ft.channel_count
+  const fixtures = db.prepare(`
+    SELECT f.*, ft.name as type_name, ft.category,
+           ftm.name as mode_name, ftm.channel_count
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
+    LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
     ORDER BY f.universe, f.address
   `).all();
+
+  // Attach channels for each fixture (needed for card rendering)
+  const chByMode = db.prepare('SELECT * FROM fixture_type_channels WHERE mode_id = ? ORDER BY channel_number');
+  const chByType = db.prepare('SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number');
+  for (const f of fixtures) {
+    f.channels = f.mode_id ? chByMode.all(f.mode_id) : chByType.all(f.fixture_type_id);
+    for (const ch of f.channels) {
+      ch.ranges = ch.ranges ? JSON.parse(ch.ranges) : null;
+    }
+  }
+  return fixtures;
 }
 
 function getFixture(id) {
   const f = db.prepare(`
-    SELECT f.*, ft.name as type_name, ft.category, ft.channel_count
+    SELECT f.*, ft.name as type_name, ft.category,
+           ftm.name as mode_name, ftm.channel_count
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
+    LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
     WHERE f.id = ?
   `).get(id);
   if (!f) return null;
 
-  f.channels = db.prepare(
-    'SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number'
-  ).all(f.fixture_type_id);
+  // Get channels from the fixture's mode
+  f.channels = f.mode_id
+    ? db.prepare('SELECT * FROM fixture_type_channels WHERE mode_id = ? ORDER BY channel_number').all(f.mode_id)
+    : db.prepare('SELECT * FROM fixture_type_channels WHERE fixture_type_id = ? ORDER BY channel_number').all(f.fixture_type_id);
   return f;
 }
 
-function createFixture({ name, fixture_type_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt }) {
+function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt }) {
   // Validate type exists
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
   if (!type) return { error: 'Fixture type not found' };
 
+  // Resolve mode — use provided mode_id, or default to first mode
+  let resolvedModeId = mode_id;
+  if (!resolvedModeId) {
+    const firstMode = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order LIMIT 1').get(fixture_type_id);
+    if (firstMode) resolvedModeId = firstMode.id;
+  }
+
+  // Get channel count from the mode
+  const mode = resolvedModeId ? db.prepare('SELECT * FROM fixture_type_modes WHERE id = ?').get(resolvedModeId) : null;
+  const channelCount = mode ? mode.channel_count : type.channel_count;
+
   // Validate address range
   if (address < 1 || address > 512) return { error: 'Address must be 1-512' };
-  if (address + type.channel_count - 1 > 512) return { error: `Address too high for ${type.channel_count}-channel fixture` };
+  if (address + channelCount - 1 > 512) return { error: `Address too high for ${channelCount}-channel fixture` };
 
   // Check for overlapping addresses in same universe
-  const overlap = checkAddressOverlap(universe || 1, address, type.channel_count, null);
+  const overlap = checkAddressOverlap(universe || 1, address, channelCount, null);
   if (overlap) return { error: overlap };
 
   const otype = output_type || 'artnet';
   const r = db.prepare(
-    `INSERT INTO fixtures (name, fixture_type_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(name, fixture_type_id, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128);
+    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128);
 
   return getFixture(r.lastInsertRowid);
 }
 
-function updateFixture(id, { name, fixture_type_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt }) {
+function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -1022,19 +1308,31 @@ function updateFixture(id, { name, fixture_type_id, universe, address, output_ty
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(typeId);
   if (!type) return { error: 'Fixture type not found' };
 
+  // Resolve mode_id
+  let resolvedModeId = mode_id !== undefined ? mode_id : existing.mode_id;
+  // If type changed but mode_id wasn't specified, default to first mode of new type
+  if (fixture_type_id && fixture_type_id !== existing.fixture_type_id && mode_id === undefined) {
+    const firstMode = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order LIMIT 1').get(typeId);
+    resolvedModeId = firstMode ? firstMode.id : null;
+  }
+
+  // Get channel count from mode
+  const mode = resolvedModeId ? db.prepare('SELECT * FROM fixture_type_modes WHERE id = ?').get(resolvedModeId) : null;
+  const channelCount = mode ? mode.channel_count : type.channel_count;
+
   const addr = address ?? existing.address;
   const univ = universe ?? existing.universe;
   const otype = output_type || existing.output_type || 'artnet';
 
   if (addr < 1 || addr > 512) return { error: 'Address must be 1-512' };
-  if (addr + type.channel_count - 1 > 512) return { error: `Address too high for ${type.channel_count}-channel fixture` };
+  if (addr + channelCount - 1 > 512) return { error: `Address too high for ${channelCount}-channel fixture` };
 
-  const overlap = checkAddressOverlap(univ, addr, type.channel_count, id);
+  const overlap = checkAddressOverlap(univ, addr, channelCount, id);
   if (overlap) return { error: overlap };
 
   db.prepare(
-    `UPDATE fixtures SET name=?, fixture_type_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, updated_at=datetime('now') WHERE id=?`
-  ).run(name || existing.name, typeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, id);
+    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, updated_at=datetime('now') WHERE id=?`
+  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, id);
 
   return getFixture(id);
 }
@@ -1048,9 +1346,11 @@ function deleteFixture(id) {
 
 function checkAddressOverlap(universe, address, channelCount, excludeFixtureId) {
   const fixtures = db.prepare(
-    `SELECT f.id, f.name, f.address, ft.channel_count
+    `SELECT f.id, f.name, f.address,
+            COALESCE(ftm.channel_count, ft.channel_count) as channel_count
      FROM fixtures f
      JOIN fixture_types ft ON f.fixture_type_id = ft.id
+     LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
      WHERE f.universe = ? ${excludeFixtureId ? 'AND f.id != ?' : ''}`
   ).all(...[universe, ...(excludeFixtureId ? [excludeFixtureId] : [])]);
 
@@ -1071,9 +1371,13 @@ function checkAddressOverlap(universe, address, channelCount, excludeFixtureId) 
 
 function getUniverseMap(universe) {
   const fixtures = db.prepare(`
-    SELECT f.id, f.name, f.address, f.output_type, ft.channel_count, ft.name as type_name, ft.category
+    SELECT f.id, f.name, f.address, f.output_type,
+           COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
+           ft.name as type_name, ft.category,
+           ftm.name as mode_name
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
+    LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
     WHERE f.universe = ?
     ORDER BY f.address
   `).all(universe || 1);
@@ -1286,17 +1590,25 @@ function clearTracks() {
 function getFixtureChannelMap() {
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
-           f.home_pan, f.home_tilt,
-           ft.channel_count, ft.name as type_name, ft.category
+           f.home_pan, f.home_tilt, f.mode_id,
+           COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
+           ft.name as type_name, ft.category,
+           ftm.name as mode_name
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
+    LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
     ORDER BY f.universe, f.address
   `).all();
 
   return fixtures.map(f => {
-    const channels = db.prepare(
-      'SELECT channel_number, name, type, ranges, cell FROM fixture_type_channels WHERE fixture_type_id = (SELECT fixture_type_id FROM fixtures WHERE id = ?) ORDER BY channel_number'
-    ).all(f.id);
+    // Get channels from the mode (or fall back to fixture_type_id)
+    const channels = f.mode_id
+      ? db.prepare(
+          'SELECT channel_number, name, type, ranges, cell FROM fixture_type_channels WHERE mode_id = ? ORDER BY channel_number'
+        ).all(f.mode_id)
+      : db.prepare(
+          'SELECT channel_number, name, type, ranges, cell FROM fixture_type_channels WHERE fixture_type_id = (SELECT fixture_type_id FROM fixtures WHERE id = ?) ORDER BY channel_number'
+        ).all(f.id);
     const group_ids = db.prepare(
       'SELECT group_id FROM fixture_group_members WHERE fixture_id = ?'
     ).all(f.id).map(r => r.group_id);
@@ -2111,6 +2423,7 @@ function getTracksWithAnalysis() {
 module.exports = {
   init,
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
+  getFixtureTypeSummaries, searchFixtureTypes,
   createLedBarFixtureType,
   createMultiCellFixtureType,
   getFixtures, getFixture, createFixture, updateFixture, deleteFixture,

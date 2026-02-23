@@ -235,7 +235,7 @@ footer {
 .ch-badge.gobo, .ch-badge.gobo_rotation { background: #1a2a1a; color: #6fa; }
 .fixture-card-actions { display: flex; gap: 6px; margin-top: 10px; }
 
-/* ── Fixture Types List ────────────────────────────── */
+/* ── Fixture Library List ────────────────────────────── */
 .types-list { display: flex; flex-direction: column; gap: 8px; }
 .type-row {
   display: flex; align-items: center; gap: 16px;
