@@ -374,7 +374,9 @@ function handleOs2lSubscribed(data) {
 
 // ─── Express Web Server ─────────────────────────────────────────────────────
 
+const compression = require('compression');
 const app = express();
+app.use(compression());
 app.use(express.json({ limit: '200mb' }));
 app.use('/lib', express.static(path.join(__dirname, 'node_modules/waveform-data/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -635,15 +637,41 @@ app.delete('/api/mover-presets/:id', (req, res) => {
 
 // ─── Version / About API ────────────────────────────────────────────────────
 
-app.get('/api/version', (req, res) => {
+app.get('/api/version', async (req, res) => {
   const pkg = require('./package.json');
+  const [ffmpegVersion, ffprobeVersion] = await Promise.all([
+    audioAnalyzer.getFfmpegVersion(),
+    audioAnalyzer.getFfprobeVersion()
+  ]);
+
+  // Gather dependency licenses
+  const deps = Object.keys(pkg.dependencies || {});
+  const licenses = [];
+  for (const dep of deps) {
+    try {
+      const depPkg = require(dep + '/package.json');
+      licenses.push({
+        name: dep,
+        version: depPkg.version || '—',
+        license: depPkg.license || 'Unknown',
+        author: typeof depPkg.author === 'string' ? depPkg.author : (depPkg.author && depPkg.author.name ? depPkg.author.name : ''),
+        homepage: depPkg.homepage || depPkg.repository && (typeof depPkg.repository === 'string' ? depPkg.repository : depPkg.repository.url) || ''
+      });
+    } catch (_) {
+      licenses.push({ name: dep, version: '—', license: 'Unknown', author: '', homepage: '' });
+    }
+  }
+
   res.json({
     version: pkg.version,
     name: pkg.name,
     description: pkg.description,
     node: process.version,
     platform: process.platform,
-    arch: process.arch
+    arch: process.arch,
+    ffmpeg: ffmpegVersion || 'Not found',
+    ffprobe: ffprobeVersion || 'Not found',
+    licenses
   });
 });
 
@@ -1424,9 +1452,10 @@ app.get('/api/tracks/:id/analysis', (req, res) => {
   if (!analysis) return res.status(404).json({ error: 'No analysis found' });
   // Parse JSON fields
   analysis.waveform_peaks = JSON.parse(analysis.waveform_peaks || '[]');
-  analysis.energy_levels = JSON.parse(analysis.energy_levels || '[]');
-  analysis.beats = JSON.parse(analysis.beats || '[]');
   analysis.sections = JSON.parse(analysis.sections || '[]');
+  // Strip energy_levels and beats — only used server-side for generation, not by the waveform renderer
+  delete analysis.energy_levels;
+  delete analysis.beats;
   res.json(analysis);
 });
 
@@ -2118,7 +2147,14 @@ app.delete('/api/sequences/:id', (req, res) => {
 // ─── Sequence Cues API ──────────────────────────────────────────────────────
 
 app.get('/api/sequences/:id/cues', (req, res) => {
-  res.json(db.getSequenceCues(+req.params.id));
+  const cues = db.getSequenceCuesLightweight(+req.params.id);
+  res.json(cues);
+});
+
+app.get('/api/cues/:id', (req, res) => {
+  const cue = db.getCue(+req.params.id);
+  if (!cue) return res.status(404).json({ error: 'Not found' });
+  res.json(cue);
 });
 
 app.post('/api/sequences/:id/cues', (req, res) => {

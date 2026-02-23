@@ -22,7 +22,6 @@ let seqPlayheadMs = 0;
 let seqIsPlaying = false;
 let seqDragState = null;
 let seqIsDraggingPlayhead = false;
-let seqEditingEffectId = null;
 let seqExpandedFixtures = new Set(); // fixture IDs whose cells are expanded
 let seqMoverPresets = []; // cached mover presets for movement cue type
 
@@ -44,7 +43,6 @@ async function loadSequencer() {
 
   refreshEffectDropdown();
   refreshMoverPresetDropdown();
-  renderEffectsList();
   renderSeqSelector();
   if (seqCurrentId) {
     document.getElementById('seqSelector').value = seqCurrentId;
@@ -96,7 +94,6 @@ async function loadSequenceById(id) {
     wfRawPeaks = null;
     wfTrackInfo = null;
     wfCurrentTrackId = null;
-    if (typeof loadAudioForTrack === 'function') loadAudioForTrack(null);
     document.getElementById('seqBpmDisplay').textContent = '--';
     document.getElementById('seqDurDisplay').textContent = '--';
     document.getElementById('seqCueCount').textContent = '0';
@@ -130,32 +127,39 @@ async function loadSequenceById(id) {
   if (seq.track_id && typeof loadAndShowWaveform === 'function') {
     loadAndShowWaveform(seq.track_id);
   }
+}
 
-  // Auto-load audio player if track exists
-  if (seq.track_id && typeof loadAudioForTrack === 'function') {
-    loadAudioForTrack(seq.track_id, seq.name);
+// Compute lightweight display fields from full channel_values (after create/update)
+function computeCueDisplayFields(cue) {
+  const chV = cue.channel_values || {};
+  const endV = cue.end_channel_values || {};
+  if (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined) {
+    cue.display_color = colorFromChannelValues(chV);
+  } else {
+    cue.display_color = cue.color || '#e94560';
   }
+  if (endV && (endV.red !== undefined || endV.green !== undefined || endV.blue !== undefined)) {
+    cue.end_display_color = colorFromChannelValues(endV);
+  } else {
+    cue.end_display_color = null;
+  }
+  cue.mover_preset_id = chV.mover_preset_id || null;
 }
 
 function renderCueBlock(cue) {
   const left = (cue.start_ms / 1000) * seqZoomPxPerSec;
   const width = Math.max(4, (cue.duration_ms / 1000) * seqZoomPxPerSec);
   const selected = seqSelectedCueIds.has(cue.id) ? ' selected' : '';
-  const chV = cue.channel_values || {};
-  const endV = cue.end_channel_values || {};
-  const startColor = (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined)
-    ? colorFromChannelValues(chV) : (cue.color || '#e94560');
-  const hasEndRGB = endV.red !== undefined || endV.green !== undefined || endV.blue !== undefined;
+  const startColor = cue.display_color || cue.color || '#e94560';
   let bgStyle;
-  if (hasEndRGB && cue.cue_type !== 'solid') {
-    const endColor = colorFromChannelValues(endV);
-    bgStyle = `background:linear-gradient(to right, ${startColor}, ${endColor})`;
+  if (cue.end_display_color && cue.cue_type !== 'solid') {
+    bgStyle = `background:linear-gradient(to right, ${startColor}, ${cue.end_display_color})`;
   } else {
     bgStyle = `background:${startColor}`;
   }
   let typeLabel = cue.label || (cue.cue_type === 'solid' ? '' : cue.cue_type);
-  if (cue.cue_type === 'movement' && chV.mover_preset_id) {
-    const mp = seqMoverPresets.find(p => p.id === chV.mover_preset_id);
+  if (cue.cue_type === 'movement' && cue.mover_preset_id) {
+    const mp = seqMoverPresets.find(p => p.id === cue.mover_preset_id);
     if (mp) typeLabel = mp.name;
   }
   return `<div class="seq-cue${selected}" data-cue-id="${cue.id}" ` +
@@ -387,17 +391,9 @@ function snapToGrid(ms) {
 
 // ─── Seek / Audio Sync Helpers ───────────────────────────────────────────────
 
-function syncAudioToPlayhead() {
-  const audioEl = document.getElementById('audioElement');
-  if (audioEl && audioEl.src && !isNaN(audioEl.duration)) {
-    audioEl.currentTime = seqPlayheadMs / 1000;
-  }
-}
-
 function seekSequence(timeMs) {
   seqPlayheadMs = timeMs;
   updatePlayhead();
-  syncAudioToPlayhead();
   // Tell the server to jump to this position if a sequence is loaded
   if (seqCurrentId) {
     ws.send(JSON.stringify({ type: 'sequence', action: 'seek', deck: seqDeck, timeMs: seqPlayheadMs }));
@@ -455,24 +451,11 @@ function setupSequencerEvents() {
     updatePlayhead();
     ws.send(JSON.stringify({ type: 'sequence', action: 'load', deck: seqDeck, sequenceId: seqCurrentId }));
     ws.send(JSON.stringify({ type: 'sequence', action: 'play', deck: seqDeck }));
-    // Also start audio playback
-    const audioEl = document.getElementById('audioElement');
-    if (audioEl && audioEl.src) {
-      audioEl.currentTime = 0;
-      audioEl.play().catch(() => {});
-      document.getElementById('audioPlayBtn').innerHTML = '\u{23F8}';
-    }
   });
   document.getElementById('seqPauseBtn').addEventListener('click', () => {
     seqIsPlaying = false;
     document.getElementById('seqPlayBtn').classList.remove('active');
     ws.send(JSON.stringify({ type: 'sequence', action: 'pause', deck: seqDeck }));
-    // Also pause audio
-    const audioEl = document.getElementById('audioElement');
-    if (audioEl && !audioEl.paused) {
-      audioEl.pause();
-      document.getElementById('audioPlayBtn').innerHTML = '&#9654;';
-    }
   });
   document.getElementById('seqStopBtn').addEventListener('click', () => {
     seqIsPlaying = false;
@@ -480,22 +463,18 @@ function setupSequencerEvents() {
     document.getElementById('seqPlayBtn').classList.remove('active');
     updatePlayhead();
     ws.send(JSON.stringify({ type: 'sequence', action: 'unload', deck: seqDeck }));
-    // Also stop and reset audio
-    const audioEl = document.getElementById('audioElement');
-    if (audioEl) {
-      audioEl.pause();
-      audioEl.currentTime = 0;
-      document.getElementById('audioPlayBtn').innerHTML = '&#9654;';
-    }
   });
 
   // Deck selector
   document.getElementById('seqDeckSel').addEventListener('change', (e) => { seqDeck = +e.target.value; });
 
   // Zoom
+  // Zoom (debounced for smoother editing)
+  let _zoomTimer = null;
   document.getElementById('seqZoomSlider').addEventListener('input', (e) => {
     seqZoomPxPerSec = +e.target.value;
-    renderSequencerTimeline();
+    if (_zoomTimer) clearTimeout(_zoomTimer);
+    _zoomTimer = setTimeout(() => renderSequencerTimeline(), 60);
   });
 
   // Snap
@@ -545,6 +524,7 @@ function setupSequencerEvents() {
       body: JSON.stringify(body)
     });
     const cue = await res.json();
+    computeCueDisplayFields(cue);
     seqCues.push(cue);
     document.getElementById('seqCueCount').textContent = seqCues.length;
     renderSequencerTimeline();
@@ -849,6 +829,7 @@ function setupSequencerEvents() {
       body: JSON.stringify(update)
     });
     Object.assign(cue, update);
+    computeCueDisplayFields(cue);
     renderSequencerTimeline();
     updateSelectionVisuals();
   }
@@ -911,7 +892,6 @@ function setupSequencerEvents() {
     const maxMs = seqCurrentSeq?.duration_ms || Infinity;
     seqPlayheadMs = Math.max(0, Math.min((x / seqZoomPxPerSec) * 1000, maxMs));
     updatePlayhead();
-    syncAudioToPlayhead();
   });
 
   document.addEventListener('mouseup', () => {
@@ -923,22 +903,6 @@ function setupSequencerEvents() {
     if (seqCurrentId) {
       ws.send(JSON.stringify({ type: 'sequence', action: 'seek', deck: seqDeck, timeMs: seqPlayheadMs }));
     }
-  });
-
-  // Effects management
-  document.getElementById('seqAddEffectBtn').addEventListener('click', () => openEffectModal(null));
-  document.getElementById('effSaveBtn').addEventListener('click', saveEffect);
-  document.getElementById('effType').addEventListener('change', (e) => {
-    renderEffectParams(e.target.value, {});
-    // Auto-set fixture_target based on effect type category
-    const movingTypes = ['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod'];
-    const multicellOnlyTypes = ['segments','ripple','cell_strobe','gradient'];
-    const colorTypes = ['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire'];
-    const sel = document.getElementById('effFixtureTarget');
-    if (movingTypes.includes(e.target.value)) sel.value = 'moving_head';
-    else if (multicellOnlyTypes.includes(e.target.value)) sel.value = 'multicell';
-    else if (colorTypes.includes(e.target.value)) sel.value = 'color';
-    else sel.value = 'all';
   });
 
   // ─── Keyboard shortcuts: Copy / Paste / Delete / Nudge / Select All ──────
@@ -1121,6 +1085,7 @@ function autoApplyCurrentCue() {
     body: JSON.stringify(update)
   });
   Object.assign(cue, update);
+  computeCueDisplayFields(cue);
 }
 
 function clearCueSelection() {
@@ -1185,24 +1150,31 @@ function showCueProperties(cue) {
   document.getElementById('seqPropStart').value = (cue.start_ms / 1000).toFixed(3);
   document.getElementById('seqPropDur').value = (cue.duration_ms / 1000).toFixed(3);
   document.getElementById('seqPropLabel').value = cue.label || '';
-  // Derive color from RGB channel values if available
-  const chV = cue.channel_values || {};
-  if (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined) {
-    document.getElementById('seqPropColor').value = colorFromChannelValues(chV);
-  } else {
-    document.getElementById('seqPropColor').value = cue.color || '#e94560';
-  }
+  document.getElementById('seqPropColor').value = cue.display_color || cue.color || '#e94560';
   document.getElementById('seqPropEffect').value = cue.effect_id || '';
 
   // Show/hide mover preset dropdown based on cue type
   updateMoverPresetVisibility(cueType);
   if (cueType === 'movement') {
-    const chV2 = cue.channel_values || {};
-    document.getElementById('seqPropMoverPreset').value = chV2.mover_preset_id || '';
+    document.getElementById('seqPropMoverPreset').value = cue.mover_preset_id || '';
   }
 
-  // Build channel sliders based on stored type
-  renderCueChannelSliders(cue.id, cueType);
+  // If we don't have full channel_values yet, lazy-load from server
+  if (!cue.channel_values) {
+    document.getElementById('seqColorChannels').innerHTML = '<div style="color:var(--text-dim);font-size:11px;padding:8px">Loading...</div>';
+    fetch(`/api/cues/${cue.id}`).then(r => r.json()).then(fullCue => {
+      // Merge full data into local lightweight cue
+      cue.channel_values = fullCue.channel_values || {};
+      cue.end_channel_values = fullCue.end_channel_values || null;
+      cue.effect_params = fullCue.effect_params || null;
+      // Re-render sliders now that we have full data
+      if (seqSelectedCueId === cue.id) {
+        renderCueChannelSliders(cue.id, document.getElementById('seqPropType').value);
+      }
+    });
+  } else {
+    renderCueChannelSliders(cue.id, cueType);
+  }
 }
 
 // ─── Color Helpers ───────────────────────────────────────────────────────────
@@ -1363,387 +1335,6 @@ function renderFixturePicker() {
       renderSequencerTimeline();
     });
   });
-}
-
-// ─── Effects Library ─────────────────────────────────────────────────────────
-
-function renderEffectsList() {
-  const list = document.getElementById('seqEffectsList');
-  if (seqEffects.length === 0) {
-    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects yet. Click "+ New Effect" to create one.</div>';
-    return;
-  }
-  let html = '';
-  const TARGET_BADGE = { all: '', color: '🎨', moving_head: '🔦', multicell: '▓' };
-  for (const eff of seqEffects) {
-    const badge = TARGET_BADGE[eff.fixture_target] || '';
-    html += `<div class="seq-effect-card" data-eff-id="${eff.id}">` +
-      `<span class="eff-type ${eff.type}">${eff.type.replace('_', ' ')}</span>` +
-      (badge ? `<span style="font-size:10px" title="${(eff.fixture_target||'all').replace('_',' ')}">${badge}</span>` : '') +
-      `<span class="eff-name">${esc(eff.name)}</span>` +
-      `<span style="font-size:9px;color:var(--text-dim)">${eff.duration_beats}b</span>` +
-      `<span class="eff-actions">` +
-      `<button onclick="editEffect(${eff.id})" title="Edit">&#9998;</button>` +
-      `<button onclick="deleteEffect(${eff.id})" title="Delete" style="color:var(--danger)">&#10006;</button>` +
-      `</span></div>`;
-  }
-  list.innerHTML = html;
-}
-
-function openEffectModal(eff) {
-  seqEditingEffectId = eff ? eff.id : null;
-  document.getElementById('effectModalTitle').textContent = eff ? 'Edit Effect' : 'New Effect';
-  document.getElementById('effName').value = eff ? eff.name : '';
-  document.getElementById('effType').value = eff ? eff.type : 'pulse';
-  document.getElementById('effCategory').value = eff ? (eff.category || 'color') : 'color';
-  document.getElementById('effFixtureTarget').value = eff ? (eff.fixture_target || 'all') : 'all';
-  document.getElementById('effDurBeats').value = eff ? eff.duration_beats : 4;
-  renderEffectParams(eff ? eff.type : 'pulse', eff ? eff.effect_data : {});
-  document.getElementById('effectModal').classList.add('open');
-}
-
-function renderEffectParams(type, data) {
-  const area = document.getElementById('effParamsArea');
-  let html = '';
-
-  // Shared channels-per-cell row for cell-aware effects
-  const cellRow = (d) => `<div class="form-group"><label>Channels per Cell</label>` +
-    `<input type="number" id="effParamCpp" value="${d.channels_per_cell || 3}" min="1" max="20" step="1"></div>`;
-
-  if (type === 'pulse') {
-    const freq = data.frequency || 1;
-    html = `<div class="form-group"><label>Frequency (cycles per duration)</label>` +
-      `<input type="number" id="effParamFreq" value="${freq}" min="0.1" step="0.1"></div>`;
-  } else if (type === 'rainbow') {
-    const cycles = data.cycles || 1;
-    html = `<div class="form-group"><label>Hue Cycles</label>` +
-      `<input type="number" id="effParamCycles" value="${cycles}" min="0.25" step="0.25"></div>`;
-  } else if (type === 'strobe') {
-    const freq = data.frequency || 10;
-    html = `<div class="form-group"><label>Strobe Frequency (Hz)</label>` +
-      `<input type="number" id="effParamFreq" value="${freq}" min="1" max="50" step="1"></div>`;
-  } else if (type === 'color_fade') {
-    const sc = data.start_color || { red: 255, green: 0, blue: 0 };
-    const ec = data.end_color || { red: 0, green: 0, blue: 255 };
-    const startHex = '#' + [sc.red, sc.green, sc.blue].map(v => (v||0).toString(16).padStart(2,'0')).join('');
-    const endHex = '#' + [ec.red, ec.green, ec.blue].map(v => (v||0).toString(16).padStart(2,'0')).join('');
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Start Color</label><input type="color" id="effParamStartColor" value="${startHex}"></div>` +
-      `<div class="form-group"><label>End Color</label><input type="color" id="effParamEndColor" value="${endHex}"></div></div>`;
-  } else if (type === 'chase') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Direction</label><select id="effParamDir">` +
-        `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option>` +
-        `<option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
-        `<option value="bounce" ${data.direction==='bounce'?'selected':''}>Bounce</option>` +
-        `<option value="center" ${data.direction==='center'?'selected':''}>Center Out</option>` +
-        `<option value="outside" ${data.direction==='outside'?'selected':''}>Outside In</option>` +
-      `</select></div>` +
-      `<div class="form-group"><label>Speed (cycles)</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Width (cells)</label>` +
-        `<input type="number" id="effParamWidth" value="${data.width||3}" min="1" max="50" step="1"></div>` +
-      `<div class="form-group"><label>Tail (cells)</label>` +
-        `<input type="number" id="effParamTail" value="${data.tail||0}" min="0" max="50" step="1"></div></div>` +
-      `<div class="form-row">${cellRow(data)}</div>`;
-  } else if (type === 'comet') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Direction</label><select id="effParamDir">` +
-        `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option>` +
-        `<option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
-      `</select></div>` +
-      `<div class="form-group"><label>Speed (cycles)</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Tail Length (cells)</label>` +
-        `<input type="number" id="effParamTail" value="${data.tail||10}" min="1" max="50" step="1"></div>` +
-      `${cellRow(data)}</div>`;
-  } else if (type === 'scanner') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed (cycles)</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
-      `<div class="form-group"><label>Width (cells)</label>` +
-        `<input type="number" id="effParamWidth" value="${data.width||1}" min="1" max="50" step="1"></div></div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Tail (cells)</label>` +
-        `<input type="number" id="effParamTail" value="${data.tail||5}" min="0" max="50" step="1"></div>` +
-      `${cellRow(data)}</div>`;
-  } else if (type === 'sparkle') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Density (0-1)</label>` +
-        `<input type="number" id="effParamDensity" value="${data.density||0.1}" min="0.01" max="1" step="0.01"></div>` +
-      `<div class="form-group"><label>Fade Speed</label>` +
-        `<input type="number" id="effParamFadeSpd" value="${data.fade_speed||6}" min="1" max="20" step="1"></div></div>` +
-      `<div class="form-row">${cellRow(data)}</div>`;
-  } else if (type === 'color_wave') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Wavelength (cells)</label>` +
-        `<input type="number" id="effParamWavelength" value="${data.wavelength||20}" min="2" max="200" step="1"></div>` +
-      `<div class="form-group"><label>Speed (cycles)</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div></div>` +
-      `<div class="form-row">${cellRow(data)}</div>`;
-  } else if (type === 'fire') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Intensity (0-1)</label>` +
-        `<input type="number" id="effParamIntensity" value="${data.intensity||0.8}" min="0.1" max="1" step="0.05"></div>` +
-      `<div class="form-group"><label>Cooling (0-1)</label>` +
-        `<input type="number" id="effParamCooling" value="${data.cooling||0.3}" min="0" max="1" step="0.05"></div></div>` +
-      `<div class="form-row">${cellRow(data)}</div>`;
-  } else if (type === 'buildup') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Direction</label><select id="effParamDir">` +
-        `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option>` +
-        `<option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
-        `<option value="center" ${data.direction==='center'?'selected':''}>Center Out</option>` +
-      `</select></div>` +
-      `${cellRow(data)}</div>`;
-  // ── Moving Head effects ─────────────────────────────────────────────
-  } else if (type === 'pan_sweep' || type === 'tilt_sweep') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed (cycles)</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
-      `<div class="form-group"><label>Range (0-1)</label>` +
-        `<input type="number" id="effParamRange" value="${data.range||1}" min="0.05" max="1" step="0.05"></div></div>`;
-  } else if (type === 'circle' || type === 'figure_eight') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed (cycles)</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
-      `<div class="form-group"><label>Size (0-1)</label>` +
-        `<input type="number" id="effParamSize" value="${data.size||0.5}" min="0.05" max="1" step="0.05"></div></div>`;
-  } else if (type === 'random_move') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div>` +
-      `<div class="form-group"><label>Range (0-1)</label>` +
-        `<input type="number" id="effParamRange" value="${data.range||0.5}" min="0.05" max="1" step="0.05"></div></div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Smoothing (0-1)</label>` +
-        `<input type="number" id="effParamSmoothing" value="${data.smoothing||0.3}" min="0" max="1" step="0.05"></div></div>`;
-  } else if (type === 'fan') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||0.5}" min="0.1" max="10" step="0.1"></div>` +
-      `<div class="form-group"><label>Spread (0-1)</label>` +
-        `<input type="number" id="effParamSpread" value="${data.spread||1}" min="0.1" max="1" step="0.05"></div></div>`;
-  } else if (type === 'nod') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Axis</label><select id="effParamAxis">` +
-        `<option value="tilt" ${(data.axis||'tilt')==='tilt'?'selected':''}>Tilt (Nod)</option>` +
-        `<option value="pan" ${data.axis==='pan'?'selected':''}>Pan (Shake)</option>` +
-      `</select></div>` +
-      `<div class="form-group"><label>Speed</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||2}" min="0.1" max="20" step="0.1"></div></div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Range (0-1)</label>` +
-        `<input type="number" id="effParamRange" value="${data.range||0.3}" min="0.05" max="1" step="0.05"></div></div>`;
-  // ── Multicell-specific effects ──────────────────────────────────────
-  } else if (type === 'segments') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Segment Size (cells)</label>` +
-        `<input type="number" id="effParamSegSize" value="${data.segment_size||2}" min="1" max="20" step="1"></div>` +
-      `<div class="form-group"><label>Offset Speed</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.offset_speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
-      `<div class="form-row">${cellRow(data)}</div>`;
-  } else if (type === 'ripple') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div>` +
-      `<div class="form-group"><label>Width (cells)</label>` +
-        `<input type="number" id="effParamWidth" value="${data.width||3}" min="1" max="20" step="1"></div></div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Decay (0-1)</label>` +
-        `<input type="number" id="effParamDecay" value="${data.decay||0.7}" min="0.1" max="1" step="0.05"></div>` +
-      `${cellRow(data)}</div>`;
-  } else if (type === 'cell_strobe') {
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Frequency (Hz)</label>` +
-        `<input type="number" id="effParamFreq" value="${data.frequency||8}" min="1" max="30" step="1"></div>` +
-      `<div class="form-group"><label>Pattern</label><select id="effParamPattern">` +
-        `<option value="sequential" ${(data.pattern||'sequential')==='sequential'?'selected':''}>Sequential</option>` +
-        `<option value="random" ${data.pattern==='random'?'selected':''}>Random</option>` +
-      `</select></div></div>` +
-      `<div class="form-row">${cellRow(data)}</div>`;
-  } else if (type === 'gradient') {
-    const colors = data.colors || ['#ff0000', '#0000ff'];
-    html = `<div class="form-row">` +
-      `<div class="form-group"><label>Speed</label>` +
-        `<input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="10" step="0.1"></div>` +
-      `</div>` +
-      `<div class="form-row">` +
-      `<div class="form-group"><label>Color 1</label><input type="color" id="effParamGradC1" value="${colors[0]||'#ff0000'}"></div>` +
-      `<div class="form-group"><label>Color 2</label><input type="color" id="effParamGradC2" value="${colors[1]||'#0000ff'}"></div>` +
-      `<div class="form-group"><label>Color 3 (opt)</label><input type="color" id="effParamGradC3" value="${colors[2]||'#000000'}"></div></div>` +
-      `<div class="form-row"><div class="form-group"><label><input type="checkbox" id="effParamGradC3On" ${colors.length>=3?'checked':''}> Use 3rd color</label></div>` +
-      `${cellRow(data)}</div>`;
-  }
-  area.innerHTML = html;
-}
-
-function getEffectDataFromForm(type) {
-  if (type === 'pulse') {
-    return { frequency: +(document.getElementById('effParamFreq')?.value || 1) };
-  } else if (type === 'rainbow') {
-    return { cycles: +(document.getElementById('effParamCycles')?.value || 1) };
-  } else if (type === 'strobe') {
-    return { frequency: +(document.getElementById('effParamFreq')?.value || 10) };
-  } else if (type === 'color_fade') {
-    const startHex = document.getElementById('effParamStartColor')?.value || '#ff0000';
-    const endHex = document.getElementById('effParamEndColor')?.value || '#0000ff';
-    const hexToRgb = (h) => ({ red: parseInt(h.slice(1,3),16), green: parseInt(h.slice(3,5),16), blue: parseInt(h.slice(5,7),16) });
-    return { start_color: hexToRgb(startHex), end_color: hexToRgb(endHex) };
-  } else if (type === 'chase') {
-    return {
-      direction: document.getElementById('effParamDir')?.value || 'left',
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      width: +(document.getElementById('effParamWidth')?.value || 3),
-      tail: +(document.getElementById('effParamTail')?.value || 0),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'comet') {
-    return {
-      direction: document.getElementById('effParamDir')?.value || 'left',
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      tail: +(document.getElementById('effParamTail')?.value || 10),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'scanner') {
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      width: +(document.getElementById('effParamWidth')?.value || 1),
-      tail: +(document.getElementById('effParamTail')?.value || 5),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'sparkle') {
-    return {
-      density: +(document.getElementById('effParamDensity')?.value || 0.1),
-      fade_speed: +(document.getElementById('effParamFadeSpd')?.value || 6),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'color_wave') {
-    return {
-      wavelength: +(document.getElementById('effParamWavelength')?.value || 20),
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'fire') {
-    return {
-      intensity: +(document.getElementById('effParamIntensity')?.value || 0.8),
-      cooling: +(document.getElementById('effParamCooling')?.value || 0.3),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'buildup') {
-    return {
-      direction: document.getElementById('effParamDir')?.value || 'left',
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  // Moving head effects
-  } else if (type === 'pan_sweep' || type === 'tilt_sweep') {
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      range: +(document.getElementById('effParamRange')?.value || 1),
-    };
-  } else if (type === 'circle' || type === 'figure_eight') {
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      size: +(document.getElementById('effParamSize')?.value || 0.5),
-    };
-  } else if (type === 'random_move') {
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      range: +(document.getElementById('effParamRange')?.value || 0.5),
-      smoothing: +(document.getElementById('effParamSmoothing')?.value || 0.3),
-    };
-  } else if (type === 'fan') {
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 0.5),
-      spread: +(document.getElementById('effParamSpread')?.value || 1),
-    };
-  } else if (type === 'nod') {
-    return {
-      axis: document.getElementById('effParamAxis')?.value || 'tilt',
-      speed: +(document.getElementById('effParamSpeed')?.value || 2),
-      range: +(document.getElementById('effParamRange')?.value || 0.3),
-    };
-  // Multicell effects
-  } else if (type === 'segments') {
-    return {
-      segment_size: +(document.getElementById('effParamSegSize')?.value || 2),
-      offset_speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'ripple') {
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      width: +(document.getElementById('effParamWidth')?.value || 3),
-      decay: +(document.getElementById('effParamDecay')?.value || 0.7),
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'cell_strobe') {
-    return {
-      frequency: +(document.getElementById('effParamFreq')?.value || 8),
-      pattern: document.getElementById('effParamPattern')?.value || 'sequential',
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  } else if (type === 'gradient') {
-    const colors = [
-      document.getElementById('effParamGradC1')?.value || '#ff0000',
-      document.getElementById('effParamGradC2')?.value || '#0000ff',
-    ];
-    if (document.getElementById('effParamGradC3On')?.checked) {
-      colors.push(document.getElementById('effParamGradC3')?.value || '#00ff00');
-    }
-    return {
-      speed: +(document.getElementById('effParamSpeed')?.value || 1),
-      colors,
-      channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3),
-    };
-  }
-  return {};
-}
-
-async function saveEffect() {
-  const name = document.getElementById('effName').value.trim();
-  if (!name) { alert('Name is required'); return; }
-  const type = document.getElementById('effType').value;
-  const category = document.getElementById('effCategory').value;
-  const fixture_target = document.getElementById('effFixtureTarget').value;
-  const duration_beats = +(document.getElementById('effDurBeats').value || 4);
-  const effect_data = getEffectDataFromForm(type);
-
-  const body = { name, type, category, fixture_target, effect_data, duration_beats };
-  let result;
-  if (seqEditingEffectId) {
-    const res = await fetch(`/api/effects/${seqEditingEffectId}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    });
-    result = await res.json();
-    const idx = seqEffects.findIndex(e => e.id === seqEditingEffectId);
-    if (idx >= 0) seqEffects[idx] = result;
-  } else {
-    const res = await fetch('/api/effects', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    });
-    result = await res.json();
-    seqEffects.push(result);
-  }
-
-  document.getElementById('effectModal').classList.remove('open');
-  renderEffectsList();
-  refreshEffectDropdown();
-}
-
-async function editEffect(id) {
-  const eff = seqEffects.find(e => e.id === id);
-  if (eff) openEffectModal(eff);
-}
-
-async function deleteEffect(id) {
-  if (!confirm('Delete this effect?')) return;
-  await fetch(`/api/effects/${id}`, { method: 'DELETE' });
-  seqEffects = seqEffects.filter(e => e.id !== id);
-  renderEffectsList();
-  refreshEffectDropdown();
 }
 
 // ─── WebSocket Message Handlers ──────────────────────────────────────────────

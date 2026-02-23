@@ -1489,13 +1489,19 @@ function getTracks({ search, genre, sourceType, minBpm, maxBpm, key, limit, offs
   }
 
   const tracks = db.prepare(
-    `SELECT * FROM tracks ${whereClause} ORDER BY author, title ${limitClause}`
+    `SELECT t.*,
+       CASE WHEN ta.track_id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+       ls.id as sequence_id
+     FROM tracks t
+     LEFT JOIN track_analysis ta ON ta.track_id = t.id
+     LEFT JOIN light_sequences ls ON ls.track_id = t.id
+     ${whereClause} ORDER BY t.author, t.title ${limitClause}`
   ).all(...params);
 
   // Get total count for pagination
   const countParams = params.slice(0, params.length - (limit ? 2 : 0));
   const total = db.prepare(
-    `SELECT COUNT(*) as c FROM tracks ${whereClause}`
+    `SELECT COUNT(*) as c FROM tracks t ${whereClause}`
   ).get(...countParams).c;
 
   return { tracks, total };
@@ -1858,15 +1864,7 @@ function getSequence(id) {
     LEFT JOIN tracks t ON ls.track_id = t.id
     WHERE ls.id = ?
   `).get(id);
-  if (!seq) return null;
-  seq.cues = db.prepare('SELECT * FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms').all(seq.id);
-  seq.cues = seq.cues.map(c => ({
-    ...c,
-    channel_values: JSON.parse(c.channel_values || '{}'),
-    end_channel_values: c.end_channel_values ? JSON.parse(c.end_channel_values) : null,
-    effect_params: JSON.parse(c.effect_params || '{}'),
-  }));
-  return seq;
+  return seq || null;
 }
 
 function getSequenceByTrackId(trackId) {
@@ -1965,6 +1963,39 @@ function toggleUsbDevice(id) {
 }
 
 // ─── Sequence Cues CRUD ─────────────────────────────────────────────────────
+
+function getSequenceCuesLightweight(sequenceId) {
+  const cues = db.prepare(
+    'SELECT id, sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, color, label, cell, effect_id, channel_values, end_channel_values FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms'
+  ).all(sequenceId);
+  // Pre-compute display colors from channel_values to avoid sending full channel data
+  return cues.map(c => {
+    const chV = JSON.parse(c.channel_values || '{}');
+    const endV = c.end_channel_values ? JSON.parse(c.end_channel_values) : null;
+    // Compute display color from RGB channel values
+    let display_color = c.color || '#e94560';
+    if (chV.red !== undefined || chV.green !== undefined || chV.blue !== undefined) {
+      const r = Math.max(0, Math.min(255, chV.red || 0));
+      const g = Math.max(0, Math.min(255, chV.green || 0));
+      const b = Math.max(0, Math.min(255, chV.blue || 0));
+      display_color = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+    }
+    let end_display_color = null;
+    if (endV && (endV.red !== undefined || endV.green !== undefined || endV.blue !== undefined)) {
+      const r = Math.max(0, Math.min(255, endV.red || 0));
+      const g = Math.max(0, Math.min(255, endV.green || 0));
+      const b = Math.max(0, Math.min(255, endV.blue || 0));
+      end_display_color = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+    }
+    return {
+      id: c.id, lane: c.lane, start_ms: c.start_ms, duration_ms: c.duration_ms,
+      cue_type: c.cue_type, fixture_id: c.fixture_id, color: c.color,
+      label: c.label, cell: c.cell, effect_id: c.effect_id,
+      display_color, end_display_color,
+      mover_preset_id: chV.mover_preset_id || null,
+    };
+  });
+}
 
 function getSequenceCues(sequenceId) {
   const cues = db.prepare('SELECT * FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms').all(sequenceId);
@@ -2438,7 +2469,7 @@ module.exports = {
   getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset,
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,
-  getSequenceCues, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,
+  getSequenceCues, getSequenceCuesLightweight, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,
   getUsbDevices, getEnabledUsbDevices, getUsbDevice, createUsbDevice, updateUsbDevice, deleteUsbDevice, toggleUsbDevice,
   getTrackAnalysis, upsertTrackAnalysis, deleteTrackAnalysis, deleteAllAnalysis,
   deleteAllSequences, getDbStats, getTracksWithAnalysis,

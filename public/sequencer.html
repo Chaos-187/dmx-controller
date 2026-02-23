@@ -162,13 +162,13 @@
     /* ═══════════════════════════════════════════════════════════════
        Content
        ═══════════════════════════════════════════════════════════════ */
-    .content { padding: 20px; max-width: 1600px; margin: 0 auto; }
+    .content { padding: 12px 16px; }
 
     /* ═══════════════════════════════════════════════════════════════
        Tracks Panel
        ═══════════════════════════════════════════════════════════════ */
     .tracks-panel {
-      margin-bottom: 20px; border: 1px solid var(--panel-border);
+      margin-bottom: 12px; border: 1px solid var(--panel-border);
       border-radius: 8px; background: var(--panel); overflow: hidden;
     }
     .tracks-panel-header {
@@ -183,9 +183,9 @@
     }
     .tracks-panel.collapsed .tracks-panel-toggle { transform: rotate(-90deg); }
     .tracks-panel.collapsed .tracks-panel-body { display: none; }
-    .tracks-panel-body { padding: 12px 16px; }
+    .tracks-panel-body { padding: 10px 14px; }
     .tracks-toolbar {
-      display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;
+      display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center;
     }
     .tracks-search {
       padding: 7px 10px; background: var(--input-bg); border: 1px solid var(--input-border);
@@ -197,13 +197,13 @@
       border-radius: 6px; color: var(--text); font-size: 11px;
     }
     .tracks-stats-bar {
-      display: flex; gap: 16px; margin-bottom: 10px; padding: 8px 12px;
+      display: flex; gap: 14px; margin-bottom: 8px; padding: 6px 10px;
       background: rgba(0,0,0,.15); border-radius: 6px;
       font-size: 11px; color: var(--text-dim); flex-wrap: wrap;
     }
     .tracks-stats-bar .stat-val { color: var(--accent); font-weight: 600; margin-left: 4px; }
     .tracks-table-wrap {
-      overflow-x: auto; overflow-y: auto; max-height: 340px;
+      overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 380px); min-height: 200px;
       border: 1px solid var(--panel-border); border-radius: 6px;
       background: rgba(0,0,0,.1);
     }
@@ -276,38 +276,11 @@
     .seq-wf-header .wf-title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 
     /* ═══════════════════════════════════════════════════════════════
-       Audio Preview Player
-       ═══════════════════════════════════════════════════════════════ */
-    .seq-audio-player {
-      background: var(--panel); border: 1px solid var(--panel-border);
-      border-radius: 6px; padding: 8px 14px; margin-top: 12px;
-    }
-    .audio-player-bar {
-      display: flex; align-items: center; gap: 10px;
-    }
-    .audio-label {
-      font-size: 11px; color: var(--text); flex: 1;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 260px;
-    }
-    .audio-play-btn, .audio-stop-btn {
-      font-size: 14px; padding: 4px 10px;
-    }
-    #audioVolume {
-      width: 70px; accent-color: var(--accent);
-    }
-    .audio-time {
-      font-size: 11px; color: var(--text-dim);
-      font-variant-numeric: tabular-nums;
-      min-width: 90px; text-align: right;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
        Footer
        ═══════════════════════════════════════════════════════════════ */
     footer {
-      text-align: center; padding: 16px; color: var(--text-dim); font-size: 11px;
-      border-top: 1px solid var(--panel-border); margin-top: 20px;
+      text-align: center; padding: 8px; color: var(--text-dim); font-size: 11px;
+      border-top: 1px solid var(--panel-border); margin-top: 8px;
     }
   </style>
 </head>
@@ -440,106 +413,6 @@
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn btn-primary btn-sm" id="seqPropSave">Apply</button>
       <button class="btn btn-danger btn-sm" id="seqPropDelete">Delete Cue</button>
-    </div>
-  </div>
-
-  <!-- Audio Preview Player -->
-  <div class="seq-audio-player" id="seqAudioPlayer" style="display:none">
-    <div class="audio-player-bar">
-      <span class="audio-label" id="audioTrackLabel">No track</span>
-      <button class="seq-btn audio-play-btn" id="audioPlayBtn" title="Play Audio">&#9654;</button>
-      <button class="seq-btn audio-stop-btn" id="audioStopBtn" title="Stop Audio">&#9632;</button>
-      <input type="range" id="audioVolume" min="0" max="1" step="0.05" value="0.7" title="Volume">
-      <span class="audio-time" id="audioTimeDisplay">0:00 / 0:00</span>
-      <label style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
-        <input type="checkbox" id="audioSyncPlayhead" checked> Sync
-      </label>
-    </div>
-    <audio id="audioElement" preload="auto"></audio>
-  </div>
-
-  <!-- Effects Library Panel -->
-  <div class="seq-effects-panel" id="seqEffectsPanel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h4 style="margin:0">Effects Library</h4>
-      <button class="btn btn-primary btn-sm" id="seqAddEffectBtn">+ New Effect</button>
-    </div>
-    <div class="seq-effects-list" id="seqEffectsList"></div>
-  </div>
-
-  <!-- Effect Edit Modal -->
-  <div class="modal-overlay" id="effectModal">
-    <div class="modal">
-      <h2 id="effectModalTitle">New Effect</h2>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Name</label>
-          <input type="text" id="effName" placeholder="My Effect">
-        </div>
-        <div class="form-group">
-          <label>Type</label>
-          <select id="effType">
-            <optgroup label="Color / Intensity">
-              <option value="pulse">Pulse</option>
-              <option value="rainbow">Rainbow</option>
-              <option value="strobe">Strobe</option>
-              <option value="color_fade">Color Fade</option>
-              <option value="sparkle">Sparkle</option>
-              <option value="color_wave">Color Wave</option>
-              <option value="fire">Fire</option>
-            </optgroup>
-            <optgroup label="Multicell">
-              <option value="chase">Chase</option>
-              <option value="comet">Comet</option>
-              <option value="scanner">Scanner</option>
-              <option value="buildup">Buildup</option>
-              <option value="segments">Segments</option>
-              <option value="ripple">Ripple</option>
-              <option value="cell_strobe">Cell Strobe</option>
-              <option value="gradient">Gradient</option>
-            </optgroup>
-            <optgroup label="Moving Head">
-              <option value="pan_sweep">Pan Sweep</option>
-              <option value="tilt_sweep">Tilt Sweep</option>
-              <option value="circle">Circle</option>
-              <option value="figure_eight">Figure Eight</option>
-              <option value="random_move">Random Movement</option>
-              <option value="fan">Fan</option>
-              <option value="nod">Nod / Shake</option>
-            </optgroup>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Category</label>
-          <select id="effCategory">
-            <option value="color">Color</option>
-            <option value="intensity">Intensity</option>
-            <option value="movement">Movement</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Fixture Target</label>
-          <select id="effFixtureTarget">
-            <option value="all">All Fixtures</option>
-            <option value="color">Color Fixtures</option>
-            <option value="moving_head">Moving Heads Only</option>
-            <option value="multicell">Multicell Only</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Duration (beats)</label>
-          <input type="number" id="effDurBeats" value="4" min="0.25" step="0.25">
-        </div>
-      </div>
-      <div id="effParamsArea"></div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="document.getElementById('effectModal').classList.remove('open')">Cancel</button>
-        <button class="btn btn-primary" id="effSaveBtn">Save</button>
-      </div>
     </div>
   </div>
 
@@ -776,33 +649,18 @@ function renderTracks(tracks, total) {
   }
 
   const startIdx = tracksPage * TRACKS_PER_PAGE;
-  // Batch-check which tracks have sequences
-  const trackIds = tracks.map(t => t.id);
-  checkTracksWithSequences(trackIds).then(seqMap => {
-    tbody.querySelectorAll('.trk-seq-btn').forEach(btn => {
-      const tid = +btn.dataset.trackId;
-      if (seqMap[tid]) {
-        btn.classList.add('has-seq');
-        btn.innerHTML = '&#9835; Edit';
-        btn.dataset.seqId = seqMap[tid];
-      }
-    });
-  });
-  // Check which tracks already have analysis
-  checkTracksWithAnalysis(trackIds).then(analysisMap => {
-    tbody.querySelectorAll('.trk-analyze-btn').forEach(btn => {
-      const tid = +btn.dataset.trackId;
-      if (analysisMap[tid]) {
-        btn.classList.add('analyzed');
-        btn.innerHTML = '&#9835; View';
-      }
-    });
-  });
 
   let html = '';
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
     const bpmStr = t.bpm > 0 ? t.bpm.toFixed(1) : '';
+    const hasSeq = !!t.sequence_id;
+    const hasAn = !!t.has_analysis;
+    const seqCls = hasSeq ? ' has-seq' : '';
+    const seqLabel = hasSeq ? '&#9835; Edit' : '&#127917; Seq';
+    const seqData = hasSeq ? ` data-seq-id="${t.sequence_id}"` : '';
+    const anCls = hasAn ? ' analyzed' : '';
+    const anLabel = hasAn ? '&#9835; View' : '&#127911; Analyze';
     html += `<tr>
       <td style="color:var(--text-dim)">${startIdx + i + 1}</td>
       <td class="trk-title" title="${esc(t.filepath)}">${esc(t.title || t.filename)}</td>
@@ -813,25 +671,12 @@ function renderTracks(tracks, total) {
       <td class="trk-key">${esc(t.key)}</td>
       <td class="trk-duration">${formatDuration(t.song_length)}</td>
       <td><span class="trk-source ${t.source_type}">${t.source_type === 'local' ? 'Local' : 'Net'}</span></td>
-      <td><button class="trk-analyze-btn" data-track-id="${t.id}" onclick="analyzeTrackWaveform(${t.id}, this)">&#127911; Analyze</button></td>
-      <td><button class="trk-seq-btn" data-track-id="${t.id}" onclick="generateTrackSequence(${t.id}, this)">&#127917; Seq</button></td>
+      <td><button class="trk-analyze-btn${anCls}" data-track-id="${t.id}" onclick="analyzeTrackWaveform(${t.id}, this)">${anLabel}</button></td>
+      <td><button class="trk-seq-btn${seqCls}" data-track-id="${t.id}"${seqData} onclick="generateTrackSequence(${t.id}, this)">${seqLabel}</button></td>
     </tr>`;
   }
   tbody.innerHTML = html;
   updateTracksPagination(total, startIdx);
-}
-
-async function checkTracksWithSequences(trackIds) {
-  // Returns { trackId: sequenceId } for tracks that have sequences
-  const map = {};
-  const checks = trackIds.map(id =>
-    fetch(`/api/sequences/by-track/${id}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(s => { if (s) map[id] = s.id; })
-      .catch(() => {})
-  );
-  await Promise.all(checks);
-  return map;
 }
 
 // ─── Generate Options Cache ────────────────────────────────
@@ -1129,18 +974,6 @@ let wfAnalysisData = null;
 let wfWaveformData = null;   // WaveformData instance for resampling
 let wfRawPeaks = null;       // raw peak array with bass/mid/treble bands
 let wfTrackInfo = null;      // track title/author for lane header
-
-async function checkTracksWithAnalysis(trackIds) {
-  const map = {};
-  const checks = trackIds.map(id =>
-    fetch(`/api/tracks/${id}/analysis`)
-      .then(r => r.ok ? r.json() : null)
-      .then(a => { if (a) map[id] = true; })
-      .catch(() => {})
-  );
-  await Promise.all(checks);
-  return map;
-}
 
 async function analyzeTrackWaveform(trackId, btn) {
   if (btn.disabled) return;
@@ -1513,93 +1346,6 @@ document.getElementById('btnBlackout').addEventListener('click', async () => {
 
 // Fetch initial DMX output state
 fetch('/api/dmx/output').then(r => r.json()).then(r => { seqDmxOutputOn = r.enabled; updateSeqOutputToggle(); }).catch(() => {});
-
-// ═══════════════════════════════════════════════════════════════
-//  Audio Preview Player
-// ═══════════════════════════════════════════════════════════════
-let audioCurrentTrackId = null;
-
-function loadAudioForTrack(trackId, trackName) {
-  const player = document.getElementById('seqAudioPlayer');
-  const audioEl = document.getElementById('audioElement');
-  const label = document.getElementById('audioTrackLabel');
-
-  if (!trackId) {
-    player.style.display = 'none';
-    audioEl.src = '';
-    audioCurrentTrackId = null;
-    return;
-  }
-
-  // Only reload if different track
-  if (audioCurrentTrackId === trackId) {
-    player.style.display = '';
-    return;
-  }
-
-  audioCurrentTrackId = trackId;
-  audioEl.src = `/api/tracks/${trackId}/audio`;
-  audioEl.volume = parseFloat(document.getElementById('audioVolume').value);
-  label.textContent = trackName || `Track #${trackId}`;
-  player.style.display = '';
-}
-
-function formatAudioTime(sec) {
-  if (!sec || isNaN(sec)) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-(function initAudioPlayer() {
-  const audioEl = document.getElementById('audioElement');
-  const playBtn = document.getElementById('audioPlayBtn');
-  const stopBtn = document.getElementById('audioStopBtn');
-  const volSlider = document.getElementById('audioVolume');
-  const timeDisplay = document.getElementById('audioTimeDisplay');
-  const syncCheck = document.getElementById('audioSyncPlayhead');
-
-  playBtn.addEventListener('click', () => {
-    if (!audioEl.src) return;
-    if (audioEl.paused) {
-      // Seek to current playhead position before playing
-      if (syncCheck.checked && seqCurrentSeq) {
-        audioEl.currentTime = seqPlayheadMs / 1000;
-      }
-      audioEl.play();
-      playBtn.innerHTML = '&#10074;&#10074;'; // pause icon
-    } else {
-      audioEl.pause();
-      playBtn.innerHTML = '&#9654;';
-    }
-  });
-
-  stopBtn.addEventListener('click', () => {
-    audioEl.pause();
-    audioEl.currentTime = 0;
-    playBtn.innerHTML = '&#9654;';
-  });
-
-  volSlider.addEventListener('input', () => {
-    audioEl.volume = parseFloat(volSlider.value);
-  });
-
-  audioEl.addEventListener('timeupdate', () => {
-    const cur = audioEl.currentTime;
-    const dur = audioEl.duration || 0;
-    timeDisplay.textContent = `${formatAudioTime(cur)} / ${formatAudioTime(dur)}`;
-
-    // Sync sequencer playhead with audio position
-    if (syncCheck.checked && !audioEl.paused && seqCurrentSeq) {
-      seqPlayheadMs = cur * 1000;
-      updatePlayhead();
-    }
-  });
-
-  audioEl.addEventListener('ended', () => {
-    playBtn.innerHTML = '&#9654;';
-  });
-})();
 
 // ═══════════════════════════════════════════════════════════════
 //  Sequencer (loaded from external file)

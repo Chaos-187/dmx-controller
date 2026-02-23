@@ -94,6 +94,47 @@ function checkFfmpeg() {
 }
 
 /**
+ * Get the ffmpeg version string, or null if unavailable.
+ * @returns {Promise<string|null>}
+ */
+function getFfmpegVersion() {
+  return new Promise((resolve) => {
+    let out = '';
+    const proc = spawn(getFfmpegPath(), ['-version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    proc.stdout.on('data', d => { out += d; });
+    proc.on('error', () => resolve(null));
+    proc.on('close', (code) => {
+      if (code !== 0) return resolve(null);
+      const m = out.match(/ffmpeg version ([^\s]+)/);
+      resolve(m ? m[1] : out.split('\n')[0].trim() || null);
+    });
+  });
+}
+
+/**
+ * Get the ffprobe version string, or null if unavailable.
+ * @returns {Promise<string|null>}
+ */
+function getFfprobeVersion() {
+  return new Promise((resolve) => {
+    const probePath = (() => {
+      const local = path.join(PROJECT_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+      if (fs.existsSync(local)) return local;
+      return 'ffprobe';
+    })();
+    let out = '';
+    const proc = spawn(probePath, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    proc.stdout.on('data', d => { out += d; });
+    proc.on('error', () => resolve(null));
+    proc.on('close', (code) => {
+      if (code !== 0) return resolve(null);
+      const m = out.match(/ffprobe version ([^\s]+)/);
+      resolve(m ? m[1] : out.split('\n')[0].trim() || null);
+    });
+  });
+}
+
+/**
  * Get audio metadata using ffmpeg (no ffprobe dependency).
  * Parses the stderr info lines that ffmpeg prints for the input file.
  *
@@ -1191,4 +1232,4 @@ function analyzeTrack(filePath, opts = {}) {
 
 // ─── Export ─────────────────────────────────────────────────────────────────
 
-module.exports = { analyzeTrack, checkFfmpeg, probeFile, detectSections, detectBeats, beatsToBarBoundaries, ANALYSIS_VERSION, SECTION_COLORS, DEFAULTS };
+module.exports = { analyzeTrack, checkFfmpeg, getFfmpegVersion, getFfprobeVersion, probeFile, detectSections, detectBeats, beatsToBarBoundaries, ANALYSIS_VERSION, SECTION_COLORS, DEFAULTS };
