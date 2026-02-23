@@ -121,14 +121,15 @@ console.error = function (...args) {
   _broadcastLog('error', args);
 };
 
-// Throttled state broadcast (send full state at ~30fps max)
+// Throttled state broadcast (send full state at ~15fps max)
+// 15fps is plenty for UI updates and halves the WebSocket traffic vs 30fps
 let broadcastTimer = null;
 function scheduleBroadcast() {
   if (broadcastTimer) return;
   broadcastTimer = setTimeout(() => {
     broadcastTimer = null;
     broadcast({ type: 'state', state });
-  }, 33); // ~30fps
+  }, 66); // ~15fps
 }
 
 // ─── OS2L Message Handler (subscribed triggers) ────────────────────────────
@@ -2702,7 +2703,8 @@ function startPlaybackTimer(deck) {
   deckSeq.startWall = Date.now();
   deckSeq.startOffset = deckSeq.currentTimeMs || 0;
 
-  const TICK_MS = 25; // ~40 Hz
+  const TICK_MS = 25; // ~40 Hz for DMX processing
+  let _lastSeqTimeBroadcast = 0;
   playbackTimers[deck] = setInterval(() => {
     const ds = activeSequences[deck];
     if (!ds || !ds.playing) { stopPlaybackTimer(deck); return; }
@@ -2721,8 +2723,12 @@ function startPlaybackTimer(deck) {
 
     processSequenceAtTime(deck, ds.currentTimeMs);
 
-    // Broadcast playhead position to frontend
-    broadcast({ type: 'seq_time', deck, timeMs: ds.currentTimeMs });
+    // Broadcast playhead position to frontend (throttled to ~15Hz to reduce WS traffic)
+    const now = Date.now();
+    if (now - _lastSeqTimeBroadcast >= 66) {
+      _lastSeqTimeBroadcast = now;
+      broadcast({ type: 'seq_time', deck, timeMs: ds.currentTimeMs });
+    }
   }, TICK_MS);
 
   console.log(`[SEQ] Started standalone playback timer for deck ${deck}`);

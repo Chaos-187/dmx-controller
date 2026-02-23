@@ -539,19 +539,34 @@ function connect() {
     document.getElementById('statusText').textContent = 'Connected';
   };
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
+    // Fast-path: skip messages the sequencer page never uses (server_log is very frequent)
+    // Check the raw string before paying for JSON.parse
+    const raw = e.data;
+    if (raw.indexOf('"server_log"') !== -1 || raw.indexOf('"log"') !== -1 ||
+        raw.indexOf('"beat"') !== -1 || raw.indexOf('"touchFixtureDisable"') !== -1 ||
+        raw.indexOf('"touchBlackoutHold"') !== -1 || raw.indexOf('"masterDimmer"') !== -1 ||
+        raw.indexOf('"effectSpeed"') !== -1 || raw.indexOf('"scene_activated"') !== -1 ||
+        raw.indexOf('"scene_deactivated"') !== -1 || raw.indexOf('"os2l_button_map_created"') !== -1)
+      return;
+
+    const msg = JSON.parse(raw);
     if (msg.type === 'state') {
       // Update connection status
       updateConnection(msg.state.connected, msg.state.vdjAddress);
-      // Update sequencer playhead from VDJ time
+      // Buffer playhead time — actual DOM update happens in rAF loop
       for (let d = 1; d <= 4; d++) {
         const dk = msg.state.decks[d];
-        if (dk) updateSeqPlayhead(d, dk.time || 0);
+        if (dk) _pendingPlayheadTime[d] = dk.time || 0;
       }
+      _playheadDirty = true;
     }
     else if (msg.type === 'connection') updateConnection(msg.connected, msg.address);
     else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing') handleSeqWsMessage(msg);
-    else if (msg.type === 'seq_time') handleSeqTimeUpdate(msg);
+    else if (msg.type === 'seq_time') {
+      // Buffer seq_time — actual DOM update happens in rAF loop
+      _pendingPlayheadTime[msg.deck] = msg.timeMs;
+      _playheadDirty = true;
+    }
     else if (msg.type === 'analysis_complete' || msg.type === 'analysis_error' || msg.type === 'analysis_batch_complete') handleAnalysisWsMessage(msg);
     else if (msg.type === 'seq_batch_progress' || msg.type === 'seq_batch_complete') handleBulkGenWsMessage(msg);
     else if (msg.type === 'dmxOutput') { seqDmxOutputOn = msg.enabled; updateSeqOutputToggle(); }
@@ -1369,6 +1384,20 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-page').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
   });
 });
+
+// ── Throttled playhead update loop (once per animation frame) ──
+const _pendingPlayheadTime = {};  // { deckNum: timeMs }
+let _playheadDirty = false;
+function _playheadRAFLoop() {
+  if (_playheadDirty) {
+    _playheadDirty = false;
+    for (const d in _pendingPlayheadTime) {
+      updateSeqPlayhead(+d, _pendingPlayheadTime[d]);
+    }
+  }
+  requestAnimationFrame(_playheadRAFLoop);
+}
+requestAnimationFrame(_playheadRAFLoop);
 
 // Auto-load sequencer, tracks, and connect WebSocket
 connect();
