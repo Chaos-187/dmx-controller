@@ -795,6 +795,15 @@
     .ch-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
     .ch-add { margin-top: 4px; }
 
+    /* Color wheel map editor */
+    .cw-editor-rows { margin-top: 8px; }
+    .cw-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .cw-row input[type="number"] { width: 60px; }
+    .cw-row input[type="text"] { flex: 1; min-width: 80px; }
+    .cw-row input[type="color"] { width: 36px; height: 28px; padding: 1px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); cursor: pointer; }
+    .cw-row .cw-hex { width: 80px; font-family: monospace; font-size: 12px; }
+    .cw-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
     /* ═══════════════════════════════════════════════════════════════
        DMX Control Panel
        ═══════════════════════════════════════════════════════════════ */
@@ -1659,6 +1668,7 @@
       <button class="config-sidebar-btn" data-cfgtab="lighting"><span class="cfg-icon">&#9728;</span>Lighting</button>
       <button class="config-sidebar-btn" data-cfgtab="movers"><span class="cfg-icon">&#10146;</span>Movers</button>
       <button class="config-sidebar-btn" data-cfgtab="sequencer"><span class="cfg-icon">&#9836;</span>Sequencer</button>
+      <button class="config-sidebar-btn" data-cfgtab="generator"><span class="cfg-icon">&#9881;</span>Generator</button>
       <button class="config-sidebar-btn" data-cfgtab="effects"><span class="cfg-icon">&#10024;</span>Effects</button>
       <button class="config-sidebar-btn" data-cfgtab="touch-actions"><span class="cfg-icon">&#9654;</span>Touch Actions</button>
       <button class="config-sidebar-btn" data-cfgtab="fixture-library"><span class="cfg-icon">&#128161;</span>Fixture Library</button>
@@ -2187,6 +2197,86 @@
             <tbody id="linkedSeqBody"></tbody>
           </table>
           <div style="font-size:11px;color:var(--text-dim);margin-top:8px" id="linkedSeqCount"></div>
+        </div>
+      </div>
+
+      <!-- ─── Generator Config ─── -->
+      <div class="config-sub-page" id="cfgpage-generator">
+        <div class="config-section">
+          <h3>Sequence Generator Settings</h3>
+          <p class="config-desc">Adjust the parameters used when auto-generating light sequences. Changes apply to all future sequence generation. Click "Reset to Defaults" to restore factory settings.</p>
+
+          <!-- Speed DMX -->
+          <div class="config-card">
+            <h4>Motor Speed DMX Values</h4>
+            <p class="config-desc">DMX values sent to the speed channel on movers. Lower = faster motor speed on most fixtures.</p>
+            <div class="config-row">
+              <label>Slow</label>
+              <input type="number" id="genSpeedSlow" min="0" max="255" style="width:70px">
+            </div>
+            <div class="config-row">
+              <label>Medium</label>
+              <input type="number" id="genSpeedMedium" min="0" max="255" style="width:70px">
+            </div>
+            <div class="config-row">
+              <label>Fast</label>
+              <input type="number" id="genSpeedFast" min="0" max="255" style="width:70px">
+            </div>
+          </div>
+
+          <!-- Section Styles -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Section Styles</h4>
+            <p class="config-desc">Per-section intensity ranges, strobe chances, and cue density. Editable as JSON.</p>
+            <textarea id="genSectionStyles" rows="14" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Movement Styles -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Movement Styles</h4>
+            <p class="config-desc">Per-section mover movement parameters: barsPerMove, range, and speed. JSON format.</p>
+            <textarea id="genMovementStyles" rows="12" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Color Palettes -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Color Palettes</h4>
+            <p class="config-desc">Named palettes with per-section color pairs. Each palette maps section labels to arrays of [color1, color2] hex pairs. JSON format.</p>
+            <textarea id="genColorPalettes" rows="16" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Genre Presets -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Genre Presets</h4>
+            <p class="config-desc">Per-genre multipliers for intensity, strobes, cue density, accent pulses, and preferred palette. JSON format.</p>
+            <textarea id="genGenrePresets" rows="14" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Genre Aliases -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Genre Aliases</h4>
+            <p class="config-desc">Maps genre strings (from VDJ metadata) to preset keys above. JSON format.</p>
+            <textarea id="genGenreAliases" rows="10" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Section Effect Types -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Section Effect Types</h4>
+            <p class="config-desc">Which effect types are allowed per-section, split into regular and cellAware lists. JSON format.</p>
+            <textarea id="genSectionEffects" rows="12" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Cell Patterns -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>Multi-Cell Patterns</h4>
+            <p class="config-desc">Per-section list of multi-cell pattern names used for LED bars and multi-cell fixtures. JSON format.</p>
+            <textarea id="genCellPatterns" rows="10" style="width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" id="btnSaveGenConfig">Save Generator Config</button>
+            <button class="btn btn-sm" id="btnResetGenConfig" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
+          </div>
         </div>
       </div>
 
@@ -3035,6 +3125,12 @@
       </div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tDuplicateHint"></div>
     </div>
+    <div class="form-group" id="colorWheelGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
+      <label>Color Wheel Map</label>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Map DMX values to physical color wheel positions. Used by the sequence generator to match RGB palette colors to the nearest available wheel slot.</div>
+      <div class="cw-editor-rows" id="cwEditorRows"></div>
+      <button class="btn btn-secondary btn-sm" id="btnAddCwColor" type="button">+ Add Color</button>
+    </div>
     <div class="form-error" id="typeError"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('typeModal')">Cancel</button>
@@ -3498,8 +3594,11 @@ function updateState(state) {
 
     document.getElementById(`bpm-${d}`).textContent = dk.bpm > 0 ? dk.bpm.toFixed(1) : '---';
     const rawTime = dk.time || 0;
-    const secs = Math.floor(rawTime > 86400 ? rawTime / 1000 : rawTime);
-    const timeStr = `${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
+    const totalSecs = rawTime / 1000;
+    const mins = Math.floor(totalSecs / 60);
+    const secs = Math.floor(totalSecs % 60);
+    const tenths = Math.floor((totalSecs * 10) % 10);
+    const timeStr = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}.${tenths}`;
     document.getElementById(`time-${d}`).textContent = timeStr;
     document.getElementById(`beat-${d}`).textContent = dk.beatpos !== undefined ? dk.beatpos.toFixed(2) : '-';
     const fbRaw = dk.firstbeat || 0;
@@ -3533,12 +3632,15 @@ function updateState(state) {
     // Update waveform playhead & time overlay
     const wfInfo = deckWaveforms[d];
     if (wfInfo && wfInfo.durMs > 0) {
-      const elapsedSecs = rawTime > 86400 ? rawTime / 1000 : rawTime;
+      const elapsedSecs = rawTime / 1000;
       const pct = Math.min(100, Math.max(0, (elapsedSecs * 1000 / wfInfo.durMs) * 100));
       document.getElementById(`wf-playhead-${d}`).style.left = `${pct}%`;
       document.getElementById(`wf-played-${d}`).style.width = `${pct}%`;
-      const remSecs = Math.max(0, Math.floor((wfInfo.durMs / 1000) - elapsedSecs));
-      document.getElementById(`wf-time-${d}`).textContent = `-${String(Math.floor(remSecs/60)).padStart(2,'0')}:${String(remSecs%60).padStart(2,'0')}`;
+      const remTotal = Math.max(0, (wfInfo.durMs / 1000) - elapsedSecs);
+      const remMins = Math.floor(remTotal / 60);
+      const remSecs = Math.floor(remTotal % 60);
+      const remTenths = Math.floor((remTotal * 10) % 10);
+      document.getElementById(`wf-time-${d}`).textContent = `-${String(remMins).padStart(2,'0')}:${String(remSecs).padStart(2,'0')}.${remTenths}`;
     } else {
       document.getElementById(`wf-time-${d}`).textContent = '';
     }
@@ -4587,6 +4689,8 @@ function renderChannelsEditor() {
       renderChannelsEditor();
     });
   });
+  // Update color wheel section visibility when channels change
+  updateColorWheelVisibility();
 }
 
 window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs(); };
@@ -4654,7 +4758,72 @@ document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
   hint.style.color = 'var(--accent)';
 });
 
+/* ── Color Wheel Map Editor ── */
+let cwColors = []; // current color wheel map entries [{dmx_value, color_hex, label}]
+
+function updateColorWheelVisibility() {
+  // Show the color wheel editor section if ANY mode has a color_wheel channel
+  // Check typeChannels (current mode being edited) and other modes in typeModes
+  const currentHas = typeChannels.some(ch => ch.type === 'color_wheel');
+  const othersHave = typeModes.some((m, i) => i !== activeMode && (m.channels || []).some(ch => ch.type === 'color_wheel'));
+  document.getElementById('colorWheelGroup').style.display = (currentHas || othersHave) ? '' : 'none';
+}
+
+function renderCwEditor() {
+  const container = document.getElementById('cwEditorRows');
+  container.innerHTML = '';
+  cwColors.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'cw-row';
+    row.innerHTML = `
+      <span style="font-size:11px;color:var(--text-dim);width:16px;padding-top:2px">${i+1}</span>
+      <input type="number" value="${c.dmx_value}" min="0" max="255" title="DMX value" data-idx="${i}" data-field="dmx_value">
+      <input type="color" value="${c.color_hex}" data-idx="${i}" data-field="color_hex_picker">
+      <input type="text" class="cw-hex" value="${esc(c.color_hex)}" data-idx="${i}" data-field="color_hex" placeholder="#RRGGBB">
+      <input type="text" value="${esc(c.label || '')}" data-idx="${i}" data-field="label" placeholder="Color name">
+      <button type="button" class="cw-remove" data-idx="${i}">&times;</button>`;
+    container.appendChild(row);
+  });
+
+  // Bind field changes
+  container.querySelectorAll('input').forEach(el => {
+    el.addEventListener('change', () => {
+      const idx = +el.dataset.idx;
+      const field = el.dataset.field;
+      if (field === 'dmx_value') {
+        cwColors[idx].dmx_value = Math.max(0, Math.min(255, +el.value));
+      } else if (field === 'color_hex_picker') {
+        cwColors[idx].color_hex = el.value;
+        renderCwEditor(); // sync hex text input
+      } else if (field === 'color_hex') {
+        const v = el.value.trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+          cwColors[idx].color_hex = v;
+          renderCwEditor(); // sync color picker
+        }
+      } else if (field === 'label') {
+        cwColors[idx].label = el.value;
+      }
+    });
+  });
+
+  // Bind remove buttons
+  container.querySelectorAll('.cw-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      cwColors.splice(+btn.dataset.idx, 1);
+      renderCwEditor();
+    });
+  });
+}
+
+document.getElementById('btnAddCwColor').addEventListener('click', () => {
+  const lastDmx = cwColors.length > 0 ? cwColors[cwColors.length - 1].dmx_value + 18 : 0;
+  cwColors.push({ dmx_value: Math.min(lastDmx, 255), color_hex: '#ffffff', label: '' });
+  renderCwEditor();
+});
+
 async function openTypeModal(typeId) {
+  cwColors = []; // reset color wheel map
   if (typeId) {
     const t = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json());
     document.getElementById('typeModalTitle').textContent = 'Edit Fixture Type';
@@ -4672,6 +4841,11 @@ async function openTypeModal(typeId) {
     } else {
       typeModes = [{ name: 'Default', short_name: '', channels: t.channels ? t.channels.map(c => ({...c})) : [] }];
     }
+    // Load color wheel map
+    try {
+      const cwData = await fetch(`/api/fixture-types/${typeId}/color-wheel`).then(r=>r.json());
+      if (Array.isArray(cwData)) cwColors = cwData.map(c => ({ dmx_value: c.dmx_value, color_hex: c.color_hex, label: c.label || '' }));
+    } catch(e) { /* no color wheel map */ }
   } else {
     document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
     document.getElementById('typeEditId').value = '';
@@ -4687,6 +4861,8 @@ async function openTypeModal(typeId) {
   renderModeTabs();
   renderChannelsEditor();
   updateMultiCellVisibility();
+  updateColorWheelVisibility();
+  renderCwEditor();
   // Reset duplicate section
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('tDuplicateHint').textContent = '';
@@ -4738,6 +4914,22 @@ document.getElementById('btnSaveType').addEventListener('click', async () => {
   const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await res.json();
   if (data.error) return showError('typeError', data.error);
+
+  // Save color wheel map if applicable
+  const savedId = editId || data.id;
+  const hasColorWheel = modes.some(m => m.channels.some(ch => ch.type === 'color_wheel'));
+  if (savedId && hasColorWheel && cwColors.length > 0) {
+    const sorted = cwColors.map((c, i) => ({ dmx_value: c.dmx_value, color_hex: c.color_hex, label: c.label, sort_order: i + 1 }));
+    await fetch(`/api/fixture-types/${savedId}/color-wheel`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ colors: sorted })
+    });
+  } else if (savedId && !hasColorWheel) {
+    // Remove color wheel map if no color_wheel channel anymore
+    await fetch(`/api/fixture-types/${savedId}/color-wheel`, { method: 'DELETE' });
+  }
+
   closeModal('typeModal');
   loadTypes();
 });
@@ -5031,6 +5223,7 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     if (btn.dataset.cfgtab === 'lighting') loadLightingConfig();
     if (btn.dataset.cfgtab === 'movers') loadMoverConfig();
     if (btn.dataset.cfgtab === 'sequencer') loadSequencerConfig();
+    if (btn.dataset.cfgtab === 'generator') loadGeneratorConfig();
     if (btn.dataset.cfgtab === 'effects') loadEffectsConfig();
     if (btn.dataset.cfgtab === 'touch-actions') loadTouchActionsConfig();
     if (btn.dataset.cfgtab === 'database') loadDatabaseConfig();
@@ -5306,6 +5499,119 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_deck_fader_dimmer', document.getElementById('cfgSeqDeckFaderDimmer').checked ? '1' : '0'],
     ['seq_end_action', document.getElementById('cfgSeqEndAction').value],
   ], 'btnSaveSeqConfig');
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Config — Generator Settings
+// ═══════════════════════════════════════════════════════════════
+let genConfig = {};
+
+async function loadGeneratorConfig() {
+  try {
+    genConfig = await fetch('/api/generator-config').then(r => r.json());
+  } catch (e) {
+    console.warn('Failed to load generator config:', e);
+    genConfig = {};
+  }
+  renderGeneratorConfig();
+}
+
+function renderGeneratorConfig() {
+  // Speed DMX
+  const speedDmx = genConfig.gen_speed_dmx || { slow: 200, medium: 140, fast: 40 };
+  document.getElementById('genSpeedSlow').value = speedDmx.slow || 200;
+  document.getElementById('genSpeedMedium').value = speedDmx.medium || 140;
+  document.getElementById('genSpeedFast').value = speedDmx.fast || 40;
+
+  // JSON textareas
+  const jsonFields = [
+    ['genSectionStyles', 'gen_section_styles'],
+    ['genMovementStyles', 'gen_movement_styles'],
+    ['genColorPalettes', 'gen_color_palettes'],
+    ['genGenrePresets', 'gen_genre_presets'],
+    ['genGenreAliases', 'gen_genre_aliases'],
+    ['genSectionEffects', 'gen_section_effects'],
+    ['genCellPatterns', 'gen_cell_patterns'],
+  ];
+  for (const [elId, key] of jsonFields) {
+    const el = document.getElementById(elId);
+    if (el && genConfig[key] !== undefined) {
+      el.value = JSON.stringify(genConfig[key], null, 2);
+    }
+  }
+}
+
+document.getElementById('btnSaveGenConfig').addEventListener('click', async () => {
+  const btn = document.getElementById('btnSaveGenConfig');
+  const origText = btn.textContent;
+  try {
+    // Collect speed DMX
+    const speedDmx = {
+      slow: parseInt(document.getElementById('genSpeedSlow').value) || 200,
+      medium: parseInt(document.getElementById('genSpeedMedium').value) || 140,
+      fast: parseInt(document.getElementById('genSpeedFast').value) || 40,
+    };
+
+    const updates = [['gen_speed_dmx', speedDmx]];
+
+    // Parse JSON textareas
+    const jsonFields = [
+      ['genSectionStyles', 'gen_section_styles'],
+      ['genMovementStyles', 'gen_movement_styles'],
+      ['genColorPalettes', 'gen_color_palettes'],
+      ['genGenrePresets', 'gen_genre_presets'],
+      ['genGenreAliases', 'gen_genre_aliases'],
+      ['genSectionEffects', 'gen_section_effects'],
+      ['genCellPatterns', 'gen_cell_patterns'],
+    ];
+
+    for (const [elId, key] of jsonFields) {
+      const el = document.getElementById(elId);
+      if (el && el.value.trim()) {
+        try {
+          const parsed = JSON.parse(el.value);
+          updates.push([key, parsed]);
+        } catch (parseErr) {
+          btn.textContent = `Invalid JSON: ${key}`;
+          btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)';
+          setTimeout(() => { btn.textContent = origText; btn.style.borderColor = ''; btn.style.color = ''; }, 2500);
+          return;
+        }
+      }
+    }
+
+    // Save all
+    await Promise.all(updates.map(([key, value]) =>
+      fetch(`/api/generator-config/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      })
+    ));
+
+    btn.textContent = 'Saved!';
+    btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
+  } catch (e) {
+    btn.textContent = 'Error!';
+    btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)';
+  }
+  setTimeout(() => { btn.textContent = origText; btn.style.borderColor = ''; btn.style.color = ''; }, 1500);
+});
+
+document.getElementById('btnResetGenConfig').addEventListener('click', async () => {
+  if (!confirm('Reset all generator settings to factory defaults? This cannot be undone.')) return;
+  const btn = document.getElementById('btnResetGenConfig');
+  const origText = btn.textContent;
+  try {
+    genConfig = await fetch('/api/generator-config/reset', { method: 'POST' }).then(r => r.json());
+    renderGeneratorConfig();
+    btn.textContent = 'Reset!';
+    btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
+  } catch (e) {
+    btn.textContent = 'Error!';
+    btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)';
+  }
+  setTimeout(() => { btn.textContent = origText; btn.style.borderColor = ''; btn.style.color = ''; }, 1500);
 });
 
 // ═══════════════════════════════════════════════════════════════

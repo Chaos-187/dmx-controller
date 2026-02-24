@@ -170,6 +170,17 @@ function init() {
       created_at  TEXT    DEFAULT (datetime('now'))
     );
 
+    -- Color wheel color maps (per fixture type)
+    CREATE TABLE IF NOT EXISTS color_wheel_colors (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
+      dmx_value       INTEGER NOT NULL,
+      color_hex       TEXT    NOT NULL DEFAULT '#FFFFFF',
+      label           TEXT    DEFAULT '',
+      sort_order      INTEGER DEFAULT 0,
+      UNIQUE(fixture_type_id, dmx_value)
+    );
+
     -- Effects library
     CREATE TABLE IF NOT EXISTS effects (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,6 +450,61 @@ function init() {
   // Only truly multicell-specific effects are restricted
   db.exec("UPDATE effects SET fixture_target = 'multicell' WHERE fixture_target = 'all' AND type IN ('segments','ripple','cell_strobe','gradient')");
   db.exec("UPDATE effects SET fixture_target = 'moving_head' WHERE fixture_target = 'all' AND type IN ('pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod')");
+
+  // Seed default generator config if missing
+  seedDefaultGeneratorConfig();
+
+  // Seed default mover presets from hardcoded positions if table is empty
+  seedDefaultMoverPresets();
+
+  // Migration: add 60W Spot Moving Head if not present
+  const has60wSpot = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = 'Generic 60W Spot Moving Head'").get().c;
+  if (has60wSpot === 0) {
+    createFixtureType({
+      name: 'Generic 60W Spot Moving Head',
+      manufacturer: 'Generic',
+      category: 'moving_head',
+      channels: [
+        { channel_number: 1, name: 'Pan', type: 'pan', default_value: 128 },
+        { channel_number: 2, name: 'Pan Fine', type: 'pan_fine', default_value: 0 },
+        { channel_number: 3, name: 'Tilt', type: 'tilt', default_value: 128 },
+        { channel_number: 4, name: 'Tilt Fine', type: 'tilt_fine', default_value: 0 },
+        { channel_number: 5, name: 'Color Wheel', type: 'color_wheel', default_value: 0,
+          ranges: [
+            { min: 0, max: 9, label: 'No function', type: 'other' },
+            { min: 10, max: 163, label: 'Color effects', type: 'color_wheel' },
+            { min: 164, max: 210, label: 'CCW flow', type: 'macro' },
+            { min: 211, max: 255, label: 'CW flow', type: 'macro' },
+          ] },
+        { channel_number: 6, name: 'Gobo', type: 'gobo', default_value: 0,
+          ranges: [
+            { min: 0, max: 9, label: 'No function', type: 'other' },
+            { min: 10, max: 79, label: 'Gobo effects', type: 'gobo' },
+            { min: 80, max: 149, label: 'Bouncing', type: 'gobo' },
+            { min: 150, max: 200, label: 'CCW rotation', type: 'macro' },
+            { min: 201, max: 255, label: 'CW water wave', type: 'macro' },
+          ] },
+        { channel_number: 7, name: 'Strobe', type: 'strobe', default_value: 0 },
+        { channel_number: 8, name: 'Dimmer', type: 'dimmer', default_value: 0 },
+        { channel_number: 9, name: 'Speed', type: 'speed', default_value: 0 },
+        { channel_number: 10, name: 'Macro', type: 'macro', default_value: 0,
+          ranges: [
+            { min: 0, max: 50, label: 'No function', type: 'other' },
+            { min: 51, max: 151, label: 'Fast moving', type: 'macro' },
+            { min: 152, max: 255, label: 'Sound control', type: 'macro' },
+          ] },
+        { channel_number: 11, name: 'Reset', type: 'other', default_value: 0,
+          ranges: [
+            { min: 0, max: 254, label: 'No function', type: 'other' },
+            { min: 255, max: 255, label: 'Reset', type: 'other' },
+          ] },
+      ],
+    });
+    console.log('[DB] Added Generic 60W Spot Moving Head fixture type');
+  }
+
+  // Seed default color wheel map for 60W Spot Moving Head
+  seedDefaultColorWheelMap();
 
   console.log(`[DB] Opened ${DB_PATH}  (${subCount > 0 ? subCount + ' subscriptions' : 'seeded subs'}, ${count > 0 ? count + ' fixture types' : 'seeded defaults'}, ${effectCount > 0 ? effectCount + ' effects' : 'seeded effects'})`);
   return db;
@@ -1000,6 +1066,38 @@ function seedDefaults() {
     chR(typeId, modeId, 14, 'Reset', 'other', 0, [
       { min: 0, max: 254, label: 'No function', type: 'other' },
       { min: 255, max: 255, label: 'Factory Reset', type: 'other' }
+    ]);
+
+    // 9 — Generic 60W Spot Moving Head (11ch)
+    ({ typeId, modeId } = addType('Generic 60W Spot Moving Head', 'Generic', 'moving_head', 11));
+    ch(typeId, modeId, 1, 'Pan', 'pan', 128);
+    ch(typeId, modeId, 2, 'Pan Fine', 'pan_fine', 0);
+    ch(typeId, modeId, 3, 'Tilt', 'tilt', 128);
+    ch(typeId, modeId, 4, 'Tilt Fine', 'tilt_fine', 0);
+    chR(typeId, modeId, 5, 'Color Wheel', 'color_wheel', 0, [
+      { min: 0, max: 9, label: 'No function', type: 'other' },
+      { min: 10, max: 163, label: 'Color effects', type: 'color_wheel' },
+      { min: 164, max: 210, label: 'CCW flow', type: 'macro' },
+      { min: 211, max: 255, label: 'CW flow', type: 'macro' }
+    ]);
+    chR(typeId, modeId, 6, 'Gobo', 'gobo', 0, [
+      { min: 0, max: 9, label: 'No function', type: 'other' },
+      { min: 10, max: 79, label: 'Gobo effects', type: 'gobo' },
+      { min: 80, max: 149, label: 'Bouncing', type: 'gobo' },
+      { min: 150, max: 200, label: 'CCW rotation', type: 'macro' },
+      { min: 201, max: 255, label: 'CW water wave', type: 'macro' }
+    ]);
+    ch(typeId, modeId, 7, 'Strobe', 'strobe', 0);
+    ch(typeId, modeId, 8, 'Dimmer', 'dimmer', 0);
+    ch(typeId, modeId, 9, 'Speed', 'speed', 0);
+    chR(typeId, modeId, 10, 'Macro', 'macro', 0, [
+      { min: 0, max: 50, label: 'No function', type: 'other' },
+      { min: 51, max: 151, label: 'Fast moving', type: 'macro' },
+      { min: 152, max: 255, label: 'Sound control', type: 'macro' }
+    ]);
+    chR(typeId, modeId, 11, 'Reset', 'other', 0, [
+      { min: 0, max: 254, label: 'No function', type: 'other' },
+      { min: 255, max: 255, label: 'Reset', type: 'other' }
     ]);
   });
 
@@ -1596,7 +1694,7 @@ function clearTracks() {
 function getFixtureChannelMap() {
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
-           f.home_pan, f.home_tilt, f.mode_id,
+           f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
            ft.name as type_name, ft.category,
            ftm.name as mode_name
@@ -1605,6 +1703,9 @@ function getFixtureChannelMap() {
     LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
     ORDER BY f.universe, f.address
   `).all();
+
+  // Pre-load all color wheel maps (keyed by fixture_type_id)
+  const cwMaps = getAllColorWheelMaps();
 
   return fixtures.map(f => {
     // Get channels from the mode (or fall back to fixture_type_id)
@@ -1620,10 +1721,12 @@ function getFixtureChannelMap() {
     ).all(f.id).map(r => r.group_id);
     const cellNums = channels.filter(ch => ch.cell != null).map(ch => ch.cell);
     const cell_count = cellNums.length > 0 ? Math.max(...cellNums) : 0;
+    const color_wheel_map = cwMaps[f.fixture_type_id] || null;
     return {
       ...f,
       group_ids,
       cell_count,
+      color_wheel_map,
       channels: channels.map(ch => {
         // Derive per-channel invert from fixture-level pan/tilt invert settings
         const isPan = ch.type === 'pan' || ch.type === 'pan_fine';
@@ -1640,6 +1743,103 @@ function getFixtureChannelMap() {
       }),
     };
   });
+}
+
+// ─── Color Wheel Maps ───────────────────────────────────────────────────────
+
+/**
+ * Seed default color wheel map for the Generic 60W Spot Moving Head.
+ * DMX values represent the start of each color's range on the physical wheel.
+ */
+function seedDefaultColorWheelMap() {
+  const ft = db.prepare("SELECT id FROM fixture_types WHERE name = 'Generic 60W Spot Moving Head'").get();
+  if (!ft) return;
+  const existing = db.prepare('SELECT COUNT(*) as c FROM color_wheel_colors WHERE fixture_type_id = ?').get(ft.id).c;
+  // Re-seed if count doesn't match (schema was updated)
+  if (existing > 0 && existing === 14) return;
+
+  const DEFAULT_60W_COLORS = [
+    { dmx_value: 0,   color_hex: '#FFFFFF', label: 'White' },
+    { dmx_value: 10,  color_hex: '#FF0000', label: 'Red' },
+    { dmx_value: 20,  color_hex: '#00FF00', label: 'Green' },
+    { dmx_value: 30,  color_hex: '#0000FF', label: 'Blue' },
+    { dmx_value: 40,  color_hex: '#FFFF00', label: 'Yellow' },
+    { dmx_value: 50,  color_hex: '#FF8000', label: 'Flush Orange' },
+    { dmx_value: 60,  color_hex: '#00FFFF', label: 'Cyan / Aqua' },
+    { dmx_value: 70,  color_hex: '#FF00FF', label: 'Magenta' },
+    { dmx_value: 80,  color_hex: '#7F7FC8', label: 'Moody Blue' },
+    { dmx_value: 90,  color_hex: '#B4B4FF', label: 'Sail' },
+    { dmx_value: 100, color_hex: '#FF4600', label: 'Vermilion' },
+    { dmx_value: 110, color_hex: '#7FFF7F', label: 'Pastel Green' },
+    { dmx_value: 120, color_hex: '#00B4B4', label: 'Bondi Blue' },
+    { dmx_value: 130, color_hex: '#7F7F00', label: 'Olive' },
+  ];
+
+  const ins = db.prepare(
+    'INSERT INTO color_wheel_colors (fixture_type_id, dmx_value, color_hex, label, sort_order) VALUES (?, ?, ?, ?, ?)'
+  );
+  const seed = db.transaction(() => {
+    db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(ft.id);
+    for (let i = 0; i < DEFAULT_60W_COLORS.length; i++) {
+      const c = DEFAULT_60W_COLORS[i];
+      ins.run(ft.id, c.dmx_value, c.color_hex, c.label, i);
+    }
+  });
+  seed();
+  console.log(`[DB] Seeded color wheel map for Generic 60W Spot Moving Head (${DEFAULT_60W_COLORS.length} colors)`);
+}
+
+/**
+ * Get the color wheel map for a fixture type.
+ * @returns {Array} Array of { id, dmx_value, color_hex, label }
+ */
+function getColorWheelMap(fixtureTypeId) {
+  return db.prepare(
+    'SELECT id, dmx_value, color_hex, label FROM color_wheel_colors WHERE fixture_type_id = ? ORDER BY sort_order, dmx_value'
+  ).all(fixtureTypeId);
+}
+
+/**
+ * Get all color wheel maps, keyed by fixture_type_id.
+ * @returns {Object} { fixture_type_id: [{ dmx_value, color_hex, label }] }
+ */
+function getAllColorWheelMaps() {
+  const rows = db.prepare(
+    'SELECT fixture_type_id, dmx_value, color_hex, label FROM color_wheel_colors ORDER BY fixture_type_id, sort_order, dmx_value'
+  ).all();
+  const maps = {};
+  for (const r of rows) {
+    if (!maps[r.fixture_type_id]) maps[r.fixture_type_id] = [];
+    maps[r.fixture_type_id].push({ dmx_value: r.dmx_value, color_hex: r.color_hex, label: r.label });
+  }
+  return maps;
+}
+
+/**
+ * Set the full color wheel map for a fixture type (replaces existing).
+ * @param {number} fixtureTypeId
+ * @param {Array} colors - Array of { dmx_value, color_hex, label }
+ */
+function setColorWheelMap(fixtureTypeId, colors) {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(fixtureTypeId);
+    const ins = db.prepare(
+      'INSERT INTO color_wheel_colors (fixture_type_id, dmx_value, color_hex, label, sort_order) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (let i = 0; i < colors.length; i++) {
+      const c = colors[i];
+      ins.run(fixtureTypeId, c.dmx_value, c.color_hex || '#FFFFFF', c.label || '', i);
+    }
+  });
+  tx();
+  return getColorWheelMap(fixtureTypeId);
+}
+
+/**
+ * Delete the color wheel map for a fixture type.
+ */
+function deleteColorWheelMap(fixtureTypeId) {
+  db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(fixtureTypeId);
 }
 
 // ─── Fixture Groups ──────────────────────────────────────────────────────────
@@ -1733,6 +1933,311 @@ function updateMoverPreset(id, { name, positions }) {
 function deleteMoverPreset(id) {
   db.prepare('DELETE FROM mover_presets WHERE id = ?').run(id);
   return { deleted: true };
+}
+
+// ─── Default Mover Position Presets (seeded on first run) ───────────────────
+
+const DEFAULT_MOVER_POSITIONS = [
+  { name: 'Center',              pan: 128, tilt: 128 },
+  { name: 'Front Left',          pan: 40,  tilt: 100 },
+  { name: 'Front Right',         pan: 216, tilt: 100 },
+  { name: 'Audience Left',       pan: 80,  tilt: 60  },
+  { name: 'Audience Right',      pan: 176, tilt: 60  },
+  { name: 'Audience Center Far', pan: 128, tilt: 40  },
+  { name: 'Stage Left Up',       pan: 60,  tilt: 160 },
+  { name: 'Stage Right Up',      pan: 196, tilt: 160 },
+  { name: 'Straight Down',       pan: 128, tilt: 200 },
+  { name: 'Left Mid',            pan: 90,  tilt: 128 },
+  { name: 'Right Mid',           pan: 166, tilt: 128 },
+];
+
+function seedDefaultMoverPresets() {
+  const existing = db.prepare('SELECT COUNT(*) as c FROM mover_presets').get().c;
+  if (existing > 0) return;
+
+  // Get all mover fixtures (those with pan + tilt channels)
+  const fixtures = getFixtures();
+  const movers = fixtures.filter(f =>
+    f.channels.some(ch => ch.type === 'pan') &&
+    f.channels.some(ch => ch.type === 'tilt')
+  );
+
+  if (movers.length === 0) return; // no movers configured, skip seeding
+
+  const ins = db.prepare('INSERT INTO mover_presets (name, positions, sort_order) VALUES (?, ?, ?)');
+  const seed = db.transaction(() => {
+    for (let i = 0; i < DEFAULT_MOVER_POSITIONS.length; i++) {
+      const pos = DEFAULT_MOVER_POSITIONS[i];
+      // Create a position entry for every mover fixture
+      const positions = movers.map(fix => ({
+        fixture_id: fix.id, pan: pos.pan, tilt: pos.tilt
+      }));
+      ins.run(pos.name, JSON.stringify(positions), i);
+    }
+  });
+  seed();
+  console.log(`[DB] Seeded ${DEFAULT_MOVER_POSITIONS.length} default mover presets for ${movers.length} mover(s)`);
+}
+
+// ─── Generator Config (stored in config table as JSON) ──────────────────────
+
+const GENERATOR_CONFIG_DEFAULTS = {
+  gen_color_palettes: {
+    vibrant: {
+      label: 'Vibrant',
+      intro:     [[ {r:180,g:0,b:60},   {r:0,g:40,b:200}    ], [ {r:0,g:40,b:180},   {r:160,g:0,b:120}  ], [ {r:120,g:0,b:200}, {r:200,g:60,b:0}   ]],
+      verse:     [[ {r:255,g:0,b:40},   {r:0,g:180,b:120}   ], [ {r:0,g:200,b:80},   {r:255,g:60,b:0}   ], [ {r:200,g:0,b:180}, {r:0,g:120,b:255}  ], [ {r:255,g:120,b:0}, {r:0,g:200,b:200} ]],
+      chorus:    [[ {r:255,g:0,b:60},   {r:255,g:100,b:0}   ], [ {r:255,g:0,b:200},  {r:255,g:60,b:0}   ], [ {r:200,g:0,b:255}, {r:255,g:0,b:80}  ], [ {r:255,g:40,b:0}, {r:200,g:0,b:200} ]],
+      bridge:    [[ {r:255,g:200,b:0},  {r:200,g:0,b:160}   ], [ {r:255,g:0,b:100},  {r:0,g:180,b:255}  ], [ {r:180,g:255,b:0}, {r:255,g:40,b:80}  ]],
+      breakdown: [[ {r:0,g:100,b:200},  {r:120,g:0,b:100}   ], [ {r:100,g:0,b:160},  {r:0,g:80,b:180}   ]],
+      buildup:   [[ {r:255,g:120,b:0},  {r:255,g:0,b:120}   ], [ {r:200,g:80,b:0},   {r:255,g:40,b:200} ]],
+      drop:      [[ {r:255,g:0,b:0},    {r:0,g:0,b:255}     ], [ {r:255,g:0,b:120},  {r:255,g:255,b:0}  ], [ {r:255,g:50,b:0}, {r:200,g:0,b:255} ], [ {r:255,g:0,b:0}, {r:0,g:255,b:0} ]],
+      outro:     [[ {r:120,g:30,b:80},  {r:20,g:10,b:40}    ], [ {r:80,g:40,b:100},  {r:40,g:10,b:30}   ]],
+    },
+    neon: {
+      label: 'Neon',
+      intro:     [[ {r:255,g:0,b:80},   {r:0,g:100,b:255}   ], [ {r:100,g:0,b:255},  {r:0,g:255,b:200}  ]],
+      verse:     [[ {r:255,g:0,b:100},  {r:0,g:255,b:0}     ], [ {r:0,g:255,b:255},  {r:255,g:255,b:0}  ], [ {r:255,g:0,b:200}, {r:0,g:255,b:100} ], [ {r:255,g:60,b:0}, {r:0,g:200,b:255} ]],
+      chorus:    [[ {r:255,g:0,b:255},  {r:0,g:255,b:0}     ], [ {r:255,g:255,b:0},  {r:255,g:0,b:0}    ], [ {r:0,g:200,b:255}, {r:255,g:0,b:200} ]],
+      bridge:    [[ {r:200,g:255,b:0},  {r:0,g:200,b:255}   ], [ {r:255,g:0,b:150},  {r:0,g:255,b:150}  ]],
+      breakdown: [[ {r:0,g:100,b:255},  {r:0,g:60,b:150}    ], [ {r:80,g:0,b:200},   {r:0,g:150,b:200}  ]],
+      buildup:   [[ {r:255,g:255,b:0},  {r:255,g:0,b:255}   ], [ {r:0,g:255,b:0},    {r:255,g:100,b:0}  ]],
+      drop:      [[ {r:255,g:0,b:255},  {r:0,g:255,b:0}     ], [ {r:0,g:255,b:255},  {r:255,g:0,b:0}    ], [ {r:255,g:255,b:0}, {r:255,g:0,b:255} ]],
+      outro:     [[ {r:0,g:80,b:120},   {r:0,g:30,b:60}     ], [ {r:60,g:0,b:100},   {r:20,g:0,b:50}    ]],
+    },
+    warm: {
+      label: 'Warm',
+      intro:     [[ {r:120,g:40,b:0},   {r:180,g:80,b:10}   ], [ {r:100,g:30,b:0},   {r:150,g:60,b:0}   ]],
+      verse:     [[ {r:255,g:100,b:0},  {r:200,g:60,b:0}    ], [ {r:255,g:140,b:20}, {r:220,g:80,b:0}   ], [ {r:200,g:80,b:0}, {r:255,g:120,b:20} ]],
+      chorus:    [[ {r:255,g:40,b:0},   {r:255,g:180,b:0}   ], [ {r:255,g:0,b:0},    {r:255,g:200,b:50} ], [ {r:255,g:80,b:0}, {r:200,g:0,b:0}   ]],
+      bridge:    [[ {r:255,g:200,b:50}, {r:200,g:100,b:0}   ], [ {r:220,g:160,b:0},  {r:180,g:60,b:0}   ]],
+      breakdown: [[ {r:120,g:60,b:20},  {r:80,g:30,b:0}     ], [ {r:100,g:50,b:10},  {r:60,g:20,b:0}    ]],
+      buildup:   [[ {r:255,g:60,b:0},   {r:255,g:200,b:0}   ], [ {r:200,g:40,b:0},   {r:255,g:160,b:0}  ]],
+      drop:      [[ {r:255,g:0,b:0},    {r:255,g:200,b:0}   ], [ {r:255,g:80,b:0},   {r:255,g:255,b:0}  ], [ {r:200,g:0,b:0}, {r:255,g:120,b:0} ]],
+      outro:     [[ {r:100,g:40,b:10},  {r:40,g:15,b:0}     ], [ {r:80,g:30,b:5},    {r:20,g:8,b:0}     ]],
+    },
+    cool: {
+      label: 'Cool',
+      intro:     [[ {r:0,g:30,b:180},   {r:20,g:60,b:220}   ], [ {r:0,g:20,b:140},   {r:10,g:40,b:180}  ]],
+      verse:     [[ {r:0,g:100,b:200},  {r:60,g:0,b:180}    ], [ {r:0,g:150,b:220},  {r:80,g:0,b:200}   ], [ {r:40,g:80,b:255}, {r:0,g:120,b:180} ]],
+      chorus:    [[ {r:0,g:80,b:255},   {r:120,g:0,b:255}   ], [ {r:0,g:180,b:255},  {r:80,g:0,b:200}   ], [ {r:100,g:0,b:255}, {r:0,g:200,b:200} ]],
+      bridge:    [[ {r:80,g:120,b:255}, {r:0,g:180,b:180}   ], [ {r:60,g:80,b:220},  {r:0,g:140,b:200}  ]],
+      breakdown: [[ {r:0,g:40,b:120},   {r:0,g:20,b:80}     ], [ {r:20,g:30,b:100},  {r:0,g:15,b:60}    ]],
+      buildup:   [[ {r:0,g:100,b:255},  {r:120,g:0,b:255}   ], [ {r:0,g:150,b:200},  {r:100,g:50,b:255} ]],
+      drop:      [[ {r:0,g:0,b:255},    {r:200,g:0,b:255}   ], [ {r:0,g:100,b:255},  {r:150,g:0,b:200}  ], [ {r:80,g:0,b:255}, {r:0,g:200,b:255} ]],
+      outro:     [[ {r:0,g:20,b:80},    {r:0,g:8,b:30}      ], [ {r:10,g:15,b:60},   {r:0,g:5,b:20}     ]],
+    },
+    pastel: {
+      label: 'Pastel',
+      intro:     [[ {r:180,g:200,b:255}, {r:200,g:180,b:240} ], [ {r:200,g:220,b:255}, {r:180,g:200,b:230} ]],
+      verse:     [[ {r:180,g:255,b:200}, {r:200,g:180,b:255} ], [ {r:255,g:200,b:180}, {r:180,g:220,b:255} ], [ {r:220,g:200,b:255}, {r:200,g:255,b:220} ]],
+      chorus:    [[ {r:255,g:180,b:200}, {r:200,g:180,b:255} ], [ {r:255,g:220,b:180}, {r:180,g:200,b:255} ], [ {r:255,g:200,b:220}, {r:180,g:255,b:200} ]],
+      bridge:    [[ {r:255,g:240,b:180}, {r:200,g:180,b:255} ], [ {r:220,g:255,b:200}, {r:200,g:200,b:255} ]],
+      breakdown: [[ {r:180,g:200,b:240}, {r:160,g:180,b:220} ], [ {r:200,g:200,b:230}, {r:180,g:190,b:210} ]],
+      buildup:   [[ {r:255,g:200,b:180}, {r:200,g:180,b:255} ], [ {r:255,g:180,b:200}, {r:180,g:200,b:255} ]],
+      drop:      [[ {r:255,g:180,b:200}, {r:180,g:200,b:255} ], [ {r:255,g:200,b:180}, {r:200,g:180,b:255} ], [ {r:200,g:255,b:200}, {r:255,g:200,b:255} ]],
+      outro:     [[ {r:180,g:180,b:200}, {r:140,g:140,b:160} ], [ {r:160,g:170,b:190}, {r:120,g:130,b:150} ]],
+    },
+    fire: {
+      label: 'Fire',
+      intro:     [[ {r:80,g:20,b:0},    {r:140,g:40,b:0}    ], [ {r:60,g:10,b:0},    {r:100,g:30,b:0}   ]],
+      verse:     [[ {r:255,g:60,b:0},   {r:200,g:30,b:0}    ], [ {r:255,g:100,b:0},  {r:180,g:20,b:0}   ], [ {r:220,g:80,b:0}, {r:255,g:40,b:0} ]],
+      chorus:    [[ {r:255,g:0,b:0},    {r:255,g:200,b:0}   ], [ {r:255,g:80,b:0},   {r:255,g:255,b:0}  ], [ {r:200,g:0,b:0}, {r:255,g:150,b:0} ]],
+      bridge:    [[ {r:255,g:150,b:0},  {r:200,g:60,b:0}    ], [ {r:255,g:180,b:30}, {r:180,g:40,b:0}   ]],
+      breakdown: [[ {r:80,g:20,b:0},    {r:40,g:10,b:0}     ], [ {r:60,g:15,b:0},    {r:30,g:5,b:0}     ]],
+      buildup:   [[ {r:255,g:80,b:0},   {r:255,g:0,b:0}     ], [ {r:200,g:60,b:0},   {r:255,g:200,b:0}  ]],
+      drop:      [[ {r:255,g:0,b:0},    {r:255,g:255,b:0}   ], [ {r:255,g:100,b:0},  {r:255,g:0,b:0}    ], [ {r:200,g:0,b:0}, {r:255,g:200,b:0} ]],
+      outro:     [[ {r:60,g:15,b:0},    {r:20,g:5,b:0}      ], [ {r:40,g:10,b:0},    {r:10,g:2,b:0}     ]],
+    },
+    ocean: {
+      label: 'Ocean',
+      intro:     [[ {r:0,g:40,b:120},   {r:0,g:80,b:160}    ], [ {r:0,g:30,b:100},   {r:0,g:60,b:140}   ]],
+      verse:     [[ {r:0,g:120,b:200},  {r:0,g:180,b:180}   ], [ {r:0,g:100,b:220},  {r:0,g:200,b:160}  ], [ {r:0,g:160,b:200}, {r:0,g:200,b:180} ]],
+      chorus:    [[ {r:0,g:200,b:255},  {r:0,g:100,b:200}   ], [ {r:0,g:255,b:200},  {r:0,g:120,b:255}  ], [ {r:0,g:180,b:255}, {r:0,g:255,b:180} ]],
+      bridge:    [[ {r:0,g:180,b:200},  {r:0,g:120,b:160}   ], [ {r:0,g:200,b:180},  {r:0,g:140,b:180}  ]],
+      breakdown: [[ {r:0,g:40,b:100},   {r:0,g:20,b:60}     ], [ {r:0,g:30,b:80},    {r:0,g:15,b:50}    ]],
+      buildup:   [[ {r:0,g:150,b:255},  {r:0,g:200,b:200}   ], [ {r:0,g:100,b:200},  {r:0,g:255,b:180}  ]],
+      drop:      [[ {r:0,g:200,b:255},  {r:0,g:255,b:200}   ], [ {r:0,g:150,b:255},  {r:0,g:255,b:255}  ], [ {r:0,g:255,b:150}, {r:0,g:100,b:255} ]],
+      outro:     [[ {r:0,g:20,b:60},    {r:0,g:8,b:25}      ], [ {r:0,g:15,b:40},    {r:0,g:5,b:15}     ]],
+    },
+    sunset: {
+      label: 'Sunset',
+      intro:     [[ {r:120,g:40,b:80},  {r:160,g:60,b:100}  ], [ {r:100,g:30,b:60},  {r:140,g:50,b:90}  ]],
+      verse:     [[ {r:255,g:100,b:60}, {r:200,g:60,b:120}   ], [ {r:255,g:120,b:80}, {r:180,g:40,b:140} ], [ {r:220,g:80,b:100}, {r:200,g:60,b:160} ]],
+      chorus:    [[ {r:255,g:60,b:80},  {r:255,g:160,b:0}    ], [ {r:255,g:80,b:120}, {r:255,g:200,b:40} ], [ {r:200,g:40,b:160}, {r:255,g:120,b:0} ]],
+      bridge:    [[ {r:200,g:120,b:160},{r:255,g:160,b:80}   ], [ {r:180,g:100,b:140},{r:220,g:140,b:60} ]],
+      breakdown: [[ {r:100,g:40,b:80},  {r:60,g:20,b:50}     ], [ {r:80,g:30,b:60},   {r:40,g:15,b:40}  ]],
+      buildup:   [[ {r:255,g:80,b:40},  {r:200,g:40,b:120}   ], [ {r:255,g:120,b:60}, {r:220,g:60,b:160}]],
+      drop:      [[ {r:255,g:40,b:80},  {r:255,g:200,b:0}    ], [ {r:255,g:80,b:60},  {r:200,g:0,b:160} ], [ {r:255,g:0,b:120}, {r:255,g:180,b:40} ]],
+      outro:     [[ {r:80,g:30,b:50},   {r:30,g:10,b:20}     ], [ {r:60,g:20,b:40},   {r:20,g:8,b:15}   ]],
+    },
+    uv: {
+      label: 'UV / Blacklight',
+      intro:     [[ {r:40,g:0,b:120},   {r:80,g:0,b:200}    ], [ {r:30,g:0,b:100},   {r:60,g:0,b:160}   ]],
+      verse:     [[ {r:100,g:0,b:255},  {r:60,g:0,b:200}    ], [ {r:120,g:0,b:220},  {r:80,g:20,b:255}  ], [ {r:80,g:0,b:200}, {r:140,g:0,b:255} ]],
+      chorus:    [[ {r:160,g:0,b:255},  {r:80,g:0,b:200}    ], [ {r:200,g:0,b:255},  {r:100,g:0,b:255}  ], [ {r:120,g:0,b:255}, {r:180,g:0,b:200} ]],
+      bridge:    [[ {r:140,g:40,b:255}, {r:80,g:0,b:200}    ], [ {r:120,g:20,b:240}, {r:60,g:0,b:180}   ]],
+      breakdown: [[ {r:30,g:0,b:80},    {r:15,g:0,b:40}     ], [ {r:20,g:0,b:60},    {r:10,g:0,b:30}    ]],
+      buildup:   [[ {r:120,g:0,b:255},  {r:200,g:0,b:200}   ], [ {r:80,g:0,b:200},   {r:160,g:0,b:255}  ]],
+      drop:      [[ {r:200,g:0,b:255},  {r:255,g:0,b:200}   ], [ {r:160,g:0,b:255},  {r:100,g:0,b:255}  ], [ {r:255,g:0,b:255}, {r:80,g:0,b:200} ]],
+      outro:     [[ {r:20,g:0,b:60},    {r:8,g:0,b:25}      ], [ {r:15,g:0,b:40},    {r:5,g:0,b:15}     ]],
+    },
+    forest: {
+      label: 'Forest',
+      intro:     [[ {r:0,g:60,b:20},    {r:20,g:100,b:40}   ], [ {r:0,g:40,b:10},    {r:10,g:80,b:30}   ]],
+      verse:     [[ {r:0,g:180,b:60},   {r:40,g:200,b:80}   ], [ {r:20,g:160,b:40},  {r:60,g:220,b:100} ], [ {r:0,g:200,b:80}, {r:80,g:180,b:40} ]],
+      chorus:    [[ {r:80,g:255,b:0},   {r:0,g:200,b:100}   ], [ {r:40,g:255,b:60},  {r:0,g:220,b:80}   ], [ {r:100,g:255,b:40}, {r:0,g:180,b:120} ]],
+      bridge:    [[ {r:100,g:200,b:60}, {r:40,g:160,b:80}   ], [ {r:80,g:220,b:40},  {r:20,g:180,b:60}  ]],
+      breakdown: [[ {r:0,g:40,b:15},    {r:0,g:20,b:8}      ], [ {r:0,g:30,b:10},    {r:0,g:15,b:5}     ]],
+      buildup:   [[ {r:60,g:200,b:0},   {r:0,g:255,b:80}    ], [ {r:40,g:180,b:0},   {r:80,g:255,b:40}  ]],
+      drop:      [[ {r:0,g:255,b:0},    {r:100,g:255,b:0}   ], [ {r:60,g:255,b:40},  {r:0,g:200,b:0}    ], [ {r:80,g:255,b:0}, {r:0,g:255,b:80} ]],
+      outro:     [[ {r:0,g:30,b:10},    {r:0,g:10,b:5}      ], [ {r:0,g:20,b:8},     {r:0,g:5,b:2}      ]],
+    },
+    party: {
+      label: 'Party Mix',
+      intro:     [[ {r:200,g:0,b:200},  {r:0,g:100,b:255}   ], [ {r:100,g:0,b:255},  {r:0,g:200,b:200}  ]],
+      verse:     [[ {r:255,g:0,b:100},  {r:0,g:255,b:100}   ], [ {r:255,g:200,b:0},  {r:0,g:100,b:255}  ], [ {r:0,g:255,b:200}, {r:255,g:0,b:200} ], [ {r:100,g:255,b:0}, {r:255,g:0,b:100} ]],
+      chorus:    [[ {r:255,g:0,b:0},    {r:0,g:0,b:255}     ], [ {r:255,g:255,b:0},  {r:0,g:255,b:255}  ], [ {r:255,g:0,b:255}, {r:0,g:255,b:0}  ], [ {r:255,g:100,b:0}, {r:0,g:200,b:255} ]],
+      bridge:    [[ {r:0,g:255,b:200},  {r:255,g:200,b:0}   ], [ {r:200,g:100,b:255},{r:0,g:200,b:100}  ]],
+      breakdown: [[ {r:60,g:0,b:100},   {r:0,g:60,b:100}    ], [ {r:40,g:0,b:80},    {r:0,g:40,b:80}    ]],
+      buildup:   [[ {r:255,g:0,b:200},  {r:255,g:200,b:0}   ], [ {r:0,g:255,b:200},  {r:255,g:0,b:100}  ]],
+      drop:      [[ {r:255,g:0,b:0},    {r:0,g:255,b:0}     ], [ {r:0,g:0,b:255},    {r:255,g:255,b:0}  ], [ {r:255,g:0,b:255}, {r:0,g:255,b:255} ], [ {r:255,g:100,b:0}, {r:100,g:0,b:255} ]],
+      outro:     [[ {r:60,g:0,b:80},    {r:20,g:0,b:30}     ], [ {r:0,g:40,b:60},    {r:0,g:15,b:25}    ]],
+    },
+  },
+  gen_genre_presets: {
+    default:     { label: 'Default',           intensityMult: 1.0,  strobeMult: 1.0, cueDensityMult: 1.0, preferredPalette: null,     beatColorMult: 1.0, flashOnSection: true,  accentPulses: true  },
+    electronic:  { label: 'Electronic / EDM',  intensityMult: 1.1,  strobeMult: 1.4, cueDensityMult: 1.2, preferredPalette: 'neon',   beatColorMult: 0.8, flashOnSection: true,  accentPulses: true  },
+    house:       { label: 'House / Techno',    intensityMult: 1.0,  strobeMult: 1.2, cueDensityMult: 1.0, preferredPalette: 'neon',   beatColorMult: 0.9, flashOnSection: true,  accentPulses: true  },
+    trance:      { label: 'Trance',            intensityMult: 1.05, strobeMult: 1.0, cueDensityMult: 0.8, preferredPalette: 'cool',   beatColorMult: 0.7, flashOnSection: true,  accentPulses: true  },
+    dnb:         { label: 'Drum & Bass',       intensityMult: 1.2,  strobeMult: 1.8, cueDensityMult: 1.5, preferredPalette: 'fire',   beatColorMult: 0.6, flashOnSection: true,  accentPulses: false },
+    hiphop:      { label: 'Hip-Hop / Rap',     intensityMult: 0.85, strobeMult: 0.5, cueDensityMult: 0.7, preferredPalette: 'warm',   beatColorMult: 1.5, flashOnSection: false, accentPulses: true  },
+    rnb:         { label: 'R&B / Soul',        intensityMult: 0.75, strobeMult: 0.3, cueDensityMult: 0.6, preferredPalette: 'sunset', beatColorMult: 1.8, flashOnSection: false, accentPulses: true  },
+    pop:         { label: 'Pop',               intensityMult: 0.95, strobeMult: 0.8, cueDensityMult: 1.0, preferredPalette: 'party',  beatColorMult: 1.0, flashOnSection: true,  accentPulses: true  },
+    rock:        { label: 'Rock',              intensityMult: 1.1,  strobeMult: 1.0, cueDensityMult: 0.9, preferredPalette: 'fire',   beatColorMult: 1.2, flashOnSection: true,  accentPulses: false },
+    latin:       { label: 'Latin / Reggaeton', intensityMult: 1.0,  strobeMult: 0.6, cueDensityMult: 1.0, preferredPalette: 'warm',   beatColorMult: 1.0, flashOnSection: true,  accentPulses: true  },
+    ambient:     { label: 'Ambient / Chill',   intensityMult: 0.5,  strobeMult: 0.0, cueDensityMult: 0.4, preferredPalette: 'cool',   beatColorMult: 3.0, flashOnSection: false, accentPulses: false },
+    reggae:      { label: 'Reggae / Dub',      intensityMult: 0.8,  strobeMult: 0.3, cueDensityMult: 0.7, preferredPalette: 'forest', beatColorMult: 1.5, flashOnSection: false, accentPulses: true  },
+    metal:       { label: 'Metal / Hardcore',  intensityMult: 1.3,  strobeMult: 2.0, cueDensityMult: 1.5, preferredPalette: 'fire',   beatColorMult: 0.5, flashOnSection: true,  accentPulses: false },
+  },
+  gen_genre_aliases: {
+    'edm': 'electronic', 'electro': 'electronic', 'dance': 'electronic', 'electronica': 'electronic',
+    'house': 'house', 'deep house': 'house', 'tech house': 'house', 'techno': 'house',
+    'progressive house': 'house', 'future house': 'house', 'electro house': 'house',
+    'minimal': 'house', 'minimal techno': 'house',
+    'trance': 'trance', 'progressive trance': 'trance', 'psytrance': 'trance', 'psy trance': 'trance',
+    'uplifting trance': 'trance', 'vocal trance': 'trance',
+    'drum and bass': 'dnb', 'drum & bass': 'dnb', 'dnb': 'dnb', 'd&b': 'dnb',
+    'jungle': 'dnb', 'liquid dnb': 'dnb', 'neurofunk': 'dnb',
+    'dubstep': 'dnb', 'riddim': 'dnb', 'brostep': 'dnb',
+    'hip hop': 'hiphop', 'hip-hop': 'hiphop', 'hiphop': 'hiphop', 'rap': 'hiphop',
+    'trap': 'hiphop', 'grime': 'hiphop',
+    'r&b': 'rnb', 'rnb': 'rnb', 'soul': 'rnb', 'r & b': 'rnb', 'neo soul': 'rnb',
+    'funk': 'rnb', 'disco': 'rnb',
+    'pop': 'pop', 'indie pop': 'pop', 'synth pop': 'pop', 'synthpop': 'pop',
+    'electropop': 'pop', 'dance pop': 'pop', 'k-pop': 'pop',
+    'rock': 'rock', 'indie': 'rock', 'indie rock': 'rock', 'alternative': 'rock',
+    'punk': 'rock', 'punk rock': 'rock', 'post-punk': 'rock', 'grunge': 'rock',
+    'latin': 'latin', 'reggaeton': 'latin', 'dembow': 'latin', 'salsa': 'latin',
+    'bachata': 'latin', 'cumbia': 'latin', 'merengue': 'latin', 'moombahton': 'latin',
+    'ambient': 'ambient', 'chill': 'ambient', 'chillout': 'ambient', 'downtempo': 'ambient',
+    'lo-fi': 'ambient', 'lofi': 'ambient', 'new age': 'ambient',
+    'reggae': 'reggae', 'dub': 'reggae', 'dancehall': 'reggae', 'ska': 'reggae',
+    'metal': 'metal', 'heavy metal': 'metal', 'death metal': 'metal',
+    'hardcore': 'metal', 'hard rock': 'metal', 'thrash': 'metal', 'hardstyle': 'metal',
+    'gabber': 'metal',
+  },
+  gen_section_styles: {
+    intro:     { intensity: [0.4, 0.75],  beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
+    verse:     { intensity: [0.65, 0.9],   beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
+    chorus:    { intensity: [0.85, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.2,  strobeDurationBeats: 0.5,  cuePerBars: 1 },
+    bridge:    { intensity: [0.6, 0.8],    beatColorChange: true,  beatColorBars: 2, strobeChance: 0,    cuePerBars: 2 },
+    breakdown: { intensity: [0.3, 0.55],   beatColorChange: false, strobeChance: 0,    cuePerBars: 4 },
+    buildup:   { intensity: [0.45, 1.0],   beatColorChange: true,  beatColorBars: 1, strobeChance: 0.15, strobeDurationBeats: 0.25, cuePerBars: 1, rampIntensity: true, buildEnergy: true },
+    drop:      { intensity: [0.9, 1.0],    beatColorChange: true,  beatColorBars: 0.5, strobeChance: 0.35, strobeDurationBeats: 0.5, cuePerBars: 0.5, dropEnergy: true },
+    outro:     { intensity: [0.6, 0.2],    beatColorChange: false, strobeChance: 0,    cuePerBars: 4, fadeOut: true },
+  },
+  gen_movement_styles: {
+    intro:     { barsPerMove: 4,   range: 0.4, speed: 'slow' },
+    verse:     { barsPerMove: 2,   range: 0.5, speed: 'medium' },
+    chorus:    { barsPerMove: 1,   range: 0.8, speed: 'fast' },
+    bridge:    { barsPerMove: 2,   range: 0.5, speed: 'medium' },
+    breakdown: { barsPerMove: 4,   range: 0.3, speed: 'slow' },
+    buildup:   { barsPerMove: 0.5, range: 0.8, speed: 'fast' },
+    drop:      { barsPerMove: 0.5, range: 1.0, speed: 'fast' },
+    outro:     { barsPerMove: 4,   range: 0.3, speed: 'slow' },
+  },
+  gen_speed_dmx: { slow: 200, medium: 140, fast: 40 },
+  gen_section_effects: {
+    intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'] },
+    verse:     { regular: ['pulse', 'color_fade', 'rainbow'], cellAware: ['color_wave', 'sparkle'] },
+    chorus:    { regular: ['rainbow', 'pulse', 'strobe'],     cellAware: ['chase', 'scanner', 'sparkle'] },
+    bridge:    { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'sparkle'] },
+    breakdown: { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
+    buildup:   { regular: ['pulse', 'strobe'],                cellAware: ['buildup', 'comet', 'chase'] },
+    drop:      { regular: ['rainbow', 'strobe', 'pulse'],     cellAware: ['chase', 'scanner', 'sparkle', 'comet', 'buildup'] },
+    outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
+  },
+  gen_cell_patterns: {
+    intro:     ['fill_sweep', 'color_wave', 'breathe'],
+    verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase'],
+    chorus:    ['chase', 'alternate', 'scatter', 'all_flash'],
+    bridge:    ['color_wave', 'alternate', 'chase_slow'],
+    breakdown: ['fill_sweep', 'breathe'],
+    buildup:   ['build_reveal', 'chase_accel'],
+    drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
+    outro:     ['fill_sweep', 'color_wave', 'breathe'],
+  },
+};
+
+function seedDefaultGeneratorConfig() {
+  const ins = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
+  const seed = db.transaction(() => {
+    for (const [key, value] of Object.entries(GENERATOR_CONFIG_DEFAULTS)) {
+      ins.run(key, JSON.stringify(value));
+    }
+  });
+  seed();
+}
+
+function getGeneratorConfig() {
+  const keys = Object.keys(GENERATOR_CONFIG_DEFAULTS);
+  const result = {};
+  for (const key of keys) {
+    const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
+    try {
+      result[key] = row ? JSON.parse(row.value) : GENERATOR_CONFIG_DEFAULTS[key];
+    } catch (e) {
+      result[key] = GENERATOR_CONFIG_DEFAULTS[key];
+    }
+  }
+  return result;
+}
+
+function getGeneratorConfigKey(key) {
+  const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
+  try {
+    return row ? JSON.parse(row.value) : (GENERATOR_CONFIG_DEFAULTS[key] || null);
+  } catch (e) {
+    return GENERATOR_CONFIG_DEFAULTS[key] || null;
+  }
+}
+
+function setGeneratorConfigKey(key, value) {
+  db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
+}
+
+function resetGeneratorConfig() {
+  const del = db.prepare('DELETE FROM config WHERE key = ?');
+  const ins = db.prepare('INSERT INTO config (key, value) VALUES (?, ?)');
+  const reset = db.transaction(() => {
+    for (const [key, value] of Object.entries(GENERATOR_CONFIG_DEFAULTS)) {
+      del.run(key);
+      ins.run(key, JSON.stringify(value));
+    }
+  });
+  reset();
+  return getGeneratorConfig();
 }
 
 // ─── OS2L Button Maps CRUD ──────────────────────────────────────────────────
@@ -2457,6 +2962,7 @@ module.exports = {
   getFixtureTypeSummaries, searchFixtureTypes,
   createLedBarFixtureType,
   createMultiCellFixtureType,
+  getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
   getFixtures, getFixture, createFixture, updateFixture, deleteFixture,
   getUniverseMap,
   getFixtureChannelMap,
@@ -2467,6 +2973,7 @@ module.exports = {
   getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks, updateTrackBeatgridPos,
   getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,
   getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset,
+  getGeneratorConfig, getGeneratorConfigKey, setGeneratorConfigKey, resetGeneratorConfig, GENERATOR_CONFIG_DEFAULTS,
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,
   getSequenceCues, getSequenceCuesLightweight, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,

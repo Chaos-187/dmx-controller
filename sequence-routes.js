@@ -172,6 +172,7 @@ router.post('/api/sequences/generate/:trackId', async (req, res) => {
     effects: _db.getEffects(),
     moverPresets: _db.getMoverPresets(),
     noStrobes: _db.getConfig('seq_no_strobes') === '1',
+    generatorConfig: _db.getGeneratorConfig(),
   });
 
   // Create sequence
@@ -260,6 +261,7 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
           effects: allEffects,
           moverPresets: _db.getMoverPresets(),
           noStrobes: _db.getConfig('seq_no_strobes') === '1',
+          generatorConfig: _db.getGeneratorConfig(),
         });
 
         const seq = _db.createSequence({

@@ -244,6 +244,7 @@ function handleOs2lSubscribed(data) {
                 effects: db.getEffects(),
                 moverPresets: db.getMoverPresets(),
                 noStrobes: db.getConfig('seq_no_strobes') === '1',
+                generatorConfig: db.getGeneratorConfig(),
               });
               const newSeq = db.createSequence({
                 name: track.title || track.filename || 'Untitled',
@@ -253,8 +254,9 @@ function handleOs2lSubscribed(data) {
               });
               if (genResult.cues.length > 0) db.bulkUpdateCues(newSeq.id, genResult.cues);
               const generatedSeq = db.getSequence(newSeq.id);
+              generatedSeq.cues = db.getSequenceCues(newSeq.id);
               broadcast({ type: 'seq_generated', track_id: track.id, sequence: generatedSeq });
-              console.log(`[SEQ] Auto-generated sequence "${generatedSeq.name}" (${genResult.cues.length} cues) for deck ${deck}`);
+              console.log(`[SEQ] Auto-generated sequence "${generatedSeq.name}" (${generatedSeq.cues.length} cues) for deck ${deck}`);
 
               // Now auto-load if enabled
               if (seqAutoLoad) {
@@ -292,6 +294,7 @@ function handleOs2lSubscribed(data) {
         if (seq && seqAutoLoad) {
           // Auto-load the matched sequence onto this deck
           // Clear any OS2L button overrides so the new sequence controls all fixtures
+          seq.cues = db.getSequenceCues(seq.id);
           touchOverrides.os2lOverrideFixtures.clear();
           touchOverrides.colorOverrideFixtures.clear();
           touchOverrides.movementOverrideFixtures.clear();
@@ -502,6 +505,32 @@ app.delete('/api/fixture-types/:id', (req, res) => {
   const result = db.deleteFixtureType(+req.params.id);
   if (result.error) return res.status(409).json(result);
   res.json(result);
+});
+
+// ─── Color Wheel Map API ────────────────────────────────────────────────────
+
+app.get('/api/fixture-types/:id/color-wheel', (req, res) => {
+  res.json(db.getColorWheelMap(+req.params.id));
+});
+
+app.put('/api/fixture-types/:id/color-wheel', (req, res) => {
+  try {
+    const colors = req.body.colors;
+    if (!Array.isArray(colors)) return res.status(400).json({ error: 'colors array required' });
+    const result = db.setColorWheelMap(+req.params.id, colors);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/fixture-types/:id/color-wheel', (req, res) => {
+  db.deleteColorWheelMap(+req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/color-wheel-maps', (req, res) => {
+  res.json(db.getAllColorWheelMaps());
 });
 
 // ─── Fixture API ────────────────────────────────────────────────────────────
@@ -960,6 +989,36 @@ app.put('/api/config/:key', (req, res) => {
   // Refresh cached mixer settings when relevant keys change
   if (req.params.key.startsWith('seq_')) refreshMixerConfig();
   res.json({ key: req.params.key, value: req.body.value });
+});
+
+// ─── Generator Config API ───────────────────────────────────────────────────
+
+app.get('/api/generator-config', (req, res) => {
+  try {
+    res.json(db.getGeneratorConfig());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/generator-config/:key', (req, res) => {
+  try {
+    const key = req.params.key;
+    if (!key.startsWith('gen_')) return res.status(400).json({ error: 'Key must start with gen_' });
+    db.setGeneratorConfigKey(key, req.body.value);
+    res.json({ key, value: req.body.value });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/generator-config/reset', (req, res) => {
+  try {
+    db.resetGeneratorConfig();
+    res.json(db.getGeneratorConfig());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── mDNS Status / Restart API ──────────────────────────────────────────────
@@ -2560,6 +2619,7 @@ function handleSequenceCommand(ws, msg) {
     case 'load': {
       const seq = db.getSequence(sequenceId);
       if (!seq) return ws.send(JSON.stringify({ type: 'seq_error', error: 'Sequence not found' }));
+      seq.cues = db.getSequenceCues(sequenceId);
       // Clear any OS2L button overrides so the sequence controls all fixtures
       touchOverrides.os2lOverrideFixtures.clear();
       deactivateScene(); // Stop any scene effect loop from end-action
@@ -2824,27 +2884,41 @@ function processSequenceAtTime(deckNum, timeMs) {
                   : (ch.type === 'dimmer' ? 255 : null);
           }
         }
-      } else if (cue.cue_type === 'movement' && channelVals.mover_preset_id) {
-        // Movement preset: cycle through saved positions over the cue duration
-        const preset = db.getMoverPreset(channelVals.mover_preset_id);
-        if (preset && preset.positions && preset.positions.length > 0) {
-          // Find position for this specific fixture
-          const fixPositions = preset.positions.filter(p => p.fixture_id === fixtureId);
+      } else if (cue.cue_type === 'movement') {
+        // Movement preset(s): cycle through saved positions over the cue duration.
+        // Supports both a single mover_preset_id and an array of mover_preset_ids.
+        const presetIds = Array.isArray(channelVals.mover_preset_ids)
+          ? channelVals.mover_preset_ids
+          : (channelVals.mover_preset_id ? [channelVals.mover_preset_id] : []);
+
+        if (presetIds.length > 0) {
+          // Collect positions for this fixture from all referenced presets
+          const fixPositions = [];
+          for (const pid of presetIds) {
+            const preset = db.getMoverPreset(pid);
+            if (preset && preset.positions) {
+              const pos = preset.positions.find(p => p.fixture_id === fixtureId);
+              if (pos) fixPositions.push(pos);
+            }
+          }
           if (fixPositions.length > 0) {
-            // Cycle through the fixture's positions over the cue duration
             const totalSteps = fixPositions.length;
             const stepProgress = (progress * totalSteps) % totalSteps;
             const stepIdx = Math.floor(stepProgress);
-            const stepFrac = stepProgress - stepIdx;
+            const linearFrac = stepProgress - stepIdx;
+            // Smoothstep easing: decelerate into positions, accelerate out
+            // Produces natural-looking sweeps instead of sharp direction changes
+            const stepFrac = linearFrac * linearFrac * (3 - 2 * linearFrac);
             const curr = fixPositions[stepIdx % totalSteps];
             const next = fixPositions[(stepIdx + 1) % totalSteps];
             // Smooth interpolation between positions
             if (ch.type === 'pan' && curr.pan !== undefined) {
-              value = Math.round(curr.pan + (next.pan - curr.pan) * stepFrac);
+              value = curr.pan + (next.pan - curr.pan) * stepFrac;
             } else if (ch.type === 'tilt' && curr.tilt !== undefined) {
-              value = Math.round(curr.tilt + (next.tilt - curr.tilt) * stepFrac);
+              value = curr.tilt + (next.tilt - curr.tilt) * stepFrac;
             } else if (ch.type === 'speed') {
-              value = curr.speed !== undefined ? curr.speed : null;
+              value = channelVals.speed !== undefined ? channelVals.speed
+                    : (curr.speed !== undefined ? curr.speed : null);
             } else {
               // For non-movement channels (dimmer, color), pass through base values
               value = channelVals[ch.type] !== undefined ? channelVals[ch.type]

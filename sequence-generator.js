@@ -199,6 +199,18 @@ function resolveGenrePreset(genreStr) {
   return 'default';
 }
 
+/** Resolve genre using configurable presets/aliases (DB or hardcoded) */
+function resolveGenrePresetWith(genreStr, presets, aliases) {
+  if (!genreStr) return 'default';
+  const lower = genreStr.toLowerCase().trim();
+  if (presets[lower]) return lower;
+  if (aliases[lower]) return aliases[lower];
+  for (const [alias, p] of Object.entries(aliases)) {
+    if (lower.includes(alias)) return p;
+  }
+  return 'default';
+}
+
 // ─── Section style definitions ──────────────────────────────────────────────
 // Palettes are now externalized into colorPalettes above.
 
@@ -246,6 +258,38 @@ function lerpColor(c1, c2, t) {
 
 function rgbToHex(r, g, b) {
   return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+}
+
+/** Parse a hex color string to {r, g, b} */
+function hexToRgb(hex) {
+  hex = hex.replace(/^#/, '');
+  return {
+    r: parseInt(hex.substring(0, 2), 16) || 0,
+    g: parseInt(hex.substring(2, 4), 16) || 0,
+    b: parseInt(hex.substring(4, 6), 16) || 0,
+  };
+}
+
+/**
+ * Find the nearest color wheel entry for a given {r, g, b} color.
+ * Uses Euclidean distance in RGB space.
+ * @param {{r:number, g:number, b:number}} color - Target color
+ * @param {Array<{dmx_value:number, color_hex:string}>} wheelMap - Color wheel entries
+ * @returns {{dmx_value:number, color_hex:string}|null}
+ */
+function findNearestWheelColor(color, wheelMap) {
+  if (!wheelMap || wheelMap.length === 0) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const entry of wheelMap) {
+    const c = hexToRgb(entry.color_hex);
+    const dist = (color.r - c.r) ** 2 + (color.g - c.g) ** 2 + (color.b - c.b) ** 2;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = entry;
+    }
+  }
+  return best;
 }
 
 /**
@@ -308,9 +352,13 @@ function seededRandom(seed) {
 }
 
 /** Get palettes for a section from the chosen color palette theme */
-function getSectionPalettes(paletteName, sectionLabel) {
-  const pal = colorPalettes[paletteName];
-  if (!pal) return colorPalettes.vibrant[sectionLabel] || colorPalettes.vibrant.verse;
+function getSectionPalettes(paletteName, sectionLabel, palettesMap) {
+  const palettes = palettesMap || colorPalettes;
+  const pal = palettes[paletteName];
+  if (!pal) {
+    const fallback = palettes.vibrant || Object.values(palettes)[0];
+    return fallback[sectionLabel] || fallback.verse;
+  }
   return pal[sectionLabel] || pal.verse;
 }
 
@@ -338,9 +386,20 @@ function generateSequence(opts) {
   // First beat offset: align cue timing to actual musical bars
   const firstBeatMs = (track.beatgrid_pos || 0) * 1000;
 
-  // Resolve genre preset
-  const genreKey = opts.genre || resolveGenrePreset(track.genre);
-  const preset = genrePresets[genreKey] || genrePresets.default;
+  // ── Load generator config (DB overrides → hardcoded fallback) ───────
+  const gc = opts.generatorConfig || {};
+  const activePalettes       = gc.gen_color_palettes    || colorPalettes;
+  const activeGenrePresets    = gc.gen_genre_presets     || genrePresets;
+  const activeGenreAliases   = gc.gen_genre_aliases     || genreAliases;
+  const activeSectionStyles  = gc.gen_section_styles    || sectionStyles;
+  const activeMovementStyles = gc.gen_movement_styles   || MOVEMENT_STYLES;
+  const activeSpeedDmx       = gc.gen_speed_dmx         || SPEED_DMX;
+  const activeSectionEffects = gc.gen_section_effects   || SECTION_EFFECT_TYPES;
+  const activeCellPatterns   = gc.gen_cell_patterns     || CELL_PATTERN_MAP;
+
+  // Resolve genre preset using active config
+  const genreKey = opts.genre || resolveGenrePresetWith(track.genre, activeGenrePresets, activeGenreAliases);
+  const preset = activeGenrePresets[genreKey] || activeGenrePresets.default || genrePresets.default;
 
   // ── BPM-adaptive factor ─────────────────────────────────────────────
   // 0 = very slow / chill (≤90 BPM), 1 = energetic (≥150 BPM)
@@ -350,11 +409,12 @@ function generateSequence(opts) {
   const noStrobes = !!opts.noStrobes;
 
   // Resolve color palette
+  const activePaletteKeys = Object.keys(activePalettes);
   let paletteKey = opts.palette || preset.preferredPalette || 'vibrant';
   // Seed random from track ID for deterministic generation
   const rand = seededRandom(track.id * 7919 + Math.round(bpm * 100));
   if (paletteKey === 'random') {
-    paletteKey = PALETTE_KEYS[Math.floor(rand() * PALETTE_KEYS.length)];
+    paletteKey = activePaletteKeys[Math.floor(rand() * activePaletteKeys.length)];
   }
 
   // Parse analysis data
@@ -374,14 +434,30 @@ function generateSequence(opts) {
     fix.channels.some(ch => ch.type === 'blue')
   );
 
-  if (rgbFixtures.length === 0) return { cues: [], bpm, durationMs, palette: paletteKey, genrePreset: genreKey };
+  // Color-wheel-only fixtures: have a color_wheel channel + map, but no RGB
+  const rgbIds = new Set(rgbFixtures.map(f => f.id));
+  const colorWheelFixtures = fixtures.filter(fix =>
+    !rgbIds.has(fix.id) &&
+    fix.channels.some(ch => ch.type === 'color_wheel') &&
+    fix.color_wheel_map && fix.color_wheel_map.length > 0
+  );
+
+  if (rgbFixtures.length === 0 && colorWheelFixtures.length === 0) {
+    return { cues: [], bpm, durationMs, palette: paletteKey, genrePreset: genreKey };
+  }
 
   // Classify fixtures: movers (pan+tilt), LED bars (many cells), regular pars
+  // Movers include BOTH RGB and color-wheel movers
+  const allMovers = fixtures.filter(fix =>
+    fix.channels.some(ch => ch.type === 'pan') &&
+    fix.channels.some(ch => ch.type === 'tilt')
+  );
   const movers = rgbFixtures.filter(fix =>
     fix.channels.some(ch => ch.type === 'pan') &&
     fix.channels.some(ch => ch.type === 'tilt')
   );
   const moverIds = new Set(movers.map(m => m.id));
+  const allMoverIds = new Set(allMovers.map(m => m.id));
 
   // Non-mover RGB fixtures get standard color cues and effects
   const nonMoverFixtures = rgbFixtures.filter(fix => !moverIds.has(fix.id));
@@ -404,7 +480,12 @@ function generateSequence(opts) {
   // Build snapBeat/snapBar functions bound to this track's fluid beat grid
   const snapBeat = (t) => snapToBeat(t, beats);
   const snapBar  = (t) => snapToBar(t, beats);
-  const ctx = { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats };
+  const ctx = {
+    bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
+    // Active configs (DB overrides or hardcoded defaults)
+    activePalettes, activeSectionStyles, activeMovementStyles, activeSpeedDmx,
+    activeSectionEffects, activeCellPatterns,
+  };
 
   // Multi-cell fixtures get dedicated per-cell patterns, so exclude them
   // from the main section/bar generator to avoid master cues competing.
@@ -423,9 +504,14 @@ function generateSequence(opts) {
     generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx);
   }
 
-  // ── Mover movement generation (movers only) ───────────────────────────
-  if (movers.length > 0) {
-    generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets || []);
+  // ── Mover movement generation (all movers — RGB and color-wheel) ────
+  if (allMovers.length > 0) {
+    generateMoverMovement(cues, allMovers, sections, beats, ctx, moverPresets || []);
+  }
+
+  // ── Color-wheel cue generation (color-wheel-only fixtures) ────────────
+  if (colorWheelFixtures.length > 0) {
+    generateColorWheelCues(cues, colorWheelFixtures, sections, beats, energyLevels, ctx);
   }
 
   // ── Effects generation (non-movers only) ──────────────────────────────
@@ -535,7 +621,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
 
     for (let si = 0; si < sections.length; si++) {
       const sec = sections[si];
-      const style = sectionStyles[sec.label] || defaultStyle;
+      const style = (ctx.activeSectionStyles || sectionStyles)[sec.label] || defaultStyle;
       // Snap inner section boundaries to the nearest beat so cues lock to
       // the beat grid.  Keep track edges (first start, last end) unsnapped
       // so the sequence covers the full track without gaps.
@@ -545,7 +631,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       if (secDurMs <= 0) continue;
 
       // Get palettes for this section from the chosen color theme
-      const palettes = getSectionPalettes(paletteKey, sec.label);
+      const palettes = getSectionPalettes(paletteKey, sec.label, ctx.activePalettes);
 
       // Apply genre preset to cue density (BPM-adaptive: slower songs = fewer, longer cues)
       const bpmDensityScale = 0.7 + 0.6 * bpmFactor;  // 0.7x at slow BPM, 1.3x at fast BPM
@@ -727,7 +813,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       // Instead of rigid 8-bar intervals, find energy peaks within the
       // section and place accent pulses at those natural intensity spikes.
       if (preset.accentPulses && (sec.label === 'verse' || sec.label === 'bridge') && secDurMs > barMs * 4) {
-        const accentPaletteList = getSectionPalettes(paletteKey, sec.label);
+        const accentPaletteList = getSectionPalettes(paletteKey, sec.label, ctx.activePalettes);
         const accentPalette = accentPaletteList[(fiIdx + si + 1) % accentPaletteList.length];
 
         // Collect energy samples within this section
@@ -810,8 +896,8 @@ function generateBarBased(cues, fixtures, ctx) {
   const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
 
   // Use verse/chorus palettes from the selected theme
-  const versePalettes = getSectionPalettes(paletteKey, 'verse');
-  const chorusPalettes = getSectionPalettes(paletteKey, 'chorus');
+  const versePalettes = getSectionPalettes(paletteKey, 'verse', ctx.activePalettes);
+  const chorusPalettes = getSectionPalettes(paletteKey, 'chorus', ctx.activePalettes);
   const allPalettes = [...versePalettes, ...chorusPalettes];
 
   const totalBars = Math.floor(durationMs / barMs);
@@ -882,25 +968,224 @@ function generateBarBased(cues, fixtures, ctx) {
   }
 }
 
+// ─── Color Wheel Cue Generation ─────────────────────────────────────────────
+
+/**
+ * Generate color cues for fixtures that use a physical color wheel instead of
+ * RGB mixing.  These fixtures have a `color_wheel` channel and a
+ * `color_wheel_map` array that maps DMX values to hex colours.
+ *
+ * Works the same way as section-based generation: each section gets
+ * palette-matched colour-wheel positions with intensity driven via the
+ * dimmer channel.
+ */
+function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels, ctx) {
+  const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBeat, snapBar } = ctx;
+
+  const useFades = bpmFactor < 0.5;
+
+  const useSections = sections && sections.length > 0;
+
+  for (let fiIdx = 0; fiIdx < cwFixtures.length; fiIdx++) {
+    const fix = cwFixtures[fiIdx];
+    const wheelMap = fix.color_wheel_map;
+    if (!wheelMap || wheelMap.length === 0) continue;
+
+    // Find the existing lane for this fixture (from movement cues, if any)
+    const existingCue = cues.find(c => c.fixture_id === fix.id);
+    const lane = existingCue ? existingCue.lane : fiIdx;
+    const hasDimmer = fix.channels.some(ch => ch.type === 'dimmer');
+    const hasStrobe = fix.channels.some(ch => ch.type === 'strobe');
+
+    if (useSections) {
+      for (let si = 0; si < sections.length; si++) {
+        const sec = sections[si];
+        const style = (ctx.activeSectionStyles || {})[sec.label] || { intensity: [0.6, 0.8], cuePerBars: 4 };
+
+        const secStartMs = si === 0 ? 0 : snapBeat(Math.round(sec.start_ms));
+        const secEndMs = si === sections.length - 1 ? Math.round(durationMs) : snapBeat(Math.round(sec.end_ms));
+        const secDurMs = secEndMs - secStartMs;
+        if (secDurMs <= 0) continue;
+
+        const palettes = getSectionPalettes(paletteKey, sec.label, ctx.activePalettes);
+
+        const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
+        const adjustedCuePerBars = Math.max(1, Math.round((style.cuePerBars || 4) / (preset.cueDensityMult * bpmDensityScale)));
+        const cueBarMs = adjustedCuePerBars * barMs;
+        const numCues = Math.max(1, Math.floor(secDurMs / cueBarMs));
+
+        for (let ci = 0; ci < numCues; ci++) {
+          const rawCueStart = secStartMs + ci * cueBarMs;
+          const cueStart = ci === 0 ? secStartMs : snapBar(rawCueStart);
+          const rawNextStart = rawCueStart + cueBarMs;
+          const nextCueStart = ci < numCues - 1 ? snapBar(rawNextStart) : secEndMs;
+          let cueDur = nextCueStart - cueStart;
+          if (cueDur < barMs * 0.5) cueDur = Math.min(barMs, secEndMs - cueStart);
+          if (cueDur <= 0) continue;
+
+          // Pick a palette colour pair and find nearest wheel positions
+          const paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % palettes.length;
+          const palette = palettes[paletteIdx];
+
+          // Energy-driven intensity
+          let energyMod = 1.0;
+          if (energyLevels.length > 0) {
+            const cueTimeMid = cueStart + cueDur * 0.5;
+            const closest = energyLevels.reduce((best, e) =>
+              Math.abs(e.time_ms - cueTimeMid) < Math.abs(best.time_ms - cueTimeMid) ? e : best
+            );
+            energyMod = 0.75 + Math.min(1, closest.energy) * 0.4;
+          }
+
+          // Color-wheel fixtures: push dimmer higher since intensity is NOT
+          // baked into the colour (unlike RGB).  The wheel is a physical
+          // position — dimmer should be close to full so colours pop.
+          const baseIntLo = style.intensity ? style.intensity[0] : 0.6;
+          const baseIntHi = style.intensity ? style.intensity[1] : 0.8;
+          // Boost base range closer to full for color-wheel fixtures
+          const cwBoostLo = Math.min(1, baseIntLo * 1.25);
+          const cwBoostHi = Math.min(1, baseIntHi * 1.25);
+          let startIntensity = Math.min(1, cwBoostLo * preset.intensityMult * energyMod);
+          let endIntensity = Math.min(1, cwBoostHi * preset.intensityMult * energyMod);
+
+          // Occasional full-brightness "punch" moments for contrast
+          const isHighEnergy = sec.label === 'chorus' || sec.label === 'drop';
+          const punchChance = isHighEnergy ? 0.35 : 0.12;
+          if (rand() < punchChance) {
+            startIntensity = 1.0;
+            endIntensity = 1.0;
+          }
+
+          // Find the nearest wheel colour for the start & end palette colours
+          const startColor = applyIntensity(palette[0], 1); // full saturation for matching
+          const endColor = applyIntensity(palette[1], 1);
+          const startWheel = findNearestWheelColor(startColor, wheelMap);
+          const endWheel = findNearestWheelColor(endColor, wheelMap);
+          if (!startWheel) continue;
+
+          // Physical colour wheels look better with snap (static) changes —
+          // fading sweeps through intermediate wheel positions which looks bad.
+          // Use a section-aware snap probability: energetic sections snap more.
+          const SNAP_CHANCE = {
+            intro: 0.7, verse: 0.6, chorus: 0.85, bridge: 0.5,
+            breakdown: 0.4, buildup: 0.75, drop: 0.9, outro: 0.4,
+          };
+          const snapProb = SNAP_CHANCE[sec.label] || 0.6;
+          const useSnap = rand() < snapProb;
+
+          const startVals = { color_wheel: startWheel.dmx_value };
+          const endVals = {};
+
+          if (hasDimmer) {
+            startVals.dimmer = Math.round(startIntensity * 255);
+            endVals.dimmer = Math.round(endIntensity * 255);
+          }
+
+          // Only include end colour transition if NOT snapping and colours differ
+          if (!useSnap && endWheel && endWheel.dmx_value !== startWheel.dmx_value) {
+            endVals.color_wheel = endWheel.dmx_value;
+          }
+
+          const hasEndVals = Object.keys(endVals).length > 0;
+          cues.push({
+            lane,
+            start_ms: Math.round(cueStart),
+            duration_ms: Math.round(cueDur),
+            cue_type: (!useSnap && useFades && hasEndVals) ? 'fade' : 'static',
+            fixture_id: fix.id,
+            channel_values: startVals,
+            end_channel_values: hasEndVals ? endVals : undefined,
+            color: startWheel.color_hex || '#888888',
+            label: sec.label || '',
+          });
+        }
+
+        // ── Strobe hits for color-wheel fixtures ────────────────────
+        if (!noStrobes && hasStrobe) {
+          const effectiveStrobeChance = ((style.strobeChance || 0) * preset.strobeMult * (0.3 + 0.7 * bpmFactor));
+          if (effectiveStrobeChance > 0 && beats.length > 0) {
+            const strobeBeats = beats.filter(b => b >= secStartMs && b < secEndMs);
+            const strobeDurMs = Math.round((style.strobeDurationBeats || 0.5) * beatMs);
+
+            for (let bi = 0; bi < strobeBeats.length; bi++) {
+              const beatInSection = Math.floor((strobeBeats[bi] - secStartMs) / beatMs);
+              if (beatInSection % 4 === 0 && rand() < effectiveStrobeChance) {
+                cues.push({
+                  lane,
+                  start_ms: Math.round(strobeBeats[bi]),
+                  duration_ms: strobeDurMs,
+                  cue_type: 'strobe',
+                  fixture_id: fix.id,
+                  channel_values: { strobe_hz: 10, dimmer: 255 },
+                  color: '#ffffff',
+                  label: 'strobe',
+                });
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Bar-based fallback
+      const versePalettes = getSectionPalettes(paletteKey, 'verse', ctx.activePalettes);
+      const chorusPalettes = getSectionPalettes(paletteKey, 'chorus', ctx.activePalettes);
+      const allPalettes = [...versePalettes, ...chorusPalettes];
+      const totalBars = Math.floor(durationMs / barMs);
+      const sectionBars = Math.max(1, Math.round(2 / preset.cueDensityMult));
+
+      for (let bar = 0; bar < totalBars; bar += sectionBars) {
+        const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
+        const palette = allPalettes[(paletteIdx + fiIdx) % allPalettes.length];
+        const startMs = snapBar(bar * barMs);
+        const endMs = snapBar((bar + sectionBars) * barMs);
+        const durMs = Math.min(endMs - startMs, durationMs - startMs);
+        if (durMs <= 0) break;
+
+        // Boost dimmer for color-wheel fixtures (physical wheel, no RGB mixing)
+        const intensity = Math.min(1, 0.85 * preset.intensityMult);
+        const startWheel = findNearestWheelColor(palette[0], wheelMap);
+        const endWheel = findNearestWheelColor(palette[1], wheelMap);
+        if (!startWheel) continue;
+
+        // Mostly snap changes for physical wheels
+        const useSnap = rand() < 0.65;
+
+        const startVals = { color_wheel: startWheel.dmx_value };
+        const endVals = {};
+
+        if (hasDimmer) {
+          startVals.dimmer = Math.round(intensity * 255);
+          endVals.dimmer = startVals.dimmer;
+        }
+        if (!useSnap && endWheel && endWheel.dmx_value !== startWheel.dmx_value) {
+          endVals.color_wheel = endWheel.dmx_value;
+        }
+
+        const hasEndVals = Object.keys(endVals).length > 0;
+        cues.push({
+          lane,
+          start_ms: Math.round(startMs),
+          duration_ms: Math.round(durMs),
+          cue_type: (!useSnap && hasEndVals) ? 'fade' : 'static',
+          fixture_id: fix.id,
+          channel_values: startVals,
+          end_channel_values: hasEndVals ? endVals : undefined,
+          color: startWheel.color_hex || '#888888',
+          label: '',
+        });
+      }
+    }
+  }
+
+  cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
+}
+
 // ─── Mover Movement Generation ──────────────────────────────────────────────
 
 /**
  * Movement position presets — different named positions for pan/tilt (0-255).
  * These represent general stage positions movers can sweep between.
  */
-const MOVER_POSITIONS = [
-  { pan: 128, tilt: 128 },  // center
-  { pan: 40,  tilt: 100 },  // front-left
-  { pan: 216, tilt: 100 },  // front-right
-  { pan: 80,  tilt: 60 },   // audience-left
-  { pan: 176, tilt: 60 },   // audience-right
-  { pan: 128, tilt: 40 },   // audience-center (far)
-  { pan: 60,  tilt: 160 },  // stage-left-up
-  { pan: 196, tilt: 160 },  // stage-right-up
-  { pan: 128, tilt: 200 },  // straight-down
-  { pan: 90,  tilt: 128 },  // left-mid
-  { pan: 166, tilt: 128 },  // right-mid
-];
 
 /**
  * Section-aware movement styles:
@@ -927,238 +1212,137 @@ const DEFAULT_MOVEMENT = { barsPerMove: 2, range: 0.5, speed: 'medium' };
 const SPEED_DMX = { slow: 200, medium: 140, fast: 40 };
 
 /**
- * Build per-fixture position lists from saved mover presets.
- * Each preset contains positions for all movers — we extract each fixture's
- * pan/tilt from every preset to create a fixture-specific position pool.
- * Positions from saved presets are prioritised; hardcoded MOVER_POSITIONS
- * serve as padding when fewer presets than needed are defined.
- */
-function buildFixturePositions(moverPresets, movers, rand) {
-  // Map: fixture_id → [{pan, tilt}, ...] from saved presets
-  const perFixture = {};
-  for (const fix of movers) perFixture[fix.id] = [];
-
-  if (moverPresets && moverPresets.length > 0) {
-    for (const preset of moverPresets) {
-      if (!Array.isArray(preset.positions)) continue;
-      // Build lookup for this preset's positions
-      const posMap = {};
-      for (const p of preset.positions) posMap[p.fixture_id] = { pan: p.pan, tilt: p.tilt };
-
-      for (const fix of movers) {
-        if (posMap[fix.id]) {
-          perFixture[fix.id].push(posMap[fix.id]);
-        }
-      }
-    }
-  }
-
-  // Pad with hardcoded positions so we always have enough variety
-  for (const fix of movers) {
-    const arr = perFixture[fix.id];
-    // Append hardcoded positions that are not duplicates of user presets
-    for (const hp of MOVER_POSITIONS) {
-      const isDup = arr.some(a => a.pan === hp.pan && a.tilt === hp.tilt);
-      if (!isDup) arr.push({ pan: hp.pan, tilt: hp.tilt });
-    }
-    // Shuffle the combined list with seeded random for deterministic variety
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-  }
-
-  return perFixture;
-}
-
-/**
- * Generate mover pan/tilt cues alongside color cues.
- * Each mover gets position assignments that sweep through presets.
- * When saved mover presets exist, their per-fixture positions are used
- * (supplemented by generic positions for additional variety).
- * Multi-mover setups get mirrored or offset positions for visual variety.
+ * Generate mover movement cues that reference saved mover presets by ID.
+ * Instead of embedding explicit pan/tilt values, each cue stores the preset
+ * IDs to cycle through.  At playback the engine looks up current preset
+ * positions, so changing presets per-venue updates all sequences automatically.
+ *
+ * Section-aware timing is preserved: energetic sections get shorter cues
+ * (faster cycling), calm sections get longer ones (slower sweeps).
+ * Speed and gobo channels are still set directly in channel_values.
  */
 function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets) {
   const { barMs, beatMs, rand, preset, durationMs, snapBar, bpmFactor } = ctx;
 
-  // BPM-adaptive movement scaling:
-  //  - bpmFactor 0 (≤90 BPM) → moveDensity ~0.8 (slower, fewer moves)
-  //  - bpmFactor 1 (≥150 BPM) → moveDensity ~2.0 (faster, more frequent moves)
-  const moveDensityScale = 0.8 + 1.2 * bpmFactor;
-  // Range boost: high-BPM songs use wider pan/tilt sweeps
-  const rangeBoost = 1.0 + 0.4 * bpmFactor;  // 1.0–1.4×
+  // Nothing to reference if no presets are configured
+  if (!moverPresets || moverPresets.length === 0) return;
 
-  // Build per-fixture position lists from saved presets + hardcoded fallback
-  const perFixPositions = buildFixturePositions(moverPresets, movers, rand);
+  const presetIds = moverPresets.map(p => p.id);
 
   const useSections = sections && sections.length > 0;
 
   for (let mi = 0; mi < movers.length; mi++) {
     const fix = movers[mi];
-    // Position pool for this specific fixture
-    const posOrder = perFixPositions[fix.id];
     // Find existing lane for this fixture (from color cues already generated)
     const existingCue = cues.find(c => c.fixture_id === fix.id);
     const lane = existingCue ? existingCue.lane : mi;
     const hasGobo = fix.channels.some(ch => ch.type === 'gobo');
     const hasSpeed = fix.channels.some(ch => ch.type === 'speed');
 
-    let posIdx = mi; // offset per mover for variety
-    const mirror = mi % 2 === 1; // odd movers mirror pan
-
     if (useSections) {
+      // Movement density per section — not every moment needs movement.
+      // Values are the probability a given chunk is a move vs a hold.
+      const MOVE_DENSITY = {
+        intro: 0.4, verse: 0.45, chorus: 0.7, bridge: 0.5,
+        breakdown: 0.25, buildup: 0.3, drop: 0.8, outro: 0.3,
+      };
+
+      // Look-ahead: check which sections are followed by a drop
+      const followedByDrop = sections.map((sec, i) => {
+        const next = sections[i + 1];
+        return next && next.label === 'drop';
+      });
+
       for (let si = 0; si < sections.length; si++) {
         const sec = sections[si];
-        const style = MOVEMENT_STYLES[sec.label] || DEFAULT_MOVEMENT;
-        // Snap section boundaries; keep first/last edges unsnapped for full coverage
+        const activeMovStyles = ctx.activeMovementStyles || MOVEMENT_STYLES;
+        const activeSpd = ctx.activeSpeedDmx || SPEED_DMX;
+        const style = activeMovStyles[sec.label] || DEFAULT_MOVEMENT;
         const secStartMs = si === 0 ? 0 : snapBar(Math.round(sec.start_ms));
         const secEndMs = si === sections.length - 1 ? Math.round(durationMs) : Math.round(sec.end_ms);
         const secDurMs = secEndMs - secStartMs;
         if (secDurMs <= 0) continue;
 
-        // Adjust movement density with genre preset AND BPM factor
-        const barsPerMove = Math.max(0.5, Math.round((style.barsPerMove / (preset.cueDensityMult * moveDensityScale)) * 2) / 2);
-        const moveDurMs = barsPerMove * barMs;
-        const numMoves = Math.max(1, Math.floor(secDurMs / moveDurMs));
+        // Break section into bar-sized chunks; each chunk is either
+        // a movement cue or a gap (hold position).
+        const chunkBars = Math.max(1, Math.round(style.barsPerMove * 2));
+        const chunkMs = chunkBars * barMs;
+        const numChunks = Math.max(1, Math.floor(secDurMs / chunkMs));
+        const baseDensity = MOVE_DENSITY[sec.label] || 0.5;
 
-        // Scale position range by section style, BPM, and genre
-        const effectiveRange = Math.min(1, style.range * rangeBoost);
-
-        for (let ci = 0; ci < numMoves; ci++) {
-          const moveStart = ci === 0 ? secStartMs : snapBar(secStartMs + ci * moveDurMs);
-          const moveEnd = ci < numMoves - 1
-            ? snapBar(secStartMs + (ci + 1) * moveDurMs)
+        for (let ci = 0; ci < numChunks; ci++) {
+          const chunkStart = secStartMs + ci * chunkMs;
+          const chunkEnd = ci < numChunks - 1
+            ? chunkStart + chunkMs
             : secEndMs;
-          let dur = moveEnd - moveStart;
-          // Guard: ensure minimum move duration (1 bar)
-          if (dur < barMs) dur = Math.min(barMs, secEndMs - moveStart);
-          if (dur <= 0) continue;
+          const chunkDur = chunkEnd - chunkStart;
+          if (chunkDur <= 0) continue;
 
-          const from = posOrder[posIdx % posOrder.length];
-          posIdx++;
-          const to = posOrder[posIdx % posOrder.length];
+          // Buildup ramp: density increases through the section.
+          // Ramps from baseDensity (0.3) up to 0.9 if a drop follows,
+          // or up to 0.6 otherwise — so movement accelerates into the drop.
+          let density = baseDensity;
+          if (sec.label === 'buildup' && numChunks > 1) {
+            const progress = ci / (numChunks - 1); // 0..1
+            const ceiling = followedByDrop[si] ? 0.9 : 0.6;
+            density = baseDensity + (ceiling - baseDensity) * progress;
+          }
 
-          // Apply range scaling: lerp positions toward center to reduce range,
-          // or use full positions for high range
-          const centerPan = 128, centerTilt = 128;
-          const fromPan = Math.round(centerPan + (from.pan - centerPan) * effectiveRange);
-          const fromTilt = Math.round(centerTilt + (from.tilt - centerTilt) * effectiveRange);
-          const toPan = Math.round(centerPan + (to.pan - centerPan) * effectiveRange);
-          const toTilt = Math.round(centerTilt + (to.tilt - centerTilt) * effectiveRange);
+          // Always move on the first chunk of high-energy sections,
+          // otherwise use density-based probability.
+          const forceMove = ci === 0 && (sec.label === 'chorus' || sec.label === 'drop');
+          if (!forceMove && rand() >= density) continue; // gap — hold position
 
-          const startPan = mirror ? (255 - fromPan) : fromPan;
-          const endPan = mirror ? (255 - toPan) : toPan;
-
-          const startVals = { pan: startPan, tilt: fromTilt };
-          const endVals = { pan: endPan, tilt: toTilt };
+          const chVals = { mover_preset_ids: presetIds };
 
           // Set speed channel (motor speed) — faster on energetic sections
           if (hasSpeed) {
-            const baseSpeedDmx = SPEED_DMX[style.speed] || SPEED_DMX.medium;
-            // Make motor even faster at high BPM
+            const baseSpeedDmx = activeSpd[style.speed] || activeSpd.medium;
             const bpmSpeedBoost = Math.round(baseSpeedDmx * (1 - bpmFactor * 0.3));
-            startVals.speed = Math.max(0, bpmSpeedBoost);
-            endVals.speed = startVals.speed;
+            chVals.speed = Math.max(0, bpmSpeedBoost);
           }
 
           // Add gobo changes on high-energy sections
           if (hasGobo && (sec.label === 'chorus' || sec.label === 'drop'
               || (sec.label === 'buildup' && bpmFactor > 0.5))) {
-            startVals.gobo = Math.floor(rand() * 8) * 16;
+            chVals.gobo = Math.floor(rand() * 8) * 16;
           }
 
           cues.push({
             lane,
-            start_ms: Math.round(moveStart),
-            duration_ms: Math.round(dur),
-            cue_type: 'fade',
+            start_ms: Math.round(chunkStart),
+            duration_ms: Math.round(chunkDur),
+            cue_type: 'movement',
             fixture_id: fix.id,
-            channel_values: startVals,
-            end_channel_values: endVals,
+            channel_values: chVals,
             color: '#4488ff',
             label: 'move',
           });
         }
       }
     } else {
-      // No sections — sweep through positions every few bars (BPM-adaptive)
-      const totalBars = Math.floor(durationMs / barMs);
-      const barsPerMove = Math.max(1, Math.round(4 / (preset.cueDensityMult * moveDensityScale)));
+      // No sections — single movement cue for the whole track
+      const chVals = { mover_preset_ids: presetIds };
 
-      for (let bar = 0; bar < totalBars; bar += barsPerMove) {
-        const startMs = snapBar(bar * barMs);
-        const endMs = Math.min(snapBar((bar + barsPerMove) * barMs), durationMs);
-        const dur = endMs - startMs;
-        if (dur <= 0) continue;
-
-        const from = posOrder[posIdx % posOrder.length];
-        posIdx++;
-        const to = posOrder[posIdx % posOrder.length];
-
-        const startPan = mirror ? (255 - from.pan) : from.pan;
-        const endPan = mirror ? (255 - to.pan) : to.pan;
-
-        const chVals = { pan: startPan, tilt: from.tilt };
-        const endChVals = { pan: endPan, tilt: to.tilt };
-
-        if (hasSpeed) {
-          const baseSpeedDmx = SPEED_DMX.medium;
-          chVals.speed = Math.max(0, Math.round(baseSpeedDmx * (1 - bpmFactor * 0.3)));
-          endChVals.speed = chVals.speed;
-        }
-
-        cues.push({
-          lane,
-          start_ms: Math.round(startMs),
-          duration_ms: Math.round(dur),
-          cue_type: 'fade',
-          fixture_id: fix.id,
-          channel_values: chVals,
-          end_channel_values: endChVals,
-          color: '#4488ff',
-          label: 'move',
-        });
+      if (hasSpeed) {
+        chVals.speed = Math.max(0, Math.round(SPEED_DMX.medium * (1 - bpmFactor * 0.3)));
       }
+
+      cues.push({
+        lane,
+        start_ms: 0,
+        duration_ms: Math.round(durationMs),
+        cue_type: 'movement',
+        fixture_id: fix.id,
+        channel_values: chVals,
+        color: '#4488ff',
+        label: 'move',
+      });
     }
   }
 
   // Re-sort after adding movement cues
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
-
-  // ── De-overlap movement cues per fixture ──────────────────────────────
-  // At section boundaries two movement cues for the same fixture can overlap.
-  // For each mover, walk its movement cues chronologically and trim (or remove)
-  // any cue that is superseded by the next one.
-  for (const fix of movers) {
-    // Collect indices of movement cues for this fixture
-    const moveIdxs = [];
-    for (let i = 0; i < cues.length; i++) {
-      if (cues[i].fixture_id === fix.id && cues[i].label === 'move') moveIdxs.push(i);
-    }
-    if (moveIdxs.length < 2) continue;
-
-    // Walk backwards so splicing doesn't shift indices we haven't visited
-    const toRemove = new Set();
-    for (let j = 0; j < moveIdxs.length - 1; j++) {
-      const curr = cues[moveIdxs[j]];
-      const next = cues[moveIdxs[j + 1]];
-      const currEnd = curr.start_ms + curr.duration_ms;
-      if (currEnd > next.start_ms) {
-        // Overlap detected — trim current cue to end where next begins
-        const trimmed = next.start_ms - curr.start_ms;
-        if (trimmed <= 0) {
-          // Current cue starts at or after next — remove it entirely
-          toRemove.add(moveIdxs[j]);
-        } else {
-          curr.duration_ms = trimmed;
-        }
-      }
-    }
-    if (toRemove.size > 0) {
-      const sorted = [...toRemove].sort((a, b) => b - a);
-      for (const idx of sorted) cues.splice(idx, 1);
-    }
-  }
 }
 
 // ─── Effect Cue Generation (non-movers only) ───────────────────────────────
@@ -1316,8 +1500,9 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       const chance = (sectionEffectChance[label] || 0.3) * preset.cueDensityMult;
       if (rand() > Math.min(chance, 0.95)) continue;
 
-      const typesMap = SECTION_EFFECT_TYPES[label] || DEFAULT_EFFECT_TYPES;
-      const sectionPalette = getSectionPalettes(paletteKey, label);
+      const activeSE = ctx.activeSectionEffects || SECTION_EFFECT_TYPES;
+      const typesMap = activeSE[label] || DEFAULT_EFFECT_TYPES;
+      const sectionPalette = getSectionPalettes(paletteKey, label, ctx.activePalettes);
 
       // Each fixture-type group picks its own effect but stays consistent within the group
       for (const [typeName, group] of groupEntries) {
@@ -1362,7 +1547,7 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       const dur = Math.min(effectDurationBars * barMs, durationMs - startMs);
       if (dur < barMs) break;
 
-      const sectionPalette = getSectionPalettes(paletteKey, 'verse');
+      const sectionPalette = getSectionPalettes(paletteKey, 'verse', ctx.activePalettes);
       const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
 
       for (const [typeName, group] of groupEntries) {
@@ -1474,9 +1659,10 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
         }
       }
 
-      const patterns = CELL_PATTERN_MAP[label] || CELL_PATTERN_MAP.verse;
-      const allPalettes = getSectionPalettes(paletteKey, label);
-      const style = sectionStyles[label] || defaultStyle;
+      const activeCPM = ctx.activeCellPatterns || CELL_PATTERN_MAP;
+      const patterns = activeCPM[label] || activeCPM.verse || CELL_PATTERN_MAP.verse;
+      const allPalettes = getSectionPalettes(paletteKey, label, ctx.activePalettes);
+      const style = (ctx.activeSectionStyles || sectionStyles)[label] || defaultStyle;
       const baseIntensity = Math.min(1, ((style.intensity[0] + style.intensity[1]) / 2) * preset.intensityMult);
 
       // Determine how many sub-phrases fit in this section

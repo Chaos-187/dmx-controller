@@ -53,7 +53,7 @@ const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','fig
 const MULTICELL_EFFECT_TYPES   = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
 const PAN_TILT = new Set(['pan','tilt']);
-const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv']);
+const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
 
 // ─── Fixture Compatibility ──────────────────────────────────────────────────
 

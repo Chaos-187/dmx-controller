@@ -450,6 +450,22 @@ function executeMapAction(map, activate) {
           const colorMap = { red, green, blue, white };
           if (colorMap[ch.type] !== undefined) {
             channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? colorMap[ch.type] : 0 });
+          } else if (ch.type === 'color_wheel' && fix.color_wheel_map && fix.color_wheel_map.length) {
+            // Find nearest color wheel position for this RGB color
+            if (activate) {
+              let best = null, bestDist = Infinity;
+              for (const entry of fix.color_wheel_map) {
+                const hex = entry.color_hex;
+                const cr = parseInt(hex.slice(1,3), 16);
+                const cg = parseInt(hex.slice(3,5), 16);
+                const cb = parseInt(hex.slice(5,7), 16);
+                const dist = (cr-red)*(cr-red) + (cg-green)*(cg-green) + (cb-blue)*(cb-blue);
+                if (dist < bestDist) { bestDist = dist; best = entry; }
+              }
+              channelUpdates[u].push({ ch: ch.dmx_address, val: best ? best.dmx_value : 0 });
+            } else {
+              channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
+            }
           } else if (ch.type === 'dimmer' && activate) {
             channelUpdates[u].push({ ch: ch.dmx_address, val: 255 });
           } else if (ch.type === 'dimmer' && !activate) {

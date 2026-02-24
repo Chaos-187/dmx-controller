@@ -1022,6 +1022,22 @@ function getFixtureIdsFromTargets(targets) {
   return targets.filter(f => fixtureEnabled[f.id] !== false).map(f => f.id);
 }
 
+/* ─── Color Wheel Helper ───────────────────────────────────── */
+function findNearestWheelDmx(fixture, r, g, b) {
+  const map = fixture.color_wheel_map;
+  if (!map || !map.length) return null;
+  let best = null, bestDist = Infinity;
+  for (const entry of map) {
+    const hex = entry.color_hex;
+    const cr = parseInt(hex.slice(1,3), 16);
+    const cg = parseInt(hex.slice(3,5), 16);
+    const cb = parseInt(hex.slice(5,7), 16);
+    const dist = (cr-r)*(cr-r) + (cg-g)*(cg-g) + (cb-b)*(cb-b);
+    if (dist < bestDist) { bestDist = dist; best = entry; }
+  }
+  return best ? best.dmx_value : null;
+}
+
 /* ─── Color Override ───────────────────────────────────────── */
 function sendColorOverride() {
   if (selectedColor === null) return;
@@ -1029,8 +1045,8 @@ function sendColorOverride() {
   const scale = colorIntensity / 255;
   const targets = getTargetFixtures();
   const updates = buildChannelUpdates(targets,
-    ch => ['red','green','blue','white','amber','uv','dimmer'].includes(ch.type),
-    ch => {
+    ch => ['red','green','blue','white','amber','uv','dimmer','color_wheel'].includes(ch.type),
+    (ch, f) => {
       switch (ch.type) {
         case 'red': return Math.round(c.r * scale);
         case 'green': return Math.round(c.g * scale);
@@ -1039,6 +1055,10 @@ function sendColorOverride() {
         case 'dimmer': return Math.round(255 * scale);
         case 'amber': return c.name === 'Amber' ? Math.round(255 * scale) : 0;
         case 'uv': return c.name === 'UV' ? Math.round(255 * scale) : 0;
+        case 'color_wheel': {
+          const dmx = findNearestWheelDmx(f, c.r, c.g, c.b);
+          return dmx !== null ? dmx : 0;
+        }
         default: return 0;
       }
     });
@@ -1049,7 +1069,7 @@ function sendColorOverride() {
 function clearColorOverrideDMX() {
   const targets = getTargetFixtures();
   const updates = buildChannelUpdates(targets,
-    ch => ['red','green','blue','white','amber','uv'].includes(ch.type), () => 0);
+    ch => ['red','green','blue','white','amber','uv','dimmer'].includes(ch.type), () => 0);
   sendDMX(updates);
   notifyOverride('color', getFixtureIdsFromTargets(targets), false);
 }
@@ -1208,7 +1228,11 @@ function runAction(action, on) {
 function actionFullWhite() {
   const targets = getEnabledFixtures();
   sendDMX(buildChannelUpdates(targets,
-    ch => ['red','green','blue','white','dimmer'].includes(ch.type), () => 255));
+    ch => ['red','green','blue','white','dimmer','color_wheel'].includes(ch.type),
+    (ch, f) => {
+      if (ch.type === 'color_wheel') { const d = findNearestWheelDmx(f, 255, 255, 255); return d !== null ? d : 0; }
+      return 255;
+    }));
   notifyOverride('color', getFixtureIdsFromTargets(targets), true);
 }
 
@@ -1220,11 +1244,12 @@ function actionFullColor() {
 function actionDimWarm() {
   const targets = getEnabledFixtures();
   sendDMX(buildChannelUpdates(targets,
-    ch => ['red','green','blue','white','amber','dimmer'].includes(ch.type),
-    ch => {
+    ch => ['red','green','blue','white','amber','dimmer','color_wheel'].includes(ch.type),
+    (ch, f) => {
       switch (ch.type) {
         case 'red': return 180; case 'green': return 100; case 'blue': return 40;
         case 'amber': return 200; case 'white': return 80; case 'dimmer': return 120;
+        case 'color_wheel': { const d = findNearestWheelDmx(f, 180, 100, 40); return d !== null ? d : 0; }
         default: return 0;
       }
     }));
@@ -1246,10 +1271,11 @@ function actionAllOff() {
 function actionUVMode() {
   const targets = getEnabledFixtures();
   sendDMX(buildChannelUpdates(targets,
-    ch => ['red','green','blue','white','uv','dimmer'].includes(ch.type),
-    ch => {
+    ch => ['red','green','blue','white','uv','dimmer','color_wheel'].includes(ch.type),
+    (ch, f) => {
       switch (ch.type) {
         case 'uv': return 255; case 'dimmer': return 200; case 'blue': return 40;
+        case 'color_wheel': { const d = findNearestWheelDmx(f, 0, 0, 40); return d !== null ? d : 0; }
         default: return 0;
       }
     }));
@@ -1415,8 +1441,8 @@ function executeAction(action, on) {
         const g = Math.round((data.green || 0) * scale);
         const b = Math.round((data.blue || 0) * scale);
         const updates = buildChannelUpdates(getEnabledFixtures(),
-          ch => ['red','green','blue','white','amber','uv','dimmer'].includes(ch.type),
-          ch => {
+          ch => ['red','green','blue','white','amber','uv','dimmer','color_wheel'].includes(ch.type),
+          (ch, f) => {
             switch (ch.type) {
               case 'red': return r;
               case 'green': return g;
@@ -1425,6 +1451,7 @@ function executeAction(action, on) {
               case 'dimmer': return Math.round(255 * scale);
               case 'amber': return data.amber || 0;
               case 'uv': return data.uv || 0;
+              case 'color_wheel': { const d = findNearestWheelDmx(f, data.red || 0, data.green || 0, data.blue || 0); return d !== null ? d : 0; }
               default: return 0;
             }
           });

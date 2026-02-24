@@ -294,6 +294,7 @@ const SEQ = (() => {
   function refreshMoverDropdown() {
     const el = $('propMover');
     el.innerHTML = '<option value="">-- Select --</option>' +
+      '<option value="__all__">All Presets</option>' +
       moverPresets.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   }
 
@@ -306,6 +307,7 @@ const SEQ = (() => {
     cue.end_display_color = (ech.red !== undefined || ech.green !== undefined || ech.blue !== undefined)
       ? colorFromCh(ech) : null;
     cue.mover_preset_id = ch.mover_preset_id || null;
+    cue.mover_preset_ids = Array.isArray(ch.mover_preset_ids) ? ch.mover_preset_ids : null;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -434,9 +436,13 @@ const SEQ = (() => {
     const bg = (cue.end_display_color && cue.cue_type !== 'solid')
       ? `background:linear-gradient(to right,${sc},${cue.end_display_color})` : `background:${sc}`;
     let label = cue.label || (cue.cue_type === 'solid' ? '' : cue.cue_type);
-    if (cue.cue_type === 'movement' && cue.mover_preset_id) {
-      const mp = moverPresets.find(p => p.id === cue.mover_preset_id);
-      if (mp) label = mp.name;
+    if (cue.cue_type === 'movement') {
+      if (cue.mover_preset_ids && cue.mover_preset_ids.length > 0) {
+        label = 'All Presets';
+      } else if (cue.mover_preset_id) {
+        const mp = moverPresets.find(p => p.id === cue.mover_preset_id);
+        if (mp) label = mp.name;
+      }
     }
     return `<div class="tl-cue${sel}" data-cue="${cue.id}" style="left:${left}px;width:${width}px;${bg}" ` +
       `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s)">${esc(label)}<div class="tl-cue-resize"></div></div>`;
@@ -639,7 +645,13 @@ const SEQ = (() => {
     $('propColor').value = cue.display_color || cue.color || '#e94560';
     $('propEffect').value = cue.effect_id || '';
     $('propMoverRow').style.display = t === 'movement' ? '' : 'none';
-    if (t === 'movement') $('propMover').value = cue.mover_preset_id || '';
+    if (t === 'movement') {
+      if (cue.mover_preset_ids && cue.mover_preset_ids.length > 0) {
+        $('propMover').value = '__all__';
+      } else {
+        $('propMover').value = cue.mover_preset_id || '';
+      }
+    }
 
     if (!cue.channel_values) {
       $('channelSliders').innerHTML = '<div style="color:var(--text-muted);font-size:10px;padding:6px">Loading...</div>';
@@ -743,7 +755,14 @@ const SEQ = (() => {
     const endRows = $$('#channelSliders .ch-row[data-group="end"]');
     if (endRows.length > 0) { endChVals = {}; endRows.forEach(r => { endChVals[r.dataset.ch] = +r.querySelector('.ch-range').value; }); }
     if (type === 'strobe') { const hz = document.querySelector('#channelSliders .ch-row[data-ch="strobe_hz"] .ch-range'); if (hz) chVals.strobe_hz = +hz.value; }
-    if (type === 'movement') { const pid = $('propMover').value; if (pid) chVals.mover_preset_id = +pid; }
+    if (type === 'movement') {
+      const pid = $('propMover').value;
+      if (pid === '__all__') {
+        chVals.mover_preset_ids = moverPresets.map(p => p.id);
+      } else if (pid) {
+        chVals.mover_preset_id = +pid;
+      }
+    }
 
     const update = { cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs), label, color, channel_values: chVals, end_channel_values: endChVals, effect_id: effectId ? +effectId : null };
     await apiPut(`/api/cues/${selectedPrimary}`, update);
