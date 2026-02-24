@@ -183,6 +183,10 @@ function handleOs2lSubscribed(data) {
       const parts = value.replace(/\\\\/g, '\\').split('\\');
       state.decks[deck].filename = parts[parts.length - 1] || value;
 
+      // Resolve track_id for the UI (waveform display, etc.)
+      const resolvedTrack = db.getTrackByPath(value);
+      state.decks[deck].track_id = resolvedTrack ? resolvedTrack.id : null;
+
       // ─── Sequencer auto-load / auto-play / auto-generate ─────
       const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
       const seqAutoUnload = db.getConfig('seq_auto_unload') === '1';
