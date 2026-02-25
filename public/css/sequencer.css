@@ -317,6 +317,9 @@ body {
 
 .tl-lane-track {
   flex: 1; position: relative; min-width: 0; cursor: crosshair;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.055) 0 1px, transparent 1px var(--bar-px, 100px)),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px var(--beat-px, 25px));
 }
 
 /* Cue blocks */
@@ -327,12 +330,20 @@ body {
   border: 1px solid rgba(255,255,255,.12);
   white-space: nowrap; text-overflow: ellipsis;
   user-select: none; min-width: 4px; z-index: 1;
+  contain: layout style paint;
   transition: filter .08s, box-shadow .08s;
 }
 .tl-cue:hover { filter: brightness(1.15); }
 .tl-cue.selected {
   border: 2px solid #fff; z-index: 2;
   box-shadow: 0 0 10px var(--accent-glow), inset 0 0 8px rgba(255,255,255,.08);
+}
+
+/* Merged (collapsed multi-cell) cue summary */
+.tl-cue.merged {
+  opacity: .75; pointer-events: none;
+  font-weight: 700; text-align: center;
+  border-style: dashed;
 }
 
 /* Cue resize handle */

@@ -6769,6 +6769,12 @@ async function initDmxControl() {
   } catch { /* keep default */ }
 
   buildFaders();
+
+  // Load Quick Actions if that sub-tab is active (default)
+  const activeSubTab = document.querySelector('.dmx-subtab.active');
+  if (!activeSubTab || activeSubTab.dataset.dmxsub === 'quickactions') {
+    loadQuickActions();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════

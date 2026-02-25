@@ -38,6 +38,10 @@ const SEQ = (() => {
   let wfRawPeaks = null;
   let wfTrackInfo = null;
 
+  // Virtualized cue rendering
+  let _cuesByKey = new Map();
+  let _maxCueDurMs = 1000;
+
   // DMX output
   let dmxOutputOn = false;
 
@@ -47,7 +51,7 @@ const SEQ = (() => {
   let _timeDirty = false;
 
   // ── Helpers ───────────────────────────────────────────────────
-  function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function formatDur(s) { if (!s || s <= 0) return '--:--'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function colorFromCh(ch) {
@@ -180,9 +184,11 @@ const SEQ = (() => {
       api(`/api/sequences/${id}`), api(`/api/sequences/${id}/cues`),
     ]);
     currentId = seq.id; currentSeq = seq; cues = cueRes;
+    cues.forEach(computeDisplay);
     wfAnalysis = null; wfData = null; wfRawPeaks = null; wfTrackInfo = null; wfTrackId = null;
     activeLanes = new Set(cues.map(c => c.fixture_id).filter(Boolean));
     updateInfoPanel(); renderFixtureChips(); renderTimeline();
+    $('tlScroll').scrollLeft = 0;
     highlightSeqItem(currentId);
     if (seq.track_id) loadWaveform(seq.track_id);
   }
@@ -336,6 +342,12 @@ const SEQ = (() => {
     canvas.style.width = (totalW + 140) + 'px';
     ruler.style.width = totalW + 'px';
 
+    // Grid spacing via CSS custom properties (replaces DOM grid-line elements)
+    const beatPx = (beatMs / 1000) * zoomPxPerSec;
+    const barPx = beatPx * 4;
+    canvas.style.setProperty('--beat-px', beatPx + 'px');
+    canvas.style.setProperty('--bar-px', barPx + 'px');
+
     // Ruler
     let rHtml = '', mt = 0, bc = 0;
     while (mt < durMs) {
@@ -376,16 +388,15 @@ const SEQ = (() => {
       const isMover = !isMulti && fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
       const isExp = (isMulti || isMover) && expandedFixtures.has(fix.id);
       const hasRGB = fix.channels.some(c => c.type === 'red');
-      const gridHtml = buildGridLines(durMs, beatMs);
       const expBtn = (isMulti || isMover)
         ? `<span class="lane-expand" data-fix="${fix.id}">${isExp ? '&#9660;' : '&#9654;'}</span>` : '';
 
       if (!isExp) {
-        html += renderSingleLane(fix, i, gridHtml, expBtn, hasRGB);
+        html += renderSingleLane(fix, i, expBtn, hasRGB);
       } else if (isMover) {
-        html += renderMoverLanes(fix, i, gridHtml, expBtn, hasRGB);
+        html += renderMoverLanes(fix, i, expBtn, hasRGB);
       } else {
-        html += renderMultiCellLanes(fix, i, gridHtml, expBtn, hasRGB);
+        html += renderMultiCellLanes(fix, i, expBtn, hasRGB);
       }
     }
 
@@ -401,10 +412,13 @@ const SEQ = (() => {
       });
     });
 
+    // Index cues and paint only what's visible (viewport virtualization)
+    buildCueIndex(laneFixes);
+
     // Waveform canvas
     if (wfAnalysis && wfData) requestAnimationFrame(() => drawWaveform());
 
-    $('tlScroll').scrollLeft = 0;
+    paintVisibleCues();
     updatePlayhead();
   }
 
@@ -418,19 +432,115 @@ const SEQ = (() => {
     return list;
   }
 
-  function buildGridLines(durMs, beatMs) {
-    let html = '', gt = 0, gc = 0;
-    while (gt < durMs) {
-      const gx = (gt / 1000) * zoomPxPerSec;
-      html += `<div class="tl-grid ${gc % 4 === 0 ? 'bar' : 'beat'}" style="left:${gx}px"></div>`;
-      gc++; gt += beatMs;
+  // ── Cue Spatial Index (viewport virtualization) ───────────────
+  function buildCueIndex(laneFixes) {
+    _cuesByKey.clear();
+    _maxCueDurMs = 1000;
+    const fixMeta = new Map();
+    for (const fix of laneFixes) {
+      const isMulti = fix.cell_count > 0;
+      const isMover = !isMulti && fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
+      const isExp = (isMulti || isMover) && expandedFixtures.has(fix.id);
+      fixMeta.set(fix.id, { isMulti, isMover, isExp });
     }
-    return html;
+    for (const cue of cues) {
+      if (cue.duration_ms > _maxCueDurMs) _maxCueDurMs = cue.duration_ms;
+      const meta = fixMeta.get(cue.fixture_id);
+      let key;
+      if (!meta || !meta.isExp) {
+        key = `f${cue.fixture_id}`;
+      } else if (meta.isMover) {
+        key = cue.label === 'move' ? `f${cue.fixture_id}:move` : `f${cue.fixture_id}:light`;
+      } else {
+        key = `f${cue.fixture_id}:c${cue.cell || 0}`;
+      }
+      if (!_cuesByKey.has(key)) _cuesByKey.set(key, []);
+      _cuesByKey.get(key).push(cue);
+    }
+    for (const arr of _cuesByKey.values()) {
+      arr.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    // Merge collapsed multi-cell lanes into summary blocks
+    for (const [key, arr] of _cuesByKey.entries()) {
+      if (key.includes(':')) continue; // expanded sub-lane
+      const fid = parseInt(key.substring(1));
+      const meta = fixMeta.get(fid);
+      if (meta && meta.isMulti && !meta.isExp && arr.length > 1) {
+        _cuesByKey.set(key, _mergeCollapsed(arr));
+      }
+    }
+  }
+
+  function _mergeCollapsed(sorted) {
+    const merged = [];
+    let g = null;
+    for (const c of sorted) {
+      if (!g || c.start_ms > g.start_ms + g.duration_ms) {
+        if (g) merged.push(g);
+        g = { start_ms: c.start_ms, duration_ms: c.duration_ms, _count: 1, _merged: true,
+              display_color: c.display_color || c.color || '#e94560', id: -1, cue_type: 'solid' };
+      } else {
+        const newEnd = Math.max(g.start_ms + g.duration_ms, c.start_ms + c.duration_ms);
+        g.duration_ms = newEnd - g.start_ms;
+        g._count++;
+      }
+    }
+    if (g) merged.push(g);
+    return merged;
+  }
+
+  function paintVisibleCues() {
+    if (dragState || marquee) return;
+    const sw = $('tlScroll');
+    if (!sw || !currentSeq) return;
+    const scrollLeft = sw.scrollLeft;
+    const scrollTop = sw.scrollTop;
+    const viewW = sw.clientWidth;
+    const viewH = sw.clientHeight;
+    const lanesEl = $('tlLanes');
+    const lanesTop = lanesEl ? lanesEl.offsetTop : 0;
+    const HDR_W = 140;
+    const visStartMs = Math.max(0, ((scrollLeft - HDR_W) / zoomPxPerSec) * 1000 - _maxCueDurMs);
+    const visEndMs = ((scrollLeft + viewW - HDR_W) / zoomPxPerSec) * 1000;
+    const tracks = document.querySelectorAll('.tl-lane-track[data-lane-key]');
+    for (const track of tracks) {
+      // Vertical visibility: skip lanes scrolled out of view
+      const lane = track.parentElement;
+      const laneTop = lanesTop + lane.offsetTop;
+      const laneBot = laneTop + lane.offsetHeight;
+      if (laneBot < scrollTop || laneTop > scrollTop + viewH) {
+        if (track.childNodes.length > 0) track.innerHTML = '';
+        continue;
+      }
+      const key = track.dataset.laneKey;
+      const laneCues = _cuesByKey.get(key);
+      if (!laneCues || laneCues.length === 0) {
+        if (track.childNodes.length > 0) track.innerHTML = '';
+        continue;
+      }
+      let lo = 0, hi = laneCues.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (laneCues[mid].start_ms < visStartMs) lo = mid + 1;
+        else hi = mid;
+      }
+      let html = '';
+      for (let i = lo; i < laneCues.length; i++) {
+        const c = laneCues[i];
+        if (c.start_ms > visEndMs) break;
+        html += renderCueBlock(c);
+      }
+      track.innerHTML = html;
+    }
   }
 
   function renderCueBlock(cue) {
     const left = (cue.start_ms / 1000) * zoomPxPerSec;
     const width = Math.max(4, (cue.duration_ms / 1000) * zoomPxPerSec);
+    if (cue._merged) {
+      return `<div class="tl-cue merged" style="left:${left}px;width:${width}px;background:${cue.display_color}" ` +
+        `title="${cue._count} cues">${cue._count}</div>`;
+    }
     const sel = selectedIds.has(cue.id) ? ' selected' : '';
     const sc = cue.display_color || cue.color || '#e94560';
     const bg = (cue.end_display_color && cue.cue_type !== 'solid')
@@ -448,43 +558,38 @@ const SEQ = (() => {
       `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s)">${esc(label)}<div class="tl-cue-resize"></div></div>`;
   }
 
-  function renderSingleLane(fix, lane, grid, expBtn, hasRGB) {
-    const fixCues = cues.filter(c => c.fixture_id === fix.id);
+  function renderSingleLane(fix, lane, expBtn, hasRGB) {
     return `<div class="tl-lane" data-fix="${fix.id}" data-lane="${lane}">` +
       `<div class="tl-lane-hdr">${expBtn}<div class="lane-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
       `<span class="lane-name">${esc(fix.name)}</span></div>` +
-      `<div class="tl-lane-track" data-fix="${fix.id}">${grid}${fixCues.map(renderCueBlock).join('')}</div></div>`;
+      `<div class="tl-lane-track" data-fix="${fix.id}" data-lane-key="f${fix.id}"></div></div>`;
   }
 
-  function renderMoverLanes(fix, lane, grid, expBtn, hasRGB) {
-    const lightCues = cues.filter(c => c.fixture_id === fix.id && c.label !== 'move');
-    const moveCues = cues.filter(c => c.fixture_id === fix.id && c.label === 'move');
+  function renderMoverLanes(fix, lane, expBtn, hasRGB) {
     return `<div class="tl-lane" data-fix="${fix.id}" data-lane="${lane}" data-sub="light">` +
       `<div class="tl-lane-hdr">${expBtn}<div class="lane-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
       `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Light</span></div>` +
-      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="light">${grid}${lightCues.map(renderCueBlock).join('')}</div></div>` +
+      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="light" data-lane-key="f${fix.id}:light"></div></div>` +
       `<div class="tl-lane sub-lane mover-move" data-fix="${fix.id}" data-lane="${lane}" data-sub="movement">` +
       `<div class="tl-lane-hdr"><div class="lane-color" style="background:var(--blue)"></div>` +
       `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Move</span></div>` +
-      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="movement">${grid}${moveCues.map(renderCueBlock).join('')}</div></div>`;
+      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="movement" data-lane-key="f${fix.id}:move"></div></div>`;
   }
 
-  function renderMultiCellLanes(fix, lane, grid, expBtn, hasRGB) {
+  function renderMultiCellLanes(fix, lane, expBtn, hasRGB) {
     let html = '';
     const hasMaster = fix.channels.some(ch => !ch.cell);
     if (hasMaster) {
-      const mc = cues.filter(c => c.fixture_id === fix.id && !c.cell);
       html += `<div class="tl-lane master-lane" data-fix="${fix.id}" data-lane="${lane}" data-cell="0">` +
         `<div class="tl-lane-hdr">${expBtn}<div class="lane-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
         `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Master</span></div>` +
-        `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="0">${grid}${mc.map(renderCueBlock).join('')}</div></div>`;
+        `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="0" data-lane-key="f${fix.id}:c0"></div></div>`;
     }
     for (let cell = 1; cell <= fix.cell_count; cell++) {
-      const cc = cues.filter(c => c.fixture_id === fix.id && c.cell === cell);
       html += `<div class="tl-lane sub-lane" data-fix="${fix.id}" data-lane="${lane}" data-cell="${cell}">` +
         `<div class="tl-lane-hdr">${!hasMaster && cell === 1 ? expBtn : ''}<div class="lane-color" style="background:${fix.channels.some(ch => ch.cell === cell && ch.type === 'red') ? '#e94560' : '#888'}"></div>` +
         `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Cell ${cell}</span></div>` +
-        `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="${cell}">${grid}${cc.map(renderCueBlock).join('')}</div></div>`;
+        `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="${cell}" data-lane-key="f${fix.id}:c${cell}"></div></div>`;
     }
     return html;
   }
@@ -849,11 +954,18 @@ const SEQ = (() => {
     let _zt;
     on('zoomSlider', 'input', e => {
       zoomPxPerSec = +e.target.value; $('zoomVal').textContent = zoomPxPerSec;
-      clearTimeout(_zt); _zt = setTimeout(() => renderTimeline(), 50);
+      clearTimeout(_zt); _zt = setTimeout(() => renderTimeline(), 150);
     });
 
     // ── Snap ──
     on('snapSel', 'change', e => { snapBeats = +e.target.value; });
+
+    // ── Timeline scroll → repaint visible cues ──
+    let _tlScrollRAF = 0;
+    on('tlScroll', 'scroll', () => {
+      cancelAnimationFrame(_tlScrollRAF);
+      _tlScrollRAF = requestAnimationFrame(paintVisibleCues);
+    });
 
     // ── Sequence list: virtual scroll + search ──
     on('seqList', 'scroll', onSeqListScroll);
@@ -996,6 +1108,7 @@ const SEQ = (() => {
     });
 
     // ── Mousemove: drag / marquee ──
+    let _mqRAF = 0;
     document.addEventListener('mousemove', e => {
       if (marquee) {
         const lw = $('tlLanes'), wr = lw.getBoundingClientRect(), sw = $('tlScroll');
@@ -1004,14 +1117,22 @@ const SEQ = (() => {
         const w = Math.abs(cx - marquee.sx), h = Math.abs(cy - marquee.sy);
         const mEl = document.getElementById('tlMarquee');
         if (mEl) { mEl.style.left = x+'px'; mEl.style.top = y+'px'; mEl.style.width = w+'px'; mEl.style.height = h+'px'; }
-        const mr = { left: x, top: y, right: x+w, bottom: y+h };
-        $$('.tl-cue').forEach(cel => {
-          const cid = +cel.dataset.cue;
-          const lane = cel.closest('.tl-lane');
-          const cr = { left: cel.offsetLeft, top: lane.offsetTop + cel.offsetTop, right: cel.offsetLeft + cel.offsetWidth, bottom: lane.offsetTop + cel.offsetTop + cel.offsetHeight };
-          const hit = !(cr.right < mr.left || cr.left > mr.right || cr.bottom < mr.top || cr.top > mr.bottom);
-          cel.classList.toggle('selected', hit || (marquee.add && selectedIds.has(cid)));
-        });
+        // Throttle hit-testing to animation frames to avoid layout thrash
+        marquee._rect = { left: x, top: y, right: x+w, bottom: y+h };
+        if (!_mqRAF) {
+          _mqRAF = requestAnimationFrame(() => {
+            _mqRAF = 0;
+            if (!marquee || !marquee._rect) return;
+            const mr = marquee._rect;
+            $$('.tl-cue').forEach(cel => {
+              const cid = +cel.dataset.cue;
+              const lane = cel.closest('.tl-lane');
+              const cr = { left: cel.offsetLeft, top: lane.offsetTop + cel.offsetTop, right: cel.offsetLeft + cel.offsetWidth, bottom: lane.offsetTop + cel.offsetTop + cel.offsetHeight };
+              const hit = !(cr.right < mr.left || cr.left > mr.right || cr.bottom < mr.top || cr.top > mr.bottom);
+              cel.classList.toggle('selected', hit || (marquee.add && selectedIds.has(cid)));
+            });
+          });
+        }
         return;
       }
       if (!dragState) return;
