@@ -65,14 +65,19 @@ const SEQ = (() => {
   }
 
   /** Look up display colour from a color_wheel DMX value using the fixture's color_wheel_map.
-   *  Returns the hex of the nearest entry whose dmx_value <= val, or null if no map. */
+   *  Returns the hex of the entry whose dmx_start/dmx_end range contains val, or null if no map. */
   function colorFromWheel(fixtureId, dmxVal) {
     const fix = fixtures.find(f => f.id === fixtureId);
     if (!fix || !fix.color_wheel_map || fix.color_wheel_map.length === 0) return null;
-    const map = fix.color_wheel_map.slice().sort((a, b) => a.dmx_value - b.dmx_value);
+    const map = fix.color_wheel_map.slice().sort((a, b) => a.dmx_start - b.dmx_start);
+    // Find entry whose range contains the value
+    for (const entry of map) {
+      if (dmxVal >= entry.dmx_start && dmxVal <= entry.dmx_end) return entry.color_hex;
+    }
+    // Fallback: find nearest entry by dmx_start
     let best = map[0];
     for (const entry of map) {
-      if (entry.dmx_value <= dmxVal) best = entry;
+      if (entry.dmx_start <= dmxVal) best = entry;
       else break;
     }
     return best ? best.color_hex : null;

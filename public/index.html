@@ -970,8 +970,8 @@
 
     /* Color wheel map editor */
     .cw-editor-rows { margin-top: 8px; }
-    .cw-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
-    .cw-row input[type="number"] { width: 60px; }
+    .cw-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .cw-row input[type="number"] { width: 52px; }
     .cw-row input[type="text"] { flex: 1; min-width: 80px; }
     .cw-row input[type="color"] { width: 36px; height: 28px; padding: 1px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); cursor: pointer; }
     .cw-row .cw-hex { width: 80px; font-family: monospace; font-size: 12px; }
@@ -4979,7 +4979,7 @@ document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
 });
 
 /* ── Color Wheel Map Editor ── */
-let cwColors = []; // current color wheel map entries [{dmx_value, color_hex, label}]
+let cwColors = []; // current color wheel map entries [{dmx_start, dmx_end, color_hex, label}]
 
 function updateColorWheelVisibility() {
   // Show the color wheel editor section if ANY mode has a color_wheel channel
@@ -4997,7 +4997,8 @@ function renderCwEditor() {
     row.className = 'cw-row';
     row.innerHTML = `
       <span style="font-size:11px;color:var(--text-dim);width:16px;padding-top:2px">${i+1}</span>
-      <input type="number" value="${c.dmx_value}" min="0" max="255" title="DMX value" data-idx="${i}" data-field="dmx_value">
+      <input type="number" value="${c.dmx_start}" min="0" max="255" title="DMX start value" data-idx="${i}" data-field="dmx_start">
+      <input type="number" value="${c.dmx_end}" min="0" max="255" title="DMX end value" data-idx="${i}" data-field="dmx_end">
       <input type="color" value="${c.color_hex}" data-idx="${i}" data-field="color_hex_picker">
       <input type="text" class="cw-hex" value="${esc(c.color_hex)}" data-idx="${i}" data-field="color_hex" placeholder="#RRGGBB">
       <input type="text" value="${esc(c.label || '')}" data-idx="${i}" data-field="label" placeholder="Color name">
@@ -5010,8 +5011,10 @@ function renderCwEditor() {
     el.addEventListener('change', () => {
       const idx = +el.dataset.idx;
       const field = el.dataset.field;
-      if (field === 'dmx_value') {
-        cwColors[idx].dmx_value = Math.max(0, Math.min(255, +el.value));
+      if (field === 'dmx_start') {
+        cwColors[idx].dmx_start = Math.max(0, Math.min(255, +el.value));
+      } else if (field === 'dmx_end') {
+        cwColors[idx].dmx_end = Math.max(0, Math.min(255, +el.value));
       } else if (field === 'color_hex_picker') {
         cwColors[idx].color_hex = el.value;
         renderCwEditor(); // sync hex text input
@@ -5037,8 +5040,8 @@ function renderCwEditor() {
 }
 
 document.getElementById('btnAddCwColor').addEventListener('click', () => {
-  const lastDmx = cwColors.length > 0 ? cwColors[cwColors.length - 1].dmx_value + 18 : 0;
-  cwColors.push({ dmx_value: Math.min(lastDmx, 255), color_hex: '#ffffff', label: '' });
+  const lastEnd = cwColors.length > 0 ? cwColors[cwColors.length - 1].dmx_end + 1 : 0;
+  cwColors.push({ dmx_start: Math.min(lastEnd, 255), dmx_end: Math.min(lastEnd + 9, 255), color_hex: '#ffffff', label: '' });
   renderCwEditor();
 });
 
@@ -5064,7 +5067,7 @@ async function openTypeModal(typeId) {
     // Load color wheel map
     try {
       const cwData = await fetch(`/api/fixture-types/${typeId}/color-wheel`).then(r=>r.json());
-      if (Array.isArray(cwData)) cwColors = cwData.map(c => ({ dmx_value: c.dmx_value, color_hex: c.color_hex, label: c.label || '' }));
+      if (Array.isArray(cwData)) cwColors = cwData.map(c => ({ dmx_start: c.dmx_start, dmx_end: c.dmx_end, color_hex: c.color_hex, label: c.label || '' }));
     } catch(e) { /* no color wheel map */ }
   } else {
     document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
@@ -5139,7 +5142,7 @@ document.getElementById('btnSaveType').addEventListener('click', async () => {
   const savedId = editId || data.id;
   const hasColorWheel = modes.some(m => m.channels.some(ch => ch.type === 'color_wheel'));
   if (savedId && hasColorWheel && cwColors.length > 0) {
-    const sorted = cwColors.map((c, i) => ({ dmx_value: c.dmx_value, color_hex: c.color_hex, label: c.label, sort_order: i + 1 }));
+    const sorted = cwColors.map((c, i) => ({ dmx_start: c.dmx_start, dmx_end: c.dmx_end, color_hex: c.color_hex, label: c.label, sort_order: i + 1 }));
     await fetch(`/api/fixture-types/${savedId}/color-wheel`, {
       method: 'PUT',
       headers: {'Content-Type':'application/json'},

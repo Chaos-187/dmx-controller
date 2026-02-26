@@ -429,8 +429,8 @@ function hexToRgb(hex) {
  * Find the nearest color wheel entry for a given {r, g, b} color.
  * Uses Euclidean distance in RGB space.
  * @param {{r:number, g:number, b:number}} color - Target color
- * @param {Array<{dmx_value:number, color_hex:string}>} wheelMap - Color wheel entries
- * @returns {{dmx_value:number, color_hex:string}|null}
+ * @param {Array<{dmx_start:number, dmx_end:number, color_hex:string}>} wheelMap - Color wheel entries
+ * @returns {{dmx_start:number, dmx_end:number, color_hex:string}|null}
  */
 function findNearestWheelColor(color, wheelMap) {
   if (!wheelMap || wheelMap.length === 0) return null;
@@ -1184,8 +1184,6 @@ function generateBarBased(cues, fixtures, ctx) {
 function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels, ctx) {
   const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBeat, snapBar } = ctx;
 
-  const useFades = bpmFactor < 0.5;
-
   const useSections = sections && sections.length > 0;
 
   for (let fiIdx = 0; fiIdx < cwFixtures.length; fiIdx++) {
@@ -1270,16 +1268,13 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           // Use a section-aware snap probability: energetic sections snap more.
           // Color wheel fixtures should ALWAYS snap — interpolating between
           // wheel DMX positions sweeps through random physical colours.
-          // Only the dimmer is allowed to fade.
-          const startVals = { color_wheel: startWheel.dmx_value };
-          const endVals = {};
+          // Dimmer is also set as a static snap value (no fade transitions).
+          const startVals = { color_wheel: startWheel.dmx_start };
 
           if (hasDimmer) {
             startVals.dimmer = Math.round(startIntensity * 255);
-            endVals.dimmer = Math.round(endIntensity * 255);
           }
 
-          const hasEndVals = Object.keys(endVals).length > 0;
           cues.push({
             lane,
             start_ms: Math.round(cueStart),
@@ -1287,7 +1282,6 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
             cue_type: 'static',
             fixture_id: fix.id,
             channel_values: startVals,
-            end_channel_values: hasEndVals ? endVals : undefined,
             color: startWheel.color_hex || '#888888',
             label: sec.label || '',
           });
@@ -1343,15 +1337,12 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
         // Mostly snap changes for physical wheels
         const useSnap = rand() < 0.65;
 
-        const startVals = { color_wheel: startWheel.dmx_value };
-        const endVals = {};
+        const startVals = { color_wheel: startWheel.dmx_start };
 
         if (hasDimmer) {
           startVals.dimmer = Math.round(intensity * 255);
-          endVals.dimmer = startVals.dimmer;
         }
         // Never put color_wheel in end values — interpolation sweeps the physical wheel
-        const hasEndVals = Object.keys(endVals).length > 0;
         cues.push({
           lane,
           start_ms: Math.round(startMs),
@@ -1359,7 +1350,6 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           cue_type: 'static',
           fixture_id: fix.id,
           channel_values: startVals,
-          end_channel_values: hasEndVals ? endVals : undefined,
           color: startWheel.color_hex || '#888888',
           label: '',
         });

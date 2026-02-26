@@ -1035,7 +1035,7 @@ function findNearestWheelDmx(fixture, r, g, b) {
     const dist = (cr-r)*(cr-r) + (cg-g)*(cg-g) + (cb-b)*(cb-b);
     if (dist < bestDist) { bestDist = dist; best = entry; }
   }
-  return best ? best.dmx_value : null;
+  return best ? best.dmx_start : null;
 }
 
 /* ─── Color Override ───────────────────────────────────────── */

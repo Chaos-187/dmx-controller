@@ -462,7 +462,7 @@ function executeMapAction(map, activate) {
                 const dist = (cr-red)*(cr-red) + (cg-green)*(cg-green) + (cb-blue)*(cb-blue);
                 if (dist < bestDist) { bestDist = dist; best = entry; }
               }
-              channelUpdates[u].push({ ch: ch.dmx_address, val: best ? best.dmx_value : 0 });
+              channelUpdates[u].push({ ch: ch.dmx_address, val: best ? best.dmx_start : 0 });
             } else {
               channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
             }

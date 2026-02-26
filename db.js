@@ -200,11 +200,11 @@ function init() {
     CREATE TABLE IF NOT EXISTS color_wheel_colors (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
-      dmx_value       INTEGER NOT NULL,
+      dmx_start       INTEGER NOT NULL DEFAULT 0,
+      dmx_end         INTEGER NOT NULL DEFAULT 0,
       color_hex       TEXT    NOT NULL DEFAULT '#FFFFFF',
       label           TEXT    DEFAULT '',
-      sort_order      INTEGER DEFAULT 0,
-      UNIQUE(fixture_type_id, dmx_value)
+      sort_order      INTEGER DEFAULT 0
     );
 
     -- Effects library
@@ -444,6 +444,32 @@ function init() {
   } catch (e) {
     db.exec("ALTER TABLE rig_layouts ADD COLUMN is_active INTEGER DEFAULT 0");
     console.log('[DB] Migrated rig_layouts: added is_active column');
+  }
+
+  // Migrate: color_wheel_colors from single dmx_value to dmx_start/dmx_end range
+  // Check if old dmx_value column still exists (needs table recreation)
+  let cwNeedsMigration = false;
+  try {
+    db.prepare("SELECT dmx_value FROM color_wheel_colors LIMIT 1").get();
+    cwNeedsMigration = true;
+  } catch (e) { /* dmx_value gone — already migrated */ }
+  if (cwNeedsMigration) {
+    db.exec(`
+      CREATE TABLE color_wheel_colors_new (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
+        dmx_start       INTEGER NOT NULL DEFAULT 0,
+        dmx_end         INTEGER NOT NULL DEFAULT 0,
+        color_hex       TEXT    NOT NULL DEFAULT '#FFFFFF',
+        label           TEXT    DEFAULT '',
+        sort_order      INTEGER DEFAULT 0
+      );
+      INSERT INTO color_wheel_colors_new (id, fixture_type_id, dmx_start, dmx_end, color_hex, label, sort_order)
+        SELECT id, fixture_type_id, dmx_value, dmx_value, color_hex, label, sort_order FROM color_wheel_colors;
+      DROP TABLE color_wheel_colors;
+      ALTER TABLE color_wheel_colors_new RENAME TO color_wheel_colors;
+    `);
+    console.log('[DB] Migrated color_wheel_colors: replaced dmx_value with dmx_start/dmx_end');
   }
 
   // Migrate: fixture_type_modes — create default modes for existing fixture types
@@ -2050,30 +2076,30 @@ function seedDefaultColorWheelMap() {
   if (existing > 0 && existing === 14) return;
 
   const DEFAULT_60W_COLORS = [
-    { dmx_value: 0,   color_hex: '#FFFFFF', label: 'White' },
-    { dmx_value: 10,  color_hex: '#FF0000', label: 'Red' },
-    { dmx_value: 20,  color_hex: '#00FF00', label: 'Green' },
-    { dmx_value: 30,  color_hex: '#0000FF', label: 'Blue' },
-    { dmx_value: 40,  color_hex: '#FFFF00', label: 'Yellow' },
-    { dmx_value: 50,  color_hex: '#FF8000', label: 'Flush Orange' },
-    { dmx_value: 60,  color_hex: '#00FFFF', label: 'Cyan / Aqua' },
-    { dmx_value: 70,  color_hex: '#FF00FF', label: 'Magenta' },
-    { dmx_value: 80,  color_hex: '#7F7FC8', label: 'Moody Blue' },
-    { dmx_value: 90,  color_hex: '#B4B4FF', label: 'Sail' },
-    { dmx_value: 100, color_hex: '#FF4600', label: 'Vermilion' },
-    { dmx_value: 110, color_hex: '#7FFF7F', label: 'Pastel Green' },
-    { dmx_value: 120, color_hex: '#00B4B4', label: 'Bondi Blue' },
-    { dmx_value: 130, color_hex: '#7F7F00', label: 'Olive' },
+    { dmx_start: 0,   dmx_end: 9,   color_hex: '#FFFFFF', label: 'White' },
+    { dmx_start: 10,  dmx_end: 19,  color_hex: '#FF0000', label: 'Red' },
+    { dmx_start: 20,  dmx_end: 29,  color_hex: '#FFFF00', label: 'Yellow' },
+    { dmx_start: 30,  dmx_end: 39,  color_hex: '#002aff', label: 'Blue' },
+    { dmx_start: 40,  dmx_end: 49,  color_hex: '#66ff00', label: 'Green' },
+    { dmx_start: 50,  dmx_end: 59,  color_hex: '#FF8000', label: 'Flush Orange' },
+    { dmx_start: 60,  dmx_end: 69,  color_hex: '#FF00FF', label: 'Magenta' },
+    { dmx_start: 70,  dmx_end: 79,  color_hex: '#00FFFF', label: 'Cyan / Aqua' },
+    { dmx_start: 80,  dmx_end: 89,  color_hex: '#7F7FC8', label: 'Moody Blue' },
+    { dmx_start: 90,  dmx_end: 99,  color_hex: '#B4B4FF', label: 'Sail' },
+    { dmx_start: 100, dmx_end: 109, color_hex: '#FF4600', label: 'Vermilion' },
+    { dmx_start: 110, dmx_end: 119, color_hex: '#7FFF7F', label: 'Pastel Green' },
+    { dmx_start: 120, dmx_end: 129, color_hex: '#00B4B4', label: 'Bondi Blue' },
+    { dmx_start: 130, dmx_end: 139, color_hex: '#7F7F00', label: 'Olive' },
   ];
 
   const ins = db.prepare(
-    'INSERT INTO color_wheel_colors (fixture_type_id, dmx_value, color_hex, label, sort_order) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO color_wheel_colors (fixture_type_id, dmx_start, dmx_end, color_hex, label, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const seed = db.transaction(() => {
     db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(ft.id);
     for (let i = 0; i < DEFAULT_60W_COLORS.length; i++) {
       const c = DEFAULT_60W_COLORS[i];
-      ins.run(ft.id, c.dmx_value, c.color_hex, c.label, i);
+      ins.run(ft.id, c.dmx_start, c.dmx_end, c.color_hex, c.label, i);
     }
   });
   seed();
@@ -2082,26 +2108,26 @@ function seedDefaultColorWheelMap() {
 
 /**
  * Get the color wheel map for a fixture type.
- * @returns {Array} Array of { id, dmx_value, color_hex, label }
+ * @returns {Array} Array of { id, dmx_start, dmx_end, color_hex, label }
  */
 function getColorWheelMap(fixtureTypeId) {
   return db.prepare(
-    'SELECT id, dmx_value, color_hex, label FROM color_wheel_colors WHERE fixture_type_id = ? ORDER BY sort_order, dmx_value'
+    'SELECT id, dmx_start, dmx_end, color_hex, label FROM color_wheel_colors WHERE fixture_type_id = ? ORDER BY sort_order, dmx_start'
   ).all(fixtureTypeId);
 }
 
 /**
  * Get all color wheel maps, keyed by fixture_type_id.
- * @returns {Object} { fixture_type_id: [{ dmx_value, color_hex, label }] }
+ * @returns {Object} { fixture_type_id: [{ dmx_start, dmx_end, color_hex, label }] }
  */
 function getAllColorWheelMaps() {
   const rows = db.prepare(
-    'SELECT fixture_type_id, dmx_value, color_hex, label FROM color_wheel_colors ORDER BY fixture_type_id, sort_order, dmx_value'
+    'SELECT fixture_type_id, dmx_start, dmx_end, color_hex, label FROM color_wheel_colors ORDER BY fixture_type_id, sort_order, dmx_start'
   ).all();
   const maps = {};
   for (const r of rows) {
     if (!maps[r.fixture_type_id]) maps[r.fixture_type_id] = [];
-    maps[r.fixture_type_id].push({ dmx_value: r.dmx_value, color_hex: r.color_hex, label: r.label });
+    maps[r.fixture_type_id].push({ dmx_start: r.dmx_start, dmx_end: r.dmx_end, color_hex: r.color_hex, label: r.label });
   }
   return maps;
 }
@@ -2109,17 +2135,17 @@ function getAllColorWheelMaps() {
 /**
  * Set the full color wheel map for a fixture type (replaces existing).
  * @param {number} fixtureTypeId
- * @param {Array} colors - Array of { dmx_value, color_hex, label }
+ * @param {Array} colors - Array of { dmx_start, dmx_end, color_hex, label }
  */
 function setColorWheelMap(fixtureTypeId, colors) {
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(fixtureTypeId);
     const ins = db.prepare(
-      'INSERT INTO color_wheel_colors (fixture_type_id, dmx_value, color_hex, label, sort_order) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO color_wheel_colors (fixture_type_id, dmx_start, dmx_end, color_hex, label, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
     );
     for (let i = 0; i < colors.length; i++) {
       const c = colors[i];
-      ins.run(fixtureTypeId, c.dmx_value, c.color_hex || '#FFFFFF', c.label || '', i);
+      ins.run(fixtureTypeId, c.dmx_start, c.dmx_end, c.color_hex || '#FFFFFF', c.label || '', i);
     }
   });
   tx();
