@@ -70,6 +70,8 @@ const COLOR_TYPE_MAP = {
 // OFL category → internal category
 const OFL_CATEGORY_MAP = {
   'Moving Head':    'moving_head',
+  'Moving Head Wash': 'moving_head_wash',
+  'Moving Head Spot': 'moving_head_spot',
   'Barrel Scanner': 'moving_head',
   'Scanner':        'moving_head',
   'Blinder':        'strobe',

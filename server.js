@@ -566,6 +566,95 @@ app.delete('/api/fixtures/:id', (req, res) => {
   res.json({ deleted: true });
 });
 
+// ── Rig Layout API ──────────────────────────────────────────────────────────
+
+app.put('/api/fixtures/rig-layout', (req, res) => {
+  const positions = req.body.positions;
+  if (!Array.isArray(positions)) return res.status(400).json({ error: 'positions array required' });
+  const result = db.updateFixtureRigPositions(positions);
+  res.json(result);
+});
+
+// ── Rig Elements API ────────────────────────────────────────────────────────
+
+app.get('/api/rig-elements', (req, res) => {
+  res.json(db.getRigElements());
+});
+
+app.post('/api/rig-elements', (req, res) => {
+  try {
+    const result = db.createRigElement(req.body);
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/rig-elements/bulk', (req, res) => {
+  const elements = req.body.elements;
+  if (!Array.isArray(elements)) return res.status(400).json({ error: 'elements array required' });
+  const result = db.bulkUpdateRigElements(elements);
+  res.json(result);
+});
+
+app.put('/api/rig-elements/:id', (req, res) => {
+  const result = db.updateRigElement(+req.params.id, req.body);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.delete('/api/rig-elements/:id', (req, res) => {
+  db.deleteRigElement(+req.params.id);
+  res.json({ deleted: true });
+});
+
+// ── Rig Layouts API (save/load named snapshots) ─────────────────────────────
+
+app.get('/api/rig-layouts', (req, res) => {
+  res.json(db.getRigLayouts());
+});
+
+app.get('/api/rig-layouts/active', (req, res) => {
+  res.json(db.getActiveRigLayout());
+});
+
+app.get('/api/rig-layouts/:id', (req, res) => {
+  const layout = db.getRigLayout(+req.params.id);
+  if (!layout) return res.status(404).json({ error: 'Not found' });
+  res.json(layout);
+});
+
+app.post('/api/rig-layouts', (req, res) => {
+  try {
+    const result = db.createRigLayout(req.body.name, req.body.data);
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/rig-layouts/:id', (req, res) => {
+  const result = db.updateRigLayout(+req.params.id, req.body);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.post('/api/rig-layouts/:id/load', (req, res) => {
+  const result = db.loadRigLayout(+req.params.id);
+  if (!result) return res.status(404).json({ error: 'Not found' });
+  res.json(result);
+});
+
+app.delete('/api/rig-layouts/:id', (req, res) => {
+  db.deleteRigLayout(+req.params.id);
+  res.json({ deleted: true });
+});
+
+app.put('/api/rig-layouts/:id/set-active', (req, res) => {
+  db.setActiveRigLayout(+req.params.id);
+  res.json({ active: true });
+});
+
 // ─── Universe Map API ───────────────────────────────────────────────────────
 
 app.get('/api/universe/:num', (req, res) => {
@@ -665,8 +754,9 @@ app.put('/api/mover-presets/:id', (req, res) => {
 });
 
 app.delete('/api/mover-presets/:id', (req, res) => {
-  db.deleteMoverPreset(+req.params.id);
-  res.json({ deleted: true });
+  const result = db.deleteMoverPreset(+req.params.id);
+  if (result.error) return res.status(403).json(result);
+  res.json(result);
 });
 
 // ─── Version / About API ────────────────────────────────────────────────────
@@ -1786,6 +1876,7 @@ app.post('/api/effects/run', (req, res) => {
         const channelCtx = buildChannelCtx(ch, fix);
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
+        channelCtx._rigFixtureCount = fixMap.length;
         let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
 
         if (value !== null && value !== undefined) {
@@ -2256,6 +2347,7 @@ function processSceneEffects(scene, startTime) {
         const channelCtx = buildChannelCtx(ch, fix);
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
+        channelCtx._rigFixtureCount = fixMap.length;
         let value = computeEffectValue(effect, ch.type, progress, baseValues, entry.effect_params || {}, channelCtx);
 
         // If the effect doesn't control this channel (e.g. motion effect → color channels),
@@ -2393,7 +2485,9 @@ function generateStaticScene({ name, style, colorPalette, fixtures, groups, effe
   const colorFixtures = fixtures.filter(f =>
     f.channels.some(ch => ['red', 'green', 'blue', 'white'].includes(ch.type))
   );
-  const moverFixtures = fixtures.filter(f => f.category === 'moving_head');
+  const moverFixtures = fixtures.filter(f =>
+    f.category === 'moving_head' || f.category === 'moving_head_wash' || f.category === 'moving_head_spot'
+  );
   const dimmerOnlyFixtures = fixtures.filter(f =>
     f.channels.every(ch => !['red', 'green', 'blue', 'white'].includes(ch.type)) &&
     f.channels.some(ch => ch.type === 'dimmer')
@@ -2667,8 +2761,52 @@ function handleSequenceCommand(ws, msg) {
           activeSequences[deck].startWall = Date.now();
           activeSequences[deck].startOffset = seekMs;
         }
-        processSequenceAtTime(deck, seekMs);
+        // Use preview flag when sequence is loaded in preview mode or paused
+        const usePreview = activeSequences[deck].previewMode || !activeSequences[deck].playing;
+        processSequenceAtTime(deck, seekMs, usePreview ? { preview: true } : {});
         broadcast({ type: 'seq_time', deck, timeMs: seekMs });
+      }
+      break;
+    }
+
+    // ── Edit Mode: Preview ──────────────────────────────────────────────
+    // Load a sequence for preview without auto-playing.
+    // Enables processSequenceAtTime with { preview: true }.
+    case 'preview_load': {
+      const seq = db.getSequence(sequenceId);
+      if (!seq) return ws.send(JSON.stringify({ type: 'seq_error', error: 'Sequence not found' }));
+      seq.cues = db.getSequenceCues(sequenceId);
+      stopPlaybackTimer(deck);
+      blackoutDeckFixtures(deck);
+      activeSequences[deck] = {
+        sequence: seq, lastTimeMs: -1, playing: false,
+        currentTimeMs: 0, vdjDriven: false, previewMode: true,
+      };
+      broadcast({ type: 'seq_loaded', deck, sequence: seq });
+      console.log(`[SEQ] Preview-loaded sequence "${seq.name}" on deck ${deck}`);
+      break;
+    }
+
+    // Seek in preview mode: processes cues at timeMs even though not playing.
+    case 'preview_seek': {
+      const seekMs = Math.max(0, msg.timeMs || 0);
+      if (activeSequences[deck]) {
+        activeSequences[deck].currentTimeMs = seekMs;
+        processSequenceAtTime(deck, seekMs, { preview: true });
+        broadcast({ type: 'seq_time', deck, timeMs: seekMs });
+      }
+      break;
+    }
+
+    // Hot-reload cues from DB and re-process at current position.
+    // Called after a cue is edited so the output updates immediately.
+    case 'preview_refresh': {
+      if (activeSequences[deck] && activeSequences[deck].sequence) {
+        const seqId = activeSequences[deck].sequence.id;
+        activeSequences[deck].sequence.cues = db.getSequenceCues(seqId);
+        const t = msg.timeMs != null ? msg.timeMs : activeSequences[deck].currentTimeMs;
+        activeSequences[deck].currentTimeMs = t;
+        processSequenceAtTime(deck, t, { preview: true });
       }
       break;
     }
@@ -2723,6 +2861,10 @@ function buildChannelCtx(ch, fix) {
     total_channels: fix.channels.length,
     home_pan: fix.home_pan ?? 128,
     home_tilt: fix.home_tilt ?? 128,
+    // Rig position data for rig-wide effects
+    _rigPosition: fix.rig_x ?? 0.5,
+    _rigPositionY: fix.rig_y ?? 0.5,
+    _rigOrder: fix.rig_order ?? 0,
   };
   if (fix.cell_count > 0) {
     ctx.cell_count = fix.cell_count;
@@ -2739,9 +2881,11 @@ function buildChannelCtx(ch, fix) {
   return ctx;
 }
 
-function processSequenceAtTime(deckNum, timeMs) {
+function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   const deckSeq = activeSequences[deckNum];
-  if (!deckSeq || !deckSeq.playing || !deckSeq.sequence) return;
+  if (!deckSeq || !deckSeq.sequence) return;
+  // In normal mode, only process when playing. In preview mode, always process.
+  if (!opts.preview && !deckSeq.playing) return;
 
   const seq = deckSeq.sequence;
   const cues = seq.cues || [];
@@ -2833,7 +2977,11 @@ function processSequenceAtTime(deckNum, timeMs) {
         // All cues support start→end transitions; if no end values, hold start
         const startVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
         if (startVal === null) { value = null; }
-        else if (endVals && endVals[ch.type] !== undefined) {
+        else if (ch.type === 'color_wheel' || ch.type === 'gobo') {
+          // Physical wheel channels must snap — interpolating sweeps through
+          // random intermediate positions on the physical wheel.
+          value = startVal;
+        } else if (endVals && endVals[ch.type] !== undefined) {
           const endVal = endVals[ch.type];
           value = Math.round(startVal + (endVal - startVal) * progress);
         } else {
@@ -2876,6 +3024,8 @@ function processSequenceAtTime(deckNum, timeMs) {
         const effect = db.getEffect(cue.effect_id);
         if (effect && isFixtureCompatibleWithEffect(effect, fixMap)) {
           const channelCtx = buildChannelCtx(ch, fixMap);
+          // Rig-wide fixture count for rig effects
+          channelCtx._rigFixtureCount = db.getFixtureChannelMap().length;
           value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, channelVals, cue.effect_params || {}, channelCtx);
           // If the effect doesn't control this channel (e.g. motion effect → color channels),
           // fall back to the cue's base channel value so colours/dimmer still get sent.

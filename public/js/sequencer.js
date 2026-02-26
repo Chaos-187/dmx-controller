@@ -45,6 +45,9 @@ const SEQ = (() => {
   // DMX output
   let dmxOutputOn = false;
 
+  // Edit mode (live preview)
+  let editMode = false;
+
   // WebSocket
   let ws = null;
   const _pendingTime = {};
@@ -59,6 +62,31 @@ const SEQ = (() => {
     const g = ch.green !== undefined ? ch.green : 0;
     const b = ch.blue !== undefined ? ch.blue : 0;
     return '#' + [r,g,b].map(v => clamp(v,0,255).toString(16).padStart(2,'0')).join('');
+  }
+
+  /** Look up display colour from a color_wheel DMX value using the fixture's color_wheel_map.
+   *  Returns the hex of the nearest entry whose dmx_value <= val, or null if no map. */
+  function colorFromWheel(fixtureId, dmxVal) {
+    const fix = fixtures.find(f => f.id === fixtureId);
+    if (!fix || !fix.color_wheel_map || fix.color_wheel_map.length === 0) return null;
+    const map = fix.color_wheel_map.slice().sort((a, b) => a.dmx_value - b.dmx_value);
+    let best = map[0];
+    for (const entry of map) {
+      if (entry.dmx_value <= dmxVal) best = entry;
+      else break;
+    }
+    return best ? best.color_hex : null;
+  }
+
+  /** Check whether a fixture uses a color wheel (no RGB mixing). */
+  function isColorWheelFixture(fixtureId) {
+    const fix = fixtures.find(f => f.id === fixtureId);
+    if (!fix) return false;
+    const hasRgb = fix.channels.some(ch => ch.type === 'red') &&
+                   fix.channels.some(ch => ch.type === 'green') &&
+                   fix.channels.some(ch => ch.type === 'blue');
+    const hasCW = fix.channels.some(ch => ch.type === 'color_wheel');
+    return !hasRgb && hasCW;
   }
 
   function snapToGrid(ms) {
@@ -159,19 +187,50 @@ const SEQ = (() => {
   function on(el, ev, fn) { (typeof el === 'string' ? $(el) : el).addEventListener(ev, fn); }
 
   // ── Data Loading ──────────────────────────────────────────────
+  let rigLayouts = [];
+
   async function loadAll() {
-    const [seqRes, fixRes, effRes, mpRes] = await Promise.all([
+    const [seqRes, fixRes, effRes, mpRes, rigRes] = await Promise.all([
       api('/api/sequences'), api('/api/fixture-channel-map'),
       api('/api/effects'), api('/api/mover-presets'),
+      api('/api/rig-layouts'),
     ]);
-    sequences = seqRes; fixtures = fixRes; effects = effRes; moverPresets = mpRes;
+    sequences = seqRes; fixtures = fixRes; effects = effRes; moverPresets = mpRes; rigLayouts = rigRes;
     renderSeqList();
     renderFixtureChips();
     refreshEffectDropdown();
     refreshMoverDropdown();
+    refreshRigSection();
     $('fixCount').textContent = fixtures.length;
     if (currentId) { highlightSeqItem(currentId); await loadSequenceById(currentId); }
   }
+
+  function refreshRigSection() {
+    const activeRig = rigLayouts.find(l => l.is_active);
+    const nameEl = $('seqActiveRigName');
+    if (activeRig) {
+      nameEl.textContent = '● ' + activeRig.name;
+      nameEl.style.color = 'var(--accent, #00e5ff)';
+    } else {
+      nameEl.textContent = 'None — load a rig from the controller';
+      nameEl.style.color = 'var(--text-dim)';
+    }
+    const sel = $('seqRigSelect');
+    sel.innerHTML = '<option value="">— Select Rig —</option>' +
+      rigLayouts.map(l => `<option value="${l.id}"${l.is_active ? ' selected' : ''}>${l.is_active ? '● ' : ''}${esc(l.name)}</option>`).join('');
+  }
+
+  on('seqRigSelect', 'change', async function() {
+    const id = this.value;
+    if (!id) return;
+    try {
+      await apiPost(`/api/rig-layouts/${id}/load`);
+      rigLayouts = await api('/api/rig-layouts');
+      fixtures = await api('/api/fixture-channel-map');
+      refreshRigSection();
+      renderFixtureChips();
+    } catch (e) { console.error('Failed to load rig:', e); }
+  });
 
   async function loadSequenceById(id) {
     if (!id) {
@@ -191,6 +250,10 @@ const SEQ = (() => {
     $('tlScroll').scrollLeft = 0;
     highlightSeqItem(currentId);
     if (seq.track_id) loadWaveform(seq.track_id);
+    if (editMode && currentId) {
+      wsSend({ type: 'sequence', action: 'preview_load', deck, sequenceId: currentId });
+      previewAtPlayhead();
+    }
   }
 
   // ── Sequence List (virtual-scroll) ────────────────────────────
@@ -308,10 +371,17 @@ const SEQ = (() => {
   function computeDisplay(cue) {
     const ch = cue.channel_values || {};
     const ech = cue.end_channel_values || {};
-    cue.display_color = (ch.red !== undefined || ch.green !== undefined || ch.blue !== undefined)
-      ? colorFromCh(ch) : (cue.color || '#e94560');
-    cue.end_display_color = (ech.red !== undefined || ech.green !== undefined || ech.blue !== undefined)
-      ? colorFromCh(ech) : null;
+    // For color-wheel fixtures, derive display color from wheel position
+    if (ch.color_wheel !== undefined && isColorWheelFixture(cue.fixture_id)) {
+      cue.display_color = colorFromWheel(cue.fixture_id, ch.color_wheel) || cue.color || '#888888';
+      cue.end_display_color = (ech.color_wheel !== undefined)
+        ? (colorFromWheel(cue.fixture_id, ech.color_wheel) || null) : null;
+    } else {
+      cue.display_color = (ch.red !== undefined || ch.green !== undefined || ch.blue !== undefined)
+        ? colorFromCh(ch) : (cue.color || '#e94560');
+      cue.end_display_color = (ech.red !== undefined || ech.green !== undefined || ech.blue !== undefined)
+        ? colorFromCh(ech) : null;
+    }
     cue.mover_preset_id = ch.mover_preset_id || null;
     cue.mover_preset_ids = Array.isArray(ch.mover_preset_ids) ? ch.mover_preset_ids : null;
   }
@@ -606,7 +676,13 @@ const SEQ = (() => {
 
   function seekTo(ms) {
     playheadMs = ms; updatePlayhead();
-    if (currentId) wsSend({ type: 'sequence', action: 'seek', deck, timeMs: playheadMs });
+    if (currentId) {
+      if (editMode && !isPlaying) {
+        wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: playheadMs });
+      } else {
+        wsSend({ type: 'sequence', action: 'seek', deck, timeMs: playheadMs });
+      }
+    }
   }
 
   // ── RAF Loop for playhead ─────────────────────────────────────
@@ -831,6 +907,12 @@ const SEQ = (() => {
     });
     if (vals.red !== undefined || vals.green !== undefined || vals.blue !== undefined) {
       $('propColor').value = colorFromCh(vals);
+    } else if (vals.color_wheel !== undefined && selectedPrimary) {
+      const cue = cues.find(c => c.id === selectedPrimary);
+      if (cue) {
+        const hex = colorFromWheel(cue.fixture_id, vals.color_wheel);
+        if (hex) $('propColor').value = hex;
+      }
     }
   }
 
@@ -854,8 +936,15 @@ const SEQ = (() => {
     const effectId = $('propEffect').value || null;
     const chVals = {};
     $$('#channelSliders .ch-row[data-group="start"]').forEach(r => { chVals[r.dataset.ch] = +r.querySelector('.ch-range').value; });
-    const color = (chVals.red !== undefined || chVals.green !== undefined || chVals.blue !== undefined)
-      ? colorFromCh(chVals) : $('propColor').value;
+    // Derive display color: RGB from sliders, or color_wheel map lookup, or fallback to picker
+    let color;
+    if (chVals.red !== undefined || chVals.green !== undefined || chVals.blue !== undefined) {
+      color = colorFromCh(chVals);
+    } else if (chVals.color_wheel !== undefined && isColorWheelFixture(cue.fixture_id)) {
+      color = colorFromWheel(cue.fixture_id, chVals.color_wheel) || $('propColor').value;
+    } else {
+      color = $('propColor').value;
+    }
     let endChVals = null;
     const endRows = $$('#channelSliders .ch-row[data-group="end"]');
     if (endRows.length > 0) { endChVals = {}; endRows.forEach(r => { endChVals[r.dataset.ch] = +r.querySelector('.ch-range').value; }); }
@@ -874,6 +963,7 @@ const SEQ = (() => {
     Object.assign(cue, update);
     computeDisplay(cue);
     renderTimeline(); updateSelectionVisuals();
+    previewRefresh(); // Live preview update
   }
 
   async function deleteSelectedCues() {
@@ -884,6 +974,7 @@ const SEQ = (() => {
     clearSelection();
     $('infoCues').textContent = cues.length;
     renderTimeline();
+    if (editMode) previewRefresh();
   }
 
   // ── Selection ─────────────────────────────────────────────────
@@ -915,7 +1006,14 @@ const SEQ = (() => {
     const type = $('propType').value;
     const chVals = {};
     $$('#channelSliders .ch-row[data-group="start"]').forEach(r => { chVals[r.dataset.ch] = +r.querySelector('.ch-range').value; });
-    const color = (chVals.red !== undefined || chVals.green !== undefined || chVals.blue !== undefined) ? colorFromCh(chVals) : $('propColor').value;
+    let color;
+    if (chVals.red !== undefined || chVals.green !== undefined || chVals.blue !== undefined) {
+      color = colorFromCh(chVals);
+    } else if (chVals.color_wheel !== undefined && isColorWheelFixture(cue.fixture_id)) {
+      color = colorFromWheel(cue.fixture_id, chVals.color_wheel) || $('propColor').value;
+    } else {
+      color = $('propColor').value;
+    }
     let endChVals = null;
     const endRows = $$('#channelSliders .ch-row[data-group="end"]');
     if (endRows.length > 0) { endChVals = {}; endRows.forEach(r => { endChVals[r.dataset.ch] = +r.querySelector('.ch-range').value; }); }
@@ -924,27 +1022,83 @@ const SEQ = (() => {
     apiPut(`/api/cues/${selectedPrimary}`, update);
     Object.assign(cue, update);
     computeDisplay(cue);
+    if (editMode) previewRefresh();
   }
 
   // ═══════════════════════════════════════════════════════════════
   //  Event Setup
   // ═══════════════════════════════════════════════════════════════
 
+  function toggleEditMode() {
+    editMode = !editMode;
+    $('btnEditMode').classList.toggle('active', editMode);
+    $('editBanner').classList.toggle('visible', editMode);
+    if (editMode) {
+      // Auto-enable DMX output when entering edit mode
+      if (!dmxOutputOn) {
+        dmxOutputOn = true; updateOutputPill();
+        apiPost('/api/dmx/output', { enabled: true });
+      }
+      // Load current sequence for preview
+      if (currentId) {
+        wsSend({ type: 'sequence', action: 'preview_load', deck, sequenceId: currentId });
+        // Immediately send current playhead position so we see output right away
+        wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: playheadMs });
+      }
+    } else {
+      // Exiting edit mode: unload and blackout
+      isPlaying = false; $('btnPlay').classList.remove('active');
+      wsSend({ type: 'sequence', action: 'unload', deck });
+    }
+  }
+
+  /** Send preview_seek at current playhead when in edit mode */
+  function previewAtPlayhead() {
+    if (editMode && currentId) {
+      wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: playheadMs });
+    }
+  }
+
+  /** Notify server to re-read cues and re-process at current time */
+  function previewRefresh() {
+    if (editMode && currentId) {
+      wsSend({ type: 'sequence', action: 'preview_refresh', deck, timeMs: playheadMs });
+    }
+  }
+
   function setupEvents() {
+    // ── Edit Mode Toggle ──
+    on('btnEditMode', 'click', toggleEditMode);
+
     // ── Transport ──
     on('btnPlay', 'click', () => {
       if (!currentId) return;
-      isPlaying = true; playheadMs = 0; $('btnPlay').classList.add('active'); updatePlayhead();
-      wsSend({ type: 'sequence', action: 'load', deck, sequenceId: currentId });
-      wsSend({ type: 'sequence', action: 'play', deck });
+      if (editMode) {
+        // In edit mode: play uses the preview-loaded sequence
+        isPlaying = true; $('btnPlay').classList.add('active');
+        wsSend({ type: 'sequence', action: 'preview_load', deck, sequenceId: currentId });
+        wsSend({ type: 'sequence', action: 'play', deck });
+      } else {
+        isPlaying = true; playheadMs = 0; $('btnPlay').classList.add('active'); updatePlayhead();
+        wsSend({ type: 'sequence', action: 'load', deck, sequenceId: currentId });
+        wsSend({ type: 'sequence', action: 'play', deck });
+      }
     });
     on('btnPause', 'click', () => {
       isPlaying = false; $('btnPlay').classList.remove('active');
       wsSend({ type: 'sequence', action: 'pause', deck });
+      // In edit mode, immediately show the frozen frame
+      if (editMode) previewAtPlayhead();
     });
     on('btnStop', 'click', () => {
       isPlaying = false; playheadMs = 0; $('btnPlay').classList.remove('active'); updatePlayhead();
-      wsSend({ type: 'sequence', action: 'unload', deck });
+      if (editMode) {
+        // In edit mode: stop playback but keep preview loaded
+        wsSend({ type: 'sequence', action: 'pause', deck });
+        previewAtPlayhead();
+      } else {
+        wsSend({ type: 'sequence', action: 'unload', deck });
+      }
     });
 
     // ── Deck ──
@@ -1022,6 +1176,7 @@ const SEQ = (() => {
     });
 
     // ── Playhead drag ──
+    let _previewDragThrottle = 0;
     on('tlPlayhead', 'mousedown', e => {
       if (!currentSeq) return;
       draggingPlayhead = true; e.preventDefault(); e.stopPropagation();
@@ -1033,11 +1188,25 @@ const SEQ = (() => {
       const x = e.clientX - rect.left + wrap.scrollLeft - 140;
       playheadMs = clamp((x / zoomPxPerSec) * 1000, 0, currentSeq?.duration_ms || Infinity);
       updatePlayhead();
+      // In edit mode, send live preview while dragging (throttled to ~20Hz)
+      if (editMode && currentId) {
+        const now = Date.now();
+        if (now - _previewDragThrottle > 50) {
+          _previewDragThrottle = now;
+          wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: playheadMs });
+        }
+      }
     });
     document.addEventListener('mouseup', () => {
       if (!draggingPlayhead) return;
       draggingPlayhead = false; document.body.style.cursor = ''; document.body.style.userSelect = '';
-      if (currentId) wsSend({ type: 'sequence', action: 'seek', deck, timeMs: playheadMs });
+      if (currentId) {
+        if (editMode) {
+          wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: playheadMs });
+        } else {
+          wsSend({ type: 'sequence', action: 'seek', deck, timeMs: playheadMs });
+        }
+      }
     });
 
     // ── Double-click to add cue ──

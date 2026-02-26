@@ -613,6 +613,179 @@
     .ufix-label-7 { background: rgba(118,255,3,.7); color: #000; }
 
     /* ═══════════════════════════════════════════════════════════════
+       Rig Layout (2D Canvas)
+       ═══════════════════════════════════════════════════════════════ */
+    .rig-section {
+      margin-top: 8px; margin-bottom: 20px; padding: 14px 16px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    }
+    .rig-section-header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 10px; cursor: pointer; user-select: none;
+    }
+    .rig-section-header h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
+    .rig-collapse-btn {
+      background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer;
+      transition: transform .2s; padding: 0 4px; line-height: 1;
+    }
+    .rig-section.collapsed .rig-collapse-btn { transform: rotate(-90deg); }
+    .rig-section-body {
+      overflow: hidden; transition: max-height .3s ease, opacity .2s ease;
+      max-height: 2000px; opacity: 1;
+    }
+    .rig-section.collapsed .rig-section-body { max-height: 0; opacity: 0; padding-top: 0; }
+    .rig-section.collapsed .rig-section-header { margin-bottom: 0; }
+
+    .rig-toolbar {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .rig-toolbar .btn { font-size: 11px; padding: 4px 10px; }
+
+    .rig-canvas-wrap {
+      position: relative;
+      width: 100%; height: 320px;
+      background: #0d0d14;
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+    .rig-canvas-wrap .rig-grid-line {
+      position: absolute; background: rgba(255,255,255,.04);
+    }
+    .rig-canvas-wrap .rig-grid-line.h { left: 0; right: 0; height: 1px; }
+    .rig-canvas-wrap .rig-grid-line.v { top: 0; bottom: 0; width: 1px; }
+    .rig-canvas-wrap .rig-axis-label {
+      position: absolute; font-size: 9px; color: rgba(255,255,255,.2);
+      pointer-events: none; user-select: none;
+    }
+
+    .rig-node {
+      position: absolute;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 600; color: #fff;
+      cursor: grab; user-select: none;
+      transition: box-shadow .15s;
+      transform: translate(-50%, -50%);
+      z-index: 2;
+      text-align: center;
+      line-height: 1.2;
+    }
+    .rig-node:hover { box-shadow: 0 0 16px rgba(0,229,255,.4); z-index: 3; }
+    .rig-node.dragging { cursor: grabbing; box-shadow: 0 0 20px rgba(233,69,96,.6); z-index: 10; }
+    .rig-node .rig-node-order {
+      position: absolute; top: -6px; right: -6px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      font-size: 8px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid var(--panel);
+    }
+    .rig-node .rig-node-label {
+      max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 8px; color: rgba(255,255,255,.7); margin-top: 1px;
+    }
+
+    .rig-info { font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+    .rig-info span { margin-right: 16px; }
+
+    /* Rig elements (trusses, stands, etc.) */
+    .rig-element {
+      position: absolute; z-index: 1;
+      cursor: move; user-select: none;
+      transition: box-shadow .12s;
+    }
+    .rig-element:hover { box-shadow: 0 0 10px rgba(255,255,255,.15); }
+    .rig-element.selected { box-shadow: 0 0 0 2px var(--cyan), 0 0 12px rgba(0,229,255,.3); }
+    .rig-element.dragging { opacity: .7; z-index: 5; }
+
+    .rig-element.truss_h, .rig-element.truss_v {
+      background: linear-gradient(135deg, #3a3a40 0%, #555 50%, #3a3a40 100%);
+      border: 1px solid #666; border-radius: 3px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .rig-element.truss_h .rig-el-pattern,
+    .rig-element.truss_v .rig-el-pattern {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: repeating-linear-gradient(90deg, transparent 0px, transparent 8px, rgba(255,255,255,.06) 8px, rgba(255,255,255,.06) 10px);
+      border-radius: 2px; pointer-events: none;
+    }
+    .rig-element.truss_v .rig-el-pattern {
+      background: repeating-linear-gradient(0deg, transparent 0px, transparent 8px, rgba(255,255,255,.06) 8px, rgba(255,255,255,.06) 10px);
+    }
+
+    .rig-element.stand {
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    }
+    .rig-element.stand .stand-pole {
+      width: 4px; flex: 1; background: linear-gradient(180deg, #666, #444);
+      border-radius: 2px;
+    }
+    .rig-element.stand .stand-base {
+      width: 100%; height: 6px;
+      background: #555; border-radius: 0 0 3px 3px; border-top: 1px solid #777;
+    }
+    .rig-element.stand .stand-top {
+      width: 60%; height: 4px;
+      background: #777; border-radius: 3px 3px 0 0; border-bottom: 1px solid #888;
+    }
+
+    .rig-element.tbar {
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    }
+    .rig-element.tbar .tbar-cross {
+      width: 100%; height: 4px;
+      background: linear-gradient(90deg, #666, #888, #666);
+      border-radius: 2px; border: 1px solid #777;
+    }
+    .rig-element.tbar .tbar-pole {
+      width: 4px; flex: 1;
+      background: linear-gradient(180deg, #666, #444);
+      border-radius: 2px;
+    }
+
+    .rig-element .rig-el-label {
+      position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+      font-size: 8px; color: rgba(255,255,255,.4); white-space: nowrap;
+      pointer-events: none;
+    }
+    .rig-element .rig-el-resize {
+      position: absolute; width: 8px; height: 8px;
+      background: var(--cyan); border: 1px solid #fff; border-radius: 50%;
+      cursor: nwse-resize; z-index: 6; display: none;
+    }
+    .rig-element.selected .rig-el-resize { display: block; }
+    .rig-element .rig-el-resize.r-right { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    .rig-element .rig-el-resize.r-bottom { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+    .rig-element .rig-el-resize.r-corner { right: -4px; bottom: -4px; cursor: nwse-resize; }
+
+    .rig-element .rig-el-delete {
+      position: absolute; top: -8px; right: -8px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--danger); color: #fff; border: 1px solid #fff;
+      font-size: 10px; line-height: 14px; text-align: center;
+      cursor: pointer; z-index: 6; display: none;
+    }
+    .rig-element.selected .rig-el-delete { display: block; }
+
+    .rig-snap-guide {
+      position: absolute; z-index: 4; pointer-events: none;
+    }
+    .rig-snap-guide.h {
+      left: 0; right: 0; height: 1px;
+      border-top: 1px dashed rgba(0,229,255,.4);
+    }
+    .rig-snap-guide.v {
+      top: 0; bottom: 0; width: 1px;
+      border-left: 1px dashed rgba(0,229,255,.4);
+    }
+
+    .rig-toolbar-sep {
+      width: 1px; height: 20px; background: var(--panel-border); margin: 0 4px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
        Config Tab — Sub-tab layout
        ═══════════════════════════════════════════════════════════════ */
     .config-layout { display: flex; gap: 0; min-height: calc(100vh - 160px); }
@@ -1397,6 +1570,47 @@
 
   <!-- Fixture cards grid -->
   <div class="fixtures-grid" id="fixturesGrid"></div>
+
+  <!-- Rig Layout (2D positioning) -->
+  <div class="rig-section" id="rigSection">
+    <div class="rig-section-header" id="rigSectionToggle">
+      <button class="rig-collapse-btn" title="Collapse/Expand">▼</button>
+      <h3>Rig Layout</h3>
+      <span style="flex:1"></span>
+      <span class="rig-info" id="rigInfo"></span>
+    </div>
+    <div class="rig-section-body">
+      <div class="rig-toolbar">
+        <button class="btn btn-secondary" id="btnRigAddTrussH" onclick="event.stopPropagation()" title="Add horizontal truss">+ Truss (H)</button>
+        <button class="btn btn-secondary" id="btnRigAddTrussV" onclick="event.stopPropagation()" title="Add vertical truss">+ Truss (V)</button>
+        <button class="btn btn-secondary" id="btnRigAddStand" onclick="event.stopPropagation()" title="Add lighting stand">+ Stand</button>
+        <button class="btn btn-secondary" id="btnRigAddTBar" onclick="event.stopPropagation()" title="Add T-bar">+ T-Bar</button>
+        <div class="rig-toolbar-sep"></div>
+        <button class="btn btn-secondary" id="btnRigArrangeLine" onclick="event.stopPropagation()">Arrange in Line</button>
+        <button class="btn btn-secondary" id="btnRigArrangeGrid" onclick="event.stopPropagation()">Arrange in Grid</button>
+        <button class="btn btn-secondary" id="btnRigArrangeCircle" onclick="event.stopPropagation()">Arrange in Circle</button>
+        <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;margin-left:8px" onclick="event.stopPropagation()">
+          <input type="checkbox" id="rigSnapEnabled" checked style="accent-color:var(--cyan);margin:0"> Snap
+        </label>
+        <span style="flex:1"></span>
+        <div class="rig-toolbar-sep"></div>
+        <select id="rigLayoutSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:11px;min-width:130px" onclick="event.stopPropagation()">
+          <option value="">— Saved Layouts —</option>
+        </select>
+        <button class="btn btn-secondary" id="btnRigLoadLayout" onclick="event.stopPropagation()" title="Load selected layout">Load</button>
+        <button class="btn btn-secondary" id="btnRigSaveAsLayout" onclick="event.stopPropagation()" title="Save current layout as new preset">Save As…</button>
+        <button class="btn btn-secondary" id="btnRigOverwriteLayout" onclick="event.stopPropagation()" title="Overwrite selected layout with current state" style="display:none">Overwrite</button>
+        <button class="btn btn-danger btn-sm" id="btnRigDeleteLayout" onclick="event.stopPropagation()" title="Delete selected layout" style="display:none;padding:4px 8px;font-size:11px">✕</button>
+        <span id="rigActiveLabel" style="font-size:10px;color:var(--cyan);margin-left:4px;white-space:nowrap" onclick="event.stopPropagation()"></span>
+        <div class="rig-toolbar-sep"></div>
+        <button class="btn btn-primary" id="btnRigSaveLayout">Save Layout</button>
+      </div>
+      <div class="rig-canvas-wrap" id="rigCanvas"></div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
+        Add rigging (trusses, stands, T-bars) then drag fixtures onto them — they'll snap into place. Order badges show the rig sweep order for cross-fixture effects.
+      </div>
+    </div>
+  </div>
 
   <!-- Integrated Universe Map -->
   <div class="universe-section">
@@ -2350,7 +2564,10 @@
                   <option value="all">All Fixtures</option>
                   <option value="color">Color Fixtures</option>
                   <option value="moving_head">Moving Heads Only</option>
+                  <option value="moving_head_wash">Moving Head Wash Only</option>
+                  <option value="moving_head_spot">Moving Head Spot Only</option>
                   <option value="multicell">Multicell Only</option>
+                  <option value="rig">Rig-wide (spatial)</option>
                 </select>
               </div>
             </div>
@@ -3072,6 +3289,8 @@
         <select id="tCategory">
           <option value="par">Par Can</option>
           <option value="moving_head">Moving Head</option>
+          <option value="moving_head_wash">Moving Head Wash</option>
+          <option value="moving_head_spot">Moving Head Spot</option>
           <option value="strobe">Strobe</option>
           <option value="laser">Laser</option>
           <option value="fog">Fog / Haze</option>
@@ -3327,7 +3546,8 @@ const CHANNEL_TYPES = [
   'prism','focus','zoom','frost','macro','other'
 ];
 const CATEGORY_LABELS = {
-  par:'Par Can', moving_head:'Moving Head', strobe:'Strobe', laser:'Laser',
+  par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',
+  strobe:'Strobe', laser:'Laser',
   fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
 };
 
@@ -4993,6 +5213,725 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  Rig Layout (2D positioning canvas) + Rigging Elements
+// ═══════════════════════════════════════════════════════════════
+
+// Collapsible rig section
+document.getElementById('rigSectionToggle').addEventListener('click', () => {
+  const section = document.getElementById('rigSection');
+  section.classList.toggle('collapsed');
+  localStorage.setItem('dmx_rig_collapsed', section.classList.contains('collapsed') ? '1' : '0');
+});
+if (localStorage.getItem('dmx_rig_collapsed') === '1') {
+  document.getElementById('rigSection').classList.add('collapsed');
+}
+
+// Node colour palette (same as universe map)
+const RIG_NODE_COLORS = [
+  '#e94560', '#00e676', '#448aff', '#ffea00',
+  '#00e5ff', '#e040fb', '#ff9100', '#76ff03'
+];
+
+let _rigDragNode = null;
+let _rigElements = [];          // cached rigging elements from DB
+let _rigSelectedElId = null;    // currently selected rigging element
+const SNAP_DIST = 0.03;        // normalised snap distance threshold
+
+// ── Rigging element defaults per type ──
+const RIG_ELEMENT_DEFAULTS = {
+  truss_h: { width: 0.5,  height: 0.015, label: 'Truss' },
+  truss_v: { width: 0.015, height: 0.35,  label: 'Truss' },
+  stand:   { width: 0.025, height: 0.22,  label: 'Stand' },
+  tbar:    { width: 0.14,  height: 0.22,  label: 'T-Bar' },
+};
+
+// ── Load rigging elements ──
+async function loadRigElements() {
+  try {
+    _rigElements = await fetch('/api/rig-elements').then(r => r.json());
+  } catch (e) {
+    console.warn('Failed to load rig elements', e);
+    _rigElements = [];
+  }
+}
+
+// ── Snap point calculation ──
+// Returns array of snap points {x, y} along a rigging element's surface
+function getElementSnapPoints(el, count) {
+  const pts = [];
+  const n = count || 8;
+  if (el.type === 'truss_h') {
+    // Points evenly spaced along the horizontal truss
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push({ x: el.x + (t - 0.5) * el.width, y: el.y });
+    }
+  } else if (el.type === 'truss_v') {
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push({ x: el.x, y: el.y + (t - 0.5) * el.height });
+    }
+  } else if (el.type === 'stand') {
+    // Snap to top of stand
+    pts.push({ x: el.x, y: el.y });
+  } else if (el.type === 'tbar') {
+    // Snap along the horizontal crossbar at the top
+    const crossY = el.y;
+    const crossW = el.width;
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      pts.push({ x: el.x + (t - 0.5) * crossW, y: crossY });
+    }
+  }
+  return pts;
+}
+
+// Find nearest snap point across all rigging elements
+function findSnapPoint(fx, fy) {
+  if (!document.getElementById('rigSnapEnabled').checked) return null;
+  let best = null;
+  let bestDist = SNAP_DIST;
+  for (const el of _rigElements) {
+    const pts = getElementSnapPoints(el, 16);
+    for (const p of pts) {
+      const d = Math.hypot(p.x - fx, p.y - fy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+  }
+  return best;
+}
+
+// ── Render the full rig layout ──
+function renderRigLayout() {
+  const canvas = document.getElementById('rigCanvas');
+  canvas.innerHTML = '';
+
+  // Draw grid lines
+  const GRID = 8;
+  for (let i = 1; i < GRID; i++) {
+    const pct = (i / GRID * 100).toFixed(2);
+    const hLine = document.createElement('div');
+    hLine.className = 'rig-grid-line h';
+    hLine.style.top = pct + '%';
+    canvas.appendChild(hLine);
+    const vLine = document.createElement('div');
+    vLine.className = 'rig-grid-line v';
+    vLine.style.left = pct + '%';
+    canvas.appendChild(vLine);
+  }
+  // Axis labels
+  const lblL = document.createElement('div');
+  lblL.className = 'rig-axis-label';
+  lblL.style.cssText = 'left:4px;top:50%;transform:translateY(-50%)';
+  lblL.textContent = '← L';
+  canvas.appendChild(lblL);
+  const lblR = document.createElement('div');
+  lblR.className = 'rig-axis-label';
+  lblR.style.cssText = 'right:4px;top:50%;transform:translateY(-50%)';
+  lblR.textContent = 'R →';
+  canvas.appendChild(lblR);
+  const lblT = document.createElement('div');
+  lblT.className = 'rig-axis-label';
+  lblT.style.cssText = 'top:4px;left:50%;transform:translateX(-50%)';
+  lblT.textContent = 'Top';
+  canvas.appendChild(lblT);
+  const lblB = document.createElement('div');
+  lblB.className = 'rig-axis-label';
+  lblB.style.cssText = 'bottom:4px;left:50%;transform:translateX(-50%)';
+  lblB.textContent = 'Bottom';
+  canvas.appendChild(lblB);
+
+  // ── Draw rigging elements ──
+  for (const el of _rigElements) {
+    const div = document.createElement('div');
+    div.className = `rig-element ${el.type}`;
+    div.dataset.rigElId = el.id;
+    if (el.id === _rigSelectedElId) div.classList.add('selected');
+
+    const wPct = el.width * 100;
+    const hPct = el.height * 100;
+    const xPct = (el.x - el.width / 2) * 100;
+    const yPct = (el.y - el.height / 2) * 100;
+    div.style.left = xPct + '%';
+    div.style.top = yPct + '%';
+    div.style.width = wPct + '%';
+    div.style.height = hPct + '%';
+
+    // Inner content based on type
+    if (el.type === 'truss_h' || el.type === 'truss_v') {
+      div.innerHTML = '<div class="rig-el-pattern"></div>';
+    } else if (el.type === 'stand') {
+      div.innerHTML = '<div class="stand-top"></div><div class="stand-pole"></div><div class="stand-base"></div>';
+    } else if (el.type === 'tbar') {
+      div.innerHTML = '<div class="tbar-cross"></div><div class="tbar-pole"></div>';
+    }
+
+    // Label
+    if (el.label) {
+      const lbl = document.createElement('span');
+      lbl.className = 'rig-el-label';
+      lbl.textContent = el.label;
+      div.appendChild(lbl);
+    }
+
+    // Resize handles (visible when selected)
+    const rRight = document.createElement('div');
+    rRight.className = 'rig-el-resize r-right';
+    div.appendChild(rRight);
+    const rBottom = document.createElement('div');
+    rBottom.className = 'rig-el-resize r-bottom';
+    div.appendChild(rBottom);
+    const rCorner = document.createElement('div');
+    rCorner.className = 'rig-el-resize r-corner';
+    div.appendChild(rCorner);
+
+    // Delete button (visible when selected)
+    const delBtn = document.createElement('div');
+    delBtn.className = 'rig-el-delete';
+    delBtn.textContent = '✕';
+    delBtn.title = 'Delete rigging element';
+    div.appendChild(delBtn);
+
+    // Event handlers
+    div.addEventListener('mousedown', rigElementMouseDown);
+    delBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      deleteRigElementUI(el.id);
+    });
+    rRight.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'right'); });
+    rBottom.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'bottom'); });
+    rCorner.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'corner'); });
+
+    canvas.appendChild(div);
+  }
+
+  // ── Draw fixture nodes ──
+  const fixtures = _allFixtures;
+  if (!fixtures || fixtures.length === 0) {
+    if (_rigElements.length === 0) {
+      canvas.innerHTML += '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:13px;position:absolute;inset:0;pointer-events:none">Add rigging, then fixtures to place them</div>';
+    }
+    document.getElementById('rigInfo').textContent = _rigElements.length ? `${_rigElements.length} rigging element(s)` : '';
+    return;
+  }
+
+  // Sort fixtures by rig_order for numbering
+  const sorted = [...fixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0));
+
+  for (let i = 0; i < sorted.length; i++) {
+    const f = sorted[i];
+    const x = (f.rig_x != null ? f.rig_x : 0.5) * 100;
+    const y = (f.rig_y != null ? f.rig_y : 0.5) * 100;
+    const colorIdx = i % RIG_NODE_COLORS.length;
+    const color = RIG_NODE_COLORS[colorIdx];
+
+    const node = document.createElement('div');
+    node.className = 'rig-node';
+    node.dataset.fixtureId = f.id;
+    node.style.left = x + '%';
+    node.style.top = y + '%';
+    node.style.background = color + '33';
+    node.style.border = '2px solid ' + color;
+    node.title = `${f.name}\nU${f.universe} Ch${f.address}\nRig pos: ${(f.rig_x||0).toFixed(2)}, ${(f.rig_y||0).toFixed(2)}`;
+
+    const isMovingHead = f.category === 'moving_head' || f.category === 'moving_head_wash' || f.category === 'moving_head_spot';
+    const iconText = isMovingHead ? '◎' : f.category === 'led_bar' || f.category === 'multi_cell' ? '▥' : '●';
+    node.innerHTML = `
+      <span style="font-size:14px">${iconText}</span>
+      <span class="rig-node-label">${esc(f.name)}</span>
+      <span class="rig-node-order">${i + 1}</span>`;
+
+    // Drag handlers
+    node.addEventListener('mousedown', rigNodeMouseDown);
+    node.addEventListener('touchstart', rigNodeTouchStart, { passive: false });
+
+    canvas.appendChild(node);
+  }
+
+  const parts = [`${fixtures.length} fixture(s)`];
+  if (_rigElements.length) parts.push(`${_rigElements.length} rigging`);
+  document.getElementById('rigInfo').textContent = parts.join(' · ');
+}
+
+// ── Snap guides helper ──
+function showSnapGuide(canvas, snap) {
+  clearSnapGuides(canvas);
+  if (!snap) return;
+  const gh = document.createElement('div');
+  gh.className = 'rig-snap-guide h';
+  gh.style.top = (snap.y * 100) + '%';
+  canvas.appendChild(gh);
+  const gv = document.createElement('div');
+  gv.className = 'rig-snap-guide v';
+  gv.style.left = (snap.x * 100) + '%';
+  canvas.appendChild(gv);
+}
+function clearSnapGuides(canvas) {
+  canvas.querySelectorAll('.rig-snap-guide').forEach(g => g.remove());
+}
+
+// ── Fixture node drag (with snap-to-rigging) ──
+function rigNodeMouseDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  _rigSelectedElId = null; // deselect rigging on fixture drag
+  const node = e.currentTarget;
+  const canvas = document.getElementById('rigCanvas');
+  const rect = canvas.getBoundingClientRect();
+  node.classList.add('dragging');
+
+  function onMove(ev) {
+    const px = (ev.clientX - rect.left) / rect.width;
+    const py = (ev.clientY - rect.top) / rect.height;
+    let cx = Math.max(0, Math.min(1, px));
+    let cy = Math.max(0, Math.min(1, py));
+    // Try snap
+    const snap = findSnapPoint(cx, cy);
+    if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
+    else { clearSnapGuides(canvas); }
+    node.style.left = (cx * 100) + '%';
+    node.style.top = (cy * 100) + '%';
+  }
+  function onUp() {
+    node.classList.remove('dragging');
+    clearSnapGuides(canvas);
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    const fId = +node.dataset.fixtureId;
+    const f = _allFixtures.find(fx => fx.id === fId);
+    if (f) {
+      f.rig_x = parseFloat(node.style.left) / 100;
+      f.rig_y = parseFloat(node.style.top) / 100;
+    }
+    recalcRigOrder();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function rigNodeTouchStart(e) {
+  e.preventDefault();
+  const node = e.currentTarget;
+  const canvas = document.getElementById('rigCanvas');
+  const rect = canvas.getBoundingClientRect();
+  node.classList.add('dragging');
+
+  function onMove(ev) {
+    const touch = ev.touches[0];
+    const px = (touch.clientX - rect.left) / rect.width;
+    const py = (touch.clientY - rect.top) / rect.height;
+    let cx = Math.max(0, Math.min(1, px));
+    let cy = Math.max(0, Math.min(1, py));
+    const snap = findSnapPoint(cx, cy);
+    if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
+    else { clearSnapGuides(canvas); }
+    node.style.left = (cx * 100) + '%';
+    node.style.top = (cy * 100) + '%';
+  }
+  function onEnd() {
+    node.classList.remove('dragging');
+    clearSnapGuides(canvas);
+    node.removeEventListener('touchmove', onMove);
+    node.removeEventListener('touchend', onEnd);
+    const fId = +node.dataset.fixtureId;
+    const f = _allFixtures.find(fx => fx.id === fId);
+    if (f) {
+      f.rig_x = parseFloat(node.style.left) / 100;
+      f.rig_y = parseFloat(node.style.top) / 100;
+    }
+    recalcRigOrder();
+  }
+  node.addEventListener('touchmove', onMove, { passive: false });
+  node.addEventListener('touchend', onEnd);
+}
+
+// ── Rigging element drag ──
+function rigElementMouseDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const div = e.currentTarget;
+  const elId = +div.dataset.rigElId;
+  _rigSelectedElId = elId;
+
+  const el = _rigElements.find(r => r.id === elId);
+  if (!el) return;
+
+  const canvas = document.getElementById('rigCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const startX = (e.clientX - rect.left) / rect.width;
+  const startY = (e.clientY - rect.top) / rect.height;
+  const origX = el.x, origY = el.y;
+  div.classList.add('dragging');
+
+  function onMove(ev) {
+    const mx = (ev.clientX - rect.left) / rect.width;
+    const my = (ev.clientY - rect.top) / rect.height;
+    el.x = Math.max(el.width / 2, Math.min(1 - el.width / 2, origX + (mx - startX)));
+    el.y = Math.max(el.height / 2, Math.min(1 - el.height / 2, origY + (my - startY)));
+    renderRigLayout();
+  }
+  function onUp() {
+    div.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    saveRigElementToServer(el);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+
+  // Re-render to show selection
+  renderRigLayout();
+}
+
+// ── Rigging element resize ──
+function rigElementResizeStart(e, elId, handle) {
+  e.preventDefault();
+  const el = _rigElements.find(r => r.id === elId);
+  if (!el) return;
+
+  const canvas = document.getElementById('rigCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const origW = el.width, origH = el.height;
+  const startX = (e.clientX - rect.left) / rect.width;
+  const startY = (e.clientY - rect.top) / rect.height;
+
+  function onMove(ev) {
+    const mx = (ev.clientX - rect.left) / rect.width;
+    const my = (ev.clientY - rect.top) / rect.height;
+    const dx = mx - startX;
+    const dy = my - startY;
+    if (handle === 'right' || handle === 'corner') {
+      el.width = Math.max(0.02, origW + dx * 2);
+    }
+    if (handle === 'bottom' || handle === 'corner') {
+      el.height = Math.max(0.01, origH + dy * 2);
+    }
+    renderRigLayout();
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    saveRigElementToServer(el);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ── Delete rigging element ──
+async function deleteRigElementUI(elId) {
+  _rigElements = _rigElements.filter(r => r.id !== elId);
+  if (_rigSelectedElId === elId) _rigSelectedElId = null;
+  renderRigLayout();
+  try {
+    await fetch(`/api/rig-elements/${elId}`, { method: 'DELETE' });
+  } catch (e) { console.warn('Failed to delete rig element', e); }
+}
+
+// ── Save a single rigging element back to server ──
+async function saveRigElementToServer(el) {
+  try {
+    await fetch(`/api/rig-elements/${el.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ x: el.x, y: el.y, width: el.width, height: el.height, rotation: el.rotation })
+    });
+  } catch (e) { console.warn('Failed to save rig element', e); }
+}
+
+// ── Add rigging element buttons ──
+async function addRigElement(type) {
+  const defaults = RIG_ELEMENT_DEFAULTS[type] || RIG_ELEMENT_DEFAULTS.truss_h;
+  try {
+    const res = await fetch('/api/rig-elements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, label: defaults.label, x: 0.5, y: 0.5, width: defaults.width, height: defaults.height, rotation: 0 })
+    });
+    const data = await res.json();
+    _rigElements.push({ id: data.id, type, label: defaults.label, x: 0.5, y: 0.5, width: defaults.width, height: defaults.height, rotation: 0, sort_order: _rigElements.length });
+    _rigSelectedElId = data.id;
+    renderRigLayout();
+  } catch (e) { alert('Failed to add rigging element: ' + e.message); }
+}
+
+document.getElementById('btnRigAddTrussH').addEventListener('click', () => addRigElement('truss_h'));
+document.getElementById('btnRigAddTrussV').addEventListener('click', () => addRigElement('truss_v'));
+document.getElementById('btnRigAddStand').addEventListener('click', () => addRigElement('stand'));
+document.getElementById('btnRigAddTBar').addEventListener('click', () => addRigElement('tbar'));
+
+// Deselect rigging when clicking empty canvas area
+document.getElementById('rigCanvas').addEventListener('mousedown', (e) => {
+  if (e.target.id === 'rigCanvas' || e.target.classList.contains('rig-grid-line') || e.target.classList.contains('rig-axis-label')) {
+    if (_rigSelectedElId) { _rigSelectedElId = null; renderRigLayout(); }
+  }
+});
+
+function recalcRigOrder() {
+  // Recalculate rig_order based on left-to-right X position
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_x || 0) - (b.rig_x || 0));
+  sorted.forEach((f, i) => { f.rig_order = i; });
+  // Re-render to update order badges
+  renderRigLayout();
+}
+
+// ── Snap-to-rigging arrange: distribute fixtures along rigging elements ──
+function snapFixturesToRigging() {
+  if (!_allFixtures.length || !_rigElements.length) return;
+  // Gather all snap points from all horizontal trusses and t-bars
+  const allPts = [];
+  for (const el of _rigElements) {
+    if (el.type === 'truss_h' || el.type === 'tbar') {
+      const pts = getElementSnapPoints(el, Math.max(4, _allFixtures.length));
+      allPts.push(...pts);
+    } else if (el.type === 'truss_v') {
+      const pts = getElementSnapPoints(el, Math.max(4, _allFixtures.length));
+      allPts.push(...pts);
+    } else if (el.type === 'stand') {
+      allPts.push(...getElementSnapPoints(el));
+    }
+  }
+  if (allPts.length === 0) return;
+
+  // Sort snap points left-to-right
+  allPts.sort((a, b) => a.x - b.x || a.y - b.y);
+
+  // Distribute fixtures evenly across available snap points
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0) || a.address - b.address);
+  const n = sorted.length;
+  for (let i = 0; i < n; i++) {
+    const ptIdx = Math.round(i * (allPts.length - 1) / Math.max(1, n - 1));
+    sorted[i].rig_x = allPts[ptIdx].x;
+    sorted[i].rig_y = allPts[ptIdx].y;
+  }
+  recalcRigOrder();
+}
+
+// Arrange buttons
+document.getElementById('btnRigArrangeLine').addEventListener('click', () => {
+  // If rigging exists, snap to rigging instead of a plain line
+  if (_rigElements.length > 0) { snapFixturesToRigging(); return; }
+  if (!_allFixtures.length) return;
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0) || a.address - b.address);
+  const n = sorted.length;
+  const pad = 0.06;
+  sorted.forEach((f, i) => {
+    f.rig_x = n > 1 ? pad + i * (1 - 2 * pad) / (n - 1) : 0.5;
+    f.rig_y = 0.5;
+  });
+  recalcRigOrder();
+});
+
+document.getElementById('btnRigArrangeGrid').addEventListener('click', () => {
+  if (!_allFixtures.length) return;
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0) || a.address - b.address);
+  const n = sorted.length;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const pad = 0.08;
+  sorted.forEach((f, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    f.rig_x = cols > 1 ? pad + col * (1 - 2 * pad) / (cols - 1) : 0.5;
+    f.rig_y = rows > 1 ? pad + row * (1 - 2 * pad) / (rows - 1) : 0.5;
+  });
+  recalcRigOrder();
+});
+
+document.getElementById('btnRigArrangeCircle').addEventListener('click', () => {
+  if (!_allFixtures.length) return;
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0) || a.address - b.address);
+  const n = sorted.length;
+  const cx = 0.5, cy = 0.5, r = 0.38;
+  sorted.forEach((f, i) => {
+    const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+    f.rig_x = cx + r * Math.cos(angle);
+    f.rig_y = cy + r * Math.sin(angle);
+  });
+  recalcRigOrder();
+});
+
+// ── Rig Layout presets (save/load named snapshots) ──
+let _rigLayouts = [];
+
+// Build snapshot from current in-memory state (what user sees on canvas)
+function _buildRigSnapshot() {
+  return {
+    fixtures: _allFixtures.map(f => ({
+      id: f.id,
+      rig_x: f.rig_x != null ? f.rig_x : 0.5,
+      rig_y: f.rig_y != null ? f.rig_y : 0.5,
+      rig_order: f.rig_order != null ? f.rig_order : 0
+    })),
+    elements: _rigElements.map(el => ({
+      type: el.type, label: el.label || '',
+      x: el.x, y: el.y, width: el.width, height: el.height,
+      rotation: el.rotation || 0, sort_order: el.sort_order || 0
+    }))
+  };
+}
+
+// Persist current in-memory rig positions + elements to DB
+async function _saveCurrentRigToDB() {
+  const positions = _allFixtures.map(f => ({
+    id: f.id,
+    rig_x: f.rig_x != null ? f.rig_x : 0.5,
+    rig_y: f.rig_y != null ? f.rig_y : 0.5,
+    rig_order: f.rig_order != null ? f.rig_order : 0
+  }));
+  await fetch('/api/fixtures/rig-layout', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ positions })
+  });
+  // Also persist rig elements
+  if (_rigElements.length > 0) {
+    await fetch('/api/rig-elements/bulk', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ elements: _rigElements })
+    });
+  }
+}
+
+async function loadRigLayoutList() {
+  try {
+    _rigLayouts = await fetch('/api/rig-layouts').then(r => r.json());
+  } catch (e) { _rigLayouts = []; }
+  const sel = document.getElementById('rigLayoutSelect');
+  const activeLayout = _rigLayouts.find(l => l.is_active);
+  sel.innerHTML = '<option value="">— Saved Layouts —</option>' +
+    _rigLayouts.map(l => `<option value="${l.id}"${l.is_active ? ' selected' : ''}>${l.is_active ? '● ' : ''}${esc(l.name)}</option>`).join('');
+  // Show active label
+  const lbl = document.getElementById('rigActiveLabel');
+  if (activeLayout) {
+    lbl.textContent = '● Active: ' + activeLayout.name;
+    document.getElementById('btnRigOverwriteLayout').style.display = '';
+    document.getElementById('btnRigDeleteLayout').style.display = '';
+  } else {
+    lbl.textContent = '';
+  }
+}
+
+document.getElementById('rigLayoutSelect').addEventListener('change', () => {
+  const val = document.getElementById('rigLayoutSelect').value;
+  document.getElementById('btnRigOverwriteLayout').style.display = val ? '' : 'none';
+  document.getElementById('btnRigDeleteLayout').style.display = val ? '' : 'none';
+});
+
+document.getElementById('btnRigSaveAsLayout').addEventListener('click', async () => {
+  const name = prompt('Layout name:');
+  if (!name || !name.trim()) return;
+  try {
+    // Build snapshot from current in-memory state and send directly
+    const snapshotData = _buildRigSnapshot();
+    await _saveCurrentRigToDB();
+    await fetch('/api/rig-layouts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), data: snapshotData })
+    });
+    await loadRigLayoutList();
+  } catch (e) { alert('Save failed: ' + e.message); }
+});
+
+document.getElementById('btnRigOverwriteLayout').addEventListener('click', async () => {
+  const id = document.getElementById('rigLayoutSelect').value;
+  if (!id) return;
+  const layout = _rigLayouts.find(l => l.id === +id);
+  if (!confirm(`Overwrite "${layout ? layout.name : 'layout'}" with current positions?`)) return;
+  try {
+    // Build snapshot from current in-memory state and send directly
+    const snapshotData = _buildRigSnapshot();
+    await _saveCurrentRigToDB();
+    await fetch(`/api/rig-layouts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: layout ? layout.name : 'Layout', data: snapshotData })
+    });
+    await loadRigLayoutList();
+    document.getElementById('rigLayoutSelect').value = id;
+  } catch (e) { alert('Overwrite failed: ' + e.message); }
+});
+
+document.getElementById('btnRigLoadLayout').addEventListener('click', async () => {
+  const id = document.getElementById('rigLayoutSelect').value;
+  if (!id) { alert('Select a saved layout first'); return; }
+  const layout = _rigLayouts.find(l => l.id === +id);
+  if (!confirm(`Load layout "${layout ? layout.name : ''}"? This will overwrite current fixture positions and rigging.`)) return;
+  try {
+    const res = await fetch(`/api/rig-layouts/${id}/load`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) { alert('Load failed: ' + data.error); return; }
+    // Re-fetch ALL data from DB (positions were just restored server-side)
+    const [fixtures, types] = await Promise.all([
+      fetch('/api/fixtures').then(r => r.json()),
+      fetch('/api/fixture-types/summaries').then(r => r.json())
+    ]);
+    fixtureTypesCache = types;
+    _allFixtures = fixtures;
+    renderFilteredFixtures();
+    // Refresh rig elements (also restored by load)
+    await loadRigElements();
+    // Re-render rig canvas with restored positions
+    renderRigLayout();
+    // Keep dropdown on the loaded layout
+    await loadRigLayoutList();
+    document.getElementById('rigLayoutSelect').value = id;
+    document.getElementById('btnRigOverwriteLayout').style.display = '';
+    document.getElementById('btnRigDeleteLayout').style.display = '';
+  } catch (e) { alert('Load failed: ' + e.message); }
+});
+
+document.getElementById('btnRigDeleteLayout').addEventListener('click', async () => {
+  const id = document.getElementById('rigLayoutSelect').value;
+  if (!id) return;
+  const layout = _rigLayouts.find(l => l.id === +id);
+  if (!confirm(`Delete saved layout "${layout ? layout.name : ''}"?`)) return;
+  try {
+    await fetch(`/api/rig-layouts/${id}`, { method: 'DELETE' });
+    await loadRigLayoutList();
+    document.getElementById('btnRigOverwriteLayout').style.display = 'none';
+    document.getElementById('btnRigDeleteLayout').style.display = 'none';
+  } catch (e) { alert('Delete failed: ' + e.message); }
+});
+
+// Save layout (fixtures + rigging)
+document.getElementById('btnRigSaveLayout').addEventListener('click', async () => {
+  const positions = _allFixtures.map(f => ({
+    id: f.id,
+    rig_x: f.rig_x != null ? f.rig_x : 0.5,
+    rig_y: f.rig_y != null ? f.rig_y : 0.5,
+    rig_order: f.rig_order != null ? f.rig_order : 0
+  }));
+  const btn = document.getElementById('btnRigSaveLayout');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/fixtures/rig-layout', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ positions })
+    });
+    const data = await res.json();
+    if (data.error) { alert('Save failed: ' + data.error); }
+    else { btn.textContent = '✓ Saved'; setTimeout(() => { btn.textContent = 'Save Layout'; }, 1500); }
+  } catch(e) { alert('Save failed: ' + e.message); }
+  finally { btn.disabled = false; }
+});
+
+// Hook into loadFixtures to refresh rig layout
+const _origLoadFixtures = loadFixtures;
+loadFixtures = async function() {
+  await _origLoadFixtures();
+  await loadRigElements();
+  await loadRigLayoutList();
+  renderRigLayout();
+};
+
+// ═══════════════════════════════════════════════════════════════
 //  Integrated Universe Map (drag & drop)
 // ═══════════════════════════════════════════════════════════════
 document.getElementById('universeSelect').addEventListener('change', loadUniverseMap);
@@ -5632,7 +6571,7 @@ function renderCfgEffectsList() {
     list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects yet. Click "+ New Effect" to create one.</div>';
     return;
   }
-  const TARGET_BADGE = { all: '', color: '🎨', moving_head: '🔦', multicell: '▓' };
+  const TARGET_BADGE = { all: '', color: '🎨', moving_head: '🔦', moving_head_wash: '🔦', moving_head_spot: '🔦', multicell: '▓' };
   let html = '<table class="subs-table"><thead><tr><th>Type</th><th>Name</th><th>Target</th><th>Duration</th><th>Actions</th></tr></thead><tbody>';
   for (const eff of cfgEffects) {
     const badge = TARGET_BADGE[eff.fixture_target] || '';
@@ -6798,16 +7737,7 @@ const QA_EFFECTS = [
   { type: 'fog',     label: 'Smoke',   bg: '#78909c', fg: '#fff', border: '#90a4ae', channels: ['fog','smoke','haze','macro'] },
 ];
 
-const QA_MOVEMENTS = [
-  { id: 'center',    label: 'Centre',    icon: '◎', pan: 128, tilt: 128 },
-  { id: 'up',        label: 'Up',        icon: '⬆', pan: 128, tilt: 0 },
-  { id: 'down',      label: 'Down',      icon: '⬇', pan: 128, tilt: 255 },
-  { id: 'left',      label: 'Left',      icon: '⬅', pan: 0,   tilt: 128 },
-  { id: 'right',     label: 'Right',     icon: '➡', pan: 255, tilt: 128 },
-  { id: 'top-left',  label: 'Top Left',  icon: '↖', pan: 0,   tilt: 0 },
-  { id: 'top-right', label: 'Top Right', icon: '↗', pan: 255, tilt: 0 },
-  { id: 'bot-left',  label: 'Bot Left',  icon: '↙', pan: 0,   tilt: 255 },
-  { id: 'bot-right', label: 'Bot Right', icon: '↘', pan: 255, tilt: 255 },
+const QA_SWEEP_MODES = [
   { id: 'sweep-h',   label: 'Sweep H',   icon: '↔', sweep: 'pan' },
   { id: 'sweep-v',   label: 'Sweep V',   icon: '↕', sweep: 'tilt' },
   { id: 'circle',    label: 'Circle',    icon: '⟳', sweep: 'circle' },
@@ -7201,55 +8131,73 @@ function buildMoveGrid() {
   grid.innerHTML = '';
   const hasPan = getMoveTargets('pan').length > 0;
   const hasTilt = getMoveTargets('tilt').length > 0;
+  const disabled = !hasPan && !hasTilt;
 
-  QA_MOVEMENTS.forEach(m => {
-    const btn = document.createElement('button');
-    btn.className = 'qa-move-btn';
-    btn.innerHTML = `<span class="move-icon">${m.icon}</span>${m.label}`;
-    btn.dataset.moveId = m.id;
-
-    if (!hasPan && !hasTilt) {
-      btn.style.opacity = '0.3';
-      btn.title = 'No pan/tilt channels found';
-      grid.appendChild(btn);
-      return;
-    }
-
-    if (m.sweep) {
-      btn.addEventListener('click', () => {
-        if (btn.classList.contains('active')) { stopSweep(); }
-        else { startSweep(m.sweep, btn); }
-      });
-    } else {
-      btn.addEventListener('click', () => {
-        stopSweep();
-        sendMovePosition(m.pan, m.tilt);
-      });
-    }
-    grid.appendChild(btn);
-  });
-
-  // Add saved mover preset buttons
-  appendMoverPresetButtons(grid);
-}
-
-function appendMoverPresetButtons(grid) {
+  // Fetch all presets from DB (system + user) and build grid
   fetch('/api/mover-presets').then(r => r.json()).then(presets => {
-    if (!presets.length) return;
-    // Separator
-    const sep = document.createElement('div');
-    sep.style.cssText = 'grid-column:1/-1;border-top:1px solid var(--panel-border);margin:4px 0;';
-    grid.appendChild(sep);
-    for (const p of presets) {
+    // System presets first
+    const systemPresets = presets.filter(p => p.is_system);
+    const userPresets = presets.filter(p => !p.is_system);
+
+    for (const p of systemPresets) {
       const btn = document.createElement('button');
       btn.className = 'qa-move-btn';
-      btn.innerHTML = `<span class="move-icon">📍</span>${esc(p.name)}`;
-      btn.title = `${p.positions.length} fixture(s)`;
-      btn.addEventListener('click', () => {
-        stopSweep();
-        sendMoverTestPositions(p.positions || []);
-      });
+      const icon = p.icon || '📍';
+      btn.innerHTML = `<span class="move-icon">${icon}</span>${esc(p.name)}`;
+      btn.title = `${p.name} (System)`;
+      if (disabled) {
+        btn.style.opacity = '0.3';
+        btn.title = 'No pan/tilt channels found';
+      } else {
+        btn.addEventListener('click', () => {
+          stopSweep();
+          if (p.positions && p.positions.length > 0) {
+            sendMoverTestPositions(p.positions);
+          } else {
+            // System preset with no per-fixture positions — use first position's pan/tilt for all
+            const pos = p.positions && p.positions[0];
+            if (pos) sendMovePosition(pos.pan, pos.tilt);
+          }
+        });
+      }
       grid.appendChild(btn);
+    }
+
+    // Sweep animation buttons (always hardcoded — these are animations, not position presets)
+    QA_SWEEP_MODES.forEach(m => {
+      const btn = document.createElement('button');
+      btn.className = 'qa-move-btn';
+      btn.innerHTML = `<span class="move-icon">${m.icon}</span>${m.label}`;
+      btn.dataset.moveId = m.id;
+      if (disabled) { btn.style.opacity = '0.3'; btn.title = 'No pan/tilt channels found'; }
+      else {
+        btn.addEventListener('click', () => {
+          if (btn.classList.contains('active')) { stopSweep(); }
+          else { startSweep(m.sweep, btn); }
+        });
+      }
+      grid.appendChild(btn);
+    });
+
+    // User presets after a separator
+    if (userPresets.length > 0) {
+      const sep = document.createElement('div');
+      sep.style.cssText = 'grid-column:1/-1;border-top:1px solid var(--panel-border);margin:4px 0;';
+      grid.appendChild(sep);
+      for (const p of userPresets) {
+        const btn = document.createElement('button');
+        btn.className = 'qa-move-btn';
+        btn.innerHTML = `<span class="move-icon">📍</span>${esc(p.name)}`;
+        btn.title = `${p.positions.length} fixture(s)`;
+        if (disabled) { btn.style.opacity = '0.3'; }
+        else {
+          btn.addEventListener('click', () => {
+            stopSweep();
+            sendMoverTestPositions(p.positions || []);
+          });
+        }
+        grid.appendChild(btn);
+      }
     }
   }).catch(() => {});
 }
@@ -8142,8 +9090,12 @@ function editMoverPreset(id) {
 }
 
 async function deleteMoverPreset(id) {
+  const preset = moverPresets.find(p => p.id === id);
+  if (preset && preset.is_system) { alert('System presets cannot be deleted.'); return; }
   if (!confirm('Delete this mover preset?')) return;
-  await fetch(`/api/mover-presets/${id}`, { method: 'DELETE' });
+  const res = await fetch(`/api/mover-presets/${id}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
   await loadMoverConfig();
 }
 
@@ -8163,12 +9115,14 @@ function renderMoverPresetList() {
       const fix = moverFixtures.find(f => f.id === pos.fixture_id);
       return fix ? `${fix.name}: ${pos.pan}/${pos.tilt}` : `#${pos.fixture_id}: ${pos.pan}/${pos.tilt}`;
     }).join(' · ');
+    const systemBadge = p.is_system ? '<span style="font-size:9px;background:var(--cyan);color:#000;padding:1px 5px;border-radius:3px;margin-left:6px">SYSTEM</span>' : '';
+    const deleteBtn = p.is_system ? '' : `<button class="mp-delete" title="Delete" onclick="deleteMoverPreset(${p.id})">&times;</button>`;
     card.innerHTML = `
       <div class="mover-preset-card-header">
-        <span class="mover-preset-card-name">${esc(p.name)}</span>
+        <span class="mover-preset-card-name">${p.icon ? p.icon + ' ' : ''}${esc(p.name)}${systemBadge}</span>
         <span class="mover-preset-card-actions">
           <button class="mp-edit" title="Edit" onclick="editMoverPreset(${p.id})">✎</button>
-          <button class="mp-delete" title="Delete" onclick="deleteMoverPreset(${p.id})">&times;</button>
+          ${deleteBtn}
         </span>
       </div>
       <div class="mover-preset-card-meta">

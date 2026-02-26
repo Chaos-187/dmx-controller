@@ -154,6 +154,8 @@ function init() {
       name        TEXT    NOT NULL,
       positions   TEXT    NOT NULL DEFAULT '[]',
       sort_order  INTEGER DEFAULT 0,
+      is_system   INTEGER DEFAULT 0,
+      icon        TEXT    DEFAULT '',
       created_at  TEXT    DEFAULT (datetime('now'))
     );
 
@@ -168,6 +170,30 @@ function init() {
       enabled     INTEGER DEFAULT 1,
       sort_order  INTEGER DEFAULT 0,
       created_at  TEXT    DEFAULT (datetime('now'))
+    );
+
+    -- Rig elements (trusses, stands, etc.) for 2D rig layout
+    CREATE TABLE IF NOT EXISTS rig_elements (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      type       TEXT    NOT NULL DEFAULT 'truss_h',
+      label      TEXT    DEFAULT '',
+      x          REAL    NOT NULL DEFAULT 0.5,
+      y          REAL    NOT NULL DEFAULT 0.5,
+      width      REAL    NOT NULL DEFAULT 0.4,
+      height     REAL    NOT NULL DEFAULT 0.02,
+      rotation   REAL    NOT NULL DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT    DEFAULT (datetime('now'))
+    );
+
+    -- Saved rig layouts (named snapshots of fixture positions + rigging elements)
+    CREATE TABLE IF NOT EXISTS rig_layouts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT    NOT NULL,
+      data       TEXT    NOT NULL DEFAULT '{}',
+      is_active  INTEGER DEFAULT 0,
+      created_at TEXT    DEFAULT (datetime('now')),
+      updated_at TEXT    DEFAULT (datetime('now'))
     );
 
     -- Color wheel color maps (per fixture type)
@@ -386,6 +412,40 @@ function init() {
     console.log('[DB] Migrated effects: added fixture_target column');
   }
 
+  // Migrate: add rig position columns to fixtures if missing
+  try {
+    db.prepare("SELECT rig_x FROM fixtures LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN rig_x REAL DEFAULT 0.5");
+    db.exec("ALTER TABLE fixtures ADD COLUMN rig_y REAL DEFAULT 0.5");
+    db.exec("ALTER TABLE fixtures ADD COLUMN rig_order INTEGER DEFAULT 0");
+    // Auto-assign rig_order based on existing address ordering
+    const existingFixtures = db.prepare('SELECT id FROM fixtures ORDER BY universe, address').all();
+    const updateOrder = db.prepare('UPDATE fixtures SET rig_order = ? WHERE id = ?');
+    const assignTx = db.transaction(() => {
+      existingFixtures.forEach((f, i) => updateOrder.run(i, f.id));
+    });
+    assignTx();
+    console.log('[DB] Migrated fixtures: added rig_x, rig_y, rig_order columns');
+  }
+
+  // Migrate: add is_system and icon columns to mover_presets if missing
+  try {
+    db.prepare("SELECT is_system FROM mover_presets LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE mover_presets ADD COLUMN is_system INTEGER DEFAULT 0");
+    db.exec("ALTER TABLE mover_presets ADD COLUMN icon TEXT DEFAULT ''");
+    console.log('[DB] Migrated mover_presets: added is_system, icon columns');
+  }
+
+  // Migrate: add is_active column to rig_layouts if missing
+  try {
+    db.prepare("SELECT is_active FROM rig_layouts LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE rig_layouts ADD COLUMN is_active INTEGER DEFAULT 0");
+    console.log('[DB] Migrated rig_layouts: added is_active column');
+  }
+
   // Migrate: fixture_type_modes — create default modes for existing fixture types
   // and link channels and fixtures to their modes
   migrateToModes();
@@ -441,6 +501,7 @@ function init() {
   // Always run migration to add new effect types to existing databases
   seedNewEffectsV2();
   seedNewEffectsV3();
+  seedNewEffectsV4();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -450,6 +511,8 @@ function init() {
   // Only truly multicell-specific effects are restricted
   db.exec("UPDATE effects SET fixture_target = 'multicell' WHERE fixture_target = 'all' AND type IN ('segments','ripple','cell_strobe','gradient')");
   db.exec("UPDATE effects SET fixture_target = 'moving_head' WHERE fixture_target = 'all' AND type IN ('pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod')");
+  // Rig-wide spatial effects target all fixtures with color channels
+  db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow')");
 
   // Seed default generator config if missing
   seedDefaultGeneratorConfig();
@@ -659,6 +722,65 @@ function seedNewEffectsV3() {
   });
   tx();
   if (added > 0) console.log(`[DB] Added ${added} new effects (v3 migration — movers & multicell)`);
+}
+
+// ─── Seed V4: Rig-Wide Spatial Effects ──────────────────────────────────────
+
+function seedNewEffectsV4() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // ── Rig Chase: color chase across all fixtures by position ──────────
+    ['Rig Chase L→R',     'rig_chase',      'color', 'rig', J({ direction:'left_right',  speed:1, width:0.25, tail:0.2 }), 4],
+    ['Rig Chase R→L',     'rig_chase',      'color', 'rig', J({ direction:'right_left',  speed:1, width:0.25, tail:0.2 }), 4],
+    ['Rig Chase Bounce',  'rig_chase',      'color', 'rig', J({ direction:'bounce',      speed:1, width:0.25, tail:0.2 }), 8],
+    ['Rig Chase T→B',     'rig_chase',      'color', 'rig', J({ direction:'top_bottom',  speed:1, width:0.3,  tail:0.2 }), 4],
+    ['Rig Chase B→T',     'rig_chase',      'color', 'rig', J({ direction:'bottom_top',  speed:1, width:0.3,  tail:0.2 }), 4],
+    ['Rig Fast Chase',    'rig_chase',      'color', 'rig', J({ direction:'left_right',  speed:4, width:0.15, tail:0.1 }), 2],
+    ['Rig Wide Chase',    'rig_chase',      'color', 'rig', J({ direction:'left_right',  speed:0.5, width:0.4, tail:0.3 }), 8],
+
+    // ── Rig Color Wave: hue gradient that moves across the rig ─────────
+    ['Rig Color Wave L→R','rig_color_wave', 'color', 'rig', J({ direction:'left_right',  speed:1, wavelength:1.0 }), 8],
+    ['Rig Color Wave R→L','rig_color_wave', 'color', 'rig', J({ direction:'right_left',  speed:1, wavelength:1.0 }), 8],
+    ['Rig Color Wave T→B','rig_color_wave', 'color', 'rig', J({ direction:'top_bottom',  speed:1, wavelength:1.0 }), 8],
+    ['Rig Fast Wave',     'rig_color_wave', 'color', 'rig', J({ direction:'left_right',  speed:3, wavelength:0.5 }), 4],
+
+    // ── Rig Sweep: spotlight wash across the rig ───────────────────────
+    ['Rig Sweep L→R',     'rig_sweep',      'intensity', 'rig', J({ direction:'left_right', speed:1, width:0.25 }), 4],
+    ['Rig Sweep R→L',     'rig_sweep',      'intensity', 'rig', J({ direction:'right_left', speed:1, width:0.25 }), 4],
+    ['Rig Sweep Bounce',  'rig_sweep',      'intensity', 'rig', J({ direction:'bounce',     speed:1, width:0.25 }), 8],
+    ['Rig Sweep T→B',     'rig_sweep',      'intensity', 'rig', J({ direction:'top_bottom', speed:1, width:0.3  }), 4],
+    ['Rig Wide Sweep',    'rig_sweep',      'intensity', 'rig', J({ direction:'left_right', speed:0.5, width:0.4 }), 8],
+
+    // ── Rig Alternate: even/odd fixture split ──────────────────────────
+    ['Rig Alternate',      'rig_alternate',  'color', 'rig', J({ speed:1 }), 4],
+    ['Rig Fast Alternate', 'rig_alternate',  'color', 'rig', J({ speed:4 }), 2],
+
+    // ── Rig Converge/Diverge: edges↔center wash ───────────────────────
+    ['Rig Converge',       'rig_converge',   'color', 'rig', J({ mode:'converge', speed:1, width:0.2 }), 4],
+    ['Rig Diverge',        'rig_converge',   'color', 'rig', J({ mode:'diverge',  speed:1, width:0.2 }), 4],
+    ['Rig Converge T→B',  'rig_converge',   'color', 'rig', J({ mode:'converge', speed:1, width:0.25, direction:'top_bottom' }), 4],
+
+    // ── Rig Rainbow: rainbow gradient spread across the rig ────────────
+    ['Rig Rainbow',        'rig_rainbow',    'color', 'rig', J({ speed:0.5, spread:1.0, direction:'left_right' }), 8],
+    ['Rig Rainbow Fast',   'rig_rainbow',    'color', 'rig', J({ speed:2,   spread:1.0, direction:'left_right' }), 4],
+    ['Rig Rainbow T→B',   'rig_rainbow',    'color', 'rig', J({ speed:0.5, spread:1.0, direction:'top_bottom' }), 8],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v4 migration — rig-wide spatial)`);
 }
 
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
@@ -1366,7 +1488,7 @@ function getFixture(id) {
   return f;
 }
 
-function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt }) {
+function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order }) {
   // Validate type exists
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
   if (!type) return { error: 'Fixture type not found' };
@@ -1391,14 +1513,20 @@ function createFixture({ name, fixture_type_id, mode_id, universe, address, outp
   if (overlap) return { error: overlap };
 
   const otype = output_type || 'artnet';
+  // Auto-assign rig_order if not provided (next available)
+  let resolvedRigOrder = rig_order;
+  if (resolvedRigOrder === undefined || resolvedRigOrder === null) {
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(rig_order), -1) + 1 as next FROM fixtures').get().next;
+    resolvedRigOrder = maxOrder;
+  }
   const r = db.prepare(
-    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128);
+    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, rig_x ?? 0.5, rig_y ?? 0.5, resolvedRigOrder);
 
   return getFixture(r.lastInsertRowid);
 }
 
-function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt }) {
+function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -1429,14 +1557,176 @@ function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, 
   if (overlap) return { error: overlap };
 
   db.prepare(
-    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, updated_at=datetime('now') WHERE id=?`
-  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, id);
+    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_order=?, updated_at=datetime('now') WHERE id=?`
+  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_order ?? existing.rig_order ?? 0, id);
 
   return getFixture(id);
 }
 
 function deleteFixture(id) {
   db.prepare('DELETE FROM fixtures WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+// ─── Rig Layout Bulk Update ─────────────────────────────────────────────────
+
+/**
+ * Bulk update rig positions for multiple fixtures.
+ * @param {Array<{id:number, rig_x:number, rig_y:number, rig_order:number}>} positions
+ * @returns {{ updated: number }}
+ */
+function updateFixtureRigPositions(positions) {
+  const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  let updated = 0;
+  const tx = db.transaction(() => {
+    for (const p of positions) {
+      const result = stmt.run(p.rig_x ?? 0.5, p.rig_y ?? 0.5, p.rig_order ?? 0, p.id);
+      if (result.changes > 0) updated++;
+    }
+  });
+  tx();
+  return { updated };
+}
+
+// ─── Rig Elements CRUD ─────────────────────────────────────────────────────
+
+function getRigElements() {
+  return db.prepare('SELECT * FROM rig_elements ORDER BY sort_order, id').all();
+}
+
+function createRigElement({ type, label, x, y, width, height, rotation }) {
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 as next FROM rig_elements').get().next;
+  const result = db.prepare(
+    'INSERT INTO rig_elements (type, label, x, y, width, height, rotation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(type || 'truss_h', label || '', x ?? 0.5, y ?? 0.5, width ?? 0.4, height ?? 0.02, rotation ?? 0, maxOrder);
+  return { id: result.lastInsertRowid };
+}
+
+function updateRigElement(id, { type, label, x, y, width, height, rotation }) {
+  const existing = db.prepare('SELECT * FROM rig_elements WHERE id = ?').get(id);
+  if (!existing) return null;
+  db.prepare(
+    'UPDATE rig_elements SET type = ?, label = ?, x = ?, y = ?, width = ?, height = ?, rotation = ? WHERE id = ?'
+  ).run(
+    type ?? existing.type, label ?? existing.label,
+    x ?? existing.x, y ?? existing.y,
+    width ?? existing.width, height ?? existing.height,
+    rotation ?? existing.rotation, id
+  );
+  return { id };
+}
+
+function deleteRigElement(id) {
+  db.prepare('DELETE FROM rig_elements WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+function bulkUpdateRigElements(elements) {
+  const stmt = db.prepare('UPDATE rig_elements SET x = ?, y = ?, width = ?, height = ?, rotation = ?, sort_order = ? WHERE id = ?');
+  let updated = 0;
+  const tx = db.transaction(() => {
+    for (const el of elements) {
+      const result = stmt.run(el.x ?? 0.5, el.y ?? 0.5, el.width ?? 0.4, el.height ?? 0.02, el.rotation ?? 0, el.sort_order ?? 0, el.id);
+      if (result.changes > 0) updated++;
+    }
+  });
+  tx();
+  return { updated };
+}
+
+// ─── Rig Layouts CRUD (named snapshots) ─────────────────────────────────────
+
+function getRigLayouts() {
+  return db.prepare('SELECT id, name, is_active, created_at, updated_at FROM rig_layouts ORDER BY updated_at DESC').all();
+}
+
+function getRigLayout(id) {
+  const row = db.prepare('SELECT * FROM rig_layouts WHERE id = ?').get(id);
+  if (!row) return null;
+  row.data = JSON.parse(row.data);
+  return row;
+}
+
+function createRigLayout(name, clientData) {
+  // Use client-provided snapshot data if available, otherwise read from DB
+  let data;
+  if (clientData && clientData.fixtures) {
+    data = JSON.stringify(clientData);
+  } else {
+    const fixtures = db.prepare('SELECT id, rig_x, rig_y, rig_order FROM fixtures ORDER BY rig_order').all();
+    const elements = db.prepare('SELECT type, label, x, y, width, height, rotation, sort_order FROM rig_elements ORDER BY sort_order, id').all();
+    data = JSON.stringify({ fixtures, elements });
+  }
+  const result = db.prepare(
+    'INSERT INTO rig_layouts (name, data) VALUES (?, ?)'
+  ).run(name || 'Untitled Layout', data);
+  return { id: result.lastInsertRowid };
+}
+
+function updateRigLayout(id, { name, data: clientData } = {}) {
+  const existing = db.prepare('SELECT * FROM rig_layouts WHERE id = ?').get(id);
+  if (!existing) return null;
+  // Use client-provided snapshot data if available, otherwise read from DB
+  let data;
+  if (clientData && clientData.fixtures) {
+    data = JSON.stringify(clientData);
+  } else {
+    const fixtures = db.prepare('SELECT id, rig_x, rig_y, rig_order FROM fixtures ORDER BY rig_order').all();
+    const elements = db.prepare('SELECT type, label, x, y, width, height, rotation, sort_order FROM rig_elements ORDER BY sort_order, id').all();
+    data = JSON.stringify({ fixtures, elements });
+  }
+  db.prepare(
+    'UPDATE rig_layouts SET name = ?, data = ?, updated_at = datetime(\'now\') WHERE id = ?'
+  ).run(name ?? existing.name, data, id);
+  return { id };
+}
+
+function loadRigLayout(id) {
+  const row = db.prepare('SELECT * FROM rig_layouts WHERE id = ?').get(id);
+  if (!row) return null;
+  const data = JSON.parse(row.data);
+
+  const tx = db.transaction(() => {
+    // Restore fixture positions
+    if (data.fixtures && data.fixtures.length > 0) {
+      const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
+      for (const f of data.fixtures) {
+        stmt.run(f.rig_x ?? 0.5, f.rig_y ?? 0.5, f.rig_order ?? 0, f.id);
+      }
+    }
+
+    // Restore rig elements: clear existing, insert saved
+    db.prepare('DELETE FROM rig_elements').run();
+    if (data.elements && data.elements.length > 0) {
+      const ins = db.prepare(
+        'INSERT INTO rig_elements (type, label, x, y, width, height, rotation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      for (const el of data.elements) {
+        ins.run(el.type || 'truss_h', el.label || '', el.x ?? 0.5, el.y ?? 0.5, el.width ?? 0.4, el.height ?? 0.02, el.rotation ?? 0, el.sort_order ?? 0);
+      }
+    }
+  });
+  tx();
+
+  // Mark this layout as the active one
+  setActiveRigLayout(id);
+
+  return { loaded: true, name: row.name };
+}
+
+function setActiveRigLayout(id) {
+  db.prepare('UPDATE rig_layouts SET is_active = 0 WHERE is_active = 1').run();
+  if (id) {
+    db.prepare('UPDATE rig_layouts SET is_active = 1 WHERE id = ?').run(id);
+  }
+}
+
+function getActiveRigLayout() {
+  return db.prepare('SELECT id, name FROM rig_layouts WHERE is_active = 1').get() || null;
+}
+
+function deleteRigLayout(id) {
+  db.prepare('DELETE FROM rig_layouts WHERE id = ?').run(id);
   return { deleted: true };
 }
 
@@ -1695,6 +1985,7 @@ function getFixtureChannelMap() {
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
            f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
+           f.rig_x, f.rig_y, f.rig_order,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
            ft.name as type_name, ft.category,
            ftm.name as mode_name
@@ -1931,29 +2222,32 @@ function updateMoverPreset(id, { name, positions }) {
 }
 
 function deleteMoverPreset(id) {
+  const row = db.prepare('SELECT is_system FROM mover_presets WHERE id = ?').get(id);
+  if (row && row.is_system) return { error: 'System presets cannot be deleted' };
   db.prepare('DELETE FROM mover_presets WHERE id = ?').run(id);
   return { deleted: true };
 }
 
 // ─── Default Mover Position Presets (seeded on first run) ───────────────────
 
-const DEFAULT_MOVER_POSITIONS = [
-  { name: 'Center',              pan: 128, tilt: 128 },
-  { name: 'Front Left',          pan: 40,  tilt: 100 },
-  { name: 'Front Right',         pan: 216, tilt: 100 },
-  { name: 'Audience Left',       pan: 80,  tilt: 60  },
-  { name: 'Audience Right',      pan: 176, tilt: 60  },
-  { name: 'Audience Center Far', pan: 128, tilt: 40  },
-  { name: 'Stage Left Up',       pan: 60,  tilt: 160 },
-  { name: 'Stage Right Up',      pan: 196, tilt: 160 },
-  { name: 'Straight Down',       pan: 128, tilt: 200 },
-  { name: 'Left Mid',            pan: 90,  tilt: 128 },
-  { name: 'Right Mid',           pan: 166, tilt: 128 },
+// System default movement presets — match the QA quick-action positions
+// These are seeded as is_system=1 and cannot be deleted by the user
+const SYSTEM_MOVER_PRESETS = [
+  { name: 'Centre',    icon: '◎', pan: 128, tilt: 128 },
+  { name: 'Up',        icon: '⬆', pan: 128, tilt: 0 },
+  { name: 'Down',      icon: '⬇', pan: 128, tilt: 255 },
+  { name: 'Left',      icon: '⬅', pan: 0,   tilt: 128 },
+  { name: 'Right',     icon: '➡', pan: 255, tilt: 128 },
+  { name: 'Top Left',  icon: '↖', pan: 0,   tilt: 0 },
+  { name: 'Top Right', icon: '↗', pan: 255, tilt: 0 },
+  { name: 'Bot Left',  icon: '↙', pan: 0,   tilt: 255 },
+  { name: 'Bot Right', icon: '↘', pan: 255, tilt: 255 },
 ];
 
 function seedDefaultMoverPresets() {
-  const existing = db.prepare('SELECT COUNT(*) as c FROM mover_presets').get().c;
-  if (existing > 0) return;
+  // Check if system presets exist (migration-safe)
+  const sysCount = db.prepare('SELECT COUNT(*) as c FROM mover_presets WHERE is_system = 1').get().c;
+  if (sysCount >= SYSTEM_MOVER_PRESETS.length) return; // already seeded
 
   // Get all mover fixtures (those with pan + tilt channels)
   const fixtures = getFixtures();
@@ -1962,21 +2256,21 @@ function seedDefaultMoverPresets() {
     f.channels.some(ch => ch.type === 'tilt')
   );
 
-  if (movers.length === 0) return; // no movers configured, skip seeding
-
-  const ins = db.prepare('INSERT INTO mover_presets (name, positions, sort_order) VALUES (?, ?, ?)');
+  // Seed system presets even with no movers — positions will be empty until fixtures are added
+  const ins = db.prepare('INSERT INTO mover_presets (name, positions, sort_order, is_system, icon) VALUES (?, ?, ?, 1, ?)');
   const seed = db.transaction(() => {
-    for (let i = 0; i < DEFAULT_MOVER_POSITIONS.length; i++) {
-      const pos = DEFAULT_MOVER_POSITIONS[i];
-      // Create a position entry for every mover fixture
+    // Remove any old system presets to avoid duplicates during migration
+    db.prepare('DELETE FROM mover_presets WHERE is_system = 1').run();
+    for (let i = 0; i < SYSTEM_MOVER_PRESETS.length; i++) {
+      const pos = SYSTEM_MOVER_PRESETS[i];
       const positions = movers.map(fix => ({
         fixture_id: fix.id, pan: pos.pan, tilt: pos.tilt
       }));
-      ins.run(pos.name, JSON.stringify(positions), i);
+      ins.run(pos.name, JSON.stringify(positions), i, pos.icon);
     }
   });
   seed();
-  console.log(`[DB] Seeded ${DEFAULT_MOVER_POSITIONS.length} default mover presets for ${movers.length} mover(s)`);
+  console.log(`[DB] Seeded ${SYSTEM_MOVER_PRESETS.length} system mover presets for ${movers.length} mover(s)`);
 }
 
 // ─── Generator Config (stored in config table as JSON) ──────────────────────
@@ -2963,7 +3257,9 @@ module.exports = {
   createLedBarFixtureType,
   createMultiCellFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
-  getFixtures, getFixture, createFixture, updateFixture, deleteFixture,
+  getFixtures, getFixture, createFixture, updateFixture, deleteFixture, updateFixtureRigPositions,
+  getRigElements, createRigElement, updateRigElement, deleteRigElement, bulkUpdateRigElements,
+  getRigLayouts, getRigLayout, createRigLayout, updateRigLayout, loadRigLayout, deleteRigLayout, setActiveRigLayout, getActiveRigLayout,
   getUniverseMap,
   getFixtureChannelMap,
   getGroups, getGroup, createGroup, updateGroup, deleteGroup, setGroupFixtures,
@@ -2972,7 +3268,7 @@ module.exports = {
   getConfig, setConfig, getAllConfig,
   getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks, updateTrackBeatgridPos,
   getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,
-  getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset,
+  getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset, SYSTEM_MOVER_PRESETS,
   getGeneratorConfig, getGeneratorConfigKey, setGeneratorConfigKey, resetGeneratorConfig, GENERATOR_CONFIG_DEFAULTS,
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,

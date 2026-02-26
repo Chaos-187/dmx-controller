@@ -52,6 +52,7 @@ function hslToRgb(h, s, l) {
 const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
 const MULTICELL_EFFECT_TYPES   = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
+const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow']);
 const PAN_TILT = new Set(['pan','tilt']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
 
@@ -67,10 +68,21 @@ function isFixtureCompatibleWithEffect(effect, fix) {
   if (target === 'moving_head') {
     return fix.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt');
   }
+  if (target === 'moving_head_wash') {
+    return fix.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt') &&
+           fix.channels.some(ch => ch.type === 'red' || ch.type === 'green' || ch.type === 'blue');
+  }
+  if (target === 'moving_head_spot') {
+    return fix.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt') &&
+           fix.channels.some(ch => ch.type === 'color_wheel');
+  }
   if (target === 'multicell') {
     return (fix.cell_count || 0) > 0;
   }
   if (target === 'color') {
+    return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
+  }
+  if (target === 'rig') {
     return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
   }
   return true;
@@ -104,6 +116,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
   if (!MOVING_HEAD_EFFECT_TYPES.has(type) && PAN_TILT.has(channelType)) return null;
   // Color effects must only affect color/intensity channels (not gobo, prism, focus, etc.)
   if (COLOR_EFFECT_TYPES.has(type) && !COLOR_CHANNELS.has(channelType)) return null;
+  // Rig-wide effects only affect color/intensity channels
+  if (RIG_EFFECT_TYPES.has(type) && !COLOR_CHANNELS.has(channelType)) return null;
 
   // Helper: resolve channels-per-cell (legacy heuristic)
   const getCpp = () => params.channels_per_cell || data.channels_per_cell || 3;
@@ -509,6 +523,150 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       return null;
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  RIG-WIDE EFFECTS (cross-fixture spatial)
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // These effects use channelCtx._rigPosition (0-1 normalized X or Y),
+    // channelCtx._rigOrder (0-based index), and channelCtx._rigFixtureCount
+    // to create spatial effects that sweep/wash across the entire rig.
+
+    // ── Rig Chase: color sweeps across fixtures by rig position ────────
+    case 'rig_chase': {
+      if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
+      const speed = params.speed || data.speed || 1;
+      const width = params.width || data.width || 0.3;
+      const tail = params.tail || data.tail || 0.2;
+      const dir = params.direction || data.direction || 'left_right';
+
+      const rigPos = channelCtx._rigPosition ?? 0.5;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const cycle = (progress * speed) % 1;
+
+      let headPos;
+      if (dir === 'right_left') headPos = 1 - cycle;
+      else if (dir === 'bounce') headPos = cycle < 0.5 ? cycle * 2 : (1 - cycle) * 2;
+      else if (dir === 'top_bottom') headPos = cycle;  // uses _rigPositionY
+      else if (dir === 'bottom_top') headPos = 1 - cycle;
+      else headPos = cycle; // left_right
+
+      const useY = (dir === 'top_bottom' || dir === 'bottom_top');
+      const pos = useY ? (channelCtx._rigPositionY ?? 0.5) : rigPos;
+      const halfW = width / 2;
+      const dist = Math.abs(pos - headPos);
+
+      if (dist <= halfW) return val;
+      if (tail > 0 && dist <= halfW + tail) return val * (1 - (dist - halfW) / tail);
+      return 0;
+    }
+
+    // ── Rig Color Wave: hue shift offset by fixture position ───────────
+    case 'rig_color_wave': {
+      const speed = params.speed || data.speed || 1;
+      const wavelength = params.wavelength || data.wavelength || 1.0;
+      const dir = params.direction || data.direction || 'left_right';
+
+      const useY = (dir === 'top_bottom' || dir === 'bottom_top');
+      let pos = useY ? (channelCtx._rigPositionY ?? 0.5) : (channelCtx._rigPosition ?? 0.5);
+      if (dir === 'right_left' || dir === 'bottom_top') pos = 1 - pos;
+
+      const hue = ((pos / wavelength + progress * speed) * 360) % 360;
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      if (channelType === 'red') return r;
+      if (channelType === 'green') return g;
+      if (channelType === 'blue') return b;
+      if (channelType === 'dimmer') return 255;
+      return null;
+    }
+
+    // ── Rig Sweep: spotlight/wash that travels across the rig ──────────
+    case 'rig_sweep': {
+      const speed = params.speed || data.speed || 1;
+      const width = params.width || data.width || 0.25;
+      const dir = params.direction || data.direction || 'left_right';
+
+      const useY = (dir === 'top_bottom' || dir === 'bottom_top');
+      const rigPos = useY ? (channelCtx._rigPositionY ?? 0.5) : (channelCtx._rigPosition ?? 0.5);
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const cycle = (progress * speed) % 1;
+      let sweepPos;
+      if (dir === 'right_left' || dir === 'bottom_top') sweepPos = 1 - cycle;
+      else if (dir === 'bounce') sweepPos = cycle < 0.5 ? cycle * 2 : (1 - cycle) * 2;
+      else sweepPos = cycle;
+
+      const dist = Math.abs(rigPos - sweepPos);
+      const intensity = Math.max(0, 1 - dist / width);
+      // Smooth falloff with cosine
+      const smooth = intensity > 0 ? (Math.cos((1 - intensity) * Math.PI) + 1) / 2 : 0;
+      if (channelType === 'dimmer') return Math.round(255 * smooth);
+      return Math.round(val * smooth);
+    }
+
+    // ── Rig Alternate: even/odd split based on rig order ───────────────
+    case 'rig_alternate': {
+      if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
+      const speed = params.speed || data.speed || 1;
+      const rigOrder = channelCtx._rigOrder ?? 0;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const cycle = (progress * speed) % 1;
+      const isEven = (rigOrder % 2) === 0;
+      // First half of cycle: even fixtures on, odd off. Second half: swap.
+      const phase = cycle < 0.5;
+      const active = isEven ? phase : !phase;
+      return active ? val : 0;
+    }
+
+    // ── Rig Converge/Diverge: sweep from edges to center or vice versa ─
+    case 'rig_converge': {
+      const speed = params.speed || data.speed || 1;
+      const width = params.width || data.width || 0.2;
+      const mode = params.mode || data.mode || 'converge'; // 'converge' or 'diverge'
+      const dir = params.direction || data.direction || 'left_right';
+
+      const useY = (dir === 'top_bottom' || dir === 'bottom_top');
+      const rigPos = useY ? (channelCtx._rigPositionY ?? 0.5) : (channelCtx._rigPosition ?? 0.5);
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const cycle = (progress * speed) % 1;
+      // Distance from center (0 at center, 0.5 at edges)
+      const distFromCenter = Math.abs(rigPos - 0.5);
+
+      let sweepEdge;
+      if (mode === 'diverge') {
+        // Center to edges
+        sweepEdge = cycle * 0.5;
+      } else {
+        // Edges to center
+        sweepEdge = 0.5 - cycle * 0.5;
+      }
+
+      const dist = Math.abs(distFromCenter - sweepEdge);
+      if (dist <= width / 2) return val;
+      if (dist <= width) return val * (1 - (dist - width / 2) / (width / 2));
+      return 0;
+    }
+
+    // ── Rig Rainbow: rainbow gradient spread across the entire rig ─────
+    case 'rig_rainbow': {
+      const speed = params.speed || data.speed || 0.5;
+      const spread = params.spread || data.spread || 1.0;
+      const dir = params.direction || data.direction || 'left_right';
+
+      const useY = (dir === 'top_bottom' || dir === 'bottom_top');
+      let pos = useY ? (channelCtx._rigPositionY ?? 0.5) : (channelCtx._rigPosition ?? 0.5);
+      if (dir === 'right_left' || dir === 'bottom_top') pos = 1 - pos;
+
+      const hue = ((pos * spread + progress * speed) * 360) % 360;
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      if (channelType === 'red') return r;
+      if (channelType === 'green') return g;
+      if (channelType === 'blue') return b;
+      if (channelType === 'dimmer') return 255;
+      return null;
+    }
+
     // ── Default: pass through base value ───────────────────────────────
     default:
       return baseValues[channelType] !== undefined ? baseValues[channelType] : null;
@@ -525,6 +683,7 @@ module.exports = {
   MOVING_HEAD_EFFECT_TYPES,
   MULTICELL_EFFECT_TYPES,
   COLOR_EFFECT_TYPES,
+  RIG_EFFECT_TYPES,
   PAN_TILT,
   COLOR_CHANNELS,
 };

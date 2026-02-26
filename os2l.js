@@ -518,6 +518,7 @@ function executeMapAction(map, activate) {
                   const channelCtx = buildChannelCtx(ch, fix);
                   channelCtx._fixtureOrdinal = fi;
                   channelCtx._fixtureCount = fixtureIds.length;
+                  channelCtx._rigFixtureCount = fixMap.length;
                   let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
                   if (value !== null && value !== undefined) {
                     if (!chUpdates[fix.universe]) chUpdates[fix.universe] = {};

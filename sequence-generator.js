@@ -138,24 +138,179 @@ const colorPalettes = {
 const PALETTE_KEYS = Object.keys(colorPalettes);
 const ALL_PALETTE_OPTIONS = [...PALETTE_KEYS, 'random'];
 
+// ─── Genre-Specific Color Palettes ──────────────────────────────────────────
+// Each genre gets a tailored palette that carries a consistent color identity
+// across all song sections. Colors are chosen to match the vibe of the genre,
+// with consistent hue families and appropriate energy levels per section.
+// Genres that don't define a palette fall back to the generic palettes above.
+
+const genrePalettes = {
+  electronic: {
+    label: 'Electronic / EDM',
+    // Cyan, magenta, electric blue — high-saturation neon club colours
+    intro:     [[ {r:0,g:60,b:200},    {r:80,g:0,b:180}   ], [ {r:0,g:120,b:255},  {r:120,g:0,b:200}  ]],
+    verse:     [[ {r:0,g:200,b:255},   {r:200,g:0,b:255}  ], [ {r:0,g:255,b:200},  {r:255,g:0,b:150}  ], [ {r:80,g:0,b:255},  {r:0,g:255,b:255}  ]],
+    chorus:    [[ {r:255,g:0,b:200},   {r:0,g:255,b:100}  ], [ {r:0,g:200,b:255},  {r:255,g:0,b:255}  ], [ {r:255,g:0,b:100}, {r:0,g:255,b:255}  ], [ {r:200,g:0,b:255}, {r:0,g:255,b:0}    ]],
+    bridge:    [[ {r:60,g:0,b:255},    {r:0,g:200,b:200}  ], [ {r:120,g:0,b:220},  {r:0,g:180,b:255}  ]],
+    breakdown: [[ {r:0,g:40,b:140},    {r:60,g:0,b:100}   ], [ {r:0,g:60,b:120},   {r:40,g:0,b:120}   ]],
+    buildup:   [[ {r:0,g:150,b:255},   {r:200,g:0,b:255}  ], [ {r:255,g:0,b:200},  {r:0,g:255,b:200}  ]],
+    drop:      [[ {r:255,g:0,b:255},   {r:0,g:255,b:0}    ], [ {r:0,g:255,b:255},  {r:255,g:0,b:0}    ], [ {r:255,g:255,b:0}, {r:0,g:0,b:255}    ], [ {r:255,g:0,b:100}, {r:0,g:255,b:200}  ]],
+    outro:     [[ {r:0,g:30,b:100},    {r:40,g:0,b:80}    ], [ {r:0,g:20,b:80},    {r:30,g:0,b:60}    ]],
+  },
+  house: {
+    label: 'House / Techno',
+    // Deep blue, violet, warm pink — underground club with warmth
+    intro:     [[ {r:40,g:0,b:160},    {r:100,g:20,b:200} ], [ {r:20,g:0,b:120},   {r:80,g:10,b:180}  ]],
+    verse:     [[ {r:100,g:0,b:220},   {r:200,g:40,b:180} ], [ {r:60,g:0,b:200},   {r:180,g:0,b:200}  ], [ {r:0,g:60,b:220},  {r:220,g:0,b:160}  ]],
+    chorus:    [[ {r:200,g:0,b:200},   {r:0,g:100,b:255}  ], [ {r:255,g:40,b:180}, {r:0,g:200,b:255}  ], [ {r:220,g:0,b:255}, {r:60,g:0,b:200}   ]],
+    bridge:    [[ {r:120,g:0,b:200},   {r:0,g:80,b:200}   ], [ {r:180,g:20,b:200}, {r:0,g:100,b:180}  ]],
+    breakdown: [[ {r:30,g:0,b:80},     {r:20,g:0,b:60}    ], [ {r:40,g:0,b:100},   {r:10,g:0,b:50}    ]],
+    buildup:   [[ {r:120,g:0,b:255},   {r:200,g:0,b:200}  ], [ {r:0,g:100,b:255},  {r:180,g:0,b:220}  ]],
+    drop:      [[ {r:255,g:0,b:200},   {r:0,g:100,b:255}  ], [ {r:200,g:0,b:255},  {r:0,g:200,b:200}  ], [ {r:255,g:60,b:200},{r:0,g:150,b:255}  ]],
+    outro:     [[ {r:30,g:0,b:80},     {r:15,g:0,b:40}    ], [ {r:20,g:0,b:60},    {r:10,g:0,b:30}    ]],
+  },
+  trance: {
+    label: 'Trance',
+    // Ice blue, white-blue, ethereal cyan — vast and euphoric
+    intro:     [[ {r:0,g:40,b:180},    {r:0,g:80,b:220}   ], [ {r:0,g:30,b:140},   {r:0,g:60,b:200}   ]],
+    verse:     [[ {r:0,g:100,b:255},   {r:0,g:200,b:220}  ], [ {r:40,g:60,b:255},  {r:0,g:180,b:255}  ], [ {r:0,g:150,b:200}, {r:80,g:100,b:255} ]],
+    chorus:    [[ {r:0,g:180,b:255},   {r:100,g:0,b:255}  ], [ {r:80,g:200,b:255}, {r:0,g:100,b:255}  ], [ {r:0,g:255,b:255}, {r:60,g:0,b:200}   ]],
+    bridge:    [[ {r:60,g:120,b:255},  {r:0,g:200,b:200}  ], [ {r:40,g:80,b:220},  {r:0,g:180,b:180}  ]],
+    breakdown: [[ {r:0,g:20,b:100},    {r:0,g:40,b:80}    ], [ {r:0,g:15,b:80},    {r:0,g:30,b:60}    ]],
+    buildup:   [[ {r:0,g:120,b:255},   {r:100,g:200,b:255}], [ {r:0,g:180,b:255},  {r:60,g:100,b:255} ]],
+    drop:      [[ {r:100,g:200,b:255}, {r:0,g:0,b:255}    ], [ {r:0,g:255,b:255},  {r:80,g:0,b:255}   ], [ {r:200,g:200,b:255},{r:0,g:100,b:255} ]],
+    outro:     [[ {r:0,g:15,b:80},     {r:0,g:5,b:30}     ], [ {r:0,g:10,b:60},    {r:0,g:3,b:20}     ]],
+  },
+  dnb: {
+    label: 'Drum & Bass',
+    // Amber, red-orange, dark — aggressive and gritty
+    intro:     [[ {r:120,g:40,b:0},    {r:180,g:60,b:0}   ], [ {r:80,g:20,b:0},    {r:140,g:40,b:0}   ]],
+    verse:     [[ {r:255,g:80,b:0},    {r:200,g:40,b:0}   ], [ {r:255,g:120,b:0},  {r:180,g:0,b:0}    ], [ {r:200,g:60,b:0},  {r:255,g:100,b:0}  ]],
+    chorus:    [[ {r:255,g:40,b:0},    {r:255,g:0,b:0}    ], [ {r:255,g:100,b:0},  {r:200,g:0,b:0}    ], [ {r:255,g:0,b:0},   {r:255,g:200,b:0}  ]],
+    bridge:    [[ {r:200,g:80,b:0},    {r:255,g:120,b:0}  ], [ {r:180,g:40,b:0},   {r:220,g:80,b:0}   ]],
+    breakdown: [[ {r:60,g:15,b:0},     {r:30,g:8,b:0}     ], [ {r:40,g:10,b:0},    {r:20,g:5,b:0}     ]],
+    buildup:   [[ {r:255,g:60,b:0},    {r:255,g:0,b:0}    ], [ {r:200,g:40,b:0},   {r:255,g:100,b:0}  ]],
+    drop:      [[ {r:255,g:0,b:0},     {r:255,g:255,b:0}  ], [ {r:255,g:80,b:0},   {r:255,g:0,b:0}    ], [ {r:200,g:0,b:0},   {r:255,g:200,b:0}  ]],
+    outro:     [[ {r:60,g:15,b:0},     {r:20,g:5,b:0}     ], [ {r:40,g:10,b:0},    {r:10,g:3,b:0}     ]],
+  },
+  hiphop: {
+    label: 'Hip-Hop / Rap',
+    // Deep amber, gold, purple — rich and moody
+    intro:     [[ {r:100,g:50,b:0},    {r:60,g:0,b:100}   ], [ {r:80,g:40,b:0},    {r:40,g:0,b:80}    ]],
+    verse:     [[ {r:200,g:120,b:0},   {r:100,g:0,b:180}  ], [ {r:180,g:100,b:0},  {r:80,g:0,b:160}   ], [ {r:220,g:140,b:0}, {r:120,g:0,b:200}  ]],
+    chorus:    [[ {r:255,g:180,b:0},   {r:150,g:0,b:255}  ], [ {r:255,g:200,b:40}, {r:120,g:0,b:200}  ], [ {r:200,g:150,b:0}, {r:180,g:0,b:255}  ]],
+    bridge:    [[ {r:180,g:100,b:20},  {r:80,g:0,b:140}   ], [ {r:200,g:120,b:0},  {r:60,g:0,b:120}   ]],
+    breakdown: [[ {r:60,g:30,b:0},     {r:30,g:0,b:50}    ], [ {r:40,g:20,b:0},    {r:20,g:0,b:40}    ]],
+    buildup:   [[ {r:200,g:120,b:0},   {r:120,g:0,b:200}  ], [ {r:255,g:160,b:0},  {r:100,g:0,b:180}  ]],
+    drop:      [[ {r:255,g:200,b:0},   {r:180,g:0,b:255}  ], [ {r:255,g:160,b:0},  {r:100,g:0,b:200}  ], [ {r:200,g:140,b:0}, {r:150,g:0,b:255}  ]],
+    outro:     [[ {r:60,g:30,b:0},     {r:20,g:0,b:40}    ], [ {r:40,g:20,b:0},    {r:15,g:0,b:30}    ]],
+  },
+  rnb: {
+    label: 'R&B / Soul',
+    // Deep rose, warm violet, soft gold — smooth and sultry
+    intro:     [[ {r:100,g:20,b:60},   {r:60,g:0,b:80}    ], [ {r:80,g:15,b:50},   {r:50,g:0,b:70}    ]],
+    verse:     [[ {r:200,g:60,b:100},  {r:100,g:0,b:140}  ], [ {r:180,g:40,b:120}, {r:120,g:0,b:160}  ], [ {r:220,g:80,b:80}, {r:80,g:0,b:120}   ]],
+    chorus:    [[ {r:255,g:80,b:120},  {r:140,g:0,b:200}  ], [ {r:255,g:120,b:100},{r:100,g:0,b:180}  ], [ {r:200,g:60,b:140},{r:180,g:0,b:200}  ]],
+    bridge:    [[ {r:180,g:80,b:120},  {r:80,g:0,b:100}   ], [ {r:200,g:100,b:140},{r:60,g:0,b:80}    ]],
+    breakdown: [[ {r:60,g:15,b:40},    {r:30,g:0,b:40}    ], [ {r:50,g:10,b:30},   {r:25,g:0,b:35}    ]],
+    buildup:   [[ {r:200,g:60,b:100},  {r:140,g:0,b:180}  ], [ {r:255,g:80,b:120}, {r:100,g:0,b:160}  ]],
+    drop:      [[ {r:255,g:80,b:120},  {r:180,g:0,b:220}  ], [ {r:255,g:120,b:100},{r:140,g:0,b:200}  ], [ {r:200,g:60,b:160},{r:120,g:0,b:180}  ]],
+    outro:     [[ {r:60,g:15,b:40},    {r:20,g:0,b:30}    ], [ {r:40,g:10,b:30},   {r:15,g:0,b:20}    ]],
+  },
+  pop: {
+    label: 'Pop',
+    // Bright pink, cyan, yellow, green — fun, colourful, high variety
+    intro:     [[ {r:200,g:0,b:150},   {r:0,g:150,b:255}  ], [ {r:150,g:0,b:200},  {r:0,g:200,b:200}  ]],
+    verse:     [[ {r:255,g:0,b:150},   {r:0,g:200,b:200}  ], [ {r:0,g:255,b:150},  {r:255,g:0,b:200}  ], [ {r:255,g:200,b:0}, {r:0,g:150,b:255}  ], [ {r:0,g:255,b:200}, {r:255,g:100,b:0}  ]],
+    chorus:    [[ {r:255,g:0,b:200},   {r:0,g:255,b:100}  ], [ {r:255,g:255,b:0},  {r:0,g:200,b:255}  ], [ {r:0,g:255,b:0},   {r:255,g:0,b:255}  ], [ {r:255,g:100,b:0}, {r:0,g:200,b:255}  ]],
+    bridge:    [[ {r:200,g:100,b:255}, {r:0,g:200,b:150}  ], [ {r:255,g:150,b:0},  {r:0,g:180,b:255}  ]],
+    breakdown: [[ {r:80,g:0,b:100},    {r:0,g:60,b:100}   ], [ {r:60,g:0,b:80},    {r:0,g:50,b:80}    ]],
+    buildup:   [[ {r:255,g:0,b:200},   {r:0,g:255,b:200}  ], [ {r:255,g:200,b:0},  {r:255,g:0,b:100}  ]],
+    drop:      [[ {r:255,g:0,b:100},   {r:0,g:255,b:0}    ], [ {r:0,g:0,b:255},    {r:255,g:255,b:0}  ], [ {r:255,g:0,b:255}, {r:0,g:255,b:255}  ], [ {r:255,g:100,b:0}, {r:0,g:200,b:255}  ]],
+    outro:     [[ {r:80,g:0,b:60},     {r:0,g:40,b:60}    ], [ {r:60,g:0,b:40},    {r:0,g:30,b:50}    ]],
+  },
+  rock: {
+    label: 'Rock',
+    // Red, amber, white — raw, warm, punchy
+    intro:     [[ {r:120,g:20,b:0},    {r:180,g:60,b:0}   ], [ {r:80,g:10,b:0},    {r:140,g:40,b:0}   ]],
+    verse:     [[ {r:255,g:40,b:0},    {r:200,g:80,b:0}   ], [ {r:200,g:0,b:0},    {r:255,g:120,b:0}  ], [ {r:255,g:80,b:0},  {r:180,g:0,b:0}    ]],
+    chorus:    [[ {r:255,g:0,b:0},     {r:255,g:200,b:0}  ], [ {r:255,g:60,b:0},   {r:255,g:255,b:200}], [ {r:200,g:0,b:0},   {r:255,g:160,b:0}  ]],
+    bridge:    [[ {r:200,g:100,b:0},   {r:180,g:40,b:0}   ], [ {r:255,g:120,b:40}, {r:200,g:60,b:0}   ]],
+    breakdown: [[ {r:80,g:20,b:0},     {r:40,g:10,b:0}    ], [ {r:60,g:15,b:0},    {r:30,g:5,b:0}     ]],
+    buildup:   [[ {r:255,g:40,b:0},    {r:255,g:0,b:0}    ], [ {r:200,g:60,b:0},   {r:255,g:180,b:0}  ]],
+    drop:      [[ {r:255,g:0,b:0},     {r:255,g:255,b:200}], [ {r:255,g:80,b:0},   {r:200,g:0,b:0}    ], [ {r:255,g:200,b:0}, {r:255,g:0,b:0}    ]],
+    outro:     [[ {r:80,g:20,b:0},     {r:20,g:5,b:0}     ], [ {r:60,g:15,b:0},    {r:10,g:3,b:0}     ]],
+  },
+  latin: {
+    label: 'Latin / Reggaeton',
+    // Hot pink, gold, orange, turquoise — tropical and vibrant
+    intro:     [[ {r:200,g:60,b:0},    {r:255,g:0,b:120}  ], [ {r:160,g:40,b:0},   {r:200,g:0,b:100}  ]],
+    verse:     [[ {r:255,g:100,b:0},   {r:255,g:0,b:150}  ], [ {r:0,g:200,b:180},  {r:255,g:80,b:0}   ], [ {r:255,g:0,b:100}, {r:255,g:180,b:0}  ]],
+    chorus:    [[ {r:255,g:0,b:150},   {r:255,g:200,b:0}  ], [ {r:0,g:220,b:200},  {r:255,g:0,b:100}  ], [ {r:255,g:100,b:0}, {r:0,g:200,b:200}  ]],
+    bridge:    [[ {r:255,g:140,b:0},   {r:200,g:0,b:120}  ], [ {r:0,g:180,b:160},  {r:255,g:80,b:0}   ]],
+    breakdown: [[ {r:80,g:30,b:0},     {r:60,g:0,b:40}    ], [ {r:60,g:20,b:0},    {r:40,g:0,b:30}    ]],
+    buildup:   [[ {r:255,g:60,b:0},    {r:255,g:0,b:150}  ], [ {r:0,g:200,b:180},  {r:255,g:100,b:0}  ]],
+    drop:      [[ {r:255,g:0,b:150},   {r:0,g:255,b:200}  ], [ {r:255,g:200,b:0},  {r:255,g:0,b:100}  ], [ {r:0,g:220,b:200},{r:255,g:80,b:0}   ]],
+    outro:     [[ {r:80,g:30,b:0},     {r:40,g:0,b:30}    ], [ {r:60,g:20,b:0},    {r:30,g:0,b:20}    ]],
+  },
+  ambient: {
+    label: 'Ambient / Chill',
+    // Soft blue, muted teal, lavender — gentle and atmospheric
+    intro:     [[ {r:0,g:30,b:100},    {r:30,g:20,b:80}   ], [ {r:0,g:20,b:80},    {r:20,g:15,b:60}   ]],
+    verse:     [[ {r:0,g:80,b:140},    {r:40,g:40,b:120}  ], [ {r:0,g:100,b:120},  {r:60,g:30,b:100}  ], [ {r:30,g:60,b:140}, {r:0,g:80,b:100}   ]],
+    chorus:    [[ {r:0,g:120,b:180},   {r:80,g:60,b:160}  ], [ {r:40,g:100,b:200}, {r:60,g:40,b:140}  ], [ {r:0,g:140,b:160}, {r:100,g:60,b:180} ]],
+    bridge:    [[ {r:40,g:60,b:140},   {r:0,g:80,b:120}   ], [ {r:30,g:50,b:120},  {r:0,g:60,b:100}   ]],
+    breakdown: [[ {r:0,g:15,b:60},     {r:10,g:10,b:40}   ], [ {r:0,g:10,b:50},    {r:8,g:8,b:30}     ]],
+    buildup:   [[ {r:0,g:80,b:160},    {r:60,g:40,b:140}  ], [ {r:0,g:100,b:140},  {r:40,g:30,b:120}  ]],
+    drop:      [[ {r:0,g:120,b:200},   {r:80,g:60,b:180}  ], [ {r:40,g:100,b:180}, {r:0,g:80,b:160}   ]],
+    outro:     [[ {r:0,g:10,b:50},     {r:5,g:5,b:25}     ], [ {r:0,g:8,b:40},     {r:4,g:4,b:20}     ]],
+  },
+  reggae: {
+    label: 'Reggae / Dub',
+    // Green, gold, red — irie colours, Rastafarian palette
+    intro:     [[ {r:0,g:80,b:20},     {r:180,g:140,b:0}  ], [ {r:0,g:60,b:15},    {r:140,g:100,b:0}  ]],
+    verse:     [[ {r:0,g:200,b:40},    {r:255,g:180,b:0}  ], [ {r:200,g:0,b:0},    {r:0,g:180,b:40}   ], [ {r:255,g:200,b:0}, {r:0,g:160,b:30}   ]],
+    chorus:    [[ {r:0,g:255,b:40},    {r:255,g:200,b:0}  ], [ {r:200,g:0,b:0},    {r:0,g:200,b:40}   ], [ {r:255,g:220,b:0}, {r:200,g:0,b:0}    ]],
+    bridge:    [[ {r:0,g:160,b:30},    {r:200,g:160,b:0}  ], [ {r:180,g:0,b:0},    {r:0,g:140,b:25}   ]],
+    breakdown: [[ {r:0,g:40,b:10},     {r:60,g:40,b:0}    ], [ {r:0,g:30,b:8},     {r:40,g:30,b:0}    ]],
+    buildup:   [[ {r:0,g:180,b:30},    {r:255,g:180,b:0}  ], [ {r:200,g:0,b:0},    {r:0,g:200,b:40}   ]],
+    drop:      [[ {r:0,g:255,b:40},    {r:255,g:0,b:0}    ], [ {r:255,g:200,b:0},  {r:0,g:200,b:40}   ], [ {r:200,g:0,b:0},  {r:255,g:220,b:0}  ]],
+    outro:     [[ {r:0,g:30,b:8},      {r:40,g:30,b:0}    ], [ {r:0,g:20,b:5},     {r:30,g:20,b:0}    ]],
+  },
+  metal: {
+    label: 'Metal / Hardcore',
+    // Deep red, pure white strobe contrast, dark violet — brutal
+    intro:     [[ {r:100,g:0,b:0},     {r:40,g:0,b:60}    ], [ {r:80,g:0,b:0},     {r:30,g:0,b:50}    ]],
+    verse:     [[ {r:200,g:0,b:0},     {r:80,g:0,b:120}   ], [ {r:180,g:0,b:0},    {r:60,g:0,b:100}   ], [ {r:220,g:0,b:20},  {r:100,g:0,b:140}  ]],
+    chorus:    [[ {r:255,g:0,b:0},     {r:255,g:255,b:255}], [ {r:200,g:0,b:0},    {r:120,g:0,b:200}  ], [ {r:255,g:0,b:0},   {r:255,g:200,b:0}  ]],
+    bridge:    [[ {r:160,g:0,b:0},     {r:60,g:0,b:100}   ], [ {r:180,g:0,b:20},   {r:80,g:0,b:120}   ]],
+    breakdown: [[ {r:40,g:0,b:0},      {r:15,g:0,b:25}    ], [ {r:30,g:0,b:0},     {r:10,g:0,b:20}    ]],
+    buildup:   [[ {r:200,g:0,b:0},     {r:100,g:0,b:160}  ], [ {r:255,g:0,b:0},    {r:80,g:0,b:140}   ]],
+    drop:      [[ {r:255,g:0,b:0},     {r:255,g:255,b:255}], [ {r:255,g:0,b:0},    {r:200,g:0,b:255}  ], [ {r:200,g:0,b:0},   {r:255,g:200,b:0}  ]],
+    outro:     [[ {r:40,g:0,b:0},      {r:10,g:0,b:15}    ], [ {r:30,g:0,b:0},     {r:8,g:0,b:10}     ]],
+  },
+};
+
 // ─── Genre Presets ──────────────────────────────────────────────────────────
 // Each preset modifies generation behaviour: intensity, strobe chance,
 // cue density, preferred palette, beat colour change frequency.
+// preferredPalette can be a genre key (matched to genrePalettes) or a
+// generic palette key (matched to colorPalettes). Genre palettes take priority.
 
 const genrePresets = {
-  default:     { label: 'Default',           intensityMult: 1.0,  strobeMult: 1.0, cueDensityMult: 1.0, preferredPalette: null,     beatColorMult: 1.0, flashOnSection: true,  accentPulses: true  },
-  electronic:  { label: 'Electronic / EDM',  intensityMult: 1.1,  strobeMult: 1.4, cueDensityMult: 1.2, preferredPalette: 'neon',   beatColorMult: 0.8, flashOnSection: true,  accentPulses: true  },
-  house:       { label: 'House / Techno',    intensityMult: 1.0,  strobeMult: 1.2, cueDensityMult: 1.0, preferredPalette: 'neon',   beatColorMult: 0.9, flashOnSection: true,  accentPulses: true  },
-  trance:      { label: 'Trance',            intensityMult: 1.05, strobeMult: 1.0, cueDensityMult: 0.8, preferredPalette: 'cool',   beatColorMult: 0.7, flashOnSection: true,  accentPulses: true  },
-  dnb:         { label: 'Drum & Bass',       intensityMult: 1.2,  strobeMult: 1.8, cueDensityMult: 1.5, preferredPalette: 'fire',   beatColorMult: 0.6, flashOnSection: true,  accentPulses: false },
-  hiphop:      { label: 'Hip-Hop / Rap',     intensityMult: 0.85, strobeMult: 0.5, cueDensityMult: 0.7, preferredPalette: 'warm',   beatColorMult: 1.5, flashOnSection: false, accentPulses: true  },
-  rnb:         { label: 'R&B / Soul',        intensityMult: 0.75, strobeMult: 0.3, cueDensityMult: 0.6, preferredPalette: 'sunset', beatColorMult: 1.8, flashOnSection: false, accentPulses: true  },
-  pop:         { label: 'Pop',               intensityMult: 0.95, strobeMult: 0.8, cueDensityMult: 1.0, preferredPalette: 'party',  beatColorMult: 1.0, flashOnSection: true,  accentPulses: true  },
-  rock:        { label: 'Rock',              intensityMult: 1.1,  strobeMult: 1.0, cueDensityMult: 0.9, preferredPalette: 'fire',   beatColorMult: 1.2, flashOnSection: true,  accentPulses: false },
-  latin:       { label: 'Latin / Reggaeton', intensityMult: 1.0,  strobeMult: 0.6, cueDensityMult: 1.0, preferredPalette: 'warm',   beatColorMult: 1.0, flashOnSection: true,  accentPulses: true  },
-  ambient:     { label: 'Ambient / Chill',   intensityMult: 0.5,  strobeMult: 0.0, cueDensityMult: 0.4, preferredPalette: 'cool',   beatColorMult: 3.0, flashOnSection: false, accentPulses: false },
-  reggae:      { label: 'Reggae / Dub',      intensityMult: 0.8,  strobeMult: 0.3, cueDensityMult: 0.7, preferredPalette: 'forest', beatColorMult: 1.5, flashOnSection: false, accentPulses: true  },
-  metal:       { label: 'Metal / Hardcore',  intensityMult: 1.3,  strobeMult: 2.0, cueDensityMult: 1.5, preferredPalette: 'fire',   beatColorMult: 0.5, flashOnSection: true,  accentPulses: false },
+  default:     { label: 'Default',           intensityMult: 1.0,  strobeMult: 1.0, cueDensityMult: 1.0, preferredPalette: null,         beatColorMult: 1.0, flashOnSection: true,  accentPulses: true,  rigWideMult: 1.0, rigWidePreference: null },
+  electronic:  { label: 'Electronic / EDM',  intensityMult: 1.1,  strobeMult: 1.4, cueDensityMult: 1.2, preferredPalette: 'electronic', beatColorMult: 0.8, flashOnSection: true,  accentPulses: true,  rigWideMult: 1.5, rigWidePreference: ['rig_chase', 'rig_sweep', 'rig_alternate'] },
+  house:       { label: 'House / Techno',    intensityMult: 1.0,  strobeMult: 1.2, cueDensityMult: 1.0, preferredPalette: 'house',      beatColorMult: 0.9, flashOnSection: true,  accentPulses: true,  rigWideMult: 1.3, rigWidePreference: ['rig_chase', 'rig_color_wave', 'rig_sweep'] },
+  trance:      { label: 'Trance',            intensityMult: 1.05, strobeMult: 1.0, cueDensityMult: 0.8, preferredPalette: 'trance',     beatColorMult: 0.7, flashOnSection: true,  accentPulses: true,  rigWideMult: 1.4, rigWidePreference: ['rig_sweep', 'rig_color_wave', 'rig_rainbow'] },
+  dnb:         { label: 'Drum & Bass',       intensityMult: 1.2,  strobeMult: 1.8, cueDensityMult: 1.5, preferredPalette: 'dnb',        beatColorMult: 0.6, flashOnSection: true,  accentPulses: false, rigWideMult: 1.6, rigWidePreference: ['rig_chase', 'rig_alternate', 'rig_sweep'] },
+  hiphop:      { label: 'Hip-Hop / Rap',     intensityMult: 0.85, strobeMult: 0.5, cueDensityMult: 0.7, preferredPalette: 'hiphop',     beatColorMult: 1.5, flashOnSection: false, accentPulses: true,  rigWideMult: 0.6, rigWidePreference: ['rig_color_wave', 'rig_sweep'] },
+  rnb:         { label: 'R&B / Soul',        intensityMult: 0.75, strobeMult: 0.3, cueDensityMult: 0.6, preferredPalette: 'rnb',        beatColorMult: 1.8, flashOnSection: false, accentPulses: true,  rigWideMult: 0.4, rigWidePreference: ['rig_color_wave', 'rig_rainbow'] },
+  pop:         { label: 'Pop',               intensityMult: 0.95, strobeMult: 0.8, cueDensityMult: 1.0, preferredPalette: 'pop',        beatColorMult: 1.0, flashOnSection: true,  accentPulses: true,  rigWideMult: 1.0, rigWidePreference: ['rig_color_wave', 'rig_chase', 'rig_rainbow'] },
+  rock:        { label: 'Rock',              intensityMult: 1.1,  strobeMult: 1.0, cueDensityMult: 0.9, preferredPalette: 'rock',       beatColorMult: 1.2, flashOnSection: true,  accentPulses: false, rigWideMult: 1.2, rigWidePreference: ['rig_chase', 'rig_alternate', 'rig_converge'] },
+  latin:       { label: 'Latin / Reggaeton', intensityMult: 1.0,  strobeMult: 0.6, cueDensityMult: 1.0, preferredPalette: 'latin',      beatColorMult: 1.0, flashOnSection: true,  accentPulses: true,  rigWideMult: 0.8, rigWidePreference: ['rig_color_wave', 'rig_sweep'] },
+  ambient:     { label: 'Ambient / Chill',   intensityMult: 0.5,  strobeMult: 0.0, cueDensityMult: 0.4, preferredPalette: 'ambient',    beatColorMult: 3.0, flashOnSection: false, accentPulses: false, rigWideMult: 0.5, rigWidePreference: ['rig_color_wave', 'rig_rainbow'] },
+  reggae:      { label: 'Reggae / Dub',      intensityMult: 0.8,  strobeMult: 0.3, cueDensityMult: 0.7, preferredPalette: 'reggae',     beatColorMult: 1.5, flashOnSection: false, accentPulses: true,  rigWideMult: 0.6, rigWidePreference: ['rig_color_wave', 'rig_sweep'] },
+  metal:       { label: 'Metal / Hardcore',  intensityMult: 1.3,  strobeMult: 2.0, cueDensityMult: 1.5, preferredPalette: 'metal',      beatColorMult: 0.5, flashOnSection: true,  accentPulses: false, rigWideMult: 1.8, rigWidePreference: ['rig_chase', 'rig_alternate', 'rig_converge'] },
 };
 
 // Map common genre strings from VDJ/tags to preset keys
@@ -351,8 +506,15 @@ function seededRandom(seed) {
   };
 }
 
-/** Get palettes for a section from the chosen color palette theme */
+/** Get palettes for a section from the chosen color palette theme.
+ *  Checks genre-specific palettes first, then falls back to generic palettes. */
 function getSectionPalettes(paletteName, sectionLabel, palettesMap) {
+  // Genre-specific palettes take priority (e.g. 'electronic', 'hiphop')
+  const genrePal = genrePalettes[paletteName];
+  if (genrePal) {
+    return genrePal[sectionLabel] || genrePal.verse;
+  }
+  // Fall back to generic palettes (e.g. 'vibrant', 'neon')
   const palettes = palettesMap || colorPalettes;
   const pal = palettes[paletteName];
   if (!pal) {
@@ -489,9 +651,11 @@ function generateSequence(opts) {
 
   // Multi-cell fixtures get dedicated per-cell patterns, so exclude them
   // from the main section/bar generator to avoid master cues competing.
+  // Also exclude RGB movers — they get movement cues from generateMoverMovement,
+  // and overlapping section color cues (accents, flashes) would fight with them.
   const colorFixtures = (multiCellFixtures.length > 0 && sections.length > 0)
-    ? rgbFixtures.filter(f => f.cell_count <= 0)
-    : rgbFixtures;
+    ? rgbFixtures.filter(f => f.cell_count <= 0 && !moverIds.has(f.id))
+    : rgbFixtures.filter(f => !moverIds.has(f.id));
 
   if (sections.length > 0) {
     generateSectionBased(cues, colorFixtures, sections, beats, energyLevels, ctx);
@@ -613,6 +777,29 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
   const useFades = bpmFactor < 0.5;  // songs under ~120 BPM get fades
   const fadeOverlapFactor = Math.max(0, 1 - bpmFactor);  // 0-1: how much fade overlap (1 = max for slow songs)
 
+  // ── Color cascade: stagger colour changes across the rig ──────────
+  // Compute a per-fixture time offset so section colour transitions sweep
+  // across fixtures (L→R or by rig_order).  High-energy sections like
+  // chorus/drop get a full beat of spread; low-energy sections get half.
+  // This makes colour changes visibly ripple across the rig.
+  const rigSorted = [...fixtures].sort((a, b) => {
+    if ((a.rig_order || 0) !== (b.rig_order || 0)) return (a.rig_order || 0) - (b.rig_order || 0);
+    return (a.rig_x || 0.5) - (b.rig_x || 0.5);
+  });
+  const rigXVals = rigSorted.map(f => f.rig_x ?? 0.5);
+  const rigXSpan = Math.max(...rigXVals) - Math.min(...rigXVals);
+  // Map each fixture to a 0..1 position in the cascade order
+  const colorCascadeMap = new Map();
+  for (let i = 0; i < rigSorted.length; i++) {
+    const fraction = rigXSpan > 0.05
+      ? ((rigSorted[i].rig_x ?? 0.5) - Math.min(...rigXVals)) / rigXSpan
+      : (rigSorted.length > 1 ? i / (rigSorted.length - 1) : 0);
+    colorCascadeMap.set(rigSorted[i].id, fraction);
+  }
+  // Sections where cascade is applied
+  const CASCADE_COLOR_SECTIONS = new Set(['chorus', 'drop', 'buildup', 'bridge']);
+  const colorCascadeSpreadMs = beatMs * 1.0;  // 1 beat of spread for colour cascade
+
   for (let fiIdx = 0; fiIdx < fixtures.length; fiIdx++) {
     const fix = fixtures[fiIdx];
     const lane = fiIdx;
@@ -728,10 +915,16 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         // BPM-adaptive cue type: slow songs use fades for smooth transitions
         const cueType = useFades ? 'fade' : 'static';
 
+        // Apply colour cascade offset for high-energy sections
+        let cascadeOffset = 0;
+        if (CASCADE_COLOR_SECTIONS.has(sec.label) && fixtures.length > 1) {
+          cascadeOffset = Math.round((colorCascadeMap.get(fix.id) || 0) * colorCascadeSpreadMs);
+        }
+
         cues.push({
           lane,
-          start_ms: Math.round(cueStart),
-          duration_ms: Math.round(cueDur),
+          start_ms: Math.round(cueStart) + cascadeOffset,
+          duration_ms: Math.max(Math.round(barMs * 0.5), Math.round(cueDur) - cascadeOffset),
           cue_type: cueType,
           fixture_id: fix.id,
           channel_values: startVals,
@@ -1066,13 +1259,9 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           // Physical colour wheels look better with snap (static) changes —
           // fading sweeps through intermediate wheel positions which looks bad.
           // Use a section-aware snap probability: energetic sections snap more.
-          const SNAP_CHANCE = {
-            intro: 0.7, verse: 0.6, chorus: 0.85, bridge: 0.5,
-            breakdown: 0.4, buildup: 0.75, drop: 0.9, outro: 0.4,
-          };
-          const snapProb = SNAP_CHANCE[sec.label] || 0.6;
-          const useSnap = rand() < snapProb;
-
+          // Color wheel fixtures should ALWAYS snap — interpolating between
+          // wheel DMX positions sweeps through random physical colours.
+          // Only the dimmer is allowed to fade.
           const startVals = { color_wheel: startWheel.dmx_value };
           const endVals = {};
 
@@ -1081,17 +1270,12 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
             endVals.dimmer = Math.round(endIntensity * 255);
           }
 
-          // Only include end colour transition if NOT snapping and colours differ
-          if (!useSnap && endWheel && endWheel.dmx_value !== startWheel.dmx_value) {
-            endVals.color_wheel = endWheel.dmx_value;
-          }
-
           const hasEndVals = Object.keys(endVals).length > 0;
           cues.push({
             lane,
             start_ms: Math.round(cueStart),
             duration_ms: Math.round(cueDur),
-            cue_type: (!useSnap && useFades && hasEndVals) ? 'fade' : 'static',
+            cue_type: 'static',
             fixture_id: fix.id,
             channel_values: startVals,
             end_channel_values: hasEndVals ? endVals : undefined,
@@ -1157,16 +1341,13 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           startVals.dimmer = Math.round(intensity * 255);
           endVals.dimmer = startVals.dimmer;
         }
-        if (!useSnap && endWheel && endWheel.dmx_value !== startWheel.dmx_value) {
-          endVals.color_wheel = endWheel.dmx_value;
-        }
-
+        // Never put color_wheel in end values — interpolation sweeps the physical wheel
         const hasEndVals = Object.keys(endVals).length > 0;
         cues.push({
           lane,
           start_ms: Math.round(startMs),
           duration_ms: Math.round(durMs),
-          cue_type: (!useSnap && hasEndVals) ? 'fade' : 'static',
+          cue_type: 'static',
           fixture_id: fix.id,
           channel_values: startVals,
           end_channel_values: hasEndVals ? endVals : undefined,
@@ -1352,34 +1533,41 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
  * Cell-aware types are preferred for LED bars.
  */
 const SECTION_EFFECT_TYPES = {
-  intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'] },
-  verse:     { regular: ['pulse', 'color_fade', 'rainbow'], cellAware: ['color_wave', 'sparkle'] },
-  chorus:    { regular: ['rainbow', 'pulse', 'strobe'],     cellAware: ['chase', 'scanner', 'sparkle'] },
-  bridge:    { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'sparkle'] },
-  breakdown: { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
-  buildup:   { regular: ['pulse', 'strobe'],                cellAware: ['buildup', 'comet', 'chase'] },
-  drop:      { regular: ['rainbow', 'strobe', 'pulse'],     cellAware: ['chase', 'scanner', 'sparkle', 'comet', 'buildup'] },
-  outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
+  intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'],                                   rigWide: ['rig_color_wave', 'rig_rainbow'] },
+  verse:     { regular: ['pulse', 'color_fade', 'rainbow'], cellAware: ['color_wave', 'sparkle'],                                 rigWide: ['rig_color_wave', 'rig_sweep', 'rig_rainbow'] },
+  chorus:    { regular: ['rainbow', 'pulse', 'strobe'],     cellAware: ['chase', 'scanner', 'sparkle'],                           rigWide: ['rig_chase', 'rig_color_wave', 'rig_alternate', 'rig_rainbow'] },
+  bridge:    { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'sparkle'],                                 rigWide: ['rig_color_wave', 'rig_sweep'] },
+  breakdown: { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'],                                    rigWide: ['rig_color_wave', 'rig_rainbow'] },
+  buildup:   { regular: ['pulse', 'strobe'],                cellAware: ['buildup', 'comet', 'chase'],                             rigWide: ['rig_converge', 'rig_chase', 'rig_sweep'] },
+  drop:      { regular: ['rainbow', 'strobe', 'pulse'],     cellAware: ['chase', 'scanner', 'sparkle', 'comet', 'buildup'],       rigWide: ['rig_chase', 'rig_alternate', 'rig_sweep', 'rig_color_wave'] },
+  outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'],                                    rigWide: ['rig_color_wave', 'rig_rainbow'] },
 };
 
 const DEFAULT_EFFECT_TYPES = {
   regular: ['pulse', 'color_fade', 'rainbow'],
   cellAware: ['chase', 'color_wave', 'sparkle'],
+  rigWide: ['rig_color_wave', 'rig_chase', 'rig_rainbow'],
 };
 
 /** EFFECT_COLORS matches EFFECT_STYLE in index.html */
 const EFFECT_COLORS = {
-  pulse:      '#1e88e5',
-  rainbow:    '#ff6f00',
-  strobe:     '#f44336',
-  color_fade: '#8e24aa',
-  chase:      '#00897b',
-  comet:      '#e65100',
-  scanner:    '#00838f',
-  sparkle:    '#fdd835',
-  color_wave: '#7b1fa2',
-  fire:       '#bf360c',
-  buildup:    '#2e7d32',
+  pulse:          '#1e88e5',
+  rainbow:        '#ff6f00',
+  strobe:         '#f44336',
+  color_fade:     '#8e24aa',
+  chase:          '#00897b',
+  comet:          '#e65100',
+  scanner:        '#00838f',
+  sparkle:        '#fdd835',
+  color_wave:     '#7b1fa2',
+  fire:           '#bf360c',
+  buildup:        '#2e7d32',
+  rig_chase:      '#00bfa5',
+  rig_color_wave: '#6a1b9a',
+  rig_sweep:      '#0277bd',
+  rig_alternate:  '#c62828',
+  rig_converge:   '#ad1457',
+  rig_rainbow:    '#e65100',
 };
 
 /**
@@ -1427,7 +1615,7 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
   let laneCounter = existingMaxLane + 1;
 
   // Cascade-friendly effect types: stagger start times across fixtures in a group
-  const CASCADE_TYPES = new Set(['chase', 'comet', 'scanner', 'sparkle', 'color_wave', 'pulse', 'rainbow', 'buildup']);
+  const CASCADE_TYPES = new Set(['chase', 'comet', 'scanner', 'sparkle', 'color_wave', 'pulse', 'rainbow', 'buildup', 'strobe', 'wave', 'fade', 'flash']);
 
   // Effect density per section type, scaled by genre preset
   const sectionEffectChance = {
@@ -1437,6 +1625,8 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
   /**
    * Emit effect cues for a fixture group across a time range.
+   * Fixtures are sorted by rig position (rig_order → rig_x) so cascades
+   * sweep left-to-right across the physical rig layout.
    * @param {Object} group       - { fixtures, isLedBar }
    * @param {Object} effect      - Effect record from DB
    * @param {number} startMs     - Start time in ms
@@ -1446,15 +1636,36 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
    * @param {boolean} cascade    - Whether to stagger start times across fixtures
    */
   function emitGroupCues(group, effect, startMs, durationMs, baseColor, lane, cascade) {
-    const fixtureCount = group.fixtures.length;
-    // Cascade offset: spread fixtures across half a beat (so they ripple)
-    const cascadeSpreadMs = cascade && fixtureCount > 1
-      ? Math.min(beatMs * 0.5, durationMs * 0.15)  // max 15% of duration or half a beat
-      : 0;
+    // Sort fixtures by rig position for spatial cascading
+    const sorted = [...group.fixtures].sort((a, b) => {
+      if ((a.rig_order || 0) !== (b.rig_order || 0)) return (a.rig_order || 0) - (b.rig_order || 0);
+      return (a.rig_x || 0.5) - (b.rig_x || 0.5);
+    });
+    const fixtureCount = sorted.length;
+
+    // Cascade offset: stagger start times across fixtures for a sweep effect.
+    // When fixtures have meaningful rig_x positions, use the spatial span.
+    // When they're all at the same default position (0.5), use index-based
+    // fallback so cascading still works without a configured rig layout.
+    let cascadeSpreadMs = 0;
+    if (cascade && fixtureCount > 1) {
+      const rigXValues = sorted.map(f => f.rig_x ?? 0.5);
+      const rawSpan = Math.max(...rigXValues) - Math.min(...rigXValues);
+
+      if (rawSpan > 0.05) {
+        // Fixtures are spatially spread — use rig span.
+        // Scale: full-span rig (1.0) gets 2 beats of spread; half-span gets 1 beat.
+        cascadeSpreadMs = Math.min(beatMs * 2.0 * rawSpan, durationMs * 0.35);
+      } else {
+        // Fixtures are bunched/at defaults — fall back to index-based spread.
+        // Spread across 1.5 beats regardless of positions so cascade is always audible/visible.
+        cascadeSpreadMs = Math.min(beatMs * 1.5, durationMs * 0.35);
+      }
+    }
     const cascadeStepMs = fixtureCount > 1 ? cascadeSpreadMs / (fixtureCount - 1) : 0;
 
     for (let i = 0; i < fixtureCount; i++) {
-      const fix = group.fixtures[i];
+      const fix = sorted[i];
       const offset = Math.round(cascadeStepMs * i);
       const cueStart = startMs + offset;
       const cueDur = durationMs - offset;
@@ -1481,6 +1692,36 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
     }
   }
 
+  /**
+   * Emit rig-wide effect cues: one cue per fixture, all at the same time.
+   * The effects engine uses each fixture's rig_x/rig_y to create spatial patterns.
+   * Fixtures are sorted by rig_order for consistent spatial effect rendering.
+   */
+  function emitRigWideCues(fixtures, effect, startMs, durationMs, baseColor, lane) {
+    // Sort by rig_order → rig_x so spatial effects resolve consistently
+    const sorted = [...fixtures].sort((a, b) => {
+      if ((a.rig_order || 0) !== (b.rig_order || 0)) return (a.rig_order || 0) - (b.rig_order || 0);
+      return (a.rig_x || 0.5) - (b.rig_x || 0.5);
+    });
+    for (const fix of sorted) {
+      cues.push({
+        lane,
+        start_ms: startMs,
+        duration_ms: Math.round(durationMs),
+        cue_type: 'effect',
+        fixture_id: fix.id,
+        effect_id: effect.id,
+        effect_params: {},
+        channel_values: { red: baseColor.r, green: baseColor.g, blue: baseColor.b, dimmer: 255 },
+        color: EFFECT_COLORS[effect.type] || '#00bfa5',
+        label: `⟷ ${effect.name}`,
+      });
+    }
+  }
+
+  // ── Assign a dedicated lane for rig-wide effects ──────────────────────
+  const rigLane = laneCounter++;
+
   // ── Section-based effect generation ───────────────────────────────────
   if (sections.length > 0) {
     // Assign one lane per fixture-type group
@@ -1497,12 +1738,47 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       const sectionDuration = sectionEnd - sectionStart;
       if (sectionDuration < barMs) continue;
 
-      const chance = (sectionEffectChance[label] || 0.3) * preset.cueDensityMult;
-      if (rand() > Math.min(chance, 0.95)) continue;
-
       const activeSE = ctx.activeSectionEffects || SECTION_EFFECT_TYPES;
       const typesMap = activeSE[label] || DEFAULT_EFFECT_TYPES;
       const sectionPalette = getSectionPalettes(paletteKey, label, ctx.activePalettes);
+
+      // ── Rig-wide effects: evaluated INDEPENDENTLY from group effects ──
+      // So that even if a section skips its group effects (random chance),
+      // rig-wide spatial effects can still fire.  This makes the rig cascade
+      // much more visible and consistent.
+      const rigWideMult = preset.rigWideMult || 1.0;
+      let rigDesired = typesMap.rigWide || DEFAULT_EFFECT_TYPES.rigWide || [];
+      if (preset.rigWidePreference && preset.rigWidePreference.length > 0) {
+        const preferred = rigDesired.filter(t => preset.rigWidePreference.includes(t));
+        if (preferred.length > 0) rigDesired = preferred;
+      }
+      const isHighEnergySec = label === 'chorus' || label === 'drop' || label === 'buildup';
+      const rigThreshold = isHighEnergySec && rigWideMult >= 0.8
+        ? 0  // guaranteed for high-energy
+        : Math.max(0.05, 0.2 / rigWideMult);
+      if (rigDesired.length > 0 && allNonMovers.length >= 2 && rand() > rigThreshold) {
+        const rigEffect = pickEffect(rigDesired);
+        if (rigEffect) {
+          const maxBars = isHighEnergySec ? 4 : 8;
+          const rigDur = Math.min(sectionDuration, barMs * maxBars);
+          const rigEffDur = Math.max(barMs * 2, rigDur);
+          let t = sectionStart;
+          let segIdx = 0;
+
+          while (t < sectionEnd) {
+            const dur = Math.min(rigEffDur, sectionEnd - t);
+            if (dur < barMs) break;
+            const baseColor = sectionPalette[segIdx % sectionPalette.length];
+            emitRigWideCues(allNonMovers, rigEffect, t, dur, baseColor, rigLane);
+            t += rigEffDur;
+            segIdx++;
+          }
+        }
+      }
+
+      // ── Group effects: per fixture-type-group, subject to section chance ─
+      const chance = (sectionEffectChance[label] || 0.3) * preset.cueDensityMult;
+      if (rand() > Math.min(chance, 0.95)) continue;
 
       // Each fixture-type group picks its own effect but stays consistent within the group
       for (const [typeName, group] of groupEntries) {
@@ -1557,6 +1833,21 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
         const useCascade = CASCADE_TYPES.has(effect.type) && group.fixtures.length > 1;
         emitGroupCues(group, effect, startMs, dur, baseColor, groupLanes[typeName], useCascade);
+      }
+
+      // Rig-wide effects in bar-based mode — genre-aware probability (boosted)
+      const rigWideMult = preset.rigWideMult || 1.0;
+      const barRigThreshold = Math.max(0.05, 0.25 / rigWideMult);
+      if (allNonMovers.length >= 2 && rand() > barRigThreshold) {
+        let rigDesired = defaultTypes.rigWide || [];
+        if (preset.rigWidePreference && preset.rigWidePreference.length > 0) {
+          const preferred = rigDesired.filter(t => preset.rigWidePreference.includes(t));
+          if (preferred.length > 0) rigDesired = preferred;
+        }
+        const rigEffect = pickEffect(rigDesired);
+        if (rigEffect) {
+          emitRigWideCues(allNonMovers, rigEffect, startMs, dur, baseColor, rigLane);
+        }
       }
     }
   }
@@ -2134,6 +2425,7 @@ function detectChannelsPerCell(fixture) {
 module.exports = {
   generateSequence,
   colorPalettes,
+  genrePalettes,
   genrePresets,
   genreAliases,
   resolveGenrePreset,

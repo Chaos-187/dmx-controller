@@ -23,6 +23,10 @@
     </div>
   </div>
   <div class="topbar-right">
+    <button class="edit-mode-btn" id="btnEditMode" title="Edit Mode — live DMX preview while editing">
+      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 11l7-7 2 2-7 7H1v-2zM9.5 2.5l2 2L13 3l-2-2-1.5 1.5z" fill="currentColor"/></svg>
+      EDIT
+    </button>
     <div class="output-pill" id="outputPill">
       <span class="pill-label">OUTPUT</span>
       <div class="pill-switch" id="outputSwitch"></div>
@@ -72,10 +76,26 @@
       <h3 class="sidebar-title">Fixtures <span class="badge" id="fixCount">0</span></h3>
       <div class="fixture-chips" id="fixtureChips"></div>
     </div>
+    <div class="sidebar-section">
+      <h3 class="sidebar-title">Active Rig</h3>
+      <div id="seqActiveRig" style="font-size:11px;color:var(--text-dim);padding:4px 0">
+        <span id="seqActiveRigName">None</span>
+      </div>
+      <select id="seqRigSelect" class="mini-select" style="width:100%;margin-top:4px;font-size:11px">
+        <option value="">— Select Rig —</option>
+      </select>
+    </div>
   </aside>
 
   <!-- ── Center: Timeline ── -->
   <main class="timeline-area">
+
+    <!-- Edit Mode banner -->
+    <div class="tl-edit-banner" id="editBanner">
+      <span class="tl-edit-dot"></span>
+      <span>Edit Mode — Live DMX Preview</span>
+      <span class="tl-edit-dot"></span>
+    </div>
 
     <!-- Toolbar -->
     <div class="tl-toolbar">
