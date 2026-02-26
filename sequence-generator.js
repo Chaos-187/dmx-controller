@@ -659,8 +659,16 @@ function generateSequence(opts) {
 
   if (sections.length > 0) {
     generateSectionBased(cues, colorFixtures, sections, beats, energyLevels, ctx);
+    // RGB movers get section color cues too, but without accents/flashes/strobes
+    // that would overlap with their movement cues
+    if (movers.length > 0) {
+      generateSectionBased(cues, movers, sections, beats, energyLevels, ctx, { colorOnly: true });
+    }
   } else {
     generateBarBased(cues, colorFixtures, ctx);
+    if (movers.length > 0) {
+      generateBarBased(cues, movers, ctx);
+    }
   }
 
   // ── Multi-cell pattern generation (per-cell cues for chases/patterns) ──
@@ -769,8 +777,9 @@ function resolveMultiCellConflicts(cues, multiCellFixtures) {
 
 // ─── Section-based generation ───────────────────────────────────────────────
 
-function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx) {
+function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx, opts = {}) {
   const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBeat, snapBar } = ctx;
+  const colorOnly = opts.colorOnly || false;  // When true, skip accents/flashes/strobes (used for movers)
 
   // BPM-adaptive: slow songs get fade transitions, fast songs get snappy statics
   // bpmFactor: 0 = slow (≤90), 1 = fast (≥150)
@@ -935,7 +944,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       }
 
       // ── Strobe hits on high-energy beats ────────────────────────────
-      if (!noStrobes) {
+      if (!noStrobes && !colorOnly) {
       const effectiveStrobeChance = (style.strobeChance || 0) * preset.strobeMult * (0.3 + 0.7 * bpmFactor);
       if (effectiveStrobeChance > 0 && beats.length > 0) {
         const strobeBeats = beats.filter(b => b >= secStartMs && b < secEndMs);
@@ -978,7 +987,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       } // end noStrobes guard
 
       // ── Beat-synced color flash on chorus/drop first beat ────────────
-      if (preset.flashOnSection && (sec.label === 'chorus' || sec.label === 'drop') && beats.length > 0) {
+      if (!colorOnly && preset.flashOnSection && (sec.label === 'chorus' || sec.label === 'drop') && beats.length > 0) {
         // Flash white on the first beat of the section
         const firstBeat = beats.find(b => b >= secStartMs && b < secStartMs + beatMs * 2);
         if (firstBeat !== undefined) {
@@ -1005,7 +1014,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       // ── Energy-driven accent pulses in verses/bridges ───────────────
       // Instead of rigid 8-bar intervals, find energy peaks within the
       // section and place accent pulses at those natural intensity spikes.
-      if (preset.accentPulses && (sec.label === 'verse' || sec.label === 'bridge') && secDurMs > barMs * 4) {
+      if (!colorOnly && preset.accentPulses && (sec.label === 'verse' || sec.label === 'bridge') && secDurMs > barMs * 4) {
         const accentPaletteList = getSectionPalettes(paletteKey, sec.label, ctx.activePalettes);
         const accentPalette = accentPaletteList[(fiIdx + si + 1) % accentPaletteList.length];
 
