@@ -1279,6 +1279,8 @@ app.post('/api/usb-devices', (req, res) => {
 app.put('/api/usb-devices/:id', (req, res) => {
   const result = db.updateUsbDevice(+req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
+  // Update in-memory config so universe routing is correct without reconnecting
+  dmxUsbServer.updateDeviceConfig(+req.params.id, result);
   res.json(result);
 });
 

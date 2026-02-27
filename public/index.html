@@ -812,6 +812,18 @@
     }
     .config-sub-page { display: none; }
     .config-sub-page.active { display: block; }
+    /* Device sub-tabs */
+    .device-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 18px; }
+    .device-tab-btn {
+      padding: 8px 22px; cursor: pointer; border: none; background: none;
+      color: var(--text-dim); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      border-bottom: 2px solid transparent; transition: all .15s; font-family: var(--font);
+    }
+    .device-tab-btn:hover { color: var(--text); background: rgba(255,255,255,.02); }
+    .device-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .device-tab-panel { display: none; }
+    .device-tab-panel.active { display: block; }
     .config-section { margin-bottom: 24px; }
     .config-section h3 {
       font-size: 14px; font-weight: 600; text-transform: uppercase;
@@ -1874,8 +1886,7 @@
   <div class="config-layout">
     <!-- Sidebar Navigation -->
     <div class="config-sidebar">
-      <button class="config-sidebar-btn active" data-cfgtab="dmx-usb"><span class="cfg-icon">&#9783;</span>DMX USB</button>
-      <button class="config-sidebar-btn" data-cfgtab="artnet"><span class="cfg-icon">&#9729;</span>Art-Net</button>
+      <button class="config-sidebar-btn active" data-cfgtab="devices"><span class="cfg-icon">&#9783;</span>Devices</button>
       <button class="config-sidebar-btn" data-cfgtab="vdj"><span class="cfg-icon">&#9835;</span>VirtualDJ</button>
       <button class="config-sidebar-btn" data-cfgtab="os2l-subs"><span class="cfg-icon">&#9889;</span>OS2L Subs</button>
       <button class="config-sidebar-btn" data-cfgtab="os2l-buttons"><span class="cfg-icon">&#9881;</span>OS2L Buttons</button>
@@ -1898,51 +1909,100 @@
     <!-- Config Panels -->
     <div class="config-panel">
 
-      <!-- ─── DMX USB Output ─── -->
-      <div class="config-sub-page active" id="cfgpage-dmx-usb">
-        <div class="config-section">
-          <h3>USB DMX Adapters</h3>
-          <p class="config-desc">Manage known USB DMX adapters. Each adapter is mapped to a local DMX universe. Enabled adapters with auto-connect will be opened automatically on server start.</p>
-
-          <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
-            <button class="btn btn-primary btn-sm" id="btnAddUsbDevice">+ Add USB Device</button>
-            <button class="btn btn-secondary btn-sm" id="btnScanUsb">&#128269; Scan Hardware</button>
-            <span style="flex:1"></span>
-            <span style="font-size:11px;color:var(--text-dim)" id="usbDeviceCount"></span>
-          </div>
-
-          <table class="subs-table" id="usbDevicesTable">
-            <thead>
-              <tr>
-                <th style="width:30px">On</th>
-                <th>Label</th>
-                <th>Type</th>
-                <th>Identifier</th>
-                <th>Universe</th>
-                <th>Auto</th>
-                <th>Status</th>
-                <th style="width:160px"></th>
-              </tr>
-            </thead>
-            <tbody id="usbDevicesBody"></tbody>
-          </table>
+      <!-- ─── Devices (USB + Art-Net) ─── -->
+      <div class="config-sub-page active" id="cfgpage-devices">
+        <div class="device-tabs">
+          <button class="device-tab-btn active" data-devtab="usb">&#9783; DMX USB</button>
+          <button class="device-tab-btn" data-devtab="artnet">&#9729; Art-Net</button>
         </div>
 
-        <div class="config-section" id="usbScanResults" style="display:none">
-          <h3>Scan Results</h3>
-          <p class="config-desc" id="usbScanSummary"></p>
-          <table class="subs-table" id="usbScanTable">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Description</th>
-                <th>Serial / ID</th>
-                <th>VID:PID</th>
-                <th style="width:80px"></th>
-              </tr>
-            </thead>
-            <tbody id="usbScanBody"></tbody>
-          </table>
+        <!-- USB DMX Tab -->
+        <div class="device-tab-panel active" id="devtab-usb">
+          <div class="config-section">
+            <h3>USB DMX Adapters</h3>
+            <p class="config-desc">Manage known USB DMX adapters. Each adapter is mapped to a local DMX universe. Enabled adapters with auto-connect will be opened automatically on server start.</p>
+
+            <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+              <button class="btn btn-primary btn-sm" id="btnAddUsbDevice">+ Add USB Device</button>
+              <button class="btn btn-secondary btn-sm" id="btnScanUsb">&#128269; Scan Hardware</button>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--text-dim)" id="usbDeviceCount"></span>
+            </div>
+
+            <table class="subs-table" id="usbDevicesTable">
+              <thead>
+                <tr>
+                  <th style="width:30px">On</th>
+                  <th>Label</th>
+                  <th>Type</th>
+                  <th>Identifier</th>
+                  <th>Universe</th>
+                  <th>Auto</th>
+                  <th>Status</th>
+                  <th style="width:160px"></th>
+                </tr>
+              </thead>
+              <tbody id="usbDevicesBody"></tbody>
+            </table>
+          </div>
+
+          <div class="config-section" id="usbScanResults" style="display:none">
+            <h3>Scan Results</h3>
+            <p class="config-desc" id="usbScanSummary"></p>
+            <table class="subs-table" id="usbScanTable">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Serial / ID</th>
+                  <th>VID:PID</th>
+                  <th style="width:80px"></th>
+                </tr>
+              </thead>
+              <tbody id="usbScanBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Art-Net Tab -->
+        <div class="device-tab-panel" id="devtab-artnet">
+          <div class="config-section">
+            <h3>Art-Net Output Nodes</h3>
+            <p class="config-desc">Map local DMX universes to Art-Net output nodes. Each node sends DMX data over the network via Art-Net protocol. The worker thread runs in the background so packet transmission never blocks the main server.</p>
+
+            <div class="config-card">
+              <h4>Global</h4>
+              <div class="config-row">
+                <label>Refresh Rate</label>
+                <input type="number" id="cfgArtnetRefreshRate" value="44" min="1" max="44" style="width:70px">
+                <span class="cfg-hint">Hz — applies to all nodes</span>
+                <button class="btn btn-secondary btn-sm" id="btnSaveArtnetRate" style="margin-left:12px">Save</button>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;margin:16px 0 12px">
+              <button class="btn btn-primary btn-sm" id="btnAddArtnetNode">+ Add Art-Net Node</button>
+              <button class="btn btn-secondary btn-sm" id="btnArtnetBlackout">Blackout All</button>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--text-dim)" id="artnetNodeCount"></span>
+            </div>
+
+            <table class="subs-table" id="artnetNodesTable">
+              <thead>
+                <tr>
+                  <th style="width:30px">On</th>
+                  <th>Local Uni</th>
+                  <th>Label</th>
+                  <th>Target IP</th>
+                  <th>Port</th>
+                  <th>Subnet</th>
+                  <th>Art-Net Uni</th>
+                  <th style="width:80px"></th>
+                </tr>
+              </thead>
+              <tbody id="artnetNodesBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -2012,46 +2072,7 @@
         </div>
       </div>
 
-      <!-- ─── Art-Net ─── -->
-      <div class="config-sub-page" id="cfgpage-artnet">
-        <div class="config-section">
-          <h3>Art-Net Output Nodes</h3>
-          <p class="config-desc">Map local DMX universes to Art-Net output nodes. Each node sends DMX data over the network via Art-Net protocol. The worker thread runs in the background so packet transmission never blocks the main server.</p>
 
-          <div class="config-card">
-            <h4>Global</h4>
-            <div class="config-row">
-              <label>Refresh Rate</label>
-              <input type="number" id="cfgArtnetRefreshRate" value="44" min="1" max="44" style="width:70px">
-              <span class="cfg-hint">Hz — applies to all nodes</span>
-              <button class="btn btn-secondary btn-sm" id="btnSaveArtnetRate" style="margin-left:12px">Save</button>
-            </div>
-          </div>
-
-          <div style="display:flex;align-items:center;gap:10px;margin:16px 0 12px">
-            <button class="btn btn-primary btn-sm" id="btnAddArtnetNode">+ Add Art-Net Node</button>
-            <button class="btn btn-secondary btn-sm" id="btnArtnetBlackout">Blackout All</button>
-            <span style="flex:1"></span>
-            <span style="font-size:11px;color:var(--text-dim)" id="artnetNodeCount"></span>
-          </div>
-
-          <table class="subs-table" id="artnetNodesTable">
-            <thead>
-              <tr>
-                <th style="width:30px">On</th>
-                <th>Local Uni</th>
-                <th>Label</th>
-                <th>Target IP</th>
-                <th>Port</th>
-                <th>Subnet</th>
-                <th>Art-Net Uni</th>
-                <th style="width:80px"></th>
-              </tr>
-            </thead>
-            <tbody id="artnetNodesBody"></tbody>
-          </table>
-        </div>
-      </div>
 
       <!-- Art-Net Node Modal -->
       <div class="modal-overlay" id="artnetNodeModal">
@@ -6159,9 +6180,14 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     document.querySelectorAll('.config-sub-page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('cfgpage-' + btn.dataset.cfgtab).classList.add('active');
-    if (btn.dataset.cfgtab === 'dmx-usb') loadUsbDevices();
+    if (btn.dataset.cfgtab === 'devices') {
+      const activeDevTab = document.querySelector('.device-tab-btn.active');
+      if (activeDevTab) {
+        if (activeDevTab.dataset.devtab === 'usb') loadUsbDevices();
+        if (activeDevTab.dataset.devtab === 'artnet') loadArtnetNodes();
+      } else { loadUsbDevices(); }
+    }
     if (btn.dataset.cfgtab === 'os2l-subs') loadSubscriptions();
-    if (btn.dataset.cfgtab === 'artnet') loadArtnetNodes();
     if (btn.dataset.cfgtab === 'lighting') loadLightingConfig();
     if (btn.dataset.cfgtab === 'movers') loadMoverConfig();
     if (btn.dataset.cfgtab === 'sequencer') loadSequencerConfig();
@@ -6177,6 +6203,20 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  Devices — Sub-tab Switching (USB / Art-Net)
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.device-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.device-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.device-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('devtab-' + btn.dataset.devtab).classList.add('active');
+    if (btn.dataset.devtab === 'usb') loadUsbDevices();
+    if (btn.dataset.devtab === 'artnet') loadArtnetNodes();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  Config — Load All Settings
 // ═══════════════════════════════════════════════════════════════
 async function loadConfigPage() {
@@ -6185,7 +6225,8 @@ async function loadConfigPage() {
   // DMX USB — load saved devices table
   await loadUsbDevices();
 
-  // Art-Net
+  // Art-Net — load nodes + config
+  await loadArtnetNodes();
   document.getElementById('cfgArtnetRefreshRate').value = config.artnet_refresh_rate || 44;
 
   // VDJ

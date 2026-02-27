@@ -410,6 +410,21 @@ class DmxUsbServer {
     this.shutdownAll();
   }
 
+  /**
+   * Update config for an already-tracked device (e.g. after DB edit).
+   * Rebuilds the universe map so routing picks up the new local_universe.
+   * Returns true if the device was found in memory.
+   */
+  updateDeviceConfig(id, newConfig) {
+    const handle = this.devices.get(id);
+    if (!handle) return false;
+    handle.config = { ...handle.config, ...newConfig };
+    handle._tag = `[USB:${handle.config.label || handle.config.id}]`;
+    this._rebuildUniverseMap();
+    console.log(`[DMX-USB] Updated in-memory config for device ${id} → universe ${handle.config.local_universe}`);
+    return true;
+  }
+
   // ─── Internal ─────────────────────────────────────────────────────────
 
   _rebuildUniverseMap() {

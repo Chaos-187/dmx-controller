@@ -55,9 +55,27 @@ const SOUNDSWITCH_HEADER = Buffer.from([
 ]);
 const SOUNDSWITCH_PACKET_SIZE = SOUNDSWITCH_HEADER.length + DMX_CHANNELS; // 522
 
+// SoundSwitch initialisation packets (command 0x02)
+// Observed via Wireshark: sent before any DMX frames to put the device into output mode
+const SOUNDSWITCH_INIT_1 = Buffer.from([
+  0x73, 0x54, 0x52, 0x74,  // "sTRt" magic
+  0x02,                     // command: control / init
+  0x00,                     // port / universe
+  0x04, 0x00,               // param
+  0x00, 0x00, 0x01, 0x00,  // data
+]);
+const SOUNDSWITCH_INIT_2 = Buffer.from([
+  0x73, 0x54, 0x52, 0x74,  // "sTRt" magic
+  0x02,                     // command: control / init
+  0x00,                     // port / universe
+  0x04, 0x00,               // param
+  0x01, 0x00, 0xff, 0xff,  // data
+]);
+
 // Known USB VID:PID → protocol mapping
 const USB_PROTOCOLS = {
   '15e4:0053': 'soundswitch',   // SoundSwitch DMX Micro Interface
+  '15e4:005a': 'soundswitch',   // SoundSwitch DMX Interface (alt PID)
   '15e4:0100': 'soundswitch',   // SoundSwitch DMX Interface
 };
 
@@ -272,6 +290,11 @@ async function openUsbDevice(payload) {
     isOpen = true;
     deviceInfo = { source: 'usb', vid: `0x${vidHex}`, pid: `0x${pidHex}`, serial_number: payload.serial_number || '' };
 
+    // Send protocol-specific initialisation before any DMX frames
+    if (usbProtocol === 'soundswitch') {
+      await sendSoundSwitchInit();
+    }
+
     log('info', `[DMX-USB] USB device opened — protocol: ${usbProtocol}, endpoint: 0x${outEp.address.toString(16)}`);
     reply('opened', { identifier: deviceInfo });
     return true;
@@ -284,6 +307,31 @@ async function openUsbDevice(payload) {
     activeBackend = null;
     isOpen = false;
     return false;
+  }
+}
+
+/**
+ * Send SoundSwitch initialisation packets.
+ * These put the device into DMX output mode before we start sending frames.
+ */
+async function sendSoundSwitchInit() {
+  if (!usbDevice || !usbEndpoint) return;
+  try {
+    await new Promise((resolve, reject) => {
+      usbEndpoint.transfer(SOUNDSWITCH_INIT_1, (err) => {
+        if (err) reject(err); else resolve();
+      });
+    });
+    await sleep(20);
+    await new Promise((resolve, reject) => {
+      usbEndpoint.transfer(SOUNDSWITCH_INIT_2, (err) => {
+        if (err) reject(err); else resolve();
+      });
+    });
+    await sleep(20);
+    log('info', '[DMX-USB] SoundSwitch init packets sent');
+  } catch (e) {
+    log('warn', `[DMX-USB] SoundSwitch init failed: ${e.message}`);
   }
 }
 
