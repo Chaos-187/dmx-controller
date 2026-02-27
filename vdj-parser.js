@@ -69,6 +69,13 @@ function parseSong(song) {
   const beatgridPoi = poiData.find(p => p.type === 'beatgrid');
   const beatgridPos = beatgridPoi ? parseFloat(beatgridPoi.pos) : 0;
 
+  // Extract all beatgrid anchor points (for multi-point tempo support)
+  const beatgridPoints = poiData
+    .filter(p => p.type === 'beatgrid' && p.pos)
+    .map(p => ({ pos_sec: parseFloat(p.pos) }))
+    .filter(p => !isNaN(p.pos_sec))
+    .sort((a, b) => a.pos_sec - b.pos_sec);
+
   // Extract automix points
   const automixPoi = poiData.find(p => p.type === 'automix');
   const automixPoint = automixPoi ? automixPoi.point : '';
@@ -111,6 +118,7 @@ function parseSong(song) {
     volume,
     audio_sig: audioSig,
     beatgrid_pos: beatgridPos,
+    beatgrid_points: JSON.stringify(beatgridPoints),
     automix_point: automixPoint,
     poi_json: JSON.stringify(poiData),
     netsearch: netSearch,

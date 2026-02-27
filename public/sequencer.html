@@ -122,6 +122,7 @@
     <div class="tl-scroll" id="tlScroll">
       <div class="tl-canvas" id="tlCanvas" style="display:none">
         <div class="tl-ruler" id="tlRuler"></div>
+        <div class="tl-grid-overlay" id="tlGridOverlay"></div>
         <div class="tl-lanes" id="tlLanes"></div>
         <div class="tl-playhead" id="tlPlayhead"></div>
       </div>
@@ -189,6 +190,10 @@
   <div class="modal-card">
     <h2 class="modal-title" id="genModalTitle">Generate Sequence</h2>
     <div class="modal-body" id="genTrackInfo"></div>
+    <div class="modal-field">
+      <label>Template</label>
+      <select id="genTemplate" class="prop-input"><option value="">(None — manual settings)</option></select>
+    </div>
     <div class="modal-field">
       <label>Palette</label>
       <select id="genPalette" class="prop-input"><option value="random">Random</option></select>

@@ -162,17 +162,36 @@ router.post('/api/sequences/generate/:trackId', async (req, res) => {
     }
   }
 
-  const { palette: palKey, genre: genKey } = req.body || {};
+  const { palette: palKey, genre: genKey, template_id } = req.body || {};
+
+  // If template specified, merge its settings
+  let effectivePalette = palKey || undefined;
+  let effectiveGenre = genKey || undefined;
+  let effectiveNoStrobes = _db.getConfig('seq_no_strobes') === '1';
+  let effectiveGenConfig = _db.getGeneratorConfig();
+
+  if (template_id) {
+    const tpl = _db.getSequenceTemplate(template_id);
+    if (tpl) {
+      if (!palKey && tpl.palette && tpl.palette !== 'random') effectivePalette = tpl.palette;
+      if (!genKey && tpl.genre && tpl.genre !== 'auto') effectiveGenre = tpl.genre;
+      if (tpl.no_strobes) effectiveNoStrobes = true;
+      if (tpl.generator_config && typeof tpl.generator_config === 'object') {
+        effectiveGenConfig = { ...effectiveGenConfig, ...tpl.generator_config };
+      }
+    }
+  }
+
   const { cues, bpm, durationMs, palette, genrePreset } = _sequenceGenerator.generateSequence({
     track,
     fixtures,
     analysis,
-    palette: palKey || undefined,
-    genre: genKey || undefined,
+    palette: effectivePalette,
+    genre: effectiveGenre,
     effects: _db.getEffects(),
     moverPresets: _db.getMoverPresets(),
-    noStrobes: _db.getConfig('seq_no_strobes') === '1',
-    generatorConfig: _db.getGeneratorConfig(),
+    noStrobes: effectiveNoStrobes,
+    generatorConfig: effectiveGenConfig,
   });
 
   // Create sequence
@@ -281,6 +300,50 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
 
   console.log(`[BulkGen] Complete: ${completed} generated, ${skipped} skipped, ${failed} failed out of ${track_ids.length}`);
   _broadcast({ type: 'seq_batch_complete', completed, failed, skipped, total: track_ids.length });
+});
+
+// ─── Sequence Templates ──────────────────────────────────────────────────
+
+router.get('/api/sequence-templates', (req, res) => {
+  res.json(_db.getSequenceTemplates());
+});
+
+router.get('/api/sequence-templates/:id', (req, res) => {
+  const t = _db.getSequenceTemplate(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  res.json(t);
+});
+
+router.post('/api/sequence-templates', (req, res) => {
+  const { name, palette, genre, no_strobes, generator_config, is_default } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
+  const t = _db.createSequenceTemplate({ name: name.trim(), palette, genre, no_strobes, generator_config, is_default });
+  res.json(t);
+});
+
+router.put('/api/sequence-templates/:id', (req, res) => {
+  const existing = _db.getSequenceTemplate(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const { name, palette, genre, no_strobes, generator_config, is_default } = req.body;
+  const t = _db.updateSequenceTemplate(req.params.id, {
+    name: (name || existing.name).trim(),
+    palette: palette !== undefined ? palette : existing.palette,
+    genre: genre !== undefined ? genre : existing.genre,
+    no_strobes: no_strobes !== undefined ? no_strobes : existing.no_strobes,
+    generator_config: generator_config !== undefined ? generator_config : existing.generator_config,
+    is_default: is_default !== undefined ? is_default : existing.is_default,
+  });
+  res.json(t);
+});
+
+router.delete('/api/sequence-templates/:id', (req, res) => {
+  _db.deleteSequenceTemplate(req.params.id);
+  res.json({ ok: true });
+});
+
+router.post('/api/sequence-templates/:id/set-default', (req, res) => {
+  _db.setDefaultSequenceTemplate(req.params.id);
+  res.json({ ok: true });
 });
 
 module.exports = { router, init };

@@ -17,7 +17,7 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 11;
+const ANALYSIS_VERSION = 12;
 const DEFAULTS = {
   TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
@@ -193,23 +193,23 @@ function probeFile(filePath) {
  * Algorithm:
  * 1. Compute a bass onset strength function from energy segments.
  * 2. Find local peaks that exceed an adaptive threshold.
- * 3. Use BPM-guided window to assign each peak to the nearest expected
- *    beat position, rejecting duplicates and filling gaps.
- * 4. Return actual beat times (not evenly spaced).
+ * 3. Estimate local tempo from onset intervals; detect tempo changes.
+ * 4. If tempo varies >3%, build an adaptive grid with per-region BPM.
+ *    Otherwise use the global BPM for a uniform grid (guided by anchors).
+ * 5. Snap grid beats toward detected onsets with weighted blending.
+ * 6. Return actual beat times (not evenly spaced).
  *
- * @param {Array}  energySegments – [{time_ms, bass, energy, ...}, ...]
- * @param {number} bpm            – reference BPM from metadata
- * @param {number} durationMs     – track duration in ms
+ * @param {Array}  energySegments  – [{time_ms, bass, energy, ...}, ...]
+ * @param {number} bpm             – reference BPM from metadata
+ * @param {number} durationMs      – track duration in ms
  * @param {number} [firstBeatMs=0] – first beat hint from metadata
+ * @param {Array}  [anchorPoints]  – [{pos_ms, bpm?}, ...] multi-point beatgrid anchors
  * @returns {number[]} beat times in ms (sorted)
  */
-function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
+function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0, anchorPoints = []) {
   if (!energySegments.length || bpm <= 0) return [];
 
   const expectedBeatMs = 60000 / bpm;
-  // Tolerance: how far an onset can be from the expected grid beat to attract it.
-  // Keep tight (±15%) so beats never drift more than ~70ms at 128 BPM.
-  const tolerance = expectedBeatMs * 0.15;
 
   const segDt = energySegments.length > 1
     ? energySegments[1].time_ms - energySegments[0].time_ms
@@ -230,8 +230,6 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
   if (onsets.length === 0) return [];
 
   // ── 2. Adaptive threshold for onset peaks ─────────────────────────
-  // Use a running mean + std over a local window (~2 bars).
-  // Require onsets to be well above local noise (1.2×std).
   const windowSize = Math.max(4, Math.round((expectedBeatMs * 8) / segDt));
 
   const onsetPeaks = [];  // { time_ms, strength }
@@ -248,7 +246,7 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
       sqSum += d * d;
     }
     const localStd = Math.sqrt(sqSum / count);
-    const threshold = localMean + localStd * 1.2;  // stricter: was 0.8
+    const threshold = localMean + localStd * 1.2;
 
     if (onsets[i].strength > threshold && onsets[i].strength > 0) {
       const isLocalMax =
@@ -260,57 +258,205 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
     }
   }
 
-  // ── 3. Build guided beat grid, then attract to nearest onset ──────
-  // The grid from VDJ's firstBeat + BPM is the ground truth timing.
-  // Onsets only nudge beats slightly (blended) instead of hard-snapping.
+  // ── 3. Local tempo estimation from onset intervals ────────────────
+  //   Compute inter-onset intervals (IOIs), filter to plausible beat
+  //   intervals, then estimate BPM in overlapping windows.  If the
+  //   local BPM varies by more than 3% across the track, we have a
+  //   tempo-changing song and will use an adaptive grid.
+  const minIOI = expectedBeatMs * 0.6;
+  const maxIOI = expectedBeatMs * 2.5;
+
+  const iois = []; // { time_ms, interval, impliedBpm }
+  for (let i = 1; i < onsetPeaks.length; i++) {
+    const dt = onsetPeaks[i].time_ms - onsetPeaks[i - 1].time_ms;
+    if (dt >= minIOI && dt <= maxIOI) {
+      // Quantize to nearest beat subdivision (1 or 2 beats)
+      let iBpm;
+      if (dt < expectedBeatMs * 0.8) {
+        // Likely half-beat interval: this is 2× BPM
+        iBpm = 60000 / (dt * 2);
+      } else if (dt > expectedBeatMs * 1.6) {
+        // Likely 2-beat interval: this is 0.5× BPM
+        iBpm = 60000 / (dt / 2);
+      } else {
+        iBpm = 60000 / dt;
+      }
+      iois.push({ time_ms: onsetPeaks[i].time_ms, interval: dt, impliedBpm: iBpm });
+    }
+  }
+
+  // Sliding window local BPM estimation
+  const tempoWindowMs = Math.max(10000, expectedBeatMs * 32); // ~8 bars or 10s
+  const tempoStepMs   = tempoWindowMs / 2;
+  const localTempos   = []; // { time_ms, bpm }
+
+  for (let t = 0; t < durationMs; t += tempoStepMs) {
+    const wStart = t;
+    const wEnd   = t + tempoWindowMs;
+    const inWindow = iois.filter(x => x.time_ms >= wStart && x.time_ms < wEnd);
+    if (inWindow.length >= 3) {
+      // Median BPM (robust to outliers)
+      const bpms = inWindow.map(x => x.impliedBpm).sort((a, b) => a - b);
+      const median = bpms[Math.floor(bpms.length / 2)];
+      localTempos.push({ time_ms: t + tempoWindowMs / 2, bpm: median });
+    }
+  }
+
+  // Determine if tempo varies significantly
+  let useAdaptiveGrid = false;
+  let tempoRegions = []; // { startMs, endMs, bpm }
+
+  if (anchorPoints && anchorPoints.length >= 2) {
+    // Multi-anchor points provided (e.g. from VDJ beatgrid Pois)
+    // Infer local BPM between consecutive anchors
+    for (let i = 0; i < anchorPoints.length - 1; i++) {
+      const ap = anchorPoints[i];
+      const bp = anchorPoints[i + 1];
+      const dtMs = bp.pos_ms - ap.pos_ms;
+      const regionBpm = ap.bpm || bpm;
+      const beatsInRegion = Math.round(dtMs / (60000 / regionBpm));
+      if (beatsInRegion > 0) {
+        const actualBeatMs = dtMs / beatsInRegion;
+        tempoRegions.push({
+          startMs: ap.pos_ms,
+          endMs:   bp.pos_ms,
+          bpm:     60000 / actualBeatMs,
+        });
+      }
+    }
+    // Extend last region to end of track
+    if (tempoRegions.length > 0) {
+      tempoRegions[tempoRegions.length - 1].endMs = durationMs;
+      useAdaptiveGrid = tempoRegions.some(r => Math.abs(r.bpm - bpm) / bpm > 0.03);
+    }
+  } else if (localTempos.length >= 3) {
+    // Audio-estimated local tempos — check for variance
+    const localBpms = localTempos.map(x => x.bpm);
+    const bpmMin = Math.min(...localBpms);
+    const bpmMax = Math.max(...localBpms);
+    const bpmMid = (bpmMax + bpmMin) / 2;
+    const variance = (bpmMax - bpmMin) / bpmMid;
+
+    if (variance > 0.03) {
+      useAdaptiveGrid = true;
+      // Build tempo regions from local estimates
+      // Smooth local tempos with 3-point median for stability
+      const smoothed = localTempos.map((lt, idx) => {
+        const lo = Math.max(0, idx - 1);
+        const hi = Math.min(localTempos.length - 1, idx + 1);
+        const vals = [];
+        for (let k = lo; k <= hi; k++) vals.push(localTempos[k].bpm);
+        vals.sort((a, b) => a - b);
+        return { time_ms: lt.time_ms, bpm: vals[Math.floor(vals.length / 2)] };
+      });
+
+      for (let i = 0; i < smoothed.length; i++) {
+        tempoRegions.push({
+          startMs: i === 0 ? 0 : smoothed[i].time_ms - tempoStepMs / 2,
+          endMs:   i === smoothed.length - 1 ? durationMs : smoothed[i].time_ms + tempoStepMs / 2,
+          bpm:     smoothed[i].bpm,
+        });
+      }
+    }
+  }
+
+  // ── 4. Build beat grid (adaptive or uniform) ─────────────────────
   const phase = firstBeatMs >= 0 ? firstBeatMs : 0;
   const gridBeats = [];
-  let gridTime = phase;
 
-  // Walk backwards from phase to cover any intro before the first beat
-  if (phase > expectedBeatMs) {
-    let t = phase - expectedBeatMs;
-    const preBeats = [];
-    while (t >= 0) {
-      preBeats.push(t);
-      t -= expectedBeatMs;
+  if (useAdaptiveGrid && tempoRegions.length > 0) {
+    // Adaptive grid: walk through each tempo region
+    // Start with pre-beat phase using first region's BPM
+    const firstBpm = tempoRegions[0].bpm;
+    const firstBeatInterval = 60000 / firstBpm;
+
+    if (phase > firstBeatInterval) {
+      let t = phase - firstBeatInterval;
+      const preBeats = [];
+      while (t >= 0) {
+        preBeats.push(t);
+        t -= firstBeatInterval;
+      }
+      preBeats.reverse();
+      for (const bt of preBeats) gridBeats.push(bt);
     }
-    preBeats.reverse();
-    for (const bt of preBeats) gridBeats.push(bt);
+
+    // Walk forward, switching BPM at region boundaries
+    let t = phase;
+    while (t < durationMs) {
+      gridBeats.push(t);
+      // Find which tempo region we're in
+      let regionBpm = bpm; // fallback
+      for (const r of tempoRegions) {
+        if (t >= r.startMs && t < r.endMs) {
+          regionBpm = r.bpm;
+          break;
+        }
+      }
+      t += 60000 / regionBpm;
+    }
+  } else {
+    // Uniform grid (original behavior)
+    if (phase > expectedBeatMs) {
+      let t = phase - expectedBeatMs;
+      const preBeats = [];
+      while (t >= 0) {
+        preBeats.push(t);
+        t -= expectedBeatMs;
+      }
+      preBeats.reverse();
+      for (const bt of preBeats) gridBeats.push(bt);
+    }
+    while (phase + gridBeats.length * expectedBeatMs < durationMs || gridBeats.length === 0) {
+      // Re-walk forward properly
+      break; // handled below
+    }
+    // Walk forward through the track
+    let gTime = phase;
+    while (gTime < durationMs) {
+      gridBeats.push(gTime);
+      gTime += expectedBeatMs;
+    }
   }
 
-  // Walk forward through the track
-  while (gridTime < durationMs) {
-    gridBeats.push(gridTime);
-    gridTime += expectedBeatMs;
-  }
+  // Dedupe and sort (adaptive grid may have overlap from pre-beats)
+  const uniqueGrid = [...new Set(gridBeats.map(b => Math.round(b * 10) / 10))].sort((a, b) => a - b);
 
-  // Snap each grid beat toward the nearest strong onset within tolerance.
-  // Use weighted blending: blend = 0.5 × (1 - dist/tolerance) so nearby
-  // onsets pull harder but the grid is never fully abandoned.
+  // ── 5. Snap grid toward nearest onset with weighted blending ──────
+  const tolerance = expectedBeatMs * 0.15;
   const fluidBeats = [];
   let onsetIdx = 0;
 
-  for (let bi = 0; bi < gridBeats.length; bi++) {
-    const expected = gridBeats[bi];
+  for (let bi = 0; bi < uniqueGrid.length; bi++) {
+    const expected = uniqueGrid[bi];
+    // Use local BPM for spacing check
+    let localBeatMs = expectedBeatMs;
+    if (useAdaptiveGrid) {
+      for (const r of tempoRegions) {
+        if (expected >= r.startMs && expected < r.endMs) {
+          localBeatMs = 60000 / r.bpm;
+          break;
+        }
+      }
+    }
+    const localTolerance = localBeatMs * 0.15;
 
     // Advance onset pointer
-    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx].time_ms < expected - tolerance) {
+    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx].time_ms < expected - localTolerance) {
       onsetIdx++;
     }
 
-    // Find the strongest onset within tolerance (prefer strongest, not closest)
+    // Find the strongest onset within tolerance
     let bestOnset = null;
     let bestScore = 0;
     for (let oi = Math.max(0, onsetIdx - 1); oi < onsetPeaks.length; oi++) {
       const o = onsetPeaks[oi];
       const dist = Math.abs(o.time_ms - expected);
-      if (dist > tolerance) {
-        if (o.time_ms > expected + tolerance) break;
+      if (dist > localTolerance) {
+        if (o.time_ms > expected + localTolerance) break;
         continue;
       }
-      // Score: prefer strong onsets that are close to the grid position
-      const proximityWeight = 1 - dist / tolerance;  // 1 = exact match, 0 = edge
+      const proximityWeight = 1 - dist / localTolerance;
       const score = o.strength * proximityWeight;
       if (score > bestScore) {
         bestScore = score;
@@ -320,23 +466,20 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0) {
 
     let finalTime;
     if (bestOnset) {
-      // Blend toward onset: 50% weight, scaled by proximity
       const dist = Math.abs(bestOnset.time_ms - expected);
-      const blendWeight = 0.5 * (1 - dist / tolerance);
+      const blendWeight = 0.5 * (1 - dist / localTolerance);
       finalTime = expected + (bestOnset.time_ms - expected) * blendWeight;
     } else {
       finalTime = expected;
     }
 
-    // Enforce minimum spacing: at least 75% of expected beat interval
+    // Enforce minimum spacing: at least 75% of local beat interval
     const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
-    if (finalTime - prevBeat >= expectedBeatMs * 0.75) {
+    if (finalTime - prevBeat >= localBeatMs * 0.75) {
       fluidBeats.push(Math.round(finalTime));
-    } else if (expected - prevBeat >= expectedBeatMs * 0.75) {
-      // Onset would bunch up — use pure grid position instead
+    } else if (expected - prevBeat >= localBeatMs * 0.75) {
       fluidBeats.push(Math.round(expected));
     }
-    // else: skip entirely (shouldn't happen with a clean grid)
   }
 
   return fluidBeats;
@@ -435,6 +578,10 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const barBass   = hasBands ? barAverages('bass')   : barTotal.map(v => v);
   const barMid    = hasBands ? barAverages('mid')     : barTotal.map(v => v);
   const barTreble = hasBands ? barAverages('treble')  : barTotal.map(v => v);
+  // Extended bands (fallback to bass/treble for older analysis data)
+  const has5Bands = energySegments[0] && energySegments[0].sub_bass !== undefined;
+  const barSubBass  = has5Bands ? barAverages('sub_bass')  : barBass.map(v => v * 0.4);
+  const barHiMid    = has5Bands ? barAverages('upper_mid') : barTreble.map(v => v * 0.5);
 
   // ── 2. Light smoothing (half-window = 1 bar) so we keep contrast ─────
   function smooth(arr, halfW) {
@@ -452,12 +599,40 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const smBass   = smooth(barBass,   1);
   const smMid    = smooth(barMid,    1);
   const smTreble = smooth(barTreble, 1);
+  const smSubBass = smooth(barSubBass, 1);
+  const smHiMid   = smooth(barHiMid,   1);
+
+  // ── 2b. Per-bar spectral flux & onset density ─────────────────────────
+  //   Spectral flux: average positive frame-to-frame band energy change
+  //   Onset density: count of significant energy increases per second
+  const barSpFlux = [];
+  const barOnsetDens = [];
+  for (let bar = 0; bar < totalBars; bar++) {
+    const barStart = bars[bar].start_ms;
+    const barEnd   = bars[bar].end_ms;
+    const inBar = energySegments.filter(s => s.time_ms >= barStart && s.time_ms < barEnd);
+    let flux = 0, onsets = 0;
+    for (let fi = 1; fi < inBar.length; fi++) {
+      const prev = inBar[fi - 1], curr = inBar[fi];
+      flux += Math.max(0, curr.bass - prev.bass)
+            + Math.max(0, curr.mid  - prev.mid)
+            + Math.max(0, curr.treble - prev.treble);
+      // Onset: significant energy increase between frames
+      if ((curr.energy - prev.energy) > 0.01) onsets++;
+    }
+    barSpFlux.push(inBar.length > 1 ? flux / (inBar.length - 1) : 0);
+    const barDurMs = barEnd - barStart;
+    barOnsetDens.push(barDurMs > 0 ? (onsets / barDurMs) * 1000 : 0);
+  }
+  const smFlux   = smooth(barSpFlux, 1);
+  const smOnsets = smooth(barOnsetDens, 1);
 
   // ── 3. Multi-scale novelty ────────────────────────────────────────────
   //   a) Short-term: absolute energy difference bar-to-bar
   //   b) Phrase-level: compare bar i energy to mean of bars [i-phraseK .. i-1]
   //      vs mean of bars [i .. i+phraseK-1]
-  //   c) Spectral: cosine distance of [bass, mid, treble] vectors
+  //   c) Spectral: cosine distance of 5-band vectors
+  //   d) Spectral flux change: bar-to-bar flux difference
 
   const phraseK = Math.min(4, Math.floor(totalBars / 4)); // 4-bar context each side
 
@@ -470,10 +645,15 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     return s / (hi - lo + 1);
   }
 
-  function cosineDist(a, b) {
-    const dot  = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
-    const magA = Math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]) || 1e-9;
-    const magB = Math.sqrt(b[0]*b[0] + b[1]*b[1] + b[2]*b[2]) || 1e-9;
+  function cosineDistN(a, b) {
+    let dot = 0, magA = 0, magB = 0;
+    for (let k = 0; k < a.length; k++) {
+      dot  += a[k] * b[k];
+      magA += a[k] * a[k];
+      magB += b[k] * b[k];
+    }
+    magA = Math.sqrt(magA) || 1e-9;
+    magB = Math.sqrt(magB) || 1e-9;
     return 1 - (dot / (magA * magB));
   }
 
@@ -482,6 +662,10 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const eMin = eSorted[Math.floor(eSorted.length * 0.05)] || 0;
   const eMax = eSorted[Math.floor(eSorted.length * 0.95)] || 1;
   const eRange = (eMax - eMin) || 1;
+
+  // Flux range
+  const fSorted = [...smFlux].sort((a, b) => a - b);
+  const fRange = (fSorted[Math.floor(fSorted.length * 0.95)] - fSorted[Math.floor(fSorted.length * 0.05)]) || 1;
 
   const novelty = new Float64Array(totalBars);
   for (let i = 1; i < totalBars; i++) {
@@ -493,22 +677,26 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     const rightMean = meanRange(smTotal, i, i + phraseK - 1);
     const phraseDiff = Math.abs(rightMean - leftMean) / eRange;
 
-    // Spectral change
-    const vecPrev = [smBass[i-1], smMid[i-1], smTreble[i-1]];
-    const vecCurr = [smBass[i],   smMid[i],   smTreble[i]];
-    const specDiff = cosineDist(vecPrev, vecCurr);
+    // 5-band spectral change (cosine distance)
+    const vecPrev = [smSubBass[i-1], smBass[i-1], smMid[i-1], smHiMid[i-1], smTreble[i-1]];
+    const vecCurr = [smSubBass[i],   smBass[i],   smMid[i],   smHiMid[i],   smTreble[i]];
+    const specDiff = cosineDistN(vecPrev, vecCurr);
 
-    // Phrase-level spectral contrast (average band energy left vs right)
-    const lBass  = meanRange(smBass,   i - phraseK, i - 1);
-    const rBass  = meanRange(smBass,   i, i + phraseK - 1);
-    const lMid   = meanRange(smMid,    i - phraseK, i - 1);
-    const rMid   = meanRange(smMid,    i, i + phraseK - 1);
-    const lTreb  = meanRange(smTreble, i - phraseK, i - 1);
-    const rTreb  = meanRange(smTreble, i, i + phraseK - 1);
-    const phraseSpec = cosineDist([lBass, lMid, lTreb], [rBass, rMid, rTreb]);
+    // Phrase-level spectral contrast (average 5-band energy left vs right)
+    const lVec = [meanRange(smSubBass, i-phraseK, i-1), meanRange(smBass, i-phraseK, i-1),
+                  meanRange(smMid, i-phraseK, i-1), meanRange(smHiMid, i-phraseK, i-1),
+                  meanRange(smTreble, i-phraseK, i-1)];
+    const rVec = [meanRange(smSubBass, i, i+phraseK-1), meanRange(smBass, i, i+phraseK-1),
+                  meanRange(smMid, i, i+phraseK-1), meanRange(smHiMid, i, i+phraseK-1),
+                  meanRange(smTreble, i, i+phraseK-1)];
+    const phraseSpec = cosineDistN(lVec, rVec);
 
-    // Weighted combination
-    novelty[i] = shortDiff * 0.15 + phraseDiff * 0.35 + specDiff * 0.15 + phraseSpec * 0.35;
+    // Spectral flux change (normalised)
+    const fluxDiff = Math.abs(smFlux[i] - smFlux[i - 1]) / fRange;
+
+    // Weighted combination (added flux component)
+    novelty[i] = shortDiff * 0.10 + phraseDiff * 0.30 + specDiff * 0.10
+               + phraseSpec * 0.30 + fluxDiff * 0.20;
   }
 
   // Adaptive threshold
@@ -627,16 +815,21 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
 
     // Average energies and spectral bands
     let secTotal = 0, secBass = 0, secMid = 0, secTreble = 0;
+    let secSubBass = 0, secHiMid = 0;
     for (let b = startBar; b < endBar; b++) {
       secTotal  += smTotal[b]  || 0;
       secBass   += smBass[b]   || 0;
       secMid    += smMid[b]    || 0;
       secTreble += smTreble[b] || 0;
+      secSubBass += smSubBass[b] || 0;
+      secHiMid   += smHiMid[b]   || 0;
     }
     secTotal  /= numBars;
     secBass   /= numBars;
     secMid    /= numBars;
     secTreble /= numBars;
+    secSubBass /= numBars;
+    secHiMid   /= numBars;
     const bassRatio   = secTotal > 0 ? secBass / secTotal : 0;
     const trebleRatio = secTotal > 0 ? secTreble / secTotal : 0;
 
@@ -668,8 +861,33 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     }
     const energyCV = secTotal > 0 ? energyStdDev / secTotal : 0;
 
-    // Spectral fingerprint for similarity matching
-    const fingerprint = [secBass, secMid, secTreble];
+    // Spectral fingerprint for similarity matching (5-band)
+    const fingerprint = [secSubBass, secBass, secMid, secHiMid, secTreble];
+
+    // Per-section onset density and spectral flux (averaged over bars)
+    let secOnsetDens = 0, secSpFlux = 0;
+    for (let b = startBar; b < endBar; b++) {
+      secOnsetDens += smOnsets[b] || 0;
+      secSpFlux    += smFlux[b]   || 0;
+    }
+    secOnsetDens /= numBars;
+    secSpFlux    /= numBars;
+
+    // Onset density gradient (linear regression) — detects snare rolls / accelerating hi-hats
+    let onsetGradient = 0;
+    if (numBars >= 2) {
+      const odArr = [];
+      for (let b = startBar; b < endBar; b++) odArr.push(smOnsets[b] || 0);
+      const n = odArr.length;
+      const xM = (n - 1) / 2;
+      const yM = odArr.reduce((a, b) => a + b, 0) / n;
+      let numer = 0, denom = 0;
+      for (let i = 0; i < n; i++) {
+        numer += (i - xM) * (odArr[i] - yM);
+        denom += (i - xM) * (i - xM);
+      }
+      onsetGradient = denom > 0 ? numer / denom : 0;
+    }
 
     // Neighbour energies
     let nextEnergy = 0, prevEnergy = 0;
@@ -688,6 +906,7 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       startBar, endBar, startMs, endMs, numBars,
       energy: secTotal, bassRatio, trebleRatio,
       gradient, energyCV, fingerprint,
+      onsetDensity: secOnsetDens, spectralFlux: secSpFlux, onsetGradient,
       nextEnergy, prevEnergy,
       position: startMs / durationMs,
       endPosition: endMs / durationMs,
@@ -706,29 +925,28 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const energyMax = Math.max(...allSectionEnergies);
   const energySpan = (energyMax - energyMin) || 1;
   const maxCV = Math.max(...sectionFeats.map(f => f.energyCV), 1e-9);
+  const maxOnsetDens = Math.max(...sectionFeats.map(f => f.onsetDensity), 1e-9);
+  const maxSpFlux = Math.max(...sectionFeats.map(f => f.spectralFlux), 1e-9);
 
   /**
-   * Distance between two sections using spectral shape (band ratios),
-   * energy level, and internal dynamics (coefficient of variation).
+   * Distance between two sections using 5-band spectral shape,
+   * energy level, dynamics, onset density, and spectral flux.
    * Returns a value in roughly 0–1 range.
    */
   function sectionDist(i, j) {
     const fi = sectionFeats[i], fj = sectionFeats[j];
-    // Spectral shape: Euclidean distance of band-energy ratios.
-    // Using ratios (not absolute levels) captures timbral character
-    // independent of overall loudness.
-    const db = fi.bassRatio - fj.bassRatio;
-    const dt = fi.trebleRatio - fj.trebleRatio;
-    const iMid = Math.max(0, 1 - fi.bassRatio - fi.trebleRatio);
-    const jMid = Math.max(0, 1 - fj.bassRatio - fj.trebleRatio);
-    const dm = iMid - jMid;
-    const shapeDist = Math.min(1, Math.sqrt(db * db + dm * dm + dt * dt) / 0.5);
+    // 5-band spectral cosine distance — captures timbral fingerprint
+    const shapeDist = cosineDistN(fi.fingerprint, fj.fingerprint);
     // Normalized energy difference (0–1)
     const eDist = Math.abs(fi.energy - fj.energy) / energySpan;
     // Dynamics difference (0–1)
     const cvDist = Math.abs(fi.energyCV - fj.energyCV) / maxCV;
-    // Weighted: shape 40%, energy 40%, dynamics 20%
-    return shapeDist * 0.40 + eDist * 0.40 + cvDist * 0.20;
+    // Onset density difference (rhythmic similarity)
+    const odDist = Math.abs(fi.onsetDensity - fj.onsetDensity) / maxOnsetDens;
+    // Spectral flux difference (transition activity similarity)
+    const sfDist = Math.abs(fi.spectralFlux - fj.spectralFlux) / maxSpFlux;
+    // Weighted: shape 30%, energy 30%, dynamics 15%, rhythm 15%, flux 10%
+    return shapeDist * 0.30 + eDist * 0.30 + cvDist * 0.15 + odDist * 0.15 + sfDist * 0.10;
   }
 
   const numSections = sectionFeats.length;
@@ -848,15 +1066,26 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     }
   }
 
-  // ── 7. Position and gradient overrides ────────────────────────────────
+  // ── 7. Position, gradient, and onset-density overrides ──────────────
   //   Intro/outro, buildup, breakdown depend on position and energy context
   //   rather than spectral similarity, so they override cluster labels.
+  //   Onset density (rhythmic activity) and onset gradient (accelerating
+  //   rhythms like snare rolls) improve buildup/breakdown classification.
   const gradients = sectionFeats.map(f => f.gradient);
   const gradMax = Math.max(...gradients.map(Math.abs), 1e-9);
+
+  // Onset density percentiles for classification
+  const onsetDensities = sectionFeats.map(f => f.onsetDensity);
+  const sortedOD = [...onsetDensities].sort((a, b) => a - b);
+  const odP25 = sortedOD[Math.floor(sortedOD.length * 0.25)] || 0;
+  const odP75 = sortedOD[Math.floor(sortedOD.length * 0.75)] || 0;
+  const onsetGrads = sectionFeats.map(f => f.onsetGradient);
+  const ogMax = Math.max(...onsetGrads.map(Math.abs), 1e-9);
 
   for (let s = 0; s < numSections; s++) {
     const f = sectionFeats[s];
     const normGrad = f.gradient / gradMax;
+    const normOG   = f.onsetGradient / ogMax;
 
     // Intro: first section if moderate/low energy and short
     if (s === 0 && f.numBars <= MAX_INTRO_BARS && f.energy < p75) {
@@ -867,20 +1096,33 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
              f.energy < p75 && (normGrad < 0.1 || f.energy <= p50)) {
       sectionLabels[s] = 'outro';
     }
+    // Buildup: rising energy gradient + rising onset density (snare rolls / accelerating rhythm)
+    else if (normGrad > 0.15 && normOG > 0.15 && f.energy < p75 && f.nextEnergy > f.energy * 1.10) {
+      sectionLabels[s] = 'buildup';
+    }
     // Buildup: rising gradient with next section significantly higher
     else if (normGrad > 0.2 && f.energy < p75 && f.nextEnergy > f.energy * 1.15) {
       sectionLabels[s] = 'buildup';
     }
-    // Buildup: low energy leading into high-energy section
+    // Buildup: low energy leading into high-energy section (even without gradient)
     else if (f.energy <= p50 && f.nextEnergy > p75) {
       sectionLabels[s] = 'buildup';
     }
-    // Breakdown: very low energy after a high-energy section
+    // Buildup: strong onset density ramp (snare rolls) even if energy is moderate
+    else if (normOG > 0.35 && f.nextEnergy > f.energy * 1.10 && s > 0 && s < numSections - 1) {
+      sectionLabels[s] = 'buildup';
+    }
+    // Breakdown: very low energy + sparse rhythm after a high-energy section
     else if (f.energy <= p25 && f.prevEnergy > p75) {
       sectionLabels[s] = 'breakdown';
     }
     // Breakdown: very low energy with falling gradient (not intro/outro)
     else if (f.energy <= p25 && normGrad < -0.1 && s > 0 && s < numSections - 1) {
+      sectionLabels[s] = 'breakdown';
+    }
+    // Breakdown: sparse onset density + low energy mid-track
+    else if (f.onsetDensity <= odP25 && f.energy <= p50 && s > 0 && s < numSections - 1
+             && (f.prevEnergy > p50 || f.nextEnergy > p50)) {
       sectionLabels[s] = 'breakdown';
     }
   }
@@ -891,7 +1133,8 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     // Buildup followed by high energy → ensure next is drop or chorus
     if (sectionLabels[i] === 'buildup' && i + 1 < numSections) {
       const nf = sectionFeats[i + 1];
-      if (nf.energy >= p75 && nf.bassHigh && sectionLabels[i + 1] !== 'intro') {
+      // High energy + heavy bass OR high onset density → drop
+      if (nf.energy >= p75 && (nf.bassHigh || nf.onsetDensity >= odP75) && sectionLabels[i + 1] !== 'intro') {
         sectionLabels[i + 1] = 'drop';
       } else if (nf.energy >= p75 && sectionLabels[i + 1] === 'verse') {
         sectionLabels[i + 1] = 'chorus';
@@ -917,28 +1160,27 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   // ── 9. Bridge detection — spectrally unique verses ────────────────────
   //   A verse that is spectrally distant from the majority of verses is
   //   likely a bridge (different melody/instrumentation, one-off section).
+  //   Uses 5-band fingerprints for better timbral differentiation.
   if (numSections >= 5) {
     const verseIdxs = [];
     for (let i = 0; i < numSections; i++) {
       if (sectionLabels[i] === 'verse') verseIdxs.push(i);
     }
     if (verseIdxs.length >= 2) {
-      // Compute the centroid fingerprint of all verses
-      const centroid = [0, 0, 0];
+      // Compute the centroid fingerprint of all verses (5-band)
+      const fpLen = sectionFeats[verseIdxs[0]].fingerprint.length;
+      const centroid = new Array(fpLen).fill(0);
       for (const vi of verseIdxs) {
-        centroid[0] += sectionFeats[vi].fingerprint[0];
-        centroid[1] += sectionFeats[vi].fingerprint[1];
-        centroid[2] += sectionFeats[vi].fingerprint[2];
+        for (let k = 0; k < fpLen; k++) centroid[k] += sectionFeats[vi].fingerprint[k];
       }
-      centroid[0] /= verseIdxs.length;
-      centroid[1] /= verseIdxs.length;
-      centroid[2] /= verseIdxs.length;
+      for (let k = 0; k < fpLen; k++) centroid[k] /= verseIdxs.length;
+
+      const avgVerseEnergy = verseIdxs.reduce((s, v) => s + sectionFeats[v].energy, 0) / verseIdxs.length;
 
       for (const vi of verseIdxs) {
         const fp = sectionFeats[vi].fingerprint;
-        const dist = cosineDist(centroid, fp);
-        const eDiff = Math.abs(sectionFeats[vi].energy -
-          verseIdxs.reduce((s, v) => s + sectionFeats[v].energy, 0) / verseIdxs.length) / eRange;
+        const dist = cosineDistN(centroid, fp);
+        const eDiff = Math.abs(sectionFeats[vi].energy - avgVerseEnergy) / eRange;
         // Spectrally distant from the verse centroid → bridge
         if (dist > 0.10 || eDiff > 0.20) {
           sectionLabels[vi] = 'bridge';
@@ -1061,21 +1303,30 @@ function analyzeTrack(filePath, opts = {}) {
     const midLpAlpha  = lpCoeff(2000, DECODE_SAMPLE_RATE);   // mid  200–2000 Hz
     const midHpAlpha  = lpCoeff(200,  DECODE_SAMPLE_RATE);
     const trebAlpha   = lpCoeff(2000, DECODE_SAMPLE_RATE);   // treble > 2000 Hz
+    // Extended bands for richer spectral fingerprinting
+    const subBassAlpha = lpCoeff(80,   DECODE_SAMPLE_RATE);  // sub-bass < 80 Hz
+    const hiMidLpAlpha = lpCoeff(6000, DECODE_SAMPLE_RATE);  // upper-mid 2000–6000 Hz
+    const hiMidHpAlpha = lpCoeff(2000, DECODE_SAMPLE_RATE);
 
     const bassState   = iirState();
     const midLpState  = iirState();
     const midHpState  = iirState();
     const trebState   = iirState();
+    const subBassState = iirState();
+    const hiMidLpState = iirState();
+    const hiMidHpState = iirState();
 
     // Accumulators — waveform peaks
     const peaks = [];
     let peakMax = 0, peakRmsAccum = 0, peakSampleCount = 0;
     let peakBassMax = 0, peakMidMax = 0, peakTrebMax = 0;
+    let peakSubBassMax = 0, peakHiMidMax = 0;
 
     // Accumulators — energy segments
     const energySegments = [];
     let energyAccum = 0, energySampleCount = 0;
     let eBassAccum = 0, eMidAccum = 0, eTrebAccum = 0;
+    let eSubBassAccum = 0, eHiMidAccum = 0;
 
     let totalSamplesRead = 0;
     let leftover = Buffer.alloc(0);
@@ -1103,10 +1354,15 @@ function analyzeTrack(filePath, opts = {}) {
         const midHp  = hpFilter(midLp, midHpAlpha, midHpState);
         const mid    = midHp;
         const treble = hpFilter(norm, trebAlpha, trebState);
+        const subBass = lpFilter(norm, subBassAlpha, subBassState);
+        const hiMidLp = lpFilter(norm, hiMidLpAlpha, hiMidLpState);
+        const hiMid   = hpFilter(hiMidLp, hiMidHpAlpha, hiMidHpState);
 
         const absBass = Math.abs(bass);
         const absMid  = Math.abs(mid);
         const absTreb = Math.abs(treble);
+        const absSubBass = Math.abs(subBass);
+        const absHiMid   = Math.abs(hiMid);
 
         // ── Waveform peaks (true RMS + band maxes) ──
         if (absVal > peakMax) peakMax = absVal;
@@ -1115,6 +1371,8 @@ function analyzeTrack(filePath, opts = {}) {
         if (absBass > peakBassMax)  peakBassMax  = absBass;
         if (absMid  > peakMidMax)   peakMidMax   = absMid;
         if (absTreb > peakTrebMax)  peakTrebMax  = absTreb;
+        if (absSubBass > peakSubBassMax) peakSubBassMax = absSubBass;
+        if (absHiMid   > peakHiMidMax)   peakHiMidMax   = absHiMid;
 
         if (peakSampleCount >= samplesPerPeak) {
           peaks.push({
@@ -1123,9 +1381,12 @@ function analyzeTrack(filePath, opts = {}) {
             bass: peakBassMax,
             mid:  peakMidMax,
             treble: peakTrebMax,
+            sub_bass: peakSubBassMax,
+            upper_mid: peakHiMidMax,
           });
           peakMax = 0; peakRmsAccum = 0; peakSampleCount = 0;
           peakBassMax = 0; peakMidMax = 0; peakTrebMax = 0;
+          peakSubBassMax = 0; peakHiMidMax = 0;
         }
 
         // ── Energy levels (per-band RMS) ──
@@ -1133,6 +1394,8 @@ function analyzeTrack(filePath, opts = {}) {
         eBassAccum  += bass * bass;
         eMidAccum   += mid * mid;
         eTrebAccum  += treble * treble;
+        eSubBassAccum += subBass * subBass;
+        eHiMidAccum   += hiMid * hiMid;
         energySampleCount++;
 
         if (energySampleCount >= samplesPerEnergy) {
@@ -1143,8 +1406,11 @@ function analyzeTrack(filePath, opts = {}) {
             bass:    parseFloat(Math.sqrt(eBassAccum   / energySampleCount).toFixed(4)),
             mid:     parseFloat(Math.sqrt(eMidAccum    / energySampleCount).toFixed(4)),
             treble:  parseFloat(Math.sqrt(eTrebAccum   / energySampleCount).toFixed(4)),
+            sub_bass:  parseFloat(Math.sqrt(eSubBassAccum / energySampleCount).toFixed(4)),
+            upper_mid: parseFloat(Math.sqrt(eHiMidAccum   / energySampleCount).toFixed(4)),
           });
           energyAccum = 0; eBassAccum = 0; eMidAccum = 0; eTrebAccum = 0;
+          eSubBassAccum = 0; eHiMidAccum = 0;
           energySampleCount = 0;
         }
       }
@@ -1169,6 +1435,8 @@ function analyzeTrack(filePath, opts = {}) {
           bass: peakBassMax,
           mid:  peakMidMax,
           treble: peakTrebMax,
+          sub_bass: peakSubBassMax,
+          upper_mid: peakHiMidMax,
         });
       }
       // Flush remaining energy bucket
@@ -1180,6 +1448,8 @@ function analyzeTrack(filePath, opts = {}) {
           bass:    parseFloat(Math.sqrt(eBassAccum   / energySampleCount).toFixed(4)),
           mid:     parseFloat(Math.sqrt(eMidAccum    / energySampleCount).toFixed(4)),
           treble:  parseFloat(Math.sqrt(eTrebAccum   / energySampleCount).toFixed(4)),
+          sub_bass:  parseFloat(Math.sqrt(eSubBassAccum / energySampleCount).toFixed(4)),
+          upper_mid: parseFloat(Math.sqrt(eHiMidAccum   / energySampleCount).toFixed(4)),
         });
       }
 
@@ -1197,13 +1467,17 @@ function analyzeTrack(filePath, opts = {}) {
         bass:   parseFloat(Math.min(1, p.bass   / normRef).toFixed(4)),
         mid:    parseFloat(Math.min(1, p.mid    / normRef).toFixed(4)),
         treble: parseFloat(Math.min(1, p.treble / normRef).toFixed(4)),
+        sub_bass:  parseFloat(Math.min(1, (p.sub_bass || 0)  / normRef).toFixed(4)),
+        upper_mid: parseFloat(Math.min(1, (p.upper_mid || 0) / normRef).toFixed(4)),
       }));
 
       // Generate fluid beat grid from audio energy + BPM guide
       const bpm = opts.bpm || 0;
       const firstBeatMs = (opts.beatgridPos || 0) * 1000;
+      // Multi-point anchor support: [{pos_ms, bpm?}, ...]
+      const anchorPoints = opts.anchorPoints || [];
       const beats = bpm > 0
-        ? detectBeats(energySegments, bpm, durationMs, firstBeatMs)
+        ? detectBeats(energySegments, bpm, durationMs, firstBeatMs, anchorPoints)
         : [];
 
       // Detect structural sections using fluid beats

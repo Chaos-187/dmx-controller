@@ -286,6 +286,7 @@ function handleOs2lSubscribed(data) {
                     const result = await audioAnalyzer.analyzeTrack(actualFilePath, {
                       bpm: track.bpm || 0,
                       beatgridPos: analysisBeatgridPos,
+                      anchorPoints: getAnchorPoints(track),
                       config: getAnalysisConfig(),
                     });
                     db.upsertTrackAnalysis(track.id, result);
@@ -1820,6 +1821,21 @@ function getAnalysisConfig() {
   return cfg;
 }
 
+/**
+ * Parse multi-point beatgrid anchors from a track's poi_json.
+ * Returns [{pos_ms, bpm?}, ...] for fluid beatgrid support.
+ */
+function getAnchorPoints(track) {
+  try {
+    const pois = JSON.parse(track.poi_json || '[]');
+    return pois
+      .filter(p => p.type === 'beatgrid' && p.pos)
+      .map(p => ({ pos_ms: parseFloat(p.pos) * 1000 }))
+      .filter(p => !isNaN(p.pos_ms))
+      .sort((a, b) => a.pos_ms - b.pos_ms);
+  } catch { return []; }
+}
+
 // Trigger analysis for a track
 const analysisInProgress = new Map(); // trackId -> true
 
@@ -1854,6 +1870,7 @@ app.post('/api/tracks/:id/analyze', async (req, res) => {
     const result = await audioAnalyzer.analyzeTrack(filePath, {
       bpm: track.bpm || 0,
       beatgridPos: track.beatgrid_pos || 0,
+      anchorPoints: getAnchorPoints(track),
       config: getAnalysisConfig(),
     });
     db.upsertTrackAnalysis(trackId, result);
@@ -1909,6 +1926,7 @@ app.post('/api/tracks/analyze-batch', async (req, res) => {
       const result = await audioAnalyzer.analyzeTrack(item.track.filepath, {
         bpm: item.track.bpm || 0,
         beatgridPos: item.track.beatgrid_pos || 0,
+        anchorPoints: getAnchorPoints(item.track),
         config: analysisCfg,
       });
       return { trackId: item.trackId, result };

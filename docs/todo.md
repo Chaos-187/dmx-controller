@@ -16,8 +16,8 @@
 - [x] Keep touch controls responsive while locked (no DMX changes until PIN entered)
 
 ## Sequencer v2 Improvements
-- [ ] Refactor sequence-generator.js — file is ~2400 lines, break into modules
-- [ ] Separate fixture classification, section generation, color wheel, mover movement, effects into individual files
+- [x] Refactor sequence-generator.js — file is ~2400 lines, break into modules
+- [x] Separate fixture classification, section generation, color wheel, mover movement, effects into individual files
 - [ ] Add unit tests for generation functions
 - [ ] Support per-fixture intensity curves (not just global section intensity)
 - [ ] Multi-deck sequence blending / crossfade between sequences
@@ -25,8 +25,11 @@
 - [ ] Undo/redo in edit mode
 - [ ] Copy/paste cues between fixtures and sequences
 - [ ] Color wheel transition effects (half-color positions, split colors)
-- [ ] User-editable genre palettes and section styles from the UI
-- [ ] Sequence templates — save generation settings as reusable presets
+- [x] User-editable genre palettes and section styles from the UI
+- [x] Sequence templates — save generation settings as reusable presets
+- [x] improve audio section identifactions
+- [x] fluid beatgrid implementation for songs with changing tempos
+- [ ] look into stems for splitting songs into seprate sections to aid in sequence generation
 
 ## Edit Mode Completion
 - [ ] Channel slider live preview (send DMX values while dragging in edit mode)

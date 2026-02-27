@@ -392,6 +392,13 @@ body {
 .tl-grid.beat { background: rgba(255,255,255,.025); }
 .tl-grid.bar { background: rgba(255,255,255,.055); }
 
+/* Grid overlay — covers the lanes area for fluid beat lines */
+.tl-grid-overlay {
+  position: absolute; left: 140px; right: 0;
+  pointer-events: none; z-index: 1; display: none;
+}
+.tl-grid-overlay.active { display: block; }
+
 /* Playhead */
 .tl-playhead {
   position: absolute; top: 0; bottom: 0; width: 2px;

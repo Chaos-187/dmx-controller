@@ -487,6 +487,11 @@
     <h2 id="genModalTitle">&#127917; Generate Sequence</h2>
     <div class="gen-track-info" id="genTrackInfo"></div>
     <div class="gen-opt-row">
+      <label>Template</label>
+      <select id="genTemplate"><option value="">(None — manual settings)</option></select>
+    </div>
+    <div class="gen-opt-hint" id="genTemplateHint">Apply a saved generation preset</div>
+    <div class="gen-opt-row">
       <label>Palette</label>
       <select id="genPalette"><option value="random">Random</option></select>
     </div>
@@ -725,7 +730,30 @@ function populateGenSelects(opts) {
   (opts.genres || []).forEach(g => {
     genSel.innerHTML += `<option value="${g.key}">${esc(g.label)}</option>`;
   });
+  // Load templates
+  loadGenTemplates();
 }
+
+let _genTemplates = [];
+async function loadGenTemplates() {
+  try { _genTemplates = await fetch('/api/sequence-templates').then(r=>r.json()); } catch(e) { _genTemplates = []; }
+  const sel = document.getElementById('genTemplate');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">(None — manual settings)</option>';
+  for (const t of _genTemplates) {
+    sel.innerHTML += `<option value="${t.id}">${esc(t.name)}${t.is_default?' (default)':''}</option>`;
+  }
+  const dflt = _genTemplates.find(t => t.is_default);
+  if (dflt) sel.value = dflt.id;
+}
+
+document.getElementById('genTemplate')?.addEventListener('change', function() {
+  const tpl = _genTemplates.find(t => t.id === +this.value);
+  if (tpl) {
+    document.getElementById('genPalette').value = tpl.palette || 'random';
+    document.getElementById('genGenre').value = tpl.genre || 'auto';
+  }
+});
 
 // Show the generate options modal for a single track
 let _genPendingTrackId = null;

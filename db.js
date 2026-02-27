@@ -326,6 +326,18 @@ function init() {
       analyzed_at       TEXT    DEFAULT (datetime('now')),
       FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
     );
+
+    -- Sequence generation templates (saved presets)
+    CREATE TABLE IF NOT EXISTS sequence_templates (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      name              TEXT    NOT NULL,
+      palette           TEXT    DEFAULT 'random',
+      genre             TEXT    DEFAULT 'auto',
+      no_strobes        INTEGER DEFAULT 0,
+      generator_config  TEXT    DEFAULT NULL,
+      is_default        INTEGER DEFAULT 0,
+      created_at        TEXT    DEFAULT (datetime('now'))
+    );
   `);
 
   // Migrate: add toggle_mode column if missing (existing databases)
@@ -3274,6 +3286,48 @@ function getTracksWithAnalysis() {
   `).all();
 }
 
+// ─── Sequence Templates ────────────────────────────────────────────────────
+
+function getSequenceTemplates() {
+  return db.prepare('SELECT * FROM sequence_templates ORDER BY is_default DESC, name ASC').all().map(t => {
+    if (t.generator_config) try { t.generator_config = JSON.parse(t.generator_config); } catch(e) { t.generator_config = null; }
+    return t;
+  });
+}
+
+function getSequenceTemplate(id) {
+  const t = db.prepare('SELECT * FROM sequence_templates WHERE id = ?').get(id);
+  if (t && t.generator_config) try { t.generator_config = JSON.parse(t.generator_config); } catch(e) { t.generator_config = null; }
+  return t;
+}
+
+function createSequenceTemplate({ name, palette, genre, no_strobes, generator_config, is_default }) {
+  const r = db.prepare('INSERT INTO sequence_templates (name, palette, genre, no_strobes, generator_config, is_default) VALUES (?, ?, ?, ?, ?, ?)').run(
+    name, palette || 'random', genre || 'auto', no_strobes ? 1 : 0,
+    generator_config ? JSON.stringify(generator_config) : null,
+    is_default ? 1 : 0
+  );
+  return getSequenceTemplate(r.lastInsertRowid);
+}
+
+function updateSequenceTemplate(id, { name, palette, genre, no_strobes, generator_config, is_default }) {
+  db.prepare('UPDATE sequence_templates SET name=?, palette=?, genre=?, no_strobes=?, generator_config=?, is_default=? WHERE id=?').run(
+    name, palette || 'random', genre || 'auto', no_strobes ? 1 : 0,
+    generator_config ? JSON.stringify(generator_config) : null,
+    is_default ? 1 : 0, id
+  );
+  return getSequenceTemplate(id);
+}
+
+function deleteSequenceTemplate(id) {
+  db.prepare('DELETE FROM sequence_templates WHERE id = ?').run(id);
+}
+
+function setDefaultSequenceTemplate(id) {
+  db.prepare('UPDATE sequence_templates SET is_default = 0 WHERE is_default = 1').run();
+  if (id) db.prepare('UPDATE sequence_templates SET is_default = 1 WHERE id = ?').run(id);
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -3305,4 +3359,5 @@ module.exports = {
   getScenes, getScene, getDefaultScene, createScene, updateScene, deleteScene, setDefaultScene,
   getSceneEntries, getSceneEntry, createSceneEntry, updateSceneEntry, deleteSceneEntry, bulkUpdateSceneEntries,
   getTouchActions, getTouchAction, createTouchAction, updateTouchAction, deleteTouchAction, bulkUpdateTouchActions,
+  getSequenceTemplates, getSequenceTemplate, createSequenceTemplate, updateSequenceTemplate, deleteSequenceTemplate, setDefaultSequenceTemplate,
 };

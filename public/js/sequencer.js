@@ -96,6 +96,32 @@ const SEQ = (() => {
 
   function snapToGrid(ms) {
     if (!snapBeats || !currentSeq?.bpm) return ms;
+    // If we have fluid beat positions from analysis, snap to those
+    const beats = wfAnalysis?.beats;
+    if (beats && beats.length > 1) {
+      // Snap granularity: snapBeats 4=bar(every 4th beat), 1=beat, 0.5=half, 0.25=quarter
+      const step = Math.max(1, Math.round(snapBeats));
+      // Build snap candidates at the requested granularity
+      let best = ms, bestDist = Infinity;
+      for (let i = 0; i < beats.length; i += step) {
+        const d = Math.abs(beats[i] - ms);
+        if (d < bestDist) { bestDist = d; best = beats[i]; }
+      }
+      // For sub-beat snapping, interpolate between beats
+      if (snapBeats < 1) {
+        const subDiv = Math.round(1 / snapBeats); // 2 for half-beat, 4 for quarter
+        for (let i = 0; i < beats.length - 1; i++) {
+          const bStart = beats[i], bEnd = beats[i + 1];
+          for (let s = 0; s < subDiv; s++) {
+            const t = bStart + (bEnd - bStart) * (s / subDiv);
+            const d = Math.abs(t - ms);
+            if (d < bestDist) { bestDist = d; best = t; }
+          }
+        }
+      }
+      return best;
+    }
+    // Fallback: uniform grid
     const snapMs = (60000 / currentSeq.bpm) * snapBeats;
     return Math.round(ms / snapMs) * snapMs;
   }
@@ -417,23 +443,51 @@ const SEQ = (() => {
     canvas.style.width = (totalW + 140) + 'px';
     ruler.style.width = totalW + 'px';
 
-    // Grid spacing via CSS custom properties (replaces DOM grid-line elements)
-    const beatPx = (beatMs / 1000) * zoomPxPerSec;
-    const barPx = beatPx * 4;
-    canvas.style.setProperty('--beat-px', beatPx + 'px');
-    canvas.style.setProperty('--bar-px', barPx + 'px');
+    // Determine actual beat positions (fluid from analysis, or uniform fallback)
+    const analysisBeats = wfAnalysis?.beats;
+    const useFluidBeats = analysisBeats && analysisBeats.length > 4;
+    let beatPositions; // array of beat times in ms
+    if (useFluidBeats) {
+      beatPositions = analysisBeats;
+    } else {
+      beatPositions = [];
+      let t = 0;
+      while (t < durMs) { beatPositions.push(t); t += beatMs; }
+    }
 
-    // Ruler
-    let rHtml = '', mt = 0, bc = 0;
-    while (mt < durMs) {
-      const x = (mt / 1000) * zoomPxPerSec;
+    // Grid: when using fluid beats, disable CSS repeating gradient and use
+    // per-beat positioned grid lines in the overlay so variable spacing is visible.
+    const gridOverlay = $('tlGridOverlay');
+    if (useFluidBeats) {
+      canvas.style.setProperty('--beat-px', '0px');
+      canvas.style.setProperty('--bar-px', '0px');
+      let gridHtml = '';
+      for (let i = 0; i < beatPositions.length; i++) {
+        const x = (beatPositions[i] / 1000) * zoomPxPerSec;
+        const isBar = i % 4 === 0;
+        gridHtml += `<div class="tl-grid ${isBar ? 'bar' : 'beat'}" style="left:${x.toFixed(1)}px"></div>`;
+      }
+      gridOverlay.innerHTML = gridHtml;
+      gridOverlay.classList.add('active');
+    } else {
+      const beatPx = (beatMs / 1000) * zoomPxPerSec;
+      const barPx = beatPx * 4;
+      canvas.style.setProperty('--beat-px', beatPx + 'px');
+      canvas.style.setProperty('--bar-px', barPx + 'px');
+      gridOverlay.innerHTML = '';
+      gridOverlay.classList.remove('active');
+    }
+
+    // Ruler — use actual beat positions
+    let rHtml = '';
+    for (let bc = 0; bc < beatPositions.length; bc++) {
+      const x = (beatPositions[bc] / 1000) * zoomPxPerSec;
       const isBar = bc % 4 === 0;
       const barNum = Math.floor(bc / 4) + 1;
       if (isBar || zoomPxPerSec >= 30) {
         const label = isBar ? barNum : barNum + '.' + ((bc % 4) + 1);
-        rHtml += `<div class="tl-ruler-mark${isBar ? ' bar' : ''}" style="left:${x}px"><span class="rm-label">${label}</span></div>`;
+        rHtml += `<div class="tl-ruler-mark${isBar ? ' bar' : ''}" style="left:${x.toFixed(1)}px"><span class="rm-label">${label}</span></div>`;
       }
-      bc++; mt += beatMs;
     }
     ruler.innerHTML = rHtml;
 
@@ -486,6 +540,22 @@ const SEQ = (() => {
         renderTimeline();
       });
     });
+
+    // When using fluid beats, also disable per-lane CSS gradient backgrounds
+    // and position the grid overlay to cover the lanes area.
+    if (gridOverlay.classList.contains('active')) {
+      $$('.tl-lane-track', lanes).forEach(lt => {
+        lt.style.backgroundImage = 'none';
+      });
+      gridOverlay.style.top = lanes.offsetTop + 'px';
+      gridOverlay.style.height = lanes.offsetHeight + 'px';
+    } else {
+      $$('.tl-lane-track', lanes).forEach(lt => {
+        lt.style.backgroundImage = '';
+      });
+      gridOverlay.style.top = '';
+      gridOverlay.style.height = '';
+    }
 
     // Index cues and paint only what's visible (viewport virtualization)
     buildCueIndex(laneFixes);
@@ -1458,6 +1528,33 @@ const SEQ = (() => {
 
   // ── Modal ─────────────────────────────────────────────────────
   function closeModal() { $('genModal').classList.remove('open'); }
+
+  // ── Templates ─────────────────────────────────────────────────
+  let _seqTemplates = [];
+  async function loadTemplates() {
+    try { _seqTemplates = await apiGet('/api/sequence-templates'); } catch(e) { _seqTemplates = []; }
+    const sel = $('genTemplate');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">(None — manual settings)</option>';
+    for (const t of _seqTemplates) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name + (t.is_default ? ' (default)' : '');
+      sel.appendChild(opt);
+    }
+    const dflt = _seqTemplates.find(t => t.is_default);
+    if (dflt) sel.value = dflt.id;
+  }
+  if ($('genTemplate')) {
+    $('genTemplate').addEventListener('change', () => {
+      const tpl = _seqTemplates.find(t => t.id === +$('genTemplate').value);
+      if (tpl) {
+        const palSel = $('genPalette'); if (palSel) palSel.value = tpl.palette || 'random';
+        const genSel = $('genGenre'); if (genSel) genSel.value = tpl.genre || 'auto';
+      }
+    });
+    loadTemplates();
+  }
 
   // ═══════════════════════════════════════════════════════════════
   //  Init
