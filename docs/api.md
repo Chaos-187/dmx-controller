@@ -1,6 +1,6 @@
 # DMX Controller API Reference
 
-Base URL: `http://localhost:3000`
+Base URL: `http://localhost`
 
 All request/response bodies are JSON. Set `Content-Type: application/json` for POST/PUT requests.
 
@@ -1029,7 +1029,7 @@ Auto-generates a color-cycling sequence based on the track's BPM and duration. A
 
 ## WebSocket
 
-Connect to the WebSocket server at `ws://localhost:3000`.
+Connect to the WebSocket server at `ws://localhost`.
 
 ### Client → Server Messages
 

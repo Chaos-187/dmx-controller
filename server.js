@@ -37,6 +37,7 @@ if (process.pkg) {
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const Bonjour = require('bonjour-service').Bonjour;
@@ -49,10 +50,73 @@ const os2l = require('./os2l');
 const fixtureLibrary = require('./fixture-library');
 const { WebUSB } = require('usb');
 
+// ─── Authentication Helpers ─────────────────────────────────────────────────
+
+const AUTH_ITERATIONS = 100000;
+const AUTH_KEYLEN = 64;
+const AUTH_DIGEST = 'sha512';
+
+/** Hash a plain-text password with a random salt → { hash, salt } */
+function hashPassword(password) {
+  const salt = crypto.randomBytes(32).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, AUTH_ITERATIONS, AUTH_KEYLEN, AUTH_DIGEST).toString('hex');
+  return { hash, salt };
+}
+
+/** Verify a plain-text password against stored hash + salt */
+function verifyPassword(password, storedHash, storedSalt) {
+  const hash = crypto.pbkdf2Sync(password, storedSalt, AUTH_ITERATIONS, AUTH_KEYLEN, AUTH_DIGEST).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'));
+}
+
+/** In-memory session store: token → { username, created } */
+const authSessions = new Map();
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function createSession(username) {
+  const token = crypto.randomBytes(32).toString('hex');
+  authSessions.set(token, { username, created: Date.now() });
+  return token;
+}
+
+function validateSession(token) {
+  if (!token) return null;
+  const session = authSessions.get(token);
+  if (!session) return null;
+  if (Date.now() - session.created > SESSION_TTL) {
+    authSessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function destroySession(token) {
+  authSessions.delete(token);
+}
+
+/** Check if config-screen auth is enabled */
+function isAuthEnabled() {
+  return db.getConfig('auth_enabled') === '1'
+    && db.getConfig('auth_username')
+    && db.getConfig('auth_password_hash');
+}
+
+/**
+ * Express middleware: require a valid session when auth is enabled.
+ * Reads token from Authorization header (Bearer) or ?token query.
+ */
+function requireAuth(req, res, next) {
+  if (!isAuthEnabled()) return next();
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.query._token;
+  if (validateSession(token)) return next();
+  return res.status(401).json({ error: 'Authentication required' });
+}
+
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const OS2L_PORT = 8787;
-const WEB_PORT = 3000;
+const WEB_PORT = 80;
 const SERVICE_NAME = 'DMX-Controller';
 const MDNS_HOSTNAME_DEFAULT = 'dmxcontrol';
 
@@ -388,6 +452,101 @@ app.use(compression());
 app.use(express.json({ limit: '200mb' }));
 app.use('/lib', express.static(path.join(__dirname, 'node_modules/waveform-data/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Auth API ───────────────────────────────────────────────────────────────
+
+/** Check auth status — always accessible */
+app.get('/api/auth/status', (req, res) => {
+  const enabled = isAuthEnabled();
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.query._token;
+  const session = validateSession(token);
+  res.json({ enabled, authenticated: !!session, username: session?.username || null });
+});
+
+/** Log in with username + password → returns session token */
+app.post('/api/auth/login', (req, res) => {
+  if (!isAuthEnabled()) return res.status(400).json({ error: 'Auth is not enabled' });
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+
+  const storedUser = db.getConfig('auth_username');
+  const storedHash = db.getConfig('auth_password_hash');
+  const storedSalt = db.getConfig('auth_password_salt');
+  if (!storedUser || !storedHash || !storedSalt) return res.status(500).json({ error: 'Auth not configured' });
+
+  if (username !== storedUser || !verifyPassword(password, storedHash, storedSalt)) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  const token = createSession(username);
+  res.json({ token, username });
+});
+
+/** Log out — destroy session */
+app.post('/api/auth/logout', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (token) destroySession(token);
+  res.json({ ok: true });
+});
+
+/** Set up or update auth credentials (requires existing auth if enabled) */
+app.post('/api/auth/setup', (req, res) => {
+  // If auth is already enabled, require a valid session to change it
+  if (isAuthEnabled()) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!validateSession(token)) {
+      return res.status(401).json({ error: 'Authentication required to change credentials' });
+    }
+  }
+
+  const { enabled, username, password } = req.body || {};
+
+  if (enabled === false || enabled === '0') {
+    // Disable auth
+    db.setConfig('auth_enabled', '0');
+    // Clear all sessions
+    authSessions.clear();
+    return res.json({ ok: true, enabled: false });
+  }
+
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  if (password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
+
+  const { hash, salt } = hashPassword(password);
+  db.setConfig('auth_username', username);
+  db.setConfig('auth_password_hash', hash);
+  db.setConfig('auth_password_salt', salt);
+  db.setConfig('auth_enabled', '1');
+
+  // If caller has no session yet, create one so they stay logged in
+  const authHeader = req.headers.authorization || '';
+  const existingToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  let token = existingToken;
+  if (!validateSession(existingToken)) {
+    token = createSession(username);
+  }
+  res.json({ ok: true, enabled: true, token });
+});
+
+// ─── Auth middleware for config-related write routes ────────────────────────
+const configProtectedPrefixes = [
+  '/api/config',
+  '/api/generator-config',
+  '/api/mdns',
+  '/api/usb-devices',
+  '/api/artnet',
+  '/api/fixture-types',
+  '/api/fixture-library',
+];
+app.use((req, res, next) => {
+  if (req.method === 'GET') return next(); // reads are open
+  const isConfigPath = configProtectedPrefixes.some(p => req.path.startsWith(p));
+  if (!isConfigPath) return next();
+  return requireAuth(req, res, next);
+});
 
 // ─── Fixture Library Import API ──────────────────────────────────────────────
 
@@ -1071,10 +1230,18 @@ app.post('/api/import', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
-  res.json(db.getAllConfig());
+  const config = db.getAllConfig();
+  // Never expose password hash/salt to the client
+  delete config.auth_password_hash;
+  delete config.auth_password_salt;
+  res.json(config);
 });
 
 app.put('/api/config/:key', (req, res) => {
+  // Block direct writes to auth keys — must use /api/auth/setup
+  if (req.params.key.startsWith('auth_')) {
+    return res.status(403).json({ error: 'Use /api/auth/setup to change auth settings' });
+  }
   db.setConfig(req.params.key, req.body.value);
   // Refresh cached mixer settings when relevant keys change
   if (req.params.key.startsWith('seq_')) refreshMixerConfig();
@@ -1412,6 +1579,30 @@ app.post('/api/dmx/channels', (req, res) => {
   artnetServer.setChannels(universe, channels);
   dmxUsbServer.setChannels(universe, channels);
   res.json({ ok: true });
+});
+
+// ─── Touch PIN API ───────────────────────────────────────────────────────────
+
+/** Check if touch PIN is enabled and get idle timeout */
+app.get('/api/touch-pin/status', (req, res) => {
+  const pin = db.getConfig('touch_pin');
+  const enabled = db.getConfig('touch_pin_enabled') === '1' && !!pin;
+  const idleTimeout = parseInt(db.getConfig('touch_pin_idle_timeout') || '0', 10);
+  const pinLength = pin ? pin.length : 4;
+  res.json({ enabled, idleTimeout, pinLength });
+});
+
+/** Verify a PIN */
+app.post('/api/touch-pin/verify', (req, res) => {
+  const { pin } = req.body || {};
+  const storedPin = db.getConfig('touch_pin');
+  if (!storedPin || db.getConfig('touch_pin_enabled') !== '1') {
+    return res.json({ ok: true }); // PIN not enabled, always pass
+  }
+  if (String(pin) === String(storedPin)) {
+    return res.json({ ok: true });
+  }
+  return res.status(401).json({ ok: false, error: 'Incorrect PIN' });
 });
 
 // ─── Touch Override API ──────────────────────────────────────────────────────

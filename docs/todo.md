@@ -3,16 +3,17 @@
 ## Config Screen Overhaul
 - [ ] Consolidate config tabs — too many tabs currently, group related settings together
 - [ ] Consider collapsible sections or a sidebar nav instead of horizontal tabs
-- [ ] Add simple username/password authentication to protect the config screen
-- [ ] Store credentials hashed in the config table (bcrypt or similar)
-- [ ] Add login page that gates access to `/` and all config API routes
-- [ ] Session-based auth (cookie or token) so user stays logged in
+- [x] Add simple username/password authentication to protect the config screen
+- [x] Store credentials hashed in the config table (PBKDF2-SHA512 with salt)
+- [x] Add login page that gates access to config API routes
+- [x] Session-based auth (Bearer token) so user stays logged in
+- [x] Configurable enable/disable auth from App Settings UI
 
 ## Touch2 Security
-- [ ] Add PIN entry screen for touch2 UI
-- [ ] Configurable PIN stored in config table
-- [ ] Idle timeout — lock back to PIN screen after configurable inactivity period
-- [ ] Keep touch controls responsive while locked (no DMX changes until PIN entered)
+- [x] Add PIN entry screen for touch2 UI
+- [x] Configurable PIN stored in config table
+- [x] Idle timeout — lock back to PIN screen after configurable inactivity period
+- [x] Keep touch controls responsive while locked (no DMX changes until PIN entered)
 
 ## Sequencer v2 Improvements
 - [ ] Refactor sequence-generator.js — file is ~2400 lines, break into modules
@@ -39,4 +40,4 @@
 - [ ] Database backup/restore from UI
 - [ ] Export/import fixture types as JSON files
 - [ ] Performance profiling for large sequences (1000+ cues)
-- [ ] Change server to be hosted on port 80 instead of 3000 
+- [x] Change server to be hosted on port 80 instead of 3000 

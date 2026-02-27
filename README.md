@@ -41,7 +41,7 @@ A Node.js-based DMX lighting controller with real-time VirtualDJ integration via
                    ┌──────────────────┐        WebSocket       ┌─────────────┐
                    │  vdj-parser.js   │                        │  Browser UI  │
                    │  (XML parser)    │                        │  index.html  │
-                   └──────────────────┘        port 3000       └─────────────┘
+                   └──────────────────┘        port 80       └─────────────┘
 ```
 
 ## Prerequisites
@@ -83,10 +83,10 @@ npm run dev
 
 The server starts three listeners:
 - **OS2L TCP** on port `8787` — receives connections from VirtualDJ
-- **HTTP/WebSocket** on port `3000` — serves the web UI and pushes real-time state
+- **HTTP/WebSocket** on port `80` — serves the web UI and pushes real-time state
 - **mDNS** — advertises the `DMX-Controller` service for auto-discovery
 
-Open `http://localhost:3000` in a browser to access the web UI.
+Open `http://localhost` in a browser to access the web UI.
 
 ## Web UI Tabs
 
@@ -238,7 +238,7 @@ The SQLite database (`dmx-controller.db`) is created automatically on first run 
 | `subscription_frequency` | `25` | OS2L updates per second from VDJ |
 | `os2l_port` | `8787` | OS2L TCP server port |
 | `os2l_service_name` | `DMX-Controller` | mDNS service name |
-| `web_port` | `3000` | HTTP/WebSocket server port |
+| `web_port` | `80` | HTTP/WebSocket server port |
 | `vdj_deck_count` | `4` | Number of VDJ decks to track |
 | `dmx_refresh_rate` | `40` | USB DMX transmit rate (Hz) |
 | `artnet_refresh_rate` | `44` | Art-Net transmit rate (Hz) |

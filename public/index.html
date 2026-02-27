@@ -824,6 +824,30 @@
     .device-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
     .device-tab-panel { display: none; }
     .device-tab-panel.active { display: block; }
+    /* Login modal */
+    .login-overlay {
+      display: none; position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,.75); backdrop-filter: blur(6px);
+      justify-content: center; align-items: center;
+    }
+    .login-overlay.open { display: flex; }
+    .login-box {
+      background: var(--bg-dark); border: 1px solid var(--panel-border);
+      border-radius: 12px; padding: 32px 36px; width: 340px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.4);
+    }
+    .login-box h2 { font-size: 18px; margin-bottom: 4px; color: var(--text); }
+    .login-box .login-subtitle { font-size: 12px; color: var(--text-dim); margin-bottom: 20px; }
+    .login-box label { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+    .login-box input {
+      width: 100%; padding: 8px 10px; margin-bottom: 14px;
+      background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 6px; color: var(--text); font-size: 13px; box-sizing: border-box;
+    }
+    .login-box input:focus { border-color: var(--accent); outline: none; }
+    .login-box .login-error { color: var(--accent); font-size: 12px; margin-bottom: 10px; min-height: 16px; }
+    .login-box .login-actions { display: flex; gap: 8px; margin-top: 4px; }
+    .login-box .login-actions .btn { flex: 1; }
     .config-section { margin-bottom: 24px; }
     .config-section h3 {
       font-size: 14px; font-weight: 600; text-transform: uppercase;
@@ -1503,6 +1527,23 @@
   </div>
 </div>
 
+<!-- ══════ Login Modal ══════ -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <h2>&#128274; Config Login</h2>
+    <div class="login-subtitle">Authentication is required to access configuration.</div>
+    <label for="loginUsername">Username</label>
+    <input type="text" id="loginUsername" autocomplete="username" placeholder="Username">
+    <label for="loginPassword">Password</label>
+    <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Password">
+    <div class="login-error" id="loginError"></div>
+    <div class="login-actions">
+      <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="loginSubmitBtn">Log In</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════ Tabs ══════ -->
 <div class="tabs">
   <button class="tab-btn active" data-tab="decks">Decks</button>
@@ -2139,7 +2180,7 @@
             </div>
             <div class="config-row">
               <label>Web UI Port</label>
-              <input type="number" id="cfgWebPort" value="3000" style="width:100px">
+              <input type="number" id="cfgWebPort" value="80" style="width:100px">
               <span class="cfg-hint">Restart required on change</span>
             </div>
             <div class="config-row">
@@ -3020,6 +3061,100 @@
           <div style="margin-top:24px;padding:16px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
             <p style="font-size:12px;color:var(--text-dim)">&#128712; Analysis settings only affect new analyses. To apply changes to previously-analyzed tracks, re-analyze them from the sequencer library.</p>
           </div>
+
+          <!-- ── Config Authentication ── -->
+          <h3 style="margin-top:32px">Config Authentication</h3>
+          <p class="config-desc">Protect the Config screen with a username and password. When enabled, a login prompt appears before any config changes can be made.</p>
+
+          <table class="subs-table" style="margin-top:16px">
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th style="width:280px">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>Enable Config Auth</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">When enabled, users must log in before accessing or changing configuration. Other pages remain open.</div>
+                </td>
+                <td>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <input type="checkbox" id="settingAuthEnabled" style="accent-color:var(--accent);width:18px;height:18px">
+                    <span id="settingAuthEnabledLabel" style="font-size:12px">Off</span>
+                  </label>
+                </td>
+              </tr>
+              <tr id="authCredentialsRow" style="display:none">
+                <td>
+                  <strong>Credentials</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Set the username and password for config access. Password must be at least 4 characters.</div>
+                </td>
+                <td>
+                  <div style="display:flex;flex-direction:column;gap:8px">
+                    <input type="text" id="settingAuthUsername" placeholder="Username" autocomplete="off" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px">
+                    <input type="password" id="settingAuthPassword" placeholder="New password" autocomplete="new-password" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px">
+                    <button class="btn btn-primary btn-sm" id="btnSaveAuthCredentials">Save Credentials</button>
+                    <div id="authSaveStatus" style="font-size:11px;min-height:16px"></div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- ── Touch PIN ── -->
+          <h3 style="margin-top:32px">Touch Interface PIN</h3>
+          <p class="config-desc">Require a numeric PIN to use the Touch interface (touch2.html). Prevents accidental or unauthorized DMX control from the touch screen.</p>
+
+          <table class="subs-table" style="margin-top:16px">
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th style="width:280px">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>Enable Touch PIN</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">When enabled, the Touch interface shows a PIN entry screen. All controls are locked until the correct PIN is entered.</div>
+                </td>
+                <td>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <input type="checkbox" id="settingTouchPinEnabled" style="accent-color:var(--accent);width:18px;height:18px">
+                    <span id="settingTouchPinEnabledLabel" style="font-size:12px">Off</span>
+                  </label>
+                </td>
+              </tr>
+              <tr id="touchPinConfigRow" style="display:none">
+                <td>
+                  <strong>PIN Code</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">4–6 digit numeric PIN.</div>
+                </td>
+                <td>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <input type="text" id="settingTouchPin" placeholder="1234" maxlength="6" pattern="[0-9]*" inputmode="numeric" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:16px;font-family:monospace;width:100px;letter-spacing:4px;text-align:center">
+                    <button class="btn btn-primary btn-sm" id="btnSaveTouchPin">Save</button>
+                    <span id="touchPinSaveStatus" style="font-size:11px"></span>
+                  </div>
+                </td>
+              </tr>
+              <tr id="touchPinTimeoutRow" style="display:none">
+                <td>
+                  <strong>Idle Timeout</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Lock the touch screen after this many minutes of inactivity. Set to 0 to disable auto-lock.</div>
+                </td>
+                <td>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <input type="number" id="settingTouchPinTimeout" min="0" max="120" value="0" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;width:80px">
+                    <span style="font-size:12px;color:var(--text-dim)">minutes</span>
+                    <button class="btn btn-secondary btn-sm" id="btnSaveTouchPinTimeout">Save</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -3558,6 +3693,135 @@
      ══════════════════════════════════════════════════════════════ -->
 <script>
 // ═══════════════════════════════════════════════════════════════
+//  Authentication
+// ═══════════════════════════════════════════════════════════════
+let _authToken = sessionStorage.getItem('authToken') || null;
+let _authEnabled = false;
+let _authChecked = false;
+
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (_authToken) h['Authorization'] = 'Bearer ' + _authToken;
+  return h;
+}
+
+/** Fetch wrapper that injects the auth token */
+async function authFetch(url, opts = {}) {
+  opts.headers = { ...authHeaders(), ...(opts.headers || {}) };
+  const res = await fetch(url, opts);
+  if (res.status === 401) {
+    // Session expired — prompt re-login
+    _authToken = null;
+    sessionStorage.removeItem('authToken');
+    showLoginModal();
+    throw new Error('Authentication required');
+  }
+  return res;
+}
+
+async function checkAuthStatus() {
+  try {
+    const res = await fetch('/api/auth/status', { headers: authHeaders() });
+    const data = await res.json();
+    _authEnabled = data.enabled;
+    _authChecked = true;
+    if (data.enabled && !data.authenticated) {
+      _authToken = null;
+      sessionStorage.removeItem('authToken');
+    }
+    return data;
+  } catch {
+    _authChecked = true;
+    return { enabled: false, authenticated: false };
+  }
+}
+
+function showLoginModal(onSuccess) {
+  const overlay = document.getElementById('loginOverlay');
+  const errEl = document.getElementById('loginError');
+  const userEl = document.getElementById('loginUsername');
+  const passEl = document.getElementById('loginPassword');
+  errEl.textContent = '';
+  userEl.value = '';
+  passEl.value = '';
+  overlay.classList.add('open');
+  overlay._onSuccess = onSuccess || null;
+  setTimeout(() => userEl.focus(), 50);
+}
+
+function hideLoginModal() {
+  document.getElementById('loginOverlay').classList.remove('open');
+}
+
+document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
+document.getElementById('loginPassword').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('loginCancelBtn').addEventListener('click', () => {
+  hideLoginModal();
+  // Switch back to decks tab
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tab-btn[data-tab="decks"]').classList.add('active');
+  document.getElementById('page-decks').classList.add('active');
+});
+
+async function doLogin() {
+  const userEl = document.getElementById('loginUsername');
+  const passEl = document.getElementById('loginPassword');
+  const errEl = document.getElementById('loginError');
+  const btn = document.getElementById('loginSubmitBtn');
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Logging in...';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: userEl.value.trim(), password: passEl.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Login failed';
+      return;
+    }
+    _authToken = data.token;
+    sessionStorage.setItem('authToken', data.token);
+    hideLoginModal();
+    const cb = document.getElementById('loginOverlay')._onSuccess;
+    if (cb) cb();
+  } catch (e) {
+    errEl.textContent = 'Connection error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Log In';
+  }
+}
+
+async function doLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() });
+  } catch {}
+  _authToken = null;
+  sessionStorage.removeItem('authToken');
+}
+
+/**
+ * Gate function: checks auth before opening config tab.
+ * Returns true if access is allowed, false if login modal was shown.
+ */
+async function ensureConfigAuth(onSuccess) {
+  if (!_authEnabled) return true;
+  if (_authToken) {
+    // Verify token is still valid
+    const status = await checkAuthStatus();
+    if (status.authenticated) return true;
+  }
+  showLoginModal(onSuccess);
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Constants
 // ═══════════════════════════════════════════════════════════════
 const CHANNEL_TYPES = [
@@ -3576,7 +3840,19 @@ const CATEGORY_LABELS = {
 //  Tab Switching
 // ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
+    if (btn.dataset.tab === 'config') {
+      // Gate config tab behind auth when enabled
+      const allowed = await ensureConfigAuth(() => {
+        // On successful login, switch to config tab
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('page-config').classList.add('active');
+        loadConfigPage();
+      });
+      if (!allowed) return;
+    }
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
@@ -3769,10 +4045,13 @@ window.addEventListener('resize', () => {
   }, 200);
 });
 
-// Load deck count from config and build panels
+// Load deck count from config and check auth status on startup
 (async () => {
   try {
-    const config = await fetch('/api/config').then(r => r.json());
+    const [config] = await Promise.all([
+      fetch('/api/config').then(r => r.json()),
+      checkAuthStatus(),
+    ]);
     buildDeckPanels(parseInt(config.vdj_deck_count) || 4);
   } catch {
     buildDeckPanels(4);
@@ -6232,7 +6511,7 @@ async function loadConfigPage() {
   // VDJ
   document.getElementById('cfgOs2lPort').value = config.os2l_port || 8787;
   document.getElementById('cfgOs2lServiceName').value = config.os2l_service_name || 'DMX-Controller';
-  document.getElementById('cfgWebPort').value = config.web_port || 3000;
+  document.getElementById('cfgWebPort').value = config.web_port || 80;
   document.getElementById('cfgFrequency').value = config.subscription_frequency || 25;
   document.getElementById('cfgVdjDbPath').value = config.vdj_db_path || '';
   document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
@@ -7274,6 +7553,31 @@ async function loadAppSettings() {
     if (config.analysis_sample_rate)        document.getElementById('settingAnalysisSampleRate').value   = config.analysis_sample_rate;
     if (config.analysis_section_sensitivity) document.getElementById('settingAnalysisSensitivity').value = config.analysis_section_sensitivity;
     if (config.analysis_normalize_pct)      document.getElementById('settingAnalysisNormalize').value    = config.analysis_normalize_pct;
+
+    // Auth settings
+    const authChk = document.getElementById('settingAuthEnabled');
+    const authLbl = document.getElementById('settingAuthEnabledLabel');
+    const authOn = config.auth_enabled === '1';
+    authChk.checked = authOn;
+    authLbl.textContent = authOn ? 'On' : 'Off';
+    document.getElementById('authCredentialsRow').style.display = authOn ? '' : 'none';
+    if (config.auth_username) {
+      document.getElementById('settingAuthUsername').value = config.auth_username;
+    }
+    document.getElementById('settingAuthPassword').value = '';
+    document.getElementById('authSaveStatus').textContent = '';
+
+    // Touch PIN settings
+    const touchPinOn = config.touch_pin_enabled === '1';
+    const touchPinChk = document.getElementById('settingTouchPinEnabled');
+    const touchPinLbl = document.getElementById('settingTouchPinEnabledLabel');
+    touchPinChk.checked = touchPinOn;
+    touchPinLbl.textContent = touchPinOn ? 'On' : 'Off';
+    document.getElementById('touchPinConfigRow').style.display = touchPinOn ? '' : 'none';
+    document.getElementById('touchPinTimeoutRow').style.display = touchPinOn ? '' : 'none';
+    if (config.touch_pin) document.getElementById('settingTouchPin').value = config.touch_pin;
+    document.getElementById('settingTouchPinTimeout').value = config.touch_pin_idle_timeout || '0';
+    document.getElementById('touchPinSaveStatus').textContent = '';
   } catch(e) {
     console.error('Failed to load app settings', e);
   }
@@ -7327,6 +7631,120 @@ document.getElementById('settingDebugLogging').addEventListener('change', async 
       console.error('Failed to save analysis setting', e);
     }
   });
+});
+
+// Auth settings handlers
+document.getElementById('settingAuthEnabled').addEventListener('change', async function() {
+  const enabled = this.checked;
+  const lbl = document.getElementById('settingAuthEnabledLabel');
+  const credRow = document.getElementById('authCredentialsRow');
+  lbl.textContent = enabled ? 'On' : 'Off';
+  credRow.style.display = enabled ? '' : 'none';
+
+  if (!enabled) {
+    // Disable auth
+    try {
+      await authFetch('/api/auth/setup', {
+        method: 'POST',
+        body: JSON.stringify({ enabled: false }),
+      });
+      _authEnabled = false;
+      _authToken = null;
+      sessionStorage.removeItem('authToken');
+      document.getElementById('authSaveStatus').innerHTML = '<span style="color:var(--green)">Auth disabled</span>';
+    } catch (e) {
+      console.error('Failed to disable auth', e);
+    }
+  } else {
+    // Show credentials row — user must fill in and click Save
+    document.getElementById('settingAuthUsername').focus();
+    document.getElementById('authSaveStatus').textContent = 'Set username and password, then click Save.';
+  }
+});
+
+document.getElementById('btnSaveAuthCredentials').addEventListener('click', async function() {
+  const username = document.getElementById('settingAuthUsername').value.trim();
+  const password = document.getElementById('settingAuthPassword').value;
+  const statusEl = document.getElementById('authSaveStatus');
+  statusEl.textContent = '';
+
+  if (!username) { statusEl.innerHTML = '<span style="color:var(--accent)">Username is required</span>'; return; }
+  if (!password || password.length < 4) { statusEl.innerHTML = '<span style="color:var(--accent)">Password must be at least 4 characters</span>'; return; }
+
+  this.disabled = true;
+  this.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/auth/setup', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled: true, username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      statusEl.innerHTML = `<span style="color:var(--accent)">${data.error || 'Save failed'}</span>`;
+      return;
+    }
+    // Store the token we got back so we don't immediately lock ourselves out
+    if (data.token) {
+      _authToken = data.token;
+      sessionStorage.setItem('authToken', data.token);
+    }
+    _authEnabled = true;
+    statusEl.innerHTML = '<span style="color:var(--green)">Credentials saved &#10003;</span>';
+    document.getElementById('settingAuthPassword').value = '';
+  } catch (e) {
+    statusEl.innerHTML = '<span style="color:var(--accent)">Failed to save</span>';
+  } finally {
+    this.disabled = false;
+    this.textContent = 'Save Credentials';
+  }
+});
+
+// Touch PIN handlers
+document.getElementById('settingTouchPinEnabled').addEventListener('change', async function() {
+  const enabled = this.checked;
+  document.getElementById('settingTouchPinEnabledLabel').textContent = enabled ? 'On' : 'Off';
+  document.getElementById('touchPinConfigRow').style.display = enabled ? '' : 'none';
+  document.getElementById('touchPinTimeoutRow').style.display = enabled ? '' : 'none';
+  try {
+    await authFetch('/api/config/touch_pin_enabled', {
+      method: 'PUT',
+      body: JSON.stringify({ value: enabled ? '1' : '0' }),
+    });
+  } catch (e) {
+    console.error('Failed to save touch PIN enabled', e);
+  }
+});
+
+document.getElementById('btnSaveTouchPin').addEventListener('click', async function() {
+  const pin = document.getElementById('settingTouchPin').value.trim();
+  const statusEl = document.getElementById('touchPinSaveStatus');
+  if (!/^\d{4,6}$/.test(pin)) {
+    statusEl.innerHTML = '<span style="color:var(--accent)">PIN must be 4–6 digits</span>';
+    return;
+  }
+  try {
+    await authFetch('/api/config/touch_pin', {
+      method: 'PUT',
+      body: JSON.stringify({ value: pin }),
+    });
+    statusEl.innerHTML = '<span style="color:var(--green)">Saved &#10003;</span>';
+    setTimeout(() => { statusEl.textContent = ''; }, 2000);
+  } catch (e) {
+    statusEl.innerHTML = '<span style="color:var(--accent)">Failed to save</span>';
+  }
+});
+
+document.getElementById('btnSaveTouchPinTimeout').addEventListener('click', async function() {
+  const timeout = document.getElementById('settingTouchPinTimeout').value;
+  try {
+    await authFetch('/api/config/touch_pin_idle_timeout', {
+      method: 'PUT',
+      body: JSON.stringify({ value: String(timeout) }),
+    });
+  } catch (e) {
+    console.error('Failed to save touch PIN timeout', e);
+  }
 });
 
 document.getElementById('btnSaveMdnsConfig').addEventListener('click', async () => {

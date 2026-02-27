@@ -398,9 +398,69 @@ input[type=range]::-moz-range-thumb{
   font-size:10px;font-weight:500;color:var(--dim);
   font-variant-numeric:tabular-nums;
 }
+/* ═══════════════════════════════════════════════════════════════
+   PIN LOCK SCREEN
+   ═══════════════════════════════════════════════════════════════ */
+.pin-overlay{
+  display:none;position:fixed;inset:0;z-index:10000;
+  background:#000;flex-direction:column;align-items:center;justify-content:center;
+  padding-top:var(--safe-t);padding-bottom:var(--safe-b);
+}
+.pin-overlay.active{display:flex}
+.pin-title{font-size:28px;font-weight:700;margin-bottom:6px;letter-spacing:-.02em}
+.pin-subtitle{font-size:13px;color:var(--dim);margin-bottom:28px}
+.pin-dots{display:flex;gap:14px;margin-bottom:28px;height:20px;align-items:center}
+.pin-dot{
+  width:16px;height:16px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.3);background:transparent;
+  transition:background .1s,border-color .1s;
+}
+.pin-dot.filled{background:#fff;border-color:#fff}
+.pin-dot.wrong{border-color:var(--danger);background:var(--danger);animation:pin-shake .4s}
+@keyframes pin-shake{
+  0%,100%{transform:translateX(0)}
+  20%,60%{transform:translateX(-6px)}
+  40%,80%{transform:translateX(6px)}
+}
+.pin-pad{
+  display:grid;grid-template-columns:repeat(3,80px);gap:10px;
+}
+.pin-key{
+  width:80px;height:80px;border-radius:50%;border:1.5px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.06);color:#fff;font-size:28px;font-weight:500;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:background .1s,transform .08s;
+  font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+}
+.pin-key:active{background:rgba(255,255,255,.2);transform:scale(.92)}
+.pin-key.empty{border-color:transparent;background:transparent;pointer-events:none}
+.pin-key.fn{font-size:14px;font-weight:600;letter-spacing:.05em}
 </style>
 </head>
 <body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PIN LOCK SCREEN
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="pin-overlay" id="pinOverlay">
+  <div class="pin-title">&#128274; DMX Touch</div>
+  <div class="pin-subtitle">Enter PIN to unlock</div>
+  <div class="pin-dots" id="pinDots"></div>
+  <div class="pin-pad" id="pinPad">
+    <button class="pin-key" data-digit="1">1</button>
+    <button class="pin-key" data-digit="2">2</button>
+    <button class="pin-key" data-digit="3">3</button>
+    <button class="pin-key" data-digit="4">4</button>
+    <button class="pin-key" data-digit="5">5</button>
+    <button class="pin-key" data-digit="6">6</button>
+    <button class="pin-key" data-digit="7">7</button>
+    <button class="pin-key" data-digit="8">8</button>
+    <button class="pin-key" data-digit="9">9</button>
+    <div class="pin-key empty"></div>
+    <button class="pin-key" data-digit="0">0</button>
+    <button class="pin-key fn" id="pinBackspace">&#9003;</button>
+  </div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════════
      TOOLBAR
@@ -526,6 +586,129 @@ input[type=range]::-moz-range-thumb{
 <script>
 'use strict';
 
+/* ═══════════════════════════════════════════════════════════════
+   PIN LOCK SYSTEM
+   ═══════════════════════════════════════════════════════════════ */
+let pinEnabled = false;
+let pinLength = 4;  // will be determined from server config
+let pinIdleTimeout = 0; // minutes
+let pinEntry = '';
+let pinLocked = true;
+let idleTimer = null;
+
+async function checkPinStatus() {
+  try {
+    const data = await fetch('/api/touch-pin/status').then(r => r.json());
+    pinEnabled = data.enabled;
+    pinIdleTimeout = data.idleTimeout || 0;
+    pinLength = data.pinLength || 4;
+    if (pinEnabled) {
+      showPinScreen();
+    } else {
+      hidePinScreen();
+    }
+  } catch {
+    // If we can't reach API, don't lock
+    pinEnabled = false;
+    hidePinScreen();
+  }
+}
+
+function showPinScreen() {
+  pinLocked = true;
+  pinEntry = '';
+  renderPinDots();
+  document.getElementById('pinOverlay').classList.add('active');
+  stopIdleTimer();
+}
+
+function hidePinScreen() {
+  pinLocked = false;
+  document.getElementById('pinOverlay').classList.remove('active');
+  startIdleTimer();
+}
+
+function renderPinDots() {
+  const container = document.getElementById('pinDots');
+  container.innerHTML = '';
+  for (let i = 0; i < pinLength; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'pin-dot' + (i < pinEntry.length ? ' filled' : '');
+    container.appendChild(dot);
+  }
+}
+
+async function verifyPin() {
+  try {
+    const res = await fetch('/api/touch-pin/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: pinEntry }),
+    });
+    if (res.ok) {
+      hidePinScreen();
+    } else {
+      // Wrong PIN — shake and clear
+      document.querySelectorAll('.pin-dot.filled').forEach(d => d.classList.add('wrong'));
+      setTimeout(() => { pinEntry = ''; renderPinDots(); }, 500);
+    }
+  } catch {
+    pinEntry = '';
+    renderPinDots();
+  }
+}
+
+function onPinDigit(digit) {
+  if (pinEntry.length >= pinLength) return;
+  pinEntry += digit;
+  renderPinDots();
+  if (pinEntry.length >= pinLength) {
+    // Small delay so the last dot fills visually before verification
+    setTimeout(() => verifyPin(), 150);
+  }
+}
+
+function onPinBackspace() {
+  if (pinEntry.length > 0) {
+    pinEntry = pinEntry.slice(0, -1);
+    renderPinDots();
+  }
+}
+
+// Idle timeout
+function startIdleTimer() {
+  stopIdleTimer();
+  if (!pinEnabled || pinIdleTimeout <= 0) return;
+  const ms = pinIdleTimeout * 60 * 1000;
+  idleTimer = setTimeout(() => {
+    if (pinEnabled && !pinLocked) showPinScreen();
+  }, ms);
+}
+
+function stopIdleTimer() {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+}
+
+function resetIdleTimer() {
+  if (pinEnabled && !pinLocked && pinIdleTimeout > 0) {
+    startIdleTimer();
+  }
+}
+
+// Bind PIN pad events
+document.getElementById('pinPad').addEventListener('click', (e) => {
+  const key = e.target.closest('.pin-key');
+  if (!key) return;
+  if (key.id === 'pinBackspace') return onPinBackspace();
+  const digit = key.dataset.digit;
+  if (digit !== undefined) onPinDigit(digit);
+});
+
+// Reset idle timer on any touch/mouse activity
+['touchstart', 'pointerdown', 'keydown'].forEach(evt => {
+  document.addEventListener(evt, resetIdleTimer, { passive: true });
+});
+
 /* ─── State ────────────────────────────────────────────────── */
 let fixtures = [], groups = [], moverPresets = [], scenes = [], touchActions = [];
 let selectedColor = null, colorIntensity = 255, selectedGroups = new Set();
@@ -554,6 +737,9 @@ const COLORS = [
 
 /* ─── Init ─────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', async () => {
+  // Check PIN before initialising the app
+  await checkPinStatus();
+
   initTabs();
   initModeSwitch();
   initSliderBindings();

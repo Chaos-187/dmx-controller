@@ -491,7 +491,7 @@ function init() {
       ins.run('subscription_frequency', '25');
       ins.run('os2l_port', '8787');
       ins.run('os2l_service_name', 'DMX-Controller');
-      ins.run('web_port', '3000');
+      ins.run('web_port', '80');
       ins.run('vdj_deck_count', '4');
       ins.run('vdj_db_path', '');
       ins.run('vdj_folder', '');
