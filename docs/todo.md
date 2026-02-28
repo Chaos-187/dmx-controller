@@ -1,8 +1,8 @@
 # DMX Controller — TODO
 
 ## Config Screen Overhaul
-- [ ] Consolidate config tabs — too many tabs currently, group related settings together
-- [ ] Consider collapsible sections or a sidebar nav instead of horizontal tabs
+- [x] Consolidate config tabs — merged OS2L Subs+Buttons, Sequencer+Generator, Database+Export/Import, Network into Devices
+- [x] Sidebar nav with group headers (Hardware, DJ Integration, Lighting, Sequencer, Touch, Data) — 17 tabs reduced to 13
 - [x] Add simple username/password authentication to protect the config screen
 - [x] Store credentials hashed in the config table (PBKDF2-SHA512 with salt)
 - [x] Add login page that gates access to config API routes
@@ -23,7 +23,7 @@
 - [ ] Multi-deck sequence blending / crossfade between sequences
 - [x] Visual waveform-aligned cue editing (drag to resize, snap to waveform peaks)
 - [x] Undo/redo in edit mode
-- [ ] Copy/paste cues between fixtures and sequences
+- [x] Copy/paste cues between fixtures and sequences (Ctrl+Shift+V for cross-fixture)
 - [ ] Color wheel transition effects (half-color positions, split colors)
 - [x] User-editable genre palettes and section styles from the UI
 - [x] Sequence templates — save generation settings as reusable presets
@@ -32,15 +32,15 @@
 - [ ] look into stems for splitting songs into seprate sections to aid in sequence generation
 
 ## Edit Mode Completion
-- [ ] Channel slider live preview (send DMX values while dragging in edit mode)
+- [x] Channel slider live preview (send DMX values while dragging in edit mode)
 - [ ] Full end-to-end testing of preview system
-- [ ] Multi-cue drag selection on timeline
+- [x] Multi-cue drag selection & multi-cue resize on timeline
 - [x] Keyboard shortcuts for common edit operations
 
 ## General
 - [ ] Consolidate duplicate code between touch.html and touch2.html
-- [ ] Add error handling / reconnect logic for WebSocket disconnects
-- [ ] Database backup/restore from UI
+- [x] Add error handling / reconnect logic for WebSocket disconnects (exponential backoff, state re-sync)
+- [x] Database backup/restore from UI
 - [ ] Export/import fixture types as JSON files
 - [ ] Performance profiling for large sequences (1000+ cues)
 - [x] Change server to be hosted on port 80 instead of 3000 

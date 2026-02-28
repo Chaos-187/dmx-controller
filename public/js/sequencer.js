@@ -183,12 +183,20 @@ const SEQ = (() => {
   }
 
   // ── WebSocket ─────────────────────────────────────────────────
+  let _wsBackoff = 1000;
+  const WS_BACKOFF_MAX = 15000;
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
     ws.onopen = () => {
+      _wsBackoff = 1000;
       $('connDot').classList.add('on');
       $('connText').textContent = 'Connected';
+      // Re-sync edit preview state after reconnect
+      if (editMode && currentId) {
+        wsSend({ type: 'sequence', action: 'preview_load', sequenceId: currentId });
+      }
     };
     ws.onmessage = (e) => {
       const raw = e.data;
@@ -214,9 +222,11 @@ const SEQ = (() => {
     };
     ws.onclose = () => {
       $('connDot').classList.remove('on');
-      $('connText').textContent = 'Offline';
-      setTimeout(connect, 2000);
+      $('connText').textContent = `Reconnecting (${Math.round(_wsBackoff/1000)}s)…`;
+      setTimeout(connect, _wsBackoff);
+      _wsBackoff = Math.min(_wsBackoff * 2, WS_BACKOFF_MAX);
     };
+    ws.onerror = () => ws.close();
   }
 
   function wsSend(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
@@ -1004,11 +1014,23 @@ const SEQ = (() => {
     }
 
     el.innerHTML = html;
-    // Live value display
+    // Live value display + live DMX preview
+    let _sliderPreviewTimer = null;
     $$('.ch-range', el).forEach(inp => {
       inp.addEventListener('input', () => {
         inp.nextElementSibling.textContent = inp.value;
         updateColorFromSliders();
+        // Debounced live DMX preview when in edit mode
+        if (editMode && cue.fixture_id) {
+          clearTimeout(_sliderPreviewTimer);
+          _sliderPreviewTimer = setTimeout(() => {
+            const chVals = {};
+            $$('#channelSliders .ch-row[data-group="start"]').forEach(r => {
+              chVals[r.dataset.ch] = +r.querySelector('.ch-range').value;
+            });
+            wsSend({ type: 'sequence', action: 'preview_channel', deck, fixture_id: cue.fixture_id, cell: cue.cell || null, channel_values: chVals });
+          }, 30);
+        }
       });
     });
     // Copy start→end
@@ -1397,7 +1419,14 @@ const SEQ = (() => {
         else if (!selectedIds.has(id)) { selectCue(id); }
 
         if (e.target.classList.contains('tl-cue-resize')) {
-          dragState = { type: 'resize', cueId: id, startX: e.clientX, origW: parseFloat(cueEl.style.width), origDur: cue.duration_ms };
+          // Multi-cue resize: capture all selected cues
+          const resizeItems = [];
+          for (const sid of selectedIds) {
+            const sc = cues.find(c => c.id === sid);
+            const sel = document.querySelector(`.tl-cue[data-cue="${sid}"]`);
+            if (sc && sel) resizeItems.push({ cueId: sid, origW: parseFloat(sel.style.width), origDur: sc.duration_ms });
+          }
+          dragState = { type: 'resize', cueId: id, startX: e.clientX, origW: parseFloat(cueEl.style.width), origDur: cue.duration_ms, items: resizeItems };
         } else {
           const items = [];
           for (const sid of selectedIds) {
@@ -1456,26 +1485,28 @@ const SEQ = (() => {
       if (!dragState) return;
       const dx = e.clientX - dragState.startX;
       if (dragState.type === 'resize') {
-        const el = document.querySelector(`.tl-cue[data-cue="${dragState.cueId}"]`);
-        if (el) {
+        // Resize all selected cues proportionally
+        for (const it of (dragState.items || [{ cueId: dragState.cueId, origW: dragState.origW }])) {
+          const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
+          if (el) el.style.width = Math.max(4, it.origW + dx) + 'px';
+        }
+        // Show snap preview line at the primary cue's snapped end position
+        const cue = cues.find(c => c.id === dragState.cueId);
+        const primEl = document.querySelector(`.tl-cue[data-cue="${dragState.cueId}"]`);
+        if (cue && primEl) {
           const newW = Math.max(4, dragState.origW + dx);
-          el.style.width = newW + 'px';
-          // Show snap preview line at the snapped end position
-          const cue = cues.find(c => c.id === dragState.cueId);
-          if (cue) {
-            const rawEndMs = cue.start_ms + (newW / zoomPxPerSec) * 1000;
-            const snappedEnd = snapToGrid(rawEndMs);
-            const snapX = (snappedEnd / 1000) * zoomPxPerSec;
-            let snapLine = document.getElementById('resizeSnapLine');
-            if (!snapLine) {
-              snapLine = document.createElement('div');
-              snapLine.id = 'resizeSnapLine';
-              snapLine.className = 'tl-snap-line';
-              $('tlCanvas').appendChild(snapLine);
-            }
-            snapLine.style.left = snapX.toFixed(1) + 'px';
-            snapLine.style.display = 'block';
+          const rawEndMs = cue.start_ms + (newW / zoomPxPerSec) * 1000;
+          const snappedEnd = snapToGrid(rawEndMs);
+          const snapX = (snappedEnd / 1000) * zoomPxPerSec;
+          let snapLine = document.getElementById('resizeSnapLine');
+          if (!snapLine) {
+            snapLine = document.createElement('div');
+            snapLine.id = 'resizeSnapLine';
+            snapLine.className = 'tl-snap-line';
+            $('tlCanvas').appendChild(snapLine);
           }
+          snapLine.style.left = snapX.toFixed(1) + 'px';
+          snapLine.style.display = 'block';
         }
       } else if (dragState.type === 'move') {
         if (Math.abs(dx) > 2 || Math.abs(e.clientY - dragState.startY) > 2) dragState.moved = true;
@@ -1517,25 +1548,29 @@ const SEQ = (() => {
       const snapLine = document.getElementById('resizeSnapLine');
       if (snapLine) snapLine.style.display = 'none';
       if (dragState.type === 'resize') {
-        const cue = cues.find(c => c.id === dragState.cueId);
-        const el = document.querySelector(`.tl-cue[data-cue="${dragState.cueId}"]`);
-        if (cue && el) {
+        // Multi-cue resize commit
+        const resizeItems = dragState.items || [{ cueId: dragState.cueId, origW: dragState.origW, origDur: dragState.origDur }];
+        const resizeUndos = [];
+        for (const it of resizeItems) {
+          const cue = cues.find(c => c.id === it.cueId);
+          const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
+          if (!cue || !el) continue;
           const rawEndMs = cue.start_ms + (parseFloat(el.style.width) / zoomPxPerSec) * 1000;
           const snappedEnd = snapToGrid(rawEndMs);
-          const oldDur = dragState.origDur;
+          const oldDur = it.origDur;
           const newDur = Math.max(100, Math.round(snappedEnd - cue.start_ms));
           cue.duration_ms = newDur;
-          await apiPut(`/api/cues/${dragState.cueId}`, { duration_ms: newDur });
-          // Push undo entry for resize
-          const cueId = dragState.cueId;
-          pushUndo('resize', async () => {
-            const c = cues.find(q => q.id === cueId); if (c) { c.duration_ms = oldDur; await apiPut(`/api/cues/${cueId}`, { duration_ms: oldDur }); }
-            renderTimeline(); updateSelectionVisuals();
-          }, async () => {
-            const c = cues.find(q => q.id === cueId); if (c) { c.duration_ms = newDur; await apiPut(`/api/cues/${cueId}`, { duration_ms: newDur }); }
-            renderTimeline(); updateSelectionVisuals();
-          });
+          resizeUndos.push({ id: it.cueId, oldDur, newDur });
+          await apiPut(`/api/cues/${it.cueId}`, { duration_ms: newDur });
         }
+        const frozen = [...resizeUndos];
+        pushUndo('resize', async () => {
+          for (const r of frozen) { const c = cues.find(q => q.id === r.id); if (c) { c.duration_ms = r.oldDur; await apiPut(`/api/cues/${r.id}`, { duration_ms: r.oldDur }); } }
+          renderTimeline(); updateSelectionVisuals();
+        }, async () => {
+          for (const r of frozen) { const c = cues.find(q => q.id === r.id); if (c) { c.duration_ms = r.newDur; await apiPut(`/api/cues/${r.id}`, { duration_ms: r.newDur }); } }
+          renderTimeline(); updateSelectionVisuals();
+        });
       } else if (dragState.type === 'move' && dragState.moved) {
         let newFix = null;
         if (dragState.crossLane) {
@@ -1608,31 +1643,44 @@ const SEQ = (() => {
         return;
       }
       // Ctrl+V — Paste (with undo)
+      // Ctrl+Shift+V — Paste onto target fixture (cross-fixture paste)
       if (ctrl && key === 'v') {
         if (!clipboard || !clipboard.length || !currentId) return; e.preventDefault();
         const minStart = Math.min(...clipboard.map(c => c.start_ms));
         const offset = Math.round(playheadMs) - minStart;
+        // If Shift is held, remap all pasted cues to the first active lane fixture
+        // that's visible, or use the hovered lane
+        let targetFix = null;
+        if (e.shiftKey) {
+          const hovered = document.querySelector('.tl-lane-track:hover');
+          if (hovered && hovered.dataset.fix) {
+            targetFix = +hovered.dataset.fix;
+          } else if (activeLanes.size > 0) {
+            targetFix = [...activeLanes][0];
+          }
+        }
         const newIds = [];
         for (const clip of clipboard) {
-          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
-          if (clip.cell) body.cell = clip.cell;
+          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: targetFix || clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+          if (!targetFix && clip.cell) body.cell = clip.cell; // clear cell when retargeting fixture
           const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
           computeDisplay(nc); cues.push(nc); newIds.push(nc.id);
+          if (targetFix) activeLanes.add(targetFix);
         }
         $('infoCues').textContent = cues.length;
         selectedIds.clear(); newIds.forEach(id => selectedIds.add(id));
         selectedPrimary = newIds[0] || null;
         // Push undo for paste
         const pastedIds = [...newIds];
+        const frozenClip = JSON.parse(JSON.stringify(clipboard));
         pushUndo('paste', async () => {
           await Promise.all(pastedIds.map(id => apiDel(`/api/cues/${id}`)));
           cues = cues.filter(c => !pastedIds.includes(c.id));
           $('infoCues').textContent = cues.length; clearSelection(); renderTimeline();
         }, async () => {
-          // Re-paste (ids will differ)
-          for (const clip of clipboard) {
-            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
-            if (clip.cell) body.cell = clip.cell;
+          for (const clip of frozenClip) {
+            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: targetFix || clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+            if (!targetFix && clip.cell) body.cell = clip.cell;
             const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
             computeDisplay(nc); cues.push(nc);
           }

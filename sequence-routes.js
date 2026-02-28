@@ -40,6 +40,40 @@ router.delete('/api/db/sequences', (req, res) => {
   res.json(result);
 });
 
+// ─── Database Backup / Restore ──────────────────────────────────────────────
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+router.get('/api/db/backup', (req, res) => {
+  try {
+    const backupPath = _db.backupDatabase();
+    res.download(backupPath, 'dmx-controller-backup.db', (err) => {
+      // Clean up temp file after download (or on error)
+      try { fs.unlinkSync(backupPath); } catch (_) {}
+      if (err && !res.headersSent) res.status(500).json({ error: 'Backup download failed' });
+    });
+  } catch (e) {
+    console.error('[DB] Backup failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/api/db/restore', express.raw({ type: '*/*', limit: '500mb' }), (req, res) => {
+  try {
+    if (!req.body || !req.body.length) return res.status(400).json({ error: 'No file uploaded' });
+    const tmpPath = path.join(os.tmpdir(), `dmx-restore-${Date.now()}.db`);
+    fs.writeFileSync(tmpPath, req.body);
+    _db.restoreDatabase(tmpPath);
+    console.log('[DB] Database restored from upload');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[DB] Restore failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Sequence CRUD ──────────────────────────────────────────────────────────
 
 router.get('/api/sequences', (req, res) => {

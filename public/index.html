@@ -805,6 +805,12 @@
     .config-sidebar-btn:hover { color: var(--text); background: rgba(233,69,96,.04); }
     .config-sidebar-btn.active { color: var(--accent); border-left-color: var(--accent); background: rgba(233,69,96,.08); }
     .config-sidebar-btn .cfg-icon { margin-right: 8px; font-size: 14px; }
+    .cfg-group-label {
+      display: block; padding: 10px 16px 4px; font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim);
+      opacity: .55; pointer-events: none; user-select: none;
+    }
+    .cfg-group-label:not(:first-child) { border-top: 1px solid var(--panel-border); margin-top: 2px; }
     .config-panel {
       flex: 1; padding: 20px;
       background: rgba(17,17,24,.5); border: 1px solid var(--panel-border); border-left: none;
@@ -824,6 +830,18 @@
     .device-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
     .device-tab-panel { display: none; }
     .device-tab-panel.active { display: block; }
+    /* Sequencer sub-tabs (reuses device-tab visual style) */
+    .seq-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 18px; flex-wrap: wrap; }
+    .seq-tab-btn {
+      padding: 8px 22px; cursor: pointer; border: none; background: none;
+      color: var(--text-dim); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      border-bottom: 2px solid transparent; transition: all .15s; font-family: var(--font);
+    }
+    .seq-tab-btn:hover { color: var(--text); background: rgba(255,255,255,.02); }
+    .seq-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .seq-tab-panel { display: none; }
+    .seq-tab-panel.active { display: block; }
     /* Login modal */
     .login-overlay {
       display: none; position: fixed; inset: 0; z-index: 9999;
@@ -1969,22 +1987,24 @@
   <div class="config-layout">
     <!-- Sidebar Navigation -->
     <div class="config-sidebar">
+      <span class="cfg-group-label">Hardware</span>
       <button class="config-sidebar-btn active" data-cfgtab="devices"><span class="cfg-icon">&#9783;</span>Devices</button>
+      <span class="cfg-group-label">DJ Integration</span>
       <button class="config-sidebar-btn" data-cfgtab="vdj"><span class="cfg-icon">&#9835;</span>VirtualDJ</button>
-      <button class="config-sidebar-btn" data-cfgtab="os2l-subs"><span class="cfg-icon">&#9889;</span>OS2L Subs</button>
-      <button class="config-sidebar-btn" data-cfgtab="os2l-buttons"><span class="cfg-icon">&#9881;</span>OS2L Buttons</button>
+      <button class="config-sidebar-btn" data-cfgtab="os2l"><span class="cfg-icon">&#9889;</span>OS2L</button>
+      <span class="cfg-group-label">Lighting</span>
       <button class="config-sidebar-btn" data-cfgtab="lighting"><span class="cfg-icon">&#9728;</span>Lighting</button>
       <button class="config-sidebar-btn" data-cfgtab="movers"><span class="cfg-icon">&#10146;</span>Movers</button>
-      <button class="config-sidebar-btn" data-cfgtab="sequencer"><span class="cfg-icon">&#9836;</span>Sequencer</button>
-      <button class="config-sidebar-btn" data-cfgtab="generator"><span class="cfg-icon">&#9881;</span>Generator</button>
       <button class="config-sidebar-btn" data-cfgtab="effects"><span class="cfg-icon">&#10024;</span>Effects</button>
+      <span class="cfg-group-label">Sequencer</span>
+      <button class="config-sidebar-btn" data-cfgtab="sequencer"><span class="cfg-icon">&#9836;</span>Sequencer</button>
+      <span class="cfg-group-label">Touch</span>
       <button class="config-sidebar-btn" data-cfgtab="touch-actions"><span class="cfg-icon">&#9654;</span>Touch Actions</button>
-      <button class="config-sidebar-btn" data-cfgtab="fixture-library"><span class="cfg-icon">&#128161;</span>Fixture Library</button>
+      <span class="cfg-group-label">Data</span>
       <button class="config-sidebar-btn" data-cfgtab="database"><span class="cfg-icon">&#128451;</span>Database</button>
-      <button class="config-sidebar-btn" data-cfgtab="export-import"><span class="cfg-icon">&#128230;</span>Export / Import</button>
-      <button class="config-sidebar-btn" data-cfgtab="network"><span class="cfg-icon">&#127760;</span>Network</button>
-      <button class="config-sidebar-btn" data-cfgtab="event-log"><span class="cfg-icon">&#9776;</span>Event Log</button>
+      <button class="config-sidebar-btn" data-cfgtab="fixture-library"><span class="cfg-icon">&#128161;</span>Fixture Library</button>
       <div style="flex:1"></div>
+      <button class="config-sidebar-btn" data-cfgtab="event-log"><span class="cfg-icon">&#9776;</span>Event Log</button>
       <button class="config-sidebar-btn" data-cfgtab="app-settings"><span class="cfg-icon">&#9881;</span>App Settings</button>
       <button class="config-sidebar-btn" data-cfgtab="about"><span class="cfg-icon">&#9432;</span>About</button>
     </div>
@@ -1997,6 +2017,7 @@
         <div class="device-tabs">
           <button class="device-tab-btn active" data-devtab="usb">&#9783; DMX USB</button>
           <button class="device-tab-btn" data-devtab="artnet">&#9729; Art-Net</button>
+          <button class="device-tab-btn" data-devtab="network">&#127760; Network</button>
         </div>
 
         <!-- USB DMX Tab -->
@@ -2085,6 +2106,60 @@
               </thead>
               <tbody id="artnetNodesBody"></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Network Tab -->
+        <div class="device-tab-panel" id="devtab-network">
+          <div class="config-section">
+            <h3>Network &amp; mDNS</h3>
+            <p class="config-desc">Configure mDNS (Bonjour) so you can access the controller from any device on your network using a friendly <code>.local</code> hostname instead of an IP address.</p>
+
+            <div class="config-card">
+              <h4>mDNS Responder</h4>
+              <div class="config-row">
+                <label>Enable mDNS</label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input type="checkbox" id="cfgMdnsEnabled" checked style="width:16px;height:16px;accent-color:var(--accent)">
+                  <span style="font-size:12px">Advertise a <code>.local</code> hostname on the network</span>
+                </label>
+              </div>
+              <div class="config-row">
+                <label>Hostname</label>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="text" id="cfgMdnsHostname" value="dmxcontrol" style="width:200px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px" placeholder="dmxcontrol">
+                  <span style="font-size:13px;color:var(--text-dim)">.local</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:12px;display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" id="btnSaveMdnsConfig">Save &amp; Apply</button>
+            </div>
+
+            <div class="config-card" style="margin-top:20px">
+              <h4>Status</h4>
+              <div class="config-row">
+                <label>Responder</label>
+                <span id="mdnsStatusBadge" style="font-size:12px;color:var(--text-dim)">—</span>
+              </div>
+              <div class="config-row">
+                <label>Address</label>
+                <span id="mdnsStatusAddr" style="font-size:12px;color:var(--text-dim)">—</span>
+              </div>
+              <div class="config-row">
+                <label>Local IP</label>
+                <span id="mdnsStatusIP" style="font-size:12px;color:var(--text-dim)">—</span>
+              </div>
+              <div class="config-row">
+                <label>Web Port</label>
+                <span id="mdnsStatusWebPort" style="font-size:12px;color:var(--text-dim)">—</span>
+              </div>
+              <div class="config-row">
+                <label>OS2L Port</label>
+                <span id="mdnsStatusOs2lPort" style="font-size:12px;color:var(--text-dim)">—</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2268,8 +2343,8 @@
         </div>
       </div>
 
-      <!-- ─── OS2L Subscriptions ─── -->
-      <div class="config-sub-page" id="cfgpage-os2l-subs">
+      <!-- ─── OS2L (Subscriptions + Button Mappings) ─── -->
+      <div class="config-sub-page" id="cfgpage-os2l">
         <div class="config-section">
           <h3>OS2L Subscriptions</h3>
           <p class="config-desc">Manage the VirtualDJ trigger expressions sent via OS2L. Toggle, add, or remove individual subscriptions.</p>
@@ -2292,11 +2367,8 @@
             <tbody id="subsTableBody"></tbody>
           </table>
         </div>
-      </div>
 
-      <!-- ─── OS2L Button Mappings ─── -->
-      <div class="config-sub-page" id="cfgpage-os2l-buttons">
-        <div class="config-section">
+        <div class="config-section" style="margin-top:28px">
           <h3>OS2L Button Mappings</h3>
           <p class="config-desc">Map incoming OS2L button events from VirtualDJ to DMX actions. When VirtualDJ sends a button event matching the OS2L value, the configured action will execute automatically.</p>
           <div class="subs-status-bar" id="btnMapsStatus">
@@ -2415,6 +2487,21 @@
 
       <!-- ─── Sequencer ─── -->
       <div class="config-sub-page" id="cfgpage-sequencer">
+        <div class="seq-tabs">
+          <button class="seq-tab-btn active" data-seqtab="playback">&#9654; Playback</button>
+          <button class="seq-tab-btn" data-seqtab="colors">&#127912; Colors</button>
+          <button class="seq-tab-btn" data-seqtab="genres">&#127926; Genres &amp; Styles</button>
+          <button class="seq-tab-btn" data-seqtab="movement">&#128260; Movement</button>
+          <button class="seq-tab-btn" data-seqtab="effects">&#9889; Effects</button>
+          <button class="seq-tab-btn" data-seqtab="templates">&#128196; Templates</button>
+        </div>
+
+        <!-- Hidden canonical save/reset targets (delegated from per-tab buttons) -->
+        <button id="btnSaveGenConfig" style="display:none"></button>
+        <button id="btnResetGenConfig" style="display:none"></button>
+
+        <!-- Playback Tab -->
+        <div class="seq-tab-panel active" id="seqtab-playback">
         <div class="config-section">
           <h3>Sequencer Auto-Play</h3>
           <p class="config-desc">When a track is loaded onto a VirtualDJ deck, the server can automatically load and play the matching light sequence (if one is linked to that track). This keeps your lighting in sync without manual intervention.</p>
@@ -2516,13 +2603,69 @@
           </table>
           <div style="font-size:11px;color:var(--text-dim);margin-top:8px" id="linkedSeqCount"></div>
         </div>
-      </div>
+        </div>
 
-      <!-- ─── Generator Config ─── -->
-      <div class="config-sub-page" id="cfgpage-generator">
+        <!-- Colors Tab -->
+        <div class="seq-tab-panel" id="seqtab-colors">
         <div class="config-section">
-          <h3>Sequence Generator Settings</h3>
-          <p class="config-desc">Adjust the parameters used when auto-generating light sequences. Changes apply to all future sequence generation. Click "Reset to Defaults" to restore factory settings.</p>
+          <h3>Color Palettes</h3>
+          <p class="config-desc">Named palettes with per-section color pairs. Click swatches to change colors. Changes apply to all future sequence generation.</p>
+
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Color Palettes</h4><button class="btn btn-sm gen-json-toggle" data-editor="genColorPalettesEditor" data-key="gen_color_palettes">{ }</button></div>
+            <div id="genColorPalettesEditor"></div>
+            <textarea id="genColorPalettesRaw" rows="16" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-reset-gen" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
+          </div>
+        </div>
+        </div>
+
+        <!-- Genres & Styles Tab -->
+        <div class="seq-tab-panel" id="seqtab-genres">
+        <div class="config-section">
+          <h3>Genres &amp; Styles</h3>
+          <p class="config-desc">Configure per-section intensity, strobe chances, cue density, and per-genre multipliers. Genre aliases map track metadata to preset keys.</p>
+
+          <!-- Section Styles -->
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Section Styles</h4><button class="btn btn-sm gen-json-toggle" data-editor="genSectionStylesEditor" data-key="gen_section_styles">{ }</button></div>
+            <p class="config-desc">Per-section intensity ranges, strobe chances, and cue density.</p>
+            <div id="genSectionStylesEditor"></div>
+            <textarea id="genSectionStylesRaw" rows="14" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Genre Presets -->
+          <div class="config-card" style="margin-top:16px">
+            <div class="gen-card-header"><h4>Genre Presets</h4><button class="btn btn-sm gen-json-toggle" data-editor="genGenrePresetsEditor" data-key="gen_genre_presets">{ }</button></div>
+            <p class="config-desc">Per-genre multipliers for intensity, strobes, cue density, and preferred palette.</p>
+            <div id="genGenrePresetsEditor"></div>
+            <textarea id="genGenrePresetsRaw" rows="14" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <!-- Genre Aliases -->
+          <div class="config-card" style="margin-top:16px">
+            <div class="gen-card-header"><h4>Genre Aliases</h4><button class="btn btn-sm gen-json-toggle" data-editor="genGenreAliasesEditor" data-key="gen_genre_aliases">{ }</button></div>
+            <p class="config-desc">Maps genre strings (from track metadata) to preset keys above.</p>
+            <div id="genGenreAliasesEditor"></div>
+            <textarea id="genGenreAliasesRaw" rows="10" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-reset-gen" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
+          </div>
+        </div>
+        </div>
+
+        <!-- Movement Tab -->
+        <div class="seq-tab-panel" id="seqtab-movement">
+        <div class="config-section">
+          <h3>Movement &amp; Speed</h3>
+          <p class="config-desc">Motor speed DMX values and per-section mover movement parameters.</p>
 
           <!-- Speed DMX -->
           <div class="config-card">
@@ -2542,30 +2685,6 @@
             </div>
           </div>
 
-          <!-- Color Palettes -->
-          <div class="config-card" style="margin-top:16px">
-            <div class="gen-card-header"><h4>Color Palettes</h4><button class="btn btn-sm gen-json-toggle" data-editor="genColorPalettesEditor" data-key="gen_color_palettes">{ }</button></div>
-            <p class="config-desc">Named palettes with per-section color pairs. Click swatches to change colors.</p>
-            <div id="genColorPalettesEditor"></div>
-            <textarea id="genColorPalettesRaw" rows="16" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
-          </div>
-
-          <!-- Section Styles -->
-          <div class="config-card" style="margin-top:16px">
-            <div class="gen-card-header"><h4>Section Styles</h4><button class="btn btn-sm gen-json-toggle" data-editor="genSectionStylesEditor" data-key="gen_section_styles">{ }</button></div>
-            <p class="config-desc">Per-section intensity ranges, strobe chances, and cue density.</p>
-            <div id="genSectionStylesEditor"></div>
-            <textarea id="genSectionStylesRaw" rows="14" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
-          </div>
-
-          <!-- Genre Presets -->
-          <div class="config-card" style="margin-top:16px">
-            <div class="gen-card-header"><h4>Genre Presets</h4><button class="btn btn-sm gen-json-toggle" data-editor="genGenrePresetsEditor" data-key="gen_genre_presets">{ }</button></div>
-            <p class="config-desc">Per-genre multipliers for intensity, strobes, cue density, and preferred palette.</p>
-            <div id="genGenrePresetsEditor"></div>
-            <textarea id="genGenrePresetsRaw" rows="14" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
-          </div>
-
           <!-- Movement Styles -->
           <div class="config-card" style="margin-top:16px">
             <div class="gen-card-header"><h4>Movement Styles</h4><button class="btn btn-sm gen-json-toggle" data-editor="genMovementStylesEditor" data-key="gen_movement_styles">{ }</button></div>
@@ -2574,16 +2693,21 @@
             <textarea id="genMovementStylesRaw" rows="12" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
           </div>
 
-          <!-- Genre Aliases -->
-          <div class="config-card" style="margin-top:16px">
-            <div class="gen-card-header"><h4>Genre Aliases</h4><button class="btn btn-sm gen-json-toggle" data-editor="genGenreAliasesEditor" data-key="gen_genre_aliases">{ }</button></div>
-            <p class="config-desc">Maps genre strings (from track metadata) to preset keys above.</p>
-            <div id="genGenreAliasesEditor"></div>
-            <textarea id="genGenreAliasesRaw" rows="10" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-reset-gen" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
           </div>
+        </div>
+        </div>
+
+        <!-- Effects & Patterns Tab -->
+        <div class="seq-tab-panel" id="seqtab-effects">
+        <div class="config-section">
+          <h3>Effects &amp; Cell Patterns</h3>
+          <p class="config-desc">Configure which effect types are allowed per section and multi-cell pattern assignments.</p>
 
           <!-- Section Effect Types -->
-          <div class="config-card" style="margin-top:16px">
+          <div class="config-card">
             <div class="gen-card-header"><h4>Section Effect Types</h4><button class="btn btn-sm gen-json-toggle" data-editor="genSectionEffectsEditor" data-key="gen_section_effects">{ }</button></div>
             <p class="config-desc">Which effect types are allowed per section.</p>
             <div id="genSectionEffectsEditor"></div>
@@ -2599,14 +2723,18 @@
           </div>
 
           <div style="margin-top:16px;display:flex;gap:8px">
-            <button class="btn btn-primary btn-sm" id="btnSaveGenConfig">Save Generator Config</button>
-            <button class="btn btn-sm" id="btnResetGenConfig" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-reset-gen" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
           </div>
+        </div>
+        </div>
 
-          <!-- Sequence Templates -->
-          <div class="config-card" style="margin-top:24px">
-            <h4>Sequence Templates</h4>
-            <p class="config-desc">Save named generation presets (palette, genre, strobe settings). Templates can be selected in the Generate modal. The default template is auto-selected for new generations.</p>
+        <!-- Templates Tab -->
+        <div class="seq-tab-panel" id="seqtab-templates">
+        <div class="config-section">
+          <h3>Sequence Templates</h3>
+          <p class="config-desc">Save named generation presets (palette, genre, strobe settings). Templates can be selected in the Generate modal. The default template is auto-selected for new generations.</p>
+          <div class="config-card">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
               <button class="btn btn-primary btn-sm" id="btnAddTemplate">+ New Template</button>
               <span style="font-size:11px;color:var(--text-dim)" id="tplCount"></span>
@@ -2639,6 +2767,7 @@
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
 
@@ -2734,60 +2863,6 @@
         </div>
       </div>
 
-      <!-- ─── Network / mDNS ─── -->
-      <div class="config-sub-page" id="cfgpage-network">
-        <div class="config-section">
-          <h3>Network &amp; mDNS</h3>
-          <p class="config-desc">Configure mDNS (Bonjour) so you can access the controller from any device on your network using a friendly <code>.local</code> hostname instead of an IP address.</p>
-
-          <div class="config-card">
-            <h4>mDNS Responder</h4>
-            <div class="config-row">
-              <label>Enable mDNS</label>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" id="cfgMdnsEnabled" checked style="width:16px;height:16px;accent-color:var(--accent)">
-                <span style="font-size:12px">Advertise a <code>.local</code> hostname on the network</span>
-              </label>
-            </div>
-            <div class="config-row">
-              <label>Hostname</label>
-              <div style="display:flex;align-items:center;gap:6px">
-                <input type="text" id="cfgMdnsHostname" value="dmxcontrol" style="width:200px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px" placeholder="dmxcontrol">
-                <span style="font-size:13px;color:var(--text-dim)">.local</span>
-              </div>
-            </div>
-          </div>
-
-          <div style="margin-top:12px;display:flex;gap:8px">
-            <button class="btn btn-primary btn-sm" id="btnSaveMdnsConfig">Save &amp; Apply</button>
-          </div>
-
-          <div class="config-card" style="margin-top:20px">
-            <h4>Status</h4>
-            <div class="config-row">
-              <label>Responder</label>
-              <span id="mdnsStatusBadge" style="font-size:12px;color:var(--text-dim)">—</span>
-            </div>
-            <div class="config-row">
-              <label>Address</label>
-              <span id="mdnsStatusAddr" style="font-size:12px;color:var(--text-dim)">—</span>
-            </div>
-            <div class="config-row">
-              <label>Local IP</label>
-              <span id="mdnsStatusIP" style="font-size:12px;color:var(--text-dim)">—</span>
-            </div>
-            <div class="config-row">
-              <label>Web Port</label>
-              <span id="mdnsStatusWebPort" style="font-size:12px;color:var(--text-dim)">—</span>
-            </div>
-            <div class="config-row">
-              <label>OS2L Port</label>
-              <span id="mdnsStatusOs2lPort" style="font-size:12px;color:var(--text-dim)">—</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- ─── Database ─── -->
       <div class="config-sub-page" id="cfgpage-database">
         <div class="config-section">
@@ -2804,6 +2879,28 @@
               <div class="db-stat-card"><span class="db-stat-val" id="dbStatFixtures">—</span><span class="db-stat-label">Fixtures</span></div>
               <div class="db-stat-card"><span class="db-stat-val" id="dbStatEffects">—</span><span class="db-stat-label">Effects</span></div>
             </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <h3>Backup &amp; Restore</h3>
+          <p class="config-desc">Download a full copy of the database or restore from a previous backup.</p>
+
+          <div class="config-card">
+            <h4>Download Backup</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Creates a safe snapshot of the entire database file including all tracks, analyses, sequences, cues, fixtures, effects, and settings.</p>
+            <button class="btn btn-primary btn-sm" id="btnDbBackup">&#128190; Download Backup</button>
+            <div id="dbBackupStatus" style="font-size:11px;color:var(--text-dim);margin-top:6px"></div>
+          </div>
+
+          <div class="config-card" style="border-color:rgba(255,170,0,.25);margin-top:12px">
+            <h4 style="color:#ffa800">&#9888; Restore from Backup</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px"><strong>Warning:</strong> Restoring will replace the current database with the uploaded file. The server will automatically restart. This cannot be undone.</p>
+            <div style="display:flex;align-items:center;gap:10px">
+              <input type="file" id="dbRestoreFile" accept=".db,.sqlite,.backup" style="font-size:12px;color:var(--text-dim)">
+              <button class="btn btn-danger btn-sm" id="btnDbRestore" disabled>Restore</button>
+            </div>
+            <div id="dbRestoreStatus" style="font-size:11px;color:var(--text-dim);margin-top:6px"></div>
           </div>
         </div>
 
@@ -2826,6 +2923,78 @@
               <button class="btn btn-danger btn-sm" id="btnDeleteTrackSequence" disabled>Delete Sequence</button>
             </div>
             <div id="dbTrackActionResult" style="font-size:11px;color:var(--text-dim);margin-top:8px"></div>
+          </div>
+        </div>
+
+        <!-- Export / Import (merged into Database page) -->
+        <div class="config-section" style="margin-top:28px">
+          <h3>Export / Import</h3>
+          <p class="config-desc">Export your fixture setup, effects, mover presets, and scenes to a JSON file for backup or transfer. Import from a previously exported file to restore or merge configurations.</p>
+
+          <!-- Export -->
+          <div class="config-card" style="margin-top:12px">
+            <h4>Export</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Select what to include in the export file. All selected items will be saved as a single JSON file.</p>
+
+            <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="groups" checked style="accent-color:var(--accent)"> Groups
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="effects" checked style="accent-color:var(--accent)"> Effects
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
+              </label>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btnExport">&#128190; Download Export File</button>
+          </div>
+
+          <!-- Import -->
+          <div class="config-card" style="margin-top:20px">
+            <h4>Import</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Upload a previously exported JSON file. Existing items with matching names will be updated; new items will be created.</p>
+
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <input type="file" id="importFile" accept=".json" style="font-size:12px">
+            </div>
+
+            <div id="importPreview" style="display:none;margin-bottom:16px;padding:12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
+              <div style="font-size:12px;font-weight:600;margin-bottom:8px">File Contents:</div>
+              <div id="importPreviewList" style="font-size:12px;color:var(--text-dim)"></div>
+              <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="groups" checked style="accent-color:var(--accent)"> Groups
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="effects" checked style="accent-color:var(--accent)"> Effects
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
+                </label>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-sm" id="btnImport" disabled>&#128230; Import Selected</button>
+            <div id="importResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:12px"></div>
           </div>
         </div>
 
@@ -3241,80 +3410,6 @@
               </tr>
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <!-- ─── Export / Import ─── -->
-      <div class="config-sub-page" id="cfgpage-export-import">
-        <div class="config-section">
-          <h3>Export / Import</h3>
-          <p class="config-desc">Export your fixture setup, effects, mover presets, and scenes to a JSON file for backup or transfer. Import from a previously exported file to restore or merge configurations.</p>
-
-          <!-- Export -->
-          <div class="config-card" style="margin-top:20px">
-            <h4>Export</h4>
-            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Select what to include in the export file. All selected items will be saved as a single JSON file.</p>
-
-            <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="groups" checked style="accent-color:var(--accent)"> Groups
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="effects" checked style="accent-color:var(--accent)"> Effects
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                <input type="checkbox" class="export-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
-              </label>
-            </div>
-            <button class="btn btn-primary btn-sm" id="btnExport">&#128190; Download Export File</button>
-          </div>
-
-          <!-- Import -->
-          <div class="config-card" style="margin-top:20px">
-            <h4>Import</h4>
-            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Upload a previously exported JSON file. Existing items with matching names will be updated; new items will be created.</p>
-
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-              <input type="file" id="importFile" accept=".json" style="font-size:12px">
-            </div>
-
-            <div id="importPreview" style="display:none;margin-bottom:16px;padding:12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
-              <div style="font-size:12px;font-weight:600;margin-bottom:8px">File Contents:</div>
-              <div id="importPreviewList" style="font-size:12px;color:var(--text-dim)"></div>
-              <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px">
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="groups" checked style="accent-color:var(--accent)"> Groups
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="effects" checked style="accent-color:var(--accent)"> Effects
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-                  <input type="checkbox" class="import-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
-                </label>
-              </div>
-            </div>
-
-            <button class="btn btn-primary btn-sm" id="btnImport" disabled>&#128230; Import Selected</button>
-            <div id="importResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:12px"></div>
-          </div>
         </div>
       </div>
 
@@ -6550,17 +6645,20 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
       if (activeDevTab) {
         if (activeDevTab.dataset.devtab === 'usb') loadUsbDevices();
         if (activeDevTab.dataset.devtab === 'artnet') loadArtnetNodes();
+        if (activeDevTab.dataset.devtab === 'network') loadNetworkConfig();
       } else { loadUsbDevices(); }
     }
-    if (btn.dataset.cfgtab === 'os2l-subs') loadSubscriptions();
+    if (btn.dataset.cfgtab === 'os2l') { loadSubscriptions(); loadButtonMaps(); }
     if (btn.dataset.cfgtab === 'lighting') loadLightingConfig();
     if (btn.dataset.cfgtab === 'movers') loadMoverConfig();
-    if (btn.dataset.cfgtab === 'sequencer') loadSequencerConfig();
-    if (btn.dataset.cfgtab === 'generator') loadGeneratorConfig();
+    if (btn.dataset.cfgtab === 'sequencer') {
+      loadSequencerConfig();
+      const activeSeqTab = document.querySelector('.seq-tab-btn.active');
+      if (activeSeqTab && _seqGenTabs.has(activeSeqTab.dataset.seqtab)) loadGeneratorConfig();
+    }
     if (btn.dataset.cfgtab === 'effects') loadEffectsConfig();
     if (btn.dataset.cfgtab === 'touch-actions') loadTouchActionsConfig();
     if (btn.dataset.cfgtab === 'database') loadDatabaseConfig();
-    if (btn.dataset.cfgtab === 'network') loadNetworkConfig();
     if (btn.dataset.cfgtab === 'app-settings') loadAppSettings();
     if (btn.dataset.cfgtab === 'fixture-library') loadTypes();
     if (btn.dataset.cfgtab === 'about') loadAboutInfo();
@@ -6578,7 +6676,42 @@ document.querySelectorAll('.device-tab-btn').forEach(btn => {
     document.getElementById('devtab-' + btn.dataset.devtab).classList.add('active');
     if (btn.dataset.devtab === 'usb') loadUsbDevices();
     if (btn.dataset.devtab === 'artnet') loadArtnetNodes();
+    if (btn.dataset.devtab === 'network') loadNetworkConfig();
   });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Sequencer — Sub-tab Switching (Playback / Generator / Templates)
+// ═══════════════════════════════════════════════════════════════
+const _seqGenTabs = new Set(['colors','genres','movement','effects','templates']);
+document.querySelectorAll('.seq-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.seq-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.seq-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('seqtab-' + btn.dataset.seqtab).classList.add('active');
+    if (_seqGenTabs.has(btn.dataset.seqtab)) loadGeneratorConfig();
+  });
+});
+// Delegate Save / Reset clicks from per-tab buttons
+document.getElementById('cfgpage-sequencer').addEventListener('click', async (e) => {
+  if (e.target.classList.contains('btn-save-gen')) {
+    document.getElementById('btnSaveGenConfig').click();
+    // Mirror feedback to the visible button
+    const canonical = document.getElementById('btnSaveGenConfig');
+    const mirror = () => { e.target.textContent = canonical.textContent; e.target.style.borderColor = canonical.style.borderColor; e.target.style.color = canonical.style.color; };
+    const obs = new MutationObserver(mirror);
+    obs.observe(canonical, { childList: true, attributes: true, attributeFilter: ['style'] });
+    setTimeout(() => obs.disconnect(), 3000);
+  }
+  if (e.target.classList.contains('btn-reset-gen')) {
+    document.getElementById('btnResetGenConfig').click();
+    const canonical = document.getElementById('btnResetGenConfig');
+    const mirror = () => { e.target.textContent = canonical.textContent; e.target.style.borderColor = canonical.style.borderColor; e.target.style.color = canonical.style.color; };
+    const obs = new MutationObserver(mirror);
+    obs.observe(canonical, { childList: true, attributes: true, attributeFilter: ['style'] });
+    setTimeout(() => obs.disconnect(), 3000);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -6606,7 +6739,7 @@ async function loadConfigPage() {
 
   // Load active sub-tab
   const activeSubTab = document.querySelector('.config-sidebar-btn.active');
-  if (activeSubTab && activeSubTab.dataset.cfgtab === 'os2l-subs') loadSubscriptions();
+  if (activeSubTab && activeSubTab.dataset.cfgtab === 'os2l') { loadSubscriptions(); loadButtonMaps(); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7688,6 +7821,58 @@ document.getElementById('btnDeleteAllTracks').addEventListener('click', async ()
     btn.textContent = 'Error!';
   }
   setTimeout(() => { btn.disabled = false; btn.textContent = 'Delete All Tracks'; btn.style.borderColor = ''; btn.style.color = ''; }, 2000);
+});
+
+// Backup: download a copy of the database
+document.getElementById('btnDbBackup').addEventListener('click', async () => {
+  const btn = document.getElementById('btnDbBackup');
+  const status = document.getElementById('dbBackupStatus');
+  btn.disabled = true; btn.textContent = 'Creating backup…';
+  status.textContent = '';
+  try {
+    const res = await fetch('/api/db/backup');
+    if (!res.ok) throw new Error('Server error');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const d = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `dmx-controller-backup-${d}.db`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    status.innerHTML = '<span style="color:var(--green)">Backup downloaded.</span>';
+  } catch(e) {
+    status.innerHTML = '<span style="color:var(--danger)">Backup failed: ' + (e.message || 'Unknown error') + '</span>';
+  }
+  btn.disabled = false; btn.textContent = '\uD83D\uDCBE Download Backup';
+});
+
+// Restore: enable button when file selected
+document.getElementById('dbRestoreFile').addEventListener('change', () => {
+  document.getElementById('btnDbRestore').disabled = !document.getElementById('dbRestoreFile').files.length;
+});
+
+document.getElementById('btnDbRestore').addEventListener('click', async () => {
+  const file = document.getElementById('dbRestoreFile').files[0];
+  if (!file) return;
+  if (!confirm('This will REPLACE the current database with the uploaded file. The server will restart. Continue?')) return;
+  if (!confirm('FINAL WARNING: ALL current data will be overwritten. This cannot be undone.')) return;
+  const btn = document.getElementById('btnDbRestore');
+  const status = document.getElementById('dbRestoreStatus');
+  btn.disabled = true; btn.textContent = 'Restoring…';
+  status.textContent = '';
+  try {
+    const buf = await file.arrayBuffer();
+    const res = await fetch('/api/db/restore', { method: 'POST', body: buf, headers: { 'Content-Type': 'application/octet-stream' } });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Restore failed'); }
+    status.innerHTML = '<span style="color:var(--green)">Database restored! Reloading…</span>';
+    setTimeout(() => location.reload(), 2000);
+  } catch(e) {
+    status.innerHTML = '<span style="color:var(--danger)">Restore failed: ' + (e.message || 'Unknown error') + '</span>';
+    btn.disabled = false; btn.textContent = 'Restore';
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

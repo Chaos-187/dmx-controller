@@ -3328,10 +3328,50 @@ function setDefaultSequenceTemplate(id) {
   if (id) db.prepare('UPDATE sequence_templates SET is_default = 1 WHERE id = ?').run(id);
 }
 
+// ─── Backup / Restore ───────────────────────────────────────────────────────
+
+const fs = require('fs');
+const os = require('os');
+
+function getDbPath() {
+  return DB_PATH;
+}
+
+function backupDatabase() {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const dest = path.join(os.tmpdir(), `dmx-controller-backup-${ts}.db`);
+  db.pragma('wal_checkpoint(TRUNCATE)');
+  fs.copyFileSync(DB_PATH, dest);
+  return dest;
+}
+
+function restoreDatabase(uploadedFilePath) {
+  // Validate that the uploaded file is a valid SQLite database
+  const header = Buffer.alloc(16);
+  const fd = fs.openSync(uploadedFilePath, 'r');
+  fs.readSync(fd, header, 0, 16, 0);
+  fs.closeSync(fd);
+  if (header.toString('utf8', 0, 15) !== 'SQLite format 3') {
+    fs.unlinkSync(uploadedFilePath);
+    throw new Error('Uploaded file is not a valid SQLite database');
+  }
+  // Close current database, copy uploaded file over, re-open
+  db.close();
+  // Remove WAL/SHM files if they exist
+  try { fs.unlinkSync(DB_PATH + '-wal'); } catch (_) {}
+  try { fs.unlinkSync(DB_PATH + '-shm'); } catch (_) {}
+  fs.copyFileSync(uploadedFilePath, DB_PATH);
+  fs.unlinkSync(uploadedFilePath);
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
   init,
+  backupDatabase, getDbPath, restoreDatabase,
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
   getFixtureTypeSummaries, searchFixtureTypes,
   createLedBarFixtureType,

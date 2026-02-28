@@ -3021,6 +3021,30 @@ function handleSequenceCommand(ws, msg) {
       }
       break;
     }
+
+    // Live channel override: send channel values directly to DMX without saving to DB.
+    // Used for real-time slider preview in the edit UI.
+    case 'preview_channel': {
+      if (!dmxOutputEnabled) break;
+      const fixtureId = msg.fixture_id;
+      const vals = msg.channel_values; // { red: 255, green: 0, ... }
+      if (!fixtureId || !vals) break;
+      const fixMap = db.getFixtureChannelMap().find(f => f.id === fixtureId);
+      if (!fixMap) break;
+      for (const ch of fixMap.channels) {
+        if (msg.cell != null && ch.cell != null && ch.cell !== msg.cell) continue;
+        if (vals[ch.type] === undefined) continue;
+        let v = Math.round(Math.max(0, Math.min(255, vals[ch.type])));
+        v = mapValueToRange(v, ch, ch.type === 'dimmer' ? 'dimmer' : ch.type);
+        v = applyInvert(v, ch);
+        v = applyMasterDimmer(v, ch.type);
+        const uni = ch.universe || 1;
+        if (!dmxUniverses[uni]) dmxUniverses[uni] = Buffer.alloc(512, 0);
+        dmxUniverses[uni][ch.address - 1] = v;
+      }
+      sendDMX();
+      break;
+    }
   }
 }
 
