@@ -286,6 +286,28 @@ body {
 .tl-spacer { flex: 1; }
 .tl-hint { font-size: 11px; color: var(--text-dim); }
 
+/* Keyboard shortcut button & popup */
+.tl-kb-btn {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-muted); font-size: 13px; padding: 2px 7px; cursor: pointer;
+  line-height: 1; transition: color .1s, border-color .1s;
+}
+.tl-kb-btn:hover { color: var(--text); border-color: var(--accent); }
+.kb-popup {
+  position: absolute; top: var(--toolbar-h); right: 12px; z-index: 50;
+  background: var(--surface); border: 1px solid var(--border-hi);
+  border-radius: var(--radius); padding: 14px 18px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55);
+  font-size: 11px; color: var(--text-dim);
+}
+.kb-popup-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+.kb-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; align-items: center; }
+.kb-grid kbd {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 3px; padding: 2px 6px; font-family: var(--mono);
+  font-size: 10px; color: var(--text); white-space: nowrap;
+}
+
 /* Timeline scroll container */
 .tl-scroll {
   flex: 1; overflow: auto; position: relative;
@@ -429,6 +451,15 @@ body {
   background: rgba(0,230,118,.06);
   outline: 1px dashed rgba(0,230,118,.4);
   outline-offset: -1px;
+}
+
+/* Snap preview line during resize */
+.tl-snap-line {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--accent); opacity: .7;
+  pointer-events: none; z-index: 20;
+  display: none;
+  box-shadow: 0 0 4px var(--accent-glow);
 }
 
 /* Empty state */

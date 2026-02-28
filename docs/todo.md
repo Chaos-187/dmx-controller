@@ -21,8 +21,8 @@
 - [ ] Add unit tests for generation functions
 - [ ] Support per-fixture intensity curves (not just global section intensity)
 - [ ] Multi-deck sequence blending / crossfade between sequences
-- [ ] Visual waveform-aligned cue editing (drag to resize, snap to waveform peaks)
-- [ ] Undo/redo in edit mode
+- [x] Visual waveform-aligned cue editing (drag to resize, snap to waveform peaks)
+- [x] Undo/redo in edit mode
 - [ ] Copy/paste cues between fixtures and sequences
 - [ ] Color wheel transition effects (half-color positions, split colors)
 - [x] User-editable genre palettes and section styles from the UI
@@ -35,7 +35,7 @@
 - [ ] Channel slider live preview (send DMX values while dragging in edit mode)
 - [ ] Full end-to-end testing of preview system
 - [ ] Multi-cue drag selection on timeline
-- [ ] Keyboard shortcuts for common edit operations
+- [x] Keyboard shortcuts for common edit operations
 
 ## General
 - [ ] Consolidate duplicate code between touch.html and touch2.html

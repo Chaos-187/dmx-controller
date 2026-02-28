@@ -48,6 +48,11 @@ const SEQ = (() => {
   // Edit mode (live preview)
   let editMode = false;
 
+  // Undo / Redo history
+  const _history = [];    // array of { undo: fn, redo: fn, label: string }
+  let _historyPos = -1;   // index of last applied action
+  const HISTORY_MAX = 100;
+
   // WebSocket
   let ws = null;
   const _pendingTime = {};
@@ -57,6 +62,42 @@ const SEQ = (() => {
   function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function formatDur(s) { if (!s || s <= 0) return '--:--'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function apiGet(url) { return api(url); }
+
+  // ── Undo / Redo ───────────────────────────────────────────────
+  function pushUndo(label, undoFn, redoFn) {
+    // Discard anything after current position (branching history)
+    _history.length = _historyPos + 1;
+    _history.push({ label, undo: undoFn, redo: redoFn });
+    if (_history.length > HISTORY_MAX) _history.shift();
+    _historyPos = _history.length - 1;
+    _updateUndoUI();
+  }
+  async function undo() {
+    if (_historyPos < 0) return;
+    const entry = _history[_historyPos];
+    _historyPos--;
+    await entry.undo();
+    _updateUndoUI();
+  }
+  async function redo() {
+    if (_historyPos >= _history.length - 1) return;
+    _historyPos++;
+    const entry = _history[_historyPos];
+    await entry.redo();
+    _updateUndoUI();
+  }
+  function _updateUndoUI() {
+    const hint = $('selectionHint');
+    if (!hint) return;
+    const canUndo = _historyPos >= 0;
+    const canRedo = _historyPos < _history.length - 1;
+    const parts = [];
+    if (canUndo) parts.push('Ctrl+Z: undo ' + (_history[_historyPos]?.label || ''));
+    if (canRedo) parts.push('Ctrl+Y: redo');
+    if (selectedIds.size > 0) parts.push(selectedIds.size + ' selected');
+    hint.textContent = parts.join('  ·  ');
+  }
   function colorFromCh(ch) {
     const r = ch.red !== undefined ? ch.red : 0;
     const g = ch.green !== undefined ? ch.green : 0;
@@ -1044,12 +1085,32 @@ const SEQ = (() => {
   async function deleteSelectedCues() {
     if (selectedIds.size === 0) return;
     const ids = [...selectedIds];
+    // Snapshot cues being deleted for undo
+    const deleted = ids.map(id => cues.find(c => c.id === id)).filter(Boolean).map(c => JSON.parse(JSON.stringify(c)));
+    const seqId = currentId;
     await Promise.all(ids.map(id => apiDel(`/api/cues/${id}`)));
     cues = cues.filter(c => !selectedIds.has(c.id));
     clearSelection();
     $('infoCues').textContent = cues.length;
     renderTimeline();
     if (editMode) previewRefresh();
+    // Push undo for delete
+    pushUndo('delete', async () => {
+      for (const snap of deleted) {
+        const body = { lane: snap.lane, start_ms: snap.start_ms, duration_ms: snap.duration_ms, cue_type: snap.cue_type || 'static', fixture_id: snap.fixture_id, channel_values: snap.channel_values, end_channel_values: snap.end_channel_values || null, color: snap.color, label: snap.label || '', effect_id: snap.effect_id || null };
+        if (snap.cell != null) body.cell = snap.cell;
+        const nc = await apiPost(`/api/sequences/${seqId}/cues`, body);
+        computeDisplay(nc); cues.push(nc);
+      }
+      $('infoCues').textContent = cues.length; renderTimeline();
+    }, async () => {
+      // Re-delete the restored cues by matching start_ms+fixture_id+lane
+      for (const snap of deleted) {
+        const c = cues.find(q => q.start_ms === snap.start_ms && q.fixture_id === snap.fixture_id && q.lane === snap.lane);
+        if (c) { await apiDel(`/api/cues/${c.id}`); cues = cues.filter(q => q.id !== c.id); }
+      }
+      $('infoCues').textContent = cues.length; clearSelection(); renderTimeline();
+    });
   }
 
   // ── Selection ─────────────────────────────────────────────────
@@ -1308,6 +1369,19 @@ const SEQ = (() => {
       computeDisplay(cue);
       cues.push(cue);
       $('infoCues').textContent = cues.length;
+      // Push undo for create
+      const cId = cue.id, seqId = currentId;
+      pushUndo('create', async () => {
+        await apiDel(`/api/cues/${cId}`);
+        cues = cues.filter(c => c.id !== cId);
+        $('infoCues').textContent = cues.length;
+        clearSelection(); renderTimeline();
+      }, async () => {
+        const nc = await apiPost(`/api/sequences/${seqId}/cues`, body);
+        computeDisplay(nc); cues.push(nc);
+        $('infoCues').textContent = cues.length;
+        renderTimeline(); selectCue(nc.id);
+      });
       renderTimeline();
       selectCue(cue.id);
     });
@@ -1383,7 +1457,26 @@ const SEQ = (() => {
       const dx = e.clientX - dragState.startX;
       if (dragState.type === 'resize') {
         const el = document.querySelector(`.tl-cue[data-cue="${dragState.cueId}"]`);
-        if (el) el.style.width = Math.max(4, dragState.origW + dx) + 'px';
+        if (el) {
+          const newW = Math.max(4, dragState.origW + dx);
+          el.style.width = newW + 'px';
+          // Show snap preview line at the snapped end position
+          const cue = cues.find(c => c.id === dragState.cueId);
+          if (cue) {
+            const rawEndMs = cue.start_ms + (newW / zoomPxPerSec) * 1000;
+            const snappedEnd = snapToGrid(rawEndMs);
+            const snapX = (snappedEnd / 1000) * zoomPxPerSec;
+            let snapLine = document.getElementById('resizeSnapLine');
+            if (!snapLine) {
+              snapLine = document.createElement('div');
+              snapLine.id = 'resizeSnapLine';
+              snapLine.className = 'tl-snap-line';
+              $('tlCanvas').appendChild(snapLine);
+            }
+            snapLine.style.left = snapX.toFixed(1) + 'px';
+            snapLine.style.display = 'block';
+          }
+        }
       } else if (dragState.type === 'move') {
         if (Math.abs(dx) > 2 || Math.abs(e.clientY - dragState.startY) > 2) dragState.moved = true;
         for (const it of dragState.items) {
@@ -1420,12 +1513,28 @@ const SEQ = (() => {
       }
       if (!dragState) return;
       $$('.tl-lane-track').forEach(lt => lt.classList.remove('drop-target'));
+      // Hide snap preview line
+      const snapLine = document.getElementById('resizeSnapLine');
+      if (snapLine) snapLine.style.display = 'none';
       if (dragState.type === 'resize') {
         const cue = cues.find(c => c.id === dragState.cueId);
         const el = document.querySelector(`.tl-cue[data-cue="${dragState.cueId}"]`);
         if (cue && el) {
-          cue.duration_ms = Math.max(100, Math.round(snapToGrid((parseFloat(el.style.width) / zoomPxPerSec) * 1000)));
-          await apiPut(`/api/cues/${dragState.cueId}`, { duration_ms: cue.duration_ms });
+          const rawEndMs = cue.start_ms + (parseFloat(el.style.width) / zoomPxPerSec) * 1000;
+          const snappedEnd = snapToGrid(rawEndMs);
+          const oldDur = dragState.origDur;
+          const newDur = Math.max(100, Math.round(snappedEnd - cue.start_ms));
+          cue.duration_ms = newDur;
+          await apiPut(`/api/cues/${dragState.cueId}`, { duration_ms: newDur });
+          // Push undo entry for resize
+          const cueId = dragState.cueId;
+          pushUndo('resize', async () => {
+            const c = cues.find(q => q.id === cueId); if (c) { c.duration_ms = oldDur; await apiPut(`/api/cues/${cueId}`, { duration_ms: oldDur }); }
+            renderTimeline(); updateSelectionVisuals();
+          }, async () => {
+            const c = cues.find(q => q.id === cueId); if (c) { c.duration_ms = newDur; await apiPut(`/api/cues/${cueId}`, { duration_ms: newDur }); }
+            renderTimeline(); updateSelectionVisuals();
+          });
         }
       } else if (dragState.type === 'move' && dragState.moved) {
         let newFix = null;
@@ -1433,17 +1542,37 @@ const SEQ = (() => {
           const tgt = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tl-lane-track');
           if (tgt) newFix = +tgt.dataset.fix || null;
         }
+        const moveUndos = []; // capture before/after for undo
         const ups = [];
         for (const it of dragState.items) {
           const cue = cues.find(c => c.id === it.cueId);
           const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
           if (!cue || !el) continue;
+          const oldStart = it.origStart, oldFix = it.cueId === dragState.cueId ? dragState.origFix : cue.fixture_id;
           cue.start_ms = Math.max(0, Math.round(snapToGrid((parseFloat(el.style.left) / zoomPxPerSec) * 1000)));
           const body = { start_ms: cue.start_ms };
           if (newFix && newFix !== cue.fixture_id) { cue.fixture_id = newFix; body.fixture_id = newFix; activeLanes.add(newFix); }
+          moveUndos.push({ id: it.cueId, oldStart, oldFix, newStart: cue.start_ms, newFix: cue.fixture_id });
           ups.push(apiPut(`/api/cues/${it.cueId}`, body));
         }
         await Promise.all(ups);
+        // Push undo entry for move
+        const frozen = [...moveUndos];
+        pushUndo('move', async () => {
+          for (const m of frozen) {
+            const c = cues.find(q => q.id === m.id); if (!c) continue;
+            c.start_ms = m.oldStart; c.fixture_id = m.oldFix;
+            await apiPut(`/api/cues/${m.id}`, { start_ms: m.oldStart, fixture_id: m.oldFix });
+          }
+          renderTimeline(); updateSelectionVisuals();
+        }, async () => {
+          for (const m of frozen) {
+            const c = cues.find(q => q.id === m.id); if (!c) continue;
+            c.start_ms = m.newStart; c.fixture_id = m.newFix;
+            await apiPut(`/api/cues/${m.id}`, { start_ms: m.newStart, fixture_id: m.newFix });
+          }
+          renderTimeline(); updateSelectionVisuals();
+        });
       }
       dragState = null; renderTimeline(); updateSelectionVisuals();
     });
@@ -1453,25 +1582,33 @@ const SEQ = (() => {
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-      // Ctrl+A
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      // Ctrl+Z — Undo
+      if (ctrl && key === 'z' && !e.shiftKey) { e.preventDefault(); await undo(); return; }
+      // Ctrl+Y or Ctrl+Shift+Z — Redo
+      if ((ctrl && key === 'y') || (ctrl && key === 'z' && e.shiftKey)) { e.preventDefault(); await redo(); return; }
+
+      // Ctrl+A — Select all
+      if (ctrl && key === 'a') {
         if (!currentId) return; e.preventDefault();
         selectedIds.clear(); cues.forEach(c => selectedIds.add(c.id));
         selectedPrimary = cues.length > 0 ? cues[0].id : null;
         updateSelectionVisuals(); updateProps(); return;
       }
-      // Delete
+      // Delete / Backspace — Delete selected
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedIds.size === 0) return; e.preventDefault(); await deleteSelectedCues(); return;
       }
-      // Ctrl+C
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      // Ctrl+C — Copy
+      if (ctrl && key === 'c') {
         if (selectedIds.size === 0) return; e.preventDefault();
         clipboard = [...selectedIds].map(id => { const c = cues.find(q => q.id === id); return c ? JSON.parse(JSON.stringify(c)) : null; }).filter(Boolean);
         return;
       }
-      // Ctrl+V
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+      // Ctrl+V — Paste (with undo)
+      if (ctrl && key === 'v') {
         if (!clipboard || !clipboard.length || !currentId) return; e.preventDefault();
         const minStart = Math.min(...clipboard.map(c => c.start_ms));
         const offset = Math.round(playheadMs) - minStart;
@@ -1480,29 +1617,140 @@ const SEQ = (() => {
           const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
           if (clip.cell) body.cell = clip.cell;
           const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
-          cues.push(nc); newIds.push(nc.id);
+          computeDisplay(nc); cues.push(nc); newIds.push(nc.id);
         }
         $('infoCues').textContent = cues.length;
         selectedIds.clear(); newIds.forEach(id => selectedIds.add(id));
         selectedPrimary = newIds[0] || null;
+        // Push undo for paste
+        const pastedIds = [...newIds];
+        pushUndo('paste', async () => {
+          await Promise.all(pastedIds.map(id => apiDel(`/api/cues/${id}`)));
+          cues = cues.filter(c => !pastedIds.includes(c.id));
+          $('infoCues').textContent = cues.length; clearSelection(); renderTimeline();
+        }, async () => {
+          // Re-paste (ids will differ)
+          for (const clip of clipboard) {
+            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+            if (clip.cell) body.cell = clip.cell;
+            const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
+            computeDisplay(nc); cues.push(nc);
+          }
+          $('infoCues').textContent = cues.length; renderTimeline();
+        });
         renderTimeline(); updateSelectionVisuals(); updateProps(); return;
       }
-      // Escape
+      // Ctrl+D — Duplicate selected at playhead
+      if (ctrl && key === 'd') {
+        if (selectedIds.size === 0 || !currentId) return; e.preventDefault();
+        const srcCues = [...selectedIds].map(id => cues.find(q => q.id === id)).filter(Boolean).map(c => JSON.parse(JSON.stringify(c)));
+        if (!srcCues.length) return;
+        const minStart = Math.min(...srcCues.map(c => c.start_ms));
+        const offset = Math.round(playheadMs) - minStart;
+        const newIds = [];
+        for (const clip of srcCues) {
+          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+          if (clip.cell != null) body.cell = clip.cell;
+          const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
+          computeDisplay(nc); cues.push(nc); newIds.push(nc.id);
+        }
+        $('infoCues').textContent = cues.length;
+        const dupIds = [...newIds];
+        pushUndo('duplicate', async () => {
+          await Promise.all(dupIds.map(id => apiDel(`/api/cues/${id}`)));
+          cues = cues.filter(c => !dupIds.includes(c.id));
+          $('infoCues').textContent = cues.length; clearSelection(); renderTimeline();
+        }, async () => {
+          for (const clip of srcCues) {
+            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+            if (clip.cell != null) body.cell = clip.cell;
+            const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
+            computeDisplay(nc); cues.push(nc);
+          }
+          $('infoCues').textContent = cues.length; renderTimeline();
+        });
+        selectedIds.clear(); newIds.forEach(id => selectedIds.add(id));
+        selectedPrimary = newIds[0] || null;
+        renderTimeline(); updateSelectionVisuals(); updateProps(); return;
+      }
+      // Escape — Clear selection
       if (e.key === 'Escape') { clearSelection(); return; }
-      // Arrow nudge
+      // Arrow nudge (with undo)
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         if (selectedIds.size === 0) return; e.preventDefault();
         let nudge = (snapBeats && currentSeq?.bpm) ? (60000 / currentSeq.bpm) * snapBeats : 10;
         if (e.shiftKey) nudge = Math.max(10, nudge / 4);
         const dir = e.key === 'ArrowRight' ? 1 : -1;
+        const befores = [];
         const ups = [];
         for (const sid of selectedIds) {
           const cue = cues.find(c => c.id === sid); if (!cue) continue;
+          befores.push({ id: sid, old: cue.start_ms });
           cue.start_ms = Math.max(0, Math.round(cue.start_ms + dir * nudge));
           ups.push(apiPut(`/api/cues/${cue.id}`, { start_ms: cue.start_ms }));
         }
         await Promise.all(ups);
+        const afters = befores.map(b => { const c = cues.find(q => q.id === b.id); return { id: b.id, old: b.old, cur: c ? c.start_ms : b.old }; });
+        pushUndo('nudge', async () => {
+          for (const a of afters) { const c = cues.find(q => q.id === a.id); if (c) { c.start_ms = a.old; await apiPut(`/api/cues/${a.id}`, { start_ms: a.old }); } }
+          renderTimeline(); updateSelectionVisuals();
+        }, async () => {
+          for (const a of afters) { const c = cues.find(q => q.id === a.id); if (c) { c.start_ms = a.cur; await apiPut(`/api/cues/${a.id}`, { start_ms: a.cur }); } }
+          renderTimeline(); updateSelectionVisuals();
+        });
         renderTimeline(); updateSelectionVisuals(); return;
+      }
+      // Space — Play/Pause
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (!currentId) return;
+        if (isPlaying) { $('btnPause').click(); } else { $('btnPlay').click(); }
+        return;
+      }
+      // E — Toggle edit mode
+      if (key === 'e' && !ctrl) {
+        e.preventDefault(); toggleEditMode(); return;
+      }
+      // Home — Jump to start
+      if (e.key === 'Home') {
+        e.preventDefault(); playheadMs = 0; updatePlayhead();
+        if (editMode && currentId) wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: 0 });
+        return;
+      }
+      // End — Jump to end
+      if (e.key === 'End') {
+        e.preventDefault();
+        playheadMs = currentSeq?.duration_ms || 0; updatePlayhead();
+        if (editMode && currentId) wsSend({ type: 'sequence', action: 'preview_seek', deck, timeMs: playheadMs });
+        return;
+      }
+      // + / = — Zoom in
+      if (key === '+' || key === '=' && !ctrl) {
+        e.preventDefault();
+        const slider = $('zoomSlider');
+        slider.value = Math.min(200, +slider.value + 10);
+        slider.dispatchEvent(new Event('input'));
+        return;
+      }
+      // - — Zoom out
+      if (key === '-' && !ctrl) {
+        e.preventDefault();
+        const slider = $('zoomSlider');
+        slider.value = Math.max(5, +slider.value - 10);
+        slider.dispatchEvent(new Event('input'));
+        return;
+      }
+    });
+
+    // ── Keyboard shortcut help popup ──
+    on('btnKbHelp', 'click', () => {
+      const popup = $('kbPopup');
+      popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
+    });
+    document.addEventListener('click', e => {
+      const popup = $('kbPopup');
+      if (popup.style.display !== 'none' && !popup.contains(e.target) && e.target.id !== 'btnKbHelp') {
+        popup.style.display = 'none';
       }
     });
 
