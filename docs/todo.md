@@ -19,17 +19,17 @@
 - [x] Refactor sequence-generator.js — file is ~2400 lines, break into modules
 - [x] Separate fixture classification, section generation, color wheel, mover movement, effects into individual files
 - [ ] Add unit tests for generation functions
-- [ ] Support per-fixture intensity curves (not just global section intensity)
-- [ ] Multi-deck sequence blending / crossfade between sequences
+- [x] Support per-fixture intensity curves (not just global section intensity)
+- [x] Multi-deck sequence blending / crossfade between sequences
 - [x] Visual waveform-aligned cue editing (drag to resize, snap to waveform peaks)
 - [x] Undo/redo in edit mode
 - [x] Copy/paste cues between fixtures and sequences (Ctrl+Shift+V for cross-fixture)
-- [ ] Color wheel transition effects (half-color positions, split colors)
+- [x] Color wheel transition effects (half-color positions, split colors, wheel spin)
 - [x] User-editable genre palettes and section styles from the UI
 - [x] Sequence templates — save generation settings as reusable presets
 - [x] improve audio section identifactions
 - [x] fluid beatgrid implementation for songs with changing tempos
-- [ ] look into stems for splitting songs into seprate sections to aid in sequence generation
+- [x] Stem separation for song analysis (demucs + FFmpeg spectral fallback, per-stem energy, vocal/drum-aware generation)
 
 ## Edit Mode Completion
 - [x] Channel slider live preview (send DMX values while dragging in edit mode)

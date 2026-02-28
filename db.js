@@ -458,6 +458,14 @@ function init() {
     console.log('[DB] Migrated rig_layouts: added is_active column');
   }
 
+  // Migrate: add stem_energy column to track_analysis if missing
+  try {
+    db.prepare("SELECT stem_energy FROM track_analysis LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE track_analysis ADD COLUMN stem_energy TEXT DEFAULT NULL");
+    console.log('[DB] Migrated track_analysis: added stem_energy column');
+  }
+
   // Migrate: color_wheel_colors from single dmx_value to dmx_start/dmx_end range
   // Check if old dmx_value column still exists (needs table recreation)
   let cwNeedsMigration = false;
@@ -2520,6 +2528,12 @@ const GENERATOR_CONFIG_DEFAULTS = {
     drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
     outro:     ['fill_sweep', 'color_wave', 'breathe'],
   },
+  gen_fixture_intensity: {
+    par:         { intro: 0.90, verse: 0.85, chorus: 0.95, bridge: 0.80, breakdown: 0.70, buildup: 0.85, drop: 1.00, outro: 0.90 },
+    mover:       { intro: 0.55, verse: 0.70, chorus: 0.90, bridge: 0.65, breakdown: 0.45, buildup: 0.75, drop: 1.00, outro: 0.50 },
+    led_bar:     { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
+    color_wheel: { intro: 0.70, verse: 0.80, chorus: 1.00, bridge: 0.70, breakdown: 0.50, buildup: 0.85, drop: 1.00, outro: 0.60 },
+  },
 };
 
 function seedDefaultGeneratorConfig() {
@@ -3009,6 +3023,14 @@ function upsertTrackAnalysis(trackId, data) {
   return getTrackAnalysis(trackId);
 }
 
+function updateStemEnergy(trackId, stemData) {
+  const existing = getTrackAnalysis(trackId);
+  if (!existing) return null;
+  db.prepare('UPDATE track_analysis SET stem_energy = ? WHERE track_id = ?')
+    .run(JSON.stringify(stemData), trackId);
+  return getTrackAnalysis(trackId);
+}
+
 function deleteTrackAnalysis(trackId) {
   db.prepare('DELETE FROM track_analysis WHERE track_id = ?').run(trackId);
   return { deleted: true };
@@ -3394,7 +3416,7 @@ module.exports = {
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,
   getSequenceCues, getSequenceCuesLightweight, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,
   getUsbDevices, getEnabledUsbDevices, getUsbDevice, createUsbDevice, updateUsbDevice, deleteUsbDevice, toggleUsbDevice,
-  getTrackAnalysis, upsertTrackAnalysis, deleteTrackAnalysis, deleteAllAnalysis,
+  getTrackAnalysis, upsertTrackAnalysis, updateStemEnergy, deleteTrackAnalysis, deleteAllAnalysis,
   deleteAllSequences, getDbStats, getTracksWithAnalysis,
   getScenes, getScene, getDefaultScene, createScene, updateScene, deleteScene, setDefaultScene,
   getSceneEntries, getSceneEntry, createSceneEntry, updateSceneEntry, deleteSceneEntry, bulkUpdateSceneEntries,

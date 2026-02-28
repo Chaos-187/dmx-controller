@@ -7,7 +7,7 @@
  * random physical wheel colours.
  */
 
-const { applyIntensity, findNearestWheelColor } = require('./helpers');
+const { applyIntensity, findNearestWheelColor, findSplitWheelPosition, getFixtureIntensity } = require('./helpers');
 const { sectionStyles, getSectionPalettes } = require('./palettes');
 
 function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels, ctx) {
@@ -75,6 +75,11 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           let startIntensity = Math.min(1, cwBoostLo * preset.intensityMult * energyMod);
           let endIntensity = Math.min(1, cwBoostHi * preset.intensityMult * energyMod);
 
+          // ── Per-fixture intensity curve ──
+          const fixIntMult = getFixtureIntensity(fix.id, sec.label, ctx);
+          startIntensity = Math.min(1, startIntensity * fixIntMult);
+          endIntensity = Math.min(1, endIntensity * fixIntMult);
+
           // Occasional full-brightness "punch" moments for contrast
           const isHighEnergy = sec.label === 'chorus' || sec.label === 'drop';
           const punchChance = isHighEnergy ? 0.35 : 0.12;
@@ -90,7 +95,23 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           const endWheel = findNearestWheelColor(endColor, wheelMap);
           if (!startWheel) continue;
 
-          const startVals = { color_wheel: startWheel.dmx_start };
+          // ── Split/half-color positions for transitional sections ──
+          // In verses and bridges, occasionally use a split position between
+          // two adjacent colors for a more nuanced look
+          let cwDmxValue = startWheel.dmx_start;
+          let cwDisplayColor = startWheel.color_hex || '#888888';
+
+          const useSplit = (sec.label === 'verse' || sec.label === 'bridge' || sec.label === 'breakdown')
+            && endWheel && endWheel !== startWheel && rand() < 0.35;
+          if (useSplit) {
+            const split = findSplitWheelPosition(palette[0], palette[1], wheelMap);
+            if (split) {
+              cwDmxValue = split.dmx;
+              cwDisplayColor = split.color_hex;
+            }
+          }
+
+          const startVals = { color_wheel: cwDmxValue };
           if (hasDimmer) {
             startVals.dimmer = Math.round(startIntensity * 255);
           }
@@ -102,7 +123,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
             cue_type: 'static',
             fixture_id: fix.id,
             channel_values: startVals,
-            color: startWheel.color_hex || '#888888',
+            color: cwDisplayColor,
             label: sec.label || '',
           });
         }
@@ -126,6 +147,39 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
                   channel_values: { strobe_hz: 10, dimmer: 255 },
                   color: '#ffffff',
                   label: 'strobe',
+                });
+              }
+            }
+          }
+        }
+        // ── Color wheel spin/rotation effects on drops and choruses ──
+        if ((sec.label === 'drop' || sec.label === 'chorus' || sec.label === 'buildup') && rand() < 0.30) {
+          // Find macro ranges for CW/CCW wheel rotation
+          const cwChannel = fix.channels.find(ch => ch.type === 'color_wheel');
+          if (cwChannel && cwChannel.ranges) {
+            const spinRanges = cwChannel.ranges.filter(r => r.type === 'macro' && /flow|rotat/i.test(r.label));
+            if (spinRanges.length > 0) {
+              const spinRange = spinRanges[Math.floor(rand() * spinRanges.length)];
+              // Pick a speed within the range — faster for drops
+              const speedFrac = sec.label === 'drop' ? 0.6 + rand() * 0.3 : 0.3 + rand() * 0.4;
+              const spinDmx = Math.round(spinRange.min + speedFrac * (spinRange.max - spinRange.min));
+              // Duration: 1-2 bars of spinning
+              const spinBars = sec.label === 'drop' ? 1 : 2;
+              const spinDurMs = Math.round(spinBars * barMs);
+              // Place it at the start of the section
+              const spinStart = secStartMs;
+              if (spinDurMs > 0 && spinStart + spinDurMs <= secEndMs) {
+                const spinVals = { color_wheel: spinDmx };
+                if (hasDimmer) spinVals.dimmer = 255;
+                cues.push({
+                  lane,
+                  start_ms: Math.round(spinStart),
+                  duration_ms: spinDurMs,
+                  cue_type: 'static',
+                  fixture_id: fix.id,
+                  channel_values: spinVals,
+                  color: '#e0e0e0',
+                  label: 'wheel spin',
                 });
               }
             }

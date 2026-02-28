@@ -1033,3 +1033,31 @@ Key broadcast messages:
   │                                                              │
   └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Recent Additions
+
+### Per-Fixture Intensity Curves
+- **Config**: `gen_fixture_intensity` — 4 roles (par, mover, led_bar, color_wheel) × 8 section types
+- **Helper**: `getFixtureIntensity(fixtureId, sectionLabel, ctx)` in `gen/helpers.js`
+- **Applied in**: section-generator, bar-generator, multi-cell, color-wheel (after all other intensity modifiers)
+- **UI**: Intensity sub-tab with interactive slider grid
+
+### Multi-Deck Crossfader Blending
+- **Config**: `seq_crossfader_mode` — 'gate' (binary), 'blend' (proportional), 'off'
+- **Engine**: `processSequenceAtTime()` computes `crossfaderLevel` per deck, applies to dimmable channels
+- **UI**: Dropdown selector on Sequencer > Playback tab
+
+### Color Wheel Transitions
+- **Split colors**: `findSplitWheelPosition()` helper places DMX between adjacent wheel colors
+- **Wheel spin**: Detects CW/CCW macro ranges from fixture channel data, emits spin cues for high-energy sections
+- **Applied in**: `gen/color-wheel.js` — 35% split chance (verse/bridge/breakdown), 30% spin chance (drop/chorus/buildup)
+
+### Stem Separation
+- **Module**: `stem-separator.js` — demucs (ML) or FFmpeg spectral filter fallback
+- **DB**: `stem_energy` column on `track_analysis` (JSON blob with per-stem energy + summary)
+- **API**: `GET /api/stems/status`, `POST /api/tracks/:id/separate-stems`, `GET /api/tracks/:id/stems`
+- **Helpers**: `getStemEnergy()`, `hasVocals()`, `getDrumDensity()` in `gen/helpers.js`
+- **Generator impact**: Softer intensity during vocal sections (0.85×), strobe suppression during vocals, drum-density-boosted strobe chance
+- **UI**: Stem status panel in Audio Analysis settings, per-track "Separate Stems" button with WebSocket progress

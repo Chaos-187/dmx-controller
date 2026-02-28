@@ -25,6 +25,7 @@
       "dmx-usb-server.js",
       "dmx-usb-worker.js",
       "audio-analyzer.js",
+      "stem-separator.js",
       "sequence-generator.js",
       "vdj-parser.js"
     ],

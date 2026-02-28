@@ -9,7 +9,7 @@
  * cascade patterns across all fixtures as one large virtual fixture.
  */
 
-const { applyIntensity, rgbToHex } = require('./helpers');
+const { applyIntensity, rgbToHex, getFixtureIntensity } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
 
 const CELL_PATTERN_MAP = {
@@ -426,6 +426,7 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
       const useSubPhrases = numSubPhrases >= 2 && label !== 'buildup';
 
       for (const fCtx of fixtureContexts) {
+        const fixBaseIntensity = Math.min(1, baseIntensity * getFixtureIntensity(fCtx.fix.id, label, ctx));
         if (useSubPhrases) {
           let lastPattern = '';
           for (let sp = 0; sp < numSubPhrases; sp++) {
@@ -447,7 +448,7 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
             const patternCtx = {
               ...fCtx,
               secStartMs: spStart, secEndMs: spEnd, secDurMs: spDur,
-              palettes: patPalettes, baseIntensity, label,
+              palettes: patPalettes, baseIntensity: fixBaseIntensity, label,
               ...ctx,
             };
 
@@ -458,7 +459,7 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
           const patternCtx = {
             ...fCtx,
             secStartMs, secEndMs, secDurMs,
-            palettes: allPalettes, baseIntensity, label,
+            palettes: allPalettes, baseIntensity: fixBaseIntensity, label,
             ...ctx,
           };
           _dispatchCellPattern(cues, pattern, patternCtx);

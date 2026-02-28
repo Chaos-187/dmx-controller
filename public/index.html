@@ -2492,6 +2492,7 @@
           <button class="seq-tab-btn" data-seqtab="colors">&#127912; Colors</button>
           <button class="seq-tab-btn" data-seqtab="genres">&#127926; Genres &amp; Styles</button>
           <button class="seq-tab-btn" data-seqtab="movement">&#128260; Movement</button>
+          <button class="seq-tab-btn" data-seqtab="intensity">&#128161; Intensity</button>
           <button class="seq-tab-btn" data-seqtab="effects">&#9889; Effects</button>
           <button class="seq-tab-btn" data-seqtab="templates">&#128196; Templates</button>
         </div>
@@ -2565,10 +2566,19 @@
           <div class="config-card" style="margin-top:16px">
             <h4>Mixer Integration</h4>
             <div class="config-row">
-              <label>Crossfader Sequence Gating</label>
+              <label>Crossfader Mode</label>
+              <select id="cfgSeqCrossfaderMode" style="width:180px">
+                <option value="off">Off (no effect)</option>
+                <option value="gate">Gate (binary cut)</option>
+                <option value="blend">Blend (proportional)</option>
+              </select>
+            </div>
+            <p class="config-desc" style="margin:-4px 0 8px 0;font-size:11px;color:var(--text-dim)"><b>Gate</b>: hard cut at crossfader midpoint (legacy). <b>Blend</b>: proportionally dims each deck based on crossfader position for smooth transitions.</p>
+            <div class="config-row" id="cfgSeqCrossfaderGatingRow" style="display:none">
+              <label>Legacy Gating Override</label>
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="cfgSeqCrossfaderGating" style="width:16px;height:16px;accent-color:var(--accent)">
-                <span style="font-size:12px">Only output the active deck's sequence based on crossfader position (0–0.5 = Deck 1, 0.55–1 = Deck 2)</span>
+                <span style="font-size:12px">Enable legacy gating (overridden by mode above)</span>
               </label>
             </div>
             <div class="config-row">
@@ -2691,6 +2701,32 @@
             <p class="config-desc">Per-section mover movement parameters: barsPerMove, range, and speed.</p>
             <div id="genMovementStylesEditor"></div>
             <textarea id="genMovementStylesRaw" rows="12" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-reset-gen" style="border:1px solid var(--danger);color:var(--danger)">Reset to Defaults</button>
+          </div>
+        </div>
+        </div>
+
+        <!-- Intensity Tab -->
+        <div class="seq-tab-panel" id="seqtab-intensity">
+        <div class="config-section">
+          <h3>Per-Fixture Intensity Curves</h3>
+          <p class="config-desc">Different fixture types can have different brightness levels per song section. Instead of a single global intensity, movers can be dimmer in verses while pars stay bright, or LED bars can have reduced intensity during breakdowns.</p>
+
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Fixture Role Intensity Multipliers</h4><button class="btn btn-sm gen-json-toggle" data-editor="genFixtureIntensityEditor" data-key="gen_fixture_intensity">{ }</button></div>
+            <p class="config-desc">Per-role (par, mover, led_bar, color_wheel) × per-section (intro, verse, chorus, etc.) intensity multiplier (0.0 – 1.0). Applied on top of the section style intensity and genre preset.</p>
+            <div id="genFixtureIntensityEditor"></div>
+            <textarea id="genFixtureIntensityRaw" rows="14" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
+          </div>
+
+          <div id="fixtureIntensityVisual" class="config-card" style="margin-top:16px">
+            <h4>Visual Editor</h4>
+            <p class="config-desc">Drag sliders to adjust intensity per fixture role and section.</p>
+            <div id="fixtureIntensitySliders"></div>
           </div>
 
           <div style="margin-top:16px;display:flex;gap:8px">
@@ -2918,11 +2954,18 @@
                 <div id="dbTrackResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--panel);border:1px solid var(--panel-border);border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto"></div>
               </div>
             </div>
-            <div style="margin-top:10px;display:flex;gap:8px">
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-danger btn-sm" id="btnDeleteTrackAnalysis" disabled>Delete Analysis</button>
               <button class="btn btn-danger btn-sm" id="btnDeleteTrackSequence" disabled>Delete Sequence</button>
+              <button class="btn btn-sm" id="btnSeparateTrackStems" disabled style="background:var(--accent);color:#fff">🎵 Separate Stems</button>
             </div>
             <div id="dbTrackActionResult" style="font-size:11px;color:var(--text-dim);margin-top:8px"></div>
+            <div id="stemProgressBar" style="display:none;margin-top:8px">
+              <div style="background:var(--bg-dark);border-radius:4px;height:6px;overflow:hidden;width:100%">
+                <div id="stemProgressFill" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div>
+              </div>
+              <div id="stemProgressLabel" style="font-size:11px;color:var(--text-dim);margin-top:4px">Separating stems...</div>
+            </div>
           </div>
         </div>
 
@@ -3315,6 +3358,23 @@
 
           <div style="margin-top:24px;padding:16px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
             <p style="font-size:12px;color:var(--text-dim)">&#128712; Analysis settings only affect new analyses. To apply changes to previously-analyzed tracks, re-analyze them from the sequencer library.</p>
+          </div>
+
+          <!-- ── Stem Separation ── -->
+          <h3 style="margin-top:32px">Stem Separation</h3>
+          <p class="config-desc">Optional stem separation splits songs into vocals, drums, bass, and other — enabling smarter light cue generation (softer during vocals, punchier on drops). Uses <strong>Demucs</strong> (high quality, requires Python) or an <strong>FFmpeg spectral filter</strong> fallback.</p>
+
+          <div id="stemStatusPanel" style="margin-top:16px;padding:16px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <span id="stemStatusIcon" style="font-size:20px">⏳</span>
+              <div>
+                <div id="stemStatusLabel" style="font-weight:600;font-size:14px">Checking...</div>
+                <div id="stemStatusDetail" style="font-size:12px;color:var(--text-dim)"></div>
+              </div>
+            </div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:8px">
+              <strong>Install Demucs:</strong> <code>pip install demucs</code> &nbsp;(requires Python 3.8+ and ~2GB disk space)
+            </div>
           </div>
 
           <!-- ── Config Authentication ── -->
@@ -4262,6 +4322,27 @@ function connect() {
       document.getElementById('qaEffectSpeedVal').textContent = msg.value.toFixed(2) + '×';
     }
     else if (msg.type === 'os2l_button_map_created') { loadButtonMaps(); }
+    else if (msg.type === 'stem_progress') {
+      const fill = document.getElementById('stemProgressFill');
+      const lbl = document.getElementById('stemProgressLabel');
+      if (fill) fill.style.width = msg.progress + '%';
+      if (lbl) lbl.textContent = `Separating stems... ${msg.progress}%`;
+    }
+    else if (msg.type === 'stem_complete') {
+      const btn = document.getElementById('btnSeparateTrackStems');
+      if (btn) { btn.textContent = '🎵 Separate Stems'; btn.disabled = false; }
+      document.getElementById('stemProgressBar').style.display = 'none';
+      const methods = { demucs: 'Demucs (ML)', spectral: 'Spectral (FFmpeg)' };
+      document.getElementById('dbTrackActionResult').innerHTML =
+        `<span style="color:var(--green)">✅ Stems separated via ${methods[msg.method] || msg.method}</span>`;
+    }
+    else if (msg.type === 'stem_error') {
+      const btn = document.getElementById('btnSeparateTrackStems');
+      if (btn) { btn.textContent = '🎵 Separate Stems'; btn.disabled = false; }
+      document.getElementById('stemProgressBar').style.display = 'none';
+      document.getElementById('dbTrackActionResult').innerHTML =
+        `<span style="color:var(--danger)">Stem separation failed: ${esc(msg.error)}</span>`;
+    }
     else if (msg.type === 'server_log') { logEvent({ evtType: 'server', raw: { level: msg.level, message: msg.message }, ts: msg.ts }); }
     else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     else logEvent({ evtType: msg.type || 'event', raw: msg });
@@ -6683,7 +6764,7 @@ document.querySelectorAll('.device-tab-btn').forEach(btn => {
 // ═══════════════════════════════════════════════════════════════
 //  Sequencer — Sub-tab Switching (Playback / Generator / Templates)
 // ═══════════════════════════════════════════════════════════════
-const _seqGenTabs = new Set(['colors','genres','movement','effects','templates']);
+const _seqGenTabs = new Set(['colors','genres','movement','intensity','effects','templates']);
 document.querySelectorAll('.seq-tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.seq-tab-btn').forEach(b => b.classList.remove('active'));
@@ -6946,6 +7027,7 @@ async function loadSequencerConfig() {
   document.getElementById('cfgSeqAutoGenerate').checked = config.seq_auto_generate === '1';
   document.getElementById('cfgSeqNoStrobes').checked = config.seq_no_strobes === '1';
   document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
+  document.getElementById('cfgSeqCrossfaderMode').value = config.seq_crossfader_mode || 'gate';
   document.getElementById('cfgSeqDeckFaderDimmer').checked = config.seq_deck_fader_dimmer === '1';
   document.getElementById('cfgSeqEndAction').value = config.seq_end_action || 'none';
 
@@ -6977,6 +7059,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_auto_generate', document.getElementById('cfgSeqAutoGenerate').checked ? '1' : '0'],
     ['seq_no_strobes', document.getElementById('cfgSeqNoStrobes').checked ? '1' : '0'],
     ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],
+    ['seq_crossfader_mode', document.getElementById('cfgSeqCrossfaderMode').value],
     ['seq_deck_fader_dimmer', document.getElementById('cfgSeqDeckFaderDimmer').checked ? '1' : '0'],
     ['seq_end_action', document.getElementById('cfgSeqEndAction').value],
   ], 'btnSaveSeqConfig');
@@ -7016,6 +7099,7 @@ function renderGeneratorConfig() {
   if(!GEN_RAW['genGenreAliasesEditor']) renderGenreAliasesEditor();
   if(!GEN_RAW['genSectionEffectsEditor']) renderSectionEffectsEditor();
   if(!GEN_RAW['genCellPatternsEditor']) renderCellPatternsEditor();
+  if(!GEN_RAW['genFixtureIntensityEditor']) renderFixtureIntensityEditor();
 }
 
 // ─── Raw JSON Toggle ───
@@ -7303,6 +7387,68 @@ function renderCellPatternsEditor() {
   });
 }
 
+// ─── Fixture Intensity Editor ───
+const _FI_ROLES = ['par','mover','led_bar','color_wheel'];
+const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', color_wheel: 'Color Wheel' };
+const _FI_SECTIONS = ['intro','verse','chorus','bridge','breakdown','buildup','drop','outro'];
+const _FI_SEC_COLORS = { intro:'#78909c', verse:'#42a5f5', chorus:'#ef5350', bridge:'#ab47bc', breakdown:'#26a69a', buildup:'#ffa726', drop:'#e53935', outro:'#78909c' };
+
+function renderFixtureIntensityEditor() {
+  const fi = genConfig.gen_fixture_intensity || {};
+  const c = document.getElementById('genFixtureIntensityEditor');
+  const sc = document.getElementById('fixtureIntensitySliders');
+  if (!c || !sc) return;
+
+  // JSON tree in the gen-card editor area
+  let h = '';
+  for (const role of _FI_ROLES) {
+    const curve = fi[role] || {};
+    h += '<div style="margin-bottom:10px"><strong style="color:var(--accent)">'+_FI_ROLE_LABELS[role]+'</strong>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:4px">';
+    for (const sec of _FI_SECTIONS) {
+      const val = (curve[sec] !== undefined ? curve[sec] : 1.0);
+      h += '<span style="font-size:11px;color:var(--text-dim)">'+sec+': <b style="color:'+(_FI_SEC_COLORS[sec]||'var(--text)')+'">'+val.toFixed(2)+'</b></span>';
+    }
+    h += '</div></div>';
+  }
+  c.innerHTML = h;
+
+  // Visual slider editor
+  let sh = '<div style="display:grid;grid-template-columns:100px repeat('+_FI_SECTIONS.length+',1fr);gap:4px 8px;font-size:11px;align-items:center">';
+  // Header row
+  sh += '<div></div>';
+  for (const sec of _FI_SECTIONS) {
+    sh += '<div style="text-align:center;font-weight:600;color:'+(_FI_SEC_COLORS[sec]||'var(--text)')+'">'+sec.slice(0,5)+'</div>';
+  }
+  for (const role of _FI_ROLES) {
+    if (!fi[role]) fi[role] = {};
+    sh += '<div style="font-weight:600;color:var(--accent)">'+_FI_ROLE_LABELS[role]+'</div>';
+    for (const sec of _FI_SECTIONS) {
+      const val = fi[role][sec] !== undefined ? fi[role][sec] : 1.0;
+      const pct = Math.round(val * 100);
+      sh += '<div style="display:flex;flex-direction:column;align-items:center">';
+      sh += '<input type="range" min="0" max="100" value="'+pct+'" data-fi-role="'+role+'" data-fi-sec="'+sec+'" style="width:100%;accent-color:'+(_FI_SEC_COLORS[sec]||'var(--accent)')+'">';
+      sh += '<span class="fi-val" data-fi-role="'+role+'" data-fi-sec="'+sec+'" style="font-size:10px;color:var(--text-dim)">'+pct+'%</span>';
+      sh += '</div>';
+    }
+  }
+  sh += '</div>';
+  sc.innerHTML = sh;
+
+  // Bind slider events
+  sc.querySelectorAll('input[type=range]').forEach(slider => {
+    slider.addEventListener('input', () => {
+      const role = slider.dataset.fiRole, sec = slider.dataset.fiSec;
+      const val = parseInt(slider.value) / 100;
+      if (!genConfig.gen_fixture_intensity) genConfig.gen_fixture_intensity = {};
+      if (!genConfig.gen_fixture_intensity[role]) genConfig.gen_fixture_intensity[role] = {};
+      genConfig.gen_fixture_intensity[role][sec] = parseFloat(val.toFixed(2));
+      const lbl = sc.querySelector('span.fi-val[data-fi-role="'+role+'"][data-fi-sec="'+sec+'"]');
+      if (lbl) lbl.textContent = slider.value + '%';
+    });
+  });
+}
+
 // ─── Save Generator Config ───
 document.getElementById('btnSaveGenConfig').addEventListener('click', async () => {
   const btn = document.getElementById('btnSaveGenConfig'), orig = btn.textContent;
@@ -7312,13 +7458,14 @@ document.getElementById('btnSaveGenConfig').addEventListener('click', async () =
       medium: parseInt(document.getElementById('genSpeedMedium').value)||140,
       fast: parseInt(document.getElementById('genSpeedFast').value)||40,
     };
-    const keys = ['gen_speed_dmx','gen_color_palettes','gen_section_styles','gen_genre_presets','gen_movement_styles','gen_genre_aliases','gen_section_effects','gen_cell_patterns'];
+    const keys = ['gen_speed_dmx','gen_color_palettes','gen_section_styles','gen_genre_presets','gen_movement_styles','gen_genre_aliases','gen_section_effects','gen_cell_patterns','gen_fixture_intensity'];
     // For any editor in raw mode, parse the textarea back into genConfig first
     const rawFields = {
       genColorPalettesEditor:'gen_color_palettes', genSectionStylesEditor:'gen_section_styles',
       genGenrePresetsEditor:'gen_genre_presets', genMovementStylesEditor:'gen_movement_styles',
       genGenreAliasesEditor:'gen_genre_aliases', genSectionEffectsEditor:'gen_section_effects',
-      genCellPatternsEditor:'gen_cell_patterns'
+      genCellPatternsEditor:'gen_cell_patterns',
+      genFixtureIntensityEditor:'gen_fixture_intensity'
     };
     for (const [eid, cfgKey] of Object.entries(rawFields)) {
       if (GEN_RAW[eid]) {
@@ -7692,6 +7839,7 @@ document.getElementById('dbTrackSearch').addEventListener('input', function() {
   document.getElementById('dbTrackSelectedId').value = '';
   document.getElementById('btnDeleteTrackAnalysis').disabled = true;
   document.getElementById('btnDeleteTrackSequence').disabled = true;
+  document.getElementById('btnSeparateTrackStems').disabled = true;
   document.getElementById('dbTrackActionResult').textContent = '';
   const q = this.value.trim();
   if (q.length < 2) { document.getElementById('dbTrackResults').style.display = 'none'; return; }
@@ -7723,6 +7871,7 @@ document.getElementById('dbTrackResults').addEventListener('click', function(e) 
   this.style.display = 'none';
   document.getElementById('btnDeleteTrackAnalysis').disabled = false;
   document.getElementById('btnDeleteTrackSequence').disabled = false;
+  document.getElementById('btnSeparateTrackStems').disabled = false;
 });
 
 // Close results on outside click
@@ -7744,6 +7893,40 @@ document.getElementById('btnDeleteTrackAnalysis').addEventListener('click', asyn
     loadDatabaseConfig();
   } catch(e) {
     document.getElementById('dbTrackActionResult').innerHTML = '<span style="color:var(--danger)">Failed to delete analysis.</span>';
+  }
+});
+
+// Separate stems for a track
+document.getElementById('btnSeparateTrackStems').addEventListener('click', async () => {
+  const trackId = document.getElementById('dbTrackSelectedId').value;
+  if (!trackId) return;
+  const trackLabel = document.getElementById('dbTrackSearch').value;
+  const btn = document.getElementById('btnSeparateTrackStems');
+  btn.disabled = true;
+  btn.textContent = '⏳ Separating...';
+  document.getElementById('stemProgressBar').style.display = 'block';
+  document.getElementById('stemProgressFill').style.width = '0%';
+  document.getElementById('stemProgressLabel').textContent = 'Starting stem separation...';
+  document.getElementById('dbTrackActionResult').textContent = '';
+  try {
+    const res = await fetch(`/api/tracks/${trackId}/separate-stems`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: 'auto' }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('dbTrackActionResult').innerHTML = `<span style="color:var(--danger)">${esc(data.error || 'Failed')}</span>`;
+      btn.textContent = '🎵 Separate Stems';
+      btn.disabled = false;
+      document.getElementById('stemProgressBar').style.display = 'none';
+    }
+    // Progress tracked via WebSocket — stem_progress / stem_complete / stem_error
+  } catch(e) {
+    document.getElementById('dbTrackActionResult').innerHTML = `<span style="color:var(--danger)">Error: ${esc(e.message)}</span>`;
+    btn.textContent = '🎵 Separate Stems';
+    btn.disabled = false;
+    document.getElementById('stemProgressBar').style.display = 'none';
   }
 });
 
@@ -8166,6 +8349,34 @@ async function loadAppSettings() {
     if (config.analysis_sample_rate)        document.getElementById('settingAnalysisSampleRate').value   = config.analysis_sample_rate;
     if (config.analysis_section_sensitivity) document.getElementById('settingAnalysisSensitivity').value = config.analysis_section_sensitivity;
     if (config.analysis_normalize_pct)      document.getElementById('settingAnalysisNormalize').value    = config.analysis_normalize_pct;
+
+    // ── Stem separation status check ──
+    (async () => {
+      try {
+        const stemRes = await fetch('/api/stems/status');
+        const stemInfo = await stemRes.json();
+        const icon = document.getElementById('stemStatusIcon');
+        const label = document.getElementById('stemStatusLabel');
+        const detail = document.getElementById('stemStatusDetail');
+        if (stemInfo.demucs && stemInfo.demucs.available) {
+          icon.textContent = '✅';
+          label.textContent = 'Demucs Available';
+          detail.textContent = `Mode: ${stemInfo.demucs.mode}${stemInfo.demucs.version ? ' v' + stemInfo.demucs.version : ''} — high-quality ML-based stem separation`;
+        } else if (stemInfo.spectral_fallback) {
+          icon.textContent = '⚡';
+          label.textContent = 'Spectral Fallback (FFmpeg)';
+          detail.textContent = 'FFmpeg spectral filters available — frequency-band isolation (no Demucs detected)';
+        } else {
+          icon.textContent = '❌';
+          label.textContent = 'Not Available';
+          detail.textContent = 'Neither Demucs nor FFmpeg detected. Install Demucs or ensure FFmpeg is in PATH.';
+        }
+      } catch (e) {
+        document.getElementById('stemStatusIcon').textContent = '⚠️';
+        document.getElementById('stemStatusLabel').textContent = 'Status Check Failed';
+        document.getElementById('stemStatusDetail').textContent = e.message;
+      }
+    })();
 
     // Auth settings
     const authChk = document.getElementById('settingAuthEnabled');

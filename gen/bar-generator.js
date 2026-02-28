@@ -5,7 +5,7 @@
  * at regular bar intervals across the full track duration.
  */
 
-const { applyIntensity, CUE_COLORS } = require('./helpers');
+const { applyIntensity, CUE_COLORS, getFixtureIntensity } = require('./helpers');
 const { getSectionPalettes } = require('./palettes');
 
 function generateBarBased(cues, fixtures, ctx) {
@@ -35,7 +35,7 @@ function generateBarBased(cues, fixtures, ctx) {
       const durMs = Math.min(endMs - startMs, durationMs - startMs);
       if (durMs <= 0) break;
 
-      const intensity = Math.min(1, 0.7 * preset.intensityMult);
+      const intensity = Math.min(1, 0.7 * preset.intensityMult * getFixtureIntensity(fix.id, 'verse', ctx));
       const startColor = applyIntensity(palette[0], intensity);
       const endColor = applyIntensity(palette[1], intensity);
       const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };

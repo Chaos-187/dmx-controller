@@ -46,6 +46,7 @@ const db = require('./db');
 const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
 const audioAnalyzer = require('./audio-analyzer');
+const stemSeparator = require('./stem-separator');
 const os2l = require('./os2l');
 const fixtureLibrary = require('./fixture-library');
 const { WebUSB } = require('usb');
@@ -295,6 +296,25 @@ function handleOs2lSubscribed(data) {
                   }
                 } catch (ae) {
                   console.warn(`[SEQ] Auto-analysis failed for auto-gen: ${ae.message}`);
+                }
+              }
+
+              // Auto-separate stems if not already present
+              if (analysis && !analysis.stem_energy && actualFilePath && fileExists) {
+                try {
+                  console.log(`[SEQ] Auto-separating stems for "${track.title || track.filename}"...`);
+                  const stemResult = await stemSeparator.separateStems(actualFilePath, {
+                    onProgress: (pct) => broadcast({ type: 'stem_progress', track_id: track.id, progress: pct }),
+                  });
+                  if (stemResult && stemResult.stems) {
+                    const summary = stemSeparator.computeStemSummary(stemResult.stems);
+                    db.updateStemEnergy(track.id, { ...stemResult, summary });
+                    analysis = db.getTrackAnalysis(track.id);
+                    broadcast({ type: 'stem_complete', track_id: track.id });
+                    console.log(`[SEQ] Auto-separated stems (${stemResult.method}) for "${track.title || track.filename}"`);
+                  }
+                } catch (se) {
+                  console.warn(`[SEQ] Auto-stem separation failed: ${se.message}`);
                 }
               }
 
@@ -1957,6 +1977,103 @@ app.delete('/api/tracks/:id/analysis', (req, res) => {
   res.json({ deleted: true });
 });
 
+// ─── Stem Separation API ────────────────────────────────────────────────────
+
+// Check stem separation availability (demucs + ffmpeg spectral fallback)
+app.get('/api/stems/status', async (req, res) => {
+  const demucsInfo = await stemSeparator.checkDemucs();
+  const ffmpegOk = await audioAnalyzer.checkFfmpeg();
+  res.json({
+    demucs: demucsInfo,
+    spectral_fallback: ffmpegOk,
+    available: demucsInfo.available || ffmpegOk,
+  });
+});
+
+// Get stem data for a track
+app.get('/api/tracks/:id/stems', (req, res) => {
+  const analysis = db.getTrackAnalysis(+req.params.id);
+  if (!analysis) return res.status(404).json({ error: 'No analysis found' });
+  if (!analysis.stem_energy) return res.status(404).json({ error: 'No stem data available' });
+  try {
+    const stemData = JSON.parse(analysis.stem_energy);
+    res.json(stemData);
+  } catch (e) {
+    res.status(500).json({ error: 'Invalid stem data' });
+  }
+});
+
+// Trigger stem separation for a track
+const stemInProgress = new Map(); // trackId -> true
+
+app.post('/api/tracks/:id/separate-stems', async (req, res) => {
+  const trackId = +req.params.id;
+  const track = db.getTrack(trackId);
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+
+  // Must have existing analysis first
+  const analysis = db.getTrackAnalysis(trackId);
+  if (!analysis) {
+    return res.status(400).json({ error: 'Track must be analyzed before stem separation' });
+  }
+
+  if (stemInProgress.has(trackId)) {
+    return res.status(409).json({ error: 'Stem separation already in progress for this track' });
+  }
+
+  const filePath = track.filepath;
+  if (!filePath || !require('fs').existsSync(filePath)) {
+    return res.status(400).json({ error: 'Audio file not found on disk', filepath: filePath });
+  }
+
+  stemInProgress.set(trackId, true);
+  res.json({ status: 'started', track_id: trackId });
+
+  try {
+    const method = req.body?.method || 'auto';
+    console.log(`[Stems] Starting stem separation for track ${trackId}: ${track.title || track.filename} (method: ${method})`);
+
+    const result = await stemSeparator.separateStems(filePath, {
+      method,
+      onProgress: (pct) => {
+        broadcast({ type: 'stem_progress', track_id: trackId, progress: pct });
+      },
+    });
+
+    // Compute summary and store
+    const summary = stemSeparator.computeStemSummary(result.stems);
+    const stemData = {
+      method: result.method,
+      summary,
+      // Store full energy timeseries only for stems that have data
+      energy: {},
+    };
+    for (const [name, segments] of Object.entries(result.stems)) {
+      if (segments && segments.length > 0) {
+        stemData.energy[name] = segments;
+      }
+    }
+
+    db.updateStemEnergy(trackId, stemData);
+    console.log(`[Stems] Completed track ${trackId} via ${result.method}: ${Object.keys(stemData.energy).join(', ')}`);
+
+    broadcast({ type: 'stem_complete', track_id: trackId, method: result.method, summary });
+  } catch (e) {
+    console.error(`[Stems] Error for track ${trackId}: ${e.message}`);
+    broadcast({ type: 'stem_error', track_id: trackId, error: e.message });
+  } finally {
+    stemInProgress.delete(trackId);
+  }
+});
+
+// Delete stem data for a track (keeps analysis)
+app.delete('/api/tracks/:id/stems', (req, res) => {
+  const analysis = db.getTrackAnalysis(+req.params.id);
+  if (!analysis) return res.status(404).json({ error: 'No analysis found' });
+  db.updateStemEnergy(+req.params.id, null);
+  res.json({ deleted: true });
+});
+
 // ─── Effects API ────────────────────────────────────────────────────────────
 
 app.get('/api/effects', (req, res) => {
@@ -2792,9 +2909,10 @@ const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... 
 const playbackTimers = {};   // { deckNum: intervalId }
 
 // Cached mixer integration settings (refreshed on config save / startup)
-let _cachedMixerConfig = { crossfaderGating: false, deckFaderDimmer: false, endAction: 'none' };
+let _cachedMixerConfig = { crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none' };
 function refreshMixerConfig() {
   _cachedMixerConfig.crossfaderGating = db.getConfig('seq_crossfader_gating') === '1';
+  _cachedMixerConfig.crossfaderMode = db.getConfig('seq_crossfader_mode') || 'gate'; // gate | blend | off
   _cachedMixerConfig.deckFaderDimmer = db.getConfig('seq_deck_fader_dimmer') === '1';
   _cachedMixerConfig.endAction = db.getConfig('seq_end_action') || 'none'; // none | blackout | scene
 }
@@ -3136,23 +3254,40 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   // ── Touch blackout hold: suppress all playback output ──
   if (touchOverrides.blackoutHold) return;
 
-  // ── Crossfader gating: suppress output for the deck the crossfader is away from ──
-  if (_cachedMixerConfig.crossfaderGating) {
-    const cf = parseFloat(state.crossfader) || 0;  // 0 = full deck 1, 1 = full deck 2
-    // Deck 1 active when cf <= 0.5, Deck 2 active when cf >= 0.55, dead zone 0.5–0.55
-    const gated = (deckNum === 1 && cf > 0.5) || (deckNum === 2 && cf < 0.55);
-    if (gated) {
-      // Only blackout once when transitioning to gated state
+  // ── Crossfader: gate, blend, or off ────────────────────────────────────
+  let crossfaderLevel = 1; // 0–1 multiplier for crossfader blending
+
+  const cfMode = _cachedMixerConfig.crossfaderMode || 'gate';
+  const legacyGating = _cachedMixerConfig.crossfaderGating;
+
+  if (cfMode === 'blend' && (deckNum === 1 || deckNum === 2)) {
+    const cf = parseFloat(state.crossfader) || 0; // 0 = full deck 1, 1 = full deck 2
+    crossfaderLevel = deckNum === 1 ? Math.max(0, Math.min(1, 1 - cf)) : Math.max(0, Math.min(1, cf));
+    // If level is near zero, blackout and skip
+    if (crossfaderLevel < 0.01) {
       if (!deckSeq._gated) {
         deckSeq._gated = true;
         blackoutDeckFixtures(deckNum);
       }
       return;
     }
-    // Deck just became active again
     if (deckSeq._gated) deckSeq._gated = false;
-    // Decks 3-4: no crossfader gating, always play if active
+  } else if ((cfMode === 'gate' || legacyGating) && cfMode !== 'off') {
+    // Legacy binary gating
+    if (legacyGating || cfMode === 'gate') {
+      const cf = parseFloat(state.crossfader) || 0;
+      const gated = (deckNum === 1 && cf > 0.5) || (deckNum === 2 && cf < 0.55);
+      if (gated) {
+        if (!deckSeq._gated) {
+          deckSeq._gated = true;
+          blackoutDeckFixtures(deckNum);
+        }
+        return;
+      }
+      if (deckSeq._gated) deckSeq._gated = false;
+    }
   }
+  // cfMode === 'off' or decks 3-4: crossfaderLevel stays 1
 
   // ── Deck fader dimmer: scale output by deck volume fader ──
   const deckLevel = _cachedMixerConfig.deckFaderDimmer
@@ -3317,6 +3452,10 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         const universe = fixMap.universe;
         if (!channelUpdates[universe]) channelUpdates[universe] = {};
         let finalValue = Math.max(0, Math.min(255, Math.round(value)));
+        // Scale by crossfader blend level (proportional blend between decks)
+        if (crossfaderLevel < 1 && DIMMABLE_CHANNELS.has(ch.type)) {
+          finalValue = Math.round(finalValue * crossfaderLevel);
+        }
         // Scale by deck fader level (acts as master dimmer for this deck's sequence)
         // Only apply to intensity/color channels — NOT pan/tilt/speed/gobo etc.
         if (deckLevel < 1 && DIMMABLE_CHANNELS.has(ch.type)) {

@@ -62,6 +62,7 @@ function generateSequence(opts) {
   const activeSpeedDmx       = gc.gen_speed_dmx         || SPEED_DMX;
   const activeSectionEffects = gc.gen_section_effects   || SECTION_EFFECT_TYPES;
   const activeCellPatterns   = gc.gen_cell_patterns     || CELL_PATTERN_MAP;
+  const activeFixtureIntensity = gc.gen_fixture_intensity || null;
 
   // Resolve genre preset using active config
   const genreKey = opts.genre || resolveGenrePresetWith(track.genre, activeGenrePresets, activeGenreAliases);
@@ -85,10 +86,12 @@ function generateSequence(opts) {
   let sections = [];
   let beats = [];
   let energyLevels = [];
+  let stemEnergy = null;
   if (analysis) {
     try { sections = JSON.parse(analysis.sections || '[]'); } catch (e) { sections = []; }
     try { beats = JSON.parse(analysis.beats || '[]'); } catch (e) { beats = []; }
     try { energyLevels = JSON.parse(analysis.energy_levels || '[]'); } catch (e) { energyLevels = []; }
+    try { stemEnergy = analysis.stem_energy ? JSON.parse(analysis.stem_energy) : null; } catch (e) { stemEnergy = null; }
   }
 
   // Filter to RGB fixtures
@@ -133,13 +136,27 @@ function generateSequence(opts) {
   const multiCellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0);
   const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
 
+  // ── Build fixture role map for per-fixture intensity curves ──────────
+  const fixtureRoleMap = new Map();
+  for (const f of movers) fixtureRoleMap.set(f.id, 'mover');
+  for (const f of ledBars) fixtureRoleMap.set(f.id, 'led_bar');
+  for (const f of colorWheelFixtures) fixtureRoleMap.set(f.id, 'color_wheel');
+  for (const f of regularFixtures) {
+    if (!fixtureRoleMap.has(f.id)) fixtureRoleMap.set(f.id, 'par');
+  }
+  // Multi-cell fixtures that aren't already tagged
+  for (const f of multiCellFixtures) {
+    if (!fixtureRoleMap.has(f.id)) fixtureRoleMap.set(f.id, 'led_bar');
+  }
+
   const cues = [];
   const snapBeat = (t) => snapToBeat(t, beats);
   const snapBar  = (t) => snapToBar(t, beats);
   const ctx = {
     bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
     activePalettes, activeSectionStyles, activeMovementStyles, activeSpeedDmx,
-    activeSectionEffects, activeCellPatterns,
+    activeSectionEffects, activeCellPatterns, activeFixtureIntensity, fixtureRoleMap,
+    stemEnergy,
   };
 
   // Multi-cell fixtures get dedicated per-cell patterns, so exclude them

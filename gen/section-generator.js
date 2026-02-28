@@ -5,7 +5,7 @@
  * song sections (verse, chorus, drop, etc.) with beat-grid snapping.
  */
 
-const { applyIntensity, rgbToHex, CUE_COLORS } = require('./helpers');
+const { applyIntensity, rgbToHex, CUE_COLORS, getFixtureIntensity, hasVocals, getDrumDensity, getStemEnergy } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
 
 /**
@@ -120,6 +120,25 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
           endIntensity = Math.min(1, endIntensity * boost);
         }
 
+        // ── Per-fixture intensity curve ──
+        const fixIntMult = getFixtureIntensity(fix.id, sec.label, ctx);
+        startIntensity = Math.min(1, startIntensity * fixIntMult);
+        endIntensity = Math.min(1, endIntensity * fixIntMult);
+
+        // ── Stem-aware intensity modulation ──
+        // When stem data is available, reduce intensity during vocal sections
+        // (let the vocals breathe) and boost during instrumental passages
+        const vocalsActive = hasVocals(secStartMs, secEndMs, ctx);
+        if (vocalsActive === true) {
+          // Soften lights during vocals (85% intensity) — subtle enough to not be jarring
+          startIntensity *= 0.85;
+          endIntensity *= 0.85;
+        } else if (vocalsActive === false && (sec.label === 'chorus' || sec.label === 'drop')) {
+          // Instrumental chorus/drop — boost energy (full blast)
+          startIntensity = Math.min(1, startIntensity * 1.1);
+          endIntensity = Math.min(1, endIntensity * 1.1);
+        }
+
         const startColor = applyIntensity(palette[0], startIntensity);
         const endColor = applyIntensity(palette[1], endIntensity);
 
@@ -155,7 +174,11 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       // ── Strobe hits on high-energy beats ────────────────────────────
       if (!noStrobes && !colorOnly) {
       const effectiveStrobeChance = (style.strobeChance || 0) * preset.strobeMult * (0.3 + 0.7 * bpmFactor);
-      if (effectiveStrobeChance > 0 && beats.length > 0) {
+      // When drum stems are available, boost strobe chance in drum-dense sections
+      const drumDensity = getDrumDensity(secStartMs, secEndMs, ctx);
+      const drumBoost = drumDensity !== null ? Math.min(1.3, 0.7 + drumDensity * 0.1) : 1.0;
+      const finalStrobeChance = effectiveStrobeChance * drumBoost;
+      if (finalStrobeChance > 0 && beats.length > 0) {
         const strobeBeats = beats.filter(b => b >= secStartMs && b < secEndMs);
         const strobeDurMs = Math.round((style.strobeDurationBeats || 0.5) * beatMs);
 
@@ -163,7 +186,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
           const beatInSection = Math.floor((strobeBeats[bi] - secStartMs) / beatMs);
           const isDownbeat = beatInSection % 4 === 0;
 
-          if (isDownbeat && rand() < effectiveStrobeChance) {
+          if (isDownbeat && rand() < finalStrobeChance) {
             let beatEnergy = 0.8;
             if (energyLevels.length > 0) {
               const closest = energyLevels.reduce((best, e) =>

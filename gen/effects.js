@@ -7,6 +7,7 @@
  */
 
 const { getSectionPalettes } = require('./palettes');
+const { hasVocals } = require('./helpers');
 
 const SECTION_EFFECT_TYPES = {
   intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'],                                   rigWide: ['rig_color_wave', 'rig_rainbow'] },
@@ -243,7 +244,14 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       if (rand() > Math.min(chance, 0.95)) continue;
 
       for (const [typeName, group] of groupEntries) {
-        const desiredTypes = group.isLedBar ? typesMap.cellAware : typesMap.regular;
+        let desiredTypes = group.isLedBar ? typesMap.cellAware : typesMap.regular;
+
+        // Stem-aware: filter out strobe during vocal sections to avoid harsh lighting
+        const vocalsActive = hasVocals(sectionStart, sectionEnd, ctx);
+        if (vocalsActive === true) {
+          desiredTypes = desiredTypes.filter(t => t !== 'strobe');
+        }
+
         const effect = pickEffect(desiredTypes);
         if (!effect) continue;
 

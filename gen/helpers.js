@@ -60,6 +60,50 @@ function findNearestWheelColor(color, wheelMap) {
 }
 
 /**
+ * Find a split/half-color position between two adjacent wheel colors.
+ * Many color wheel fixtures have half-positions between gel slots.
+ * The DMX value sits at the boundary between two adjacent color ranges.
+ * @param {Object} color1 - {r,g,b} first color to match
+ * @param {Object} color2 - {r,g,b} second color to match
+ * @param {Array} wheelMap - color wheel entries sorted by dmx_start
+ * @returns {{ dmx: number, color_hex: string, label: string }|null}
+ */
+function findSplitWheelPosition(color1, color2, wheelMap) {
+  if (!wheelMap || wheelMap.length < 2) return null;
+
+  const w1 = findNearestWheelColor(color1, wheelMap);
+  const w2 = findNearestWheelColor(color2, wheelMap);
+  if (!w1 || !w2 || w1 === w2) return null;
+
+  // Find the two entries in the sorted map
+  const idx1 = wheelMap.indexOf(w1);
+  const idx2 = wheelMap.indexOf(w2);
+
+  // Only produce splits for adjacent colors on the wheel
+  if (Math.abs(idx1 - idx2) !== 1) return null;
+
+  // Split position: DMX value between the end of one color and start of the next
+  const lower = idx1 < idx2 ? w1 : w2;
+  const upper = idx1 < idx2 ? w2 : w1;
+  const splitDmx = Math.round((lower.dmx_end + upper.dmx_start) / 2);
+
+  // Blend the display colors for the UI
+  const c1 = hexToRgb(lower.color_hex);
+  const c2 = hexToRgb(upper.color_hex);
+  const blended = rgbToHex(
+    Math.round((c1.r + c2.r) / 2),
+    Math.round((c1.g + c2.g) / 2),
+    Math.round((c1.b + c2.b) / 2)
+  );
+
+  return {
+    dmx: splitDmx,
+    color_hex: blended,
+    label: `${lower.label || '?'}/${upper.label || '?'}`,
+  };
+}
+
+/**
  * Snap a time value to the nearest actual beat in the fluid beat array.
  * Uses binary search for efficiency.
  */
@@ -105,6 +149,98 @@ function seededRandom(seed) {
   };
 }
 
+/**
+ * Get per-fixture intensity multiplier based on fixture role and section label.
+ * Returns a 0–1 scalar that should multiply the section intensity.
+ * @param {number} fixtureId
+ * @param {string} sectionLabel - 'intro','verse','chorus', etc.
+ * @param {Object} ctx - generation context with fixtureRoleMap and activeFixtureIntensity
+ * @returns {number} intensity multiplier (default 1.0)
+ */
+function getFixtureIntensity(fixtureId, sectionLabel, ctx) {
+  if (!ctx.activeFixtureIntensity || !ctx.fixtureRoleMap) return 1.0;
+  const role = ctx.fixtureRoleMap.get(fixtureId) || 'par';
+  const roleCurve = ctx.activeFixtureIntensity[role];
+  if (!roleCurve) return 1.0;
+  return roleCurve[sectionLabel] ?? 1.0;
+}
+
+/**
+ * Get the average stem energy within a time range.
+ * @param {string} stemName - 'vocals', 'drums', 'bass', 'other'
+ * @param {number} startMs  - section start time
+ * @param {number} endMs    - section end time
+ * @param {Object} ctx      - generation context with stemEnergy
+ * @returns {number|null}   - average energy (0-1) or null if no stem data
+ */
+function getStemEnergy(stemName, startMs, endMs, ctx) {
+  if (!ctx.stemEnergy || !ctx.stemEnergy.energy || !ctx.stemEnergy.energy[stemName]) return null;
+  const segments = ctx.stemEnergy.energy[stemName];
+  let sum = 0, count = 0;
+  for (const seg of segments) {
+    if (seg.time_ms >= startMs && seg.time_ms < endMs) {
+      sum += seg.energy;
+      count++;
+    }
+  }
+  return count > 0 ? sum / count : null;
+}
+
+/**
+ * Check if vocals are active during a section (>15% of vocal max).
+ * Uses the pre-computed vocal_ranges from the stem summary if available,
+ * otherwise falls back to per-segment energy check.
+ *
+ * @param {number} startMs
+ * @param {number} endMs
+ * @param {Object} ctx
+ * @returns {boolean|null} - true/false if stem data available, null otherwise
+ */
+function hasVocals(startMs, endMs, ctx) {
+  if (!ctx.stemEnergy) return null;
+
+  // Check summary vocal_ranges first (efficient, pre-computed)
+  const summary = ctx.stemEnergy.summary;
+  if (summary && summary.vocal_ranges) {
+    const ranges = summary.vocal_ranges;
+    const sectionMid = (startMs + endMs) / 2;
+    const sectionLen = endMs - startMs;
+    // Vocals are "active" if any vocal range overlaps >30% of the section
+    let overlapMs = 0;
+    for (const r of ranges) {
+      const oStart = Math.max(startMs, r.start_ms);
+      const oEnd   = Math.min(endMs, r.end_ms);
+      if (oEnd > oStart) overlapMs += (oEnd - oStart);
+    }
+    return overlapMs > sectionLen * 0.3;
+  }
+
+  // Fallback: check raw energy
+  const vocalEnergy = getStemEnergy('vocals', startMs, endMs, ctx);
+  if (vocalEnergy === null) return null;
+  const maxVocal = ctx.stemEnergy.summary?.vocals?.max || 0.1;
+  return vocalEnergy > maxVocal * 0.15;
+}
+
+/**
+ * Get the drum onset density for a section (onsets per second).
+ * @param {number} startMs
+ * @param {number} endMs
+ * @param {Object} ctx
+ * @returns {number|null}
+ */
+function getDrumDensity(startMs, endMs, ctx) {
+  if (!ctx.stemEnergy || !ctx.stemEnergy.energy || !ctx.stemEnergy.energy.drums) return null;
+  const segments = ctx.stemEnergy.energy.drums;
+  let onsets = 0;
+  const inRange = segments.filter(s => s.time_ms >= startMs && s.time_ms < endMs);
+  for (let i = 1; i < inRange.length; i++) {
+    if (inRange[i].energy - inRange[i - 1].energy > 0.02) onsets++;
+  }
+  const durationSec = (endMs - startMs) / 1000;
+  return durationSec > 0 ? onsets / durationSec : null;
+}
+
 module.exports = {
   CUE_COLORS,
   applyIntensity,
@@ -112,7 +248,12 @@ module.exports = {
   rgbToHex,
   hexToRgb,
   findNearestWheelColor,
+  findSplitWheelPosition,
   snapToBeat,
   snapToBar,
   seededRandom,
+  getFixtureIntensity,
+  getStemEnergy,
+  hasVocals,
+  getDrumDensity,
 };
