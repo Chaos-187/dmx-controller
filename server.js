@@ -48,6 +48,7 @@ const DmxUsbServer = require('./dmx-usb-server');
 const audioAnalyzer = require('./audio-analyzer');
 const stemSeparator = require('./stem-separator');
 const os2l = require('./os2l');
+const midiController = require('./midi-controller');
 const fixtureLibrary = require('./fixture-library');
 const { WebUSB } = require('usb');
 
@@ -1709,6 +1710,10 @@ app.post('/api/touch/movement-override', (req, res) => {
 // ─── OS2L Button Maps API (delegated to os2l module) ────────────────────────
 
 os2l.registerRoutes(app);
+
+// ─── MIDI Controller API (delegated to midi-controller module) ──────────────
+
+midiController.registerRoutes(app);
 
 // ─── Tracks API ─────────────────────────────────────────────────────────────
 
@@ -3712,6 +3717,36 @@ os2l.init({
 
 os2l.startServer(OS2L_PORT);
 
+// Initialise MIDI controller module with same dependencies as OS2L
+midiController.init({
+  db,
+  broadcast,
+  state,
+  artnetServer,
+  dmxUsbServer,
+  touchOverrides,
+  runningQaEffects,
+  getDmxOutputEnabled: () => dmxOutputEnabled,
+  getEffectSlot,
+  stopRunningEffect,
+  activateScene,
+  deactivateScene,
+  buildChannelCtx,
+  computeEffectValue,
+  isFixtureCompatibleWithEffect,
+  applyMasterDimmer,
+  applyInvert,
+});
+
+// Auto-start MIDI controller
+(async function startMidi() {
+  try {
+    await midiController.start();
+  } catch (e) {
+    console.warn(`[MIDI] Auto-start failed: ${e.message}`);
+  }
+})();
+
 httpServer.listen(WEB_PORT, () => {
   console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT}`);
 });
@@ -3726,6 +3761,7 @@ process.on('SIGINT', async () => {
   await dmxUsbServer.shutdownAll();
   if (mdnsResponder) mdnsResponder.destroy();
   if (bonjour) bonjour.destroy();
+  midiController.stop();
   const os2lSrv = os2l.getServer();
   if (os2lSrv) os2lSrv.close();
   httpServer.close();

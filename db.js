@@ -338,6 +338,25 @@ function init() {
       is_default        INTEGER DEFAULT 0,
       created_at        TEXT    DEFAULT (datetime('now'))
     );
+
+    -- MIDI controller mappings (APC Mini / generic MIDI)
+    CREATE TABLE IF NOT EXISTS midi_mappings (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      name             TEXT    NOT NULL,
+      midi_type        TEXT    NOT NULL DEFAULT 'note',
+      midi_number      INTEGER NOT NULL DEFAULT 0,
+      midi_channel     INTEGER NOT NULL DEFAULT 0,
+      action_type      TEXT    NOT NULL DEFAULT 'none',
+      action_data      TEXT    DEFAULT '{}',
+      toggle_mode      TEXT    NOT NULL DEFAULT 'momentary',
+      led_color        INTEGER DEFAULT 0,
+      led_active_color INTEGER DEFAULT 1,
+      led_behavior     INTEGER DEFAULT 0,
+      led_active_behavior INTEGER DEFAULT 0,
+      enabled          INTEGER DEFAULT 1,
+      sort_order       INTEGER DEFAULT 0,
+      created_at       TEXT    DEFAULT (datetime('now'))
+    );
   `);
 
   // Migrate: add toggle_mode column if missing (existing databases)
@@ -490,6 +509,55 @@ function init() {
       ALTER TABLE color_wheel_colors_new RENAME TO color_wheel_colors;
     `);
     console.log('[DB] Migrated color_wheel_colors: replaced dmx_value with dmx_start/dmx_end');
+  }
+
+  // Migrate: APC mini mk2 — remap old APC mini v1 LED color values and note numbers
+  // Old v1 colors: 0=off, 1=green, 2=green blink, 3=red, 4=red blink, 5=yellow, 6=yellow blink
+  // New mk2 palette: 0=off, 5=red, 13=yellow, 21=green (velocity index into 128-color palette)
+  // Old v1 notes: bottom=64-71, right=82-89, shift=98
+  // New mk2 notes: bottom=100-107 (0x64-0x6B), right=112-119 (0x70-0x77), shift=122 (0x7A)
+  const midiMk2Migrated = getConfig('midi_mk2_migrated');
+  if (!midiMk2Migrated) {
+    const midiCount = db.prepare('SELECT COUNT(*) as c FROM midi_mappings').get().c;
+    if (midiCount > 0) {
+      // Remap old color values to mk2 palette indices
+      const colorMap = { 0: 0, 1: 21, 2: 21, 3: 5, 4: 5, 5: 13, 6: 13 };
+      const allMidi = db.prepare('SELECT id, midi_number, led_color, led_active_color FROM midi_mappings').all();
+      const updateColor = db.prepare('UPDATE midi_mappings SET led_color = ?, led_active_color = ? WHERE id = ?');
+      const updateNote  = db.prepare('UPDATE midi_mappings SET midi_number = ? WHERE id = ?');
+      const migrateTx = db.transaction(() => {
+        for (const m of allMidi) {
+          // Only remap if values are in the old 0-6 range
+          const oldLed = m.led_color;
+          const oldActive = m.led_active_color;
+          if (oldLed >= 0 && oldLed <= 6 && colorMap[oldLed] !== undefined) {
+            const newLed = colorMap[oldLed];
+            const newActive = (oldActive >= 0 && oldActive <= 6) ? (colorMap[oldActive] || 0) : oldActive;
+            updateColor.run(newLed, newActive, m.id);
+          }
+          // Remap old note numbers: bottom row 64-71 → 100-107, right col 82-89 → 112-119
+          if (m.midi_number >= 64 && m.midi_number <= 71) {
+            updateNote.run(m.midi_number - 64 + 100, m.id);  // 64→100, 65→101, ...
+          } else if (m.midi_number >= 82 && m.midi_number <= 89) {
+            updateNote.run(m.midi_number - 82 + 112, m.id);  // 82→112, 83→113, ...
+          } else if (m.midi_number === 98) {
+            updateNote.run(122, m.id);  // shift
+          }
+        }
+      });
+      migrateTx();
+      console.log(`[DB] Migrated ${allMidi.length} MIDI mappings to APC mini mk2 format (colors + note numbers)`);
+    }
+    setConfig('midi_mk2_migrated', '1');
+  }
+
+  // Migrate: add led_behavior columns to midi_mappings
+  try {
+    db.prepare('SELECT led_behavior FROM midi_mappings LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE midi_mappings ADD COLUMN led_behavior INTEGER DEFAULT 0");
+    db.exec("ALTER TABLE midi_mappings ADD COLUMN led_active_behavior INTEGER DEFAULT 0");
+    console.log('[DB] Migrated midi_mappings: added led_behavior and led_active_behavior columns');
   }
 
   // Migrate: fixture_type_modes — create default modes for existing fixture types
@@ -3389,6 +3457,77 @@ function restoreDatabase(uploadedFilePath) {
   db.pragma('foreign_keys = ON');
 }
 
+// ─── MIDI Mappings CRUD ──────────────────────────────────────────────────────
+
+function getMidiMappings() {
+  return db.prepare('SELECT * FROM midi_mappings ORDER BY sort_order, id').all();
+}
+
+function getEnabledMidiMappings() {
+  return db.prepare('SELECT * FROM midi_mappings WHERE enabled = 1 ORDER BY sort_order, id').all();
+}
+
+function getMidiMapping(id) {
+  return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
+}
+
+function createMidiMapping({ name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled }) {
+  if (!name || !name.trim()) return { error: 'Name is required' };
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM midi_mappings').get().next;
+  const r = db.prepare(
+    `INSERT INTO midi_mappings (name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    name.trim(),
+    midi_type || 'note',
+    midi_number || 0,
+    midi_channel || 0,
+    action_type || 'none',
+    typeof action_data === 'object' ? JSON.stringify(action_data) : (action_data || '{}'),
+    toggle_mode || 'momentary',
+    led_color !== undefined ? led_color : 0,
+    led_active_color !== undefined ? led_active_color : 1,
+    led_behavior !== undefined ? led_behavior : 0,
+    led_active_behavior !== undefined ? led_active_behavior : 0,
+    enabled !== undefined ? (enabled ? 1 : 0) : 1,
+    maxOrder
+  );
+  return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(r.lastInsertRowid);
+}
+
+function updateMidiMapping(id, { name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled }) {
+  const existing = db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
+  if (!existing) return null;
+  db.prepare(
+    `UPDATE midi_mappings SET name=?, midi_type=?, midi_number=?, midi_channel=?, action_type=?, action_data=?, toggle_mode=?, led_color=?, led_active_color=?, led_behavior=?, led_active_behavior=?, enabled=? WHERE id=?`
+  ).run(
+    name !== undefined ? name.trim() : existing.name,
+    midi_type !== undefined ? midi_type : existing.midi_type,
+    midi_number !== undefined ? midi_number : existing.midi_number,
+    midi_channel !== undefined ? midi_channel : existing.midi_channel,
+    action_type !== undefined ? action_type : existing.action_type,
+    action_data !== undefined ? (typeof action_data === 'object' ? JSON.stringify(action_data) : action_data) : existing.action_data,
+    toggle_mode !== undefined ? toggle_mode : existing.toggle_mode,
+    led_color !== undefined ? led_color : existing.led_color,
+    led_active_color !== undefined ? led_active_color : existing.led_active_color,
+    led_behavior !== undefined ? led_behavior : (existing.led_behavior || 0),
+    led_active_behavior !== undefined ? led_active_behavior : (existing.led_active_behavior || 0),
+    enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled,
+    id
+  );
+  return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
+}
+
+function deleteMidiMapping(id) {
+  db.prepare('DELETE FROM midi_mappings WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+function toggleMidiMapping(id) {
+  db.prepare('UPDATE midi_mappings SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE id = ?').run(id);
+  return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -3422,4 +3561,5 @@ module.exports = {
   getSceneEntries, getSceneEntry, createSceneEntry, updateSceneEntry, deleteSceneEntry, bulkUpdateSceneEntries,
   getTouchActions, getTouchAction, createTouchAction, updateTouchAction, deleteTouchAction, bulkUpdateTouchActions,
   getSequenceTemplates, getSequenceTemplate, createSequenceTemplate, updateSequenceTemplate, deleteSequenceTemplate, setDefaultSequenceTemplate,
+  getMidiMappings, getEnabledMidiMappings, getMidiMapping, createMidiMapping, updateMidiMapping, deleteMidiMapping, toggleMidiMapping,
 };

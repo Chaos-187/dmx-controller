@@ -960,6 +960,8 @@
     }
     .subs-table .sub-toggle { accent-color: var(--accent); cursor: pointer; width: 16px; height: 16px; }
     .sub-disabled td { opacity: .4; }
+    @keyframes blink-led { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.15; } }
+    @keyframes pulse-led { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
     .sub-cat {
       font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;
       letter-spacing: .5px; background: #222; color: var(--text-dim);
@@ -1989,6 +1991,7 @@
     <div class="config-sidebar">
       <span class="cfg-group-label">Hardware</span>
       <button class="config-sidebar-btn active" data-cfgtab="devices"><span class="cfg-icon">&#9783;</span>Devices</button>
+      <button class="config-sidebar-btn" data-cfgtab="midi"><span class="cfg-icon">&#127929;</span>MIDI Controller</button>
       <span class="cfg-group-label">DJ Integration</span>
       <button class="config-sidebar-btn" data-cfgtab="vdj"><span class="cfg-icon">&#9835;</span>VirtualDJ</button>
       <button class="config-sidebar-btn" data-cfgtab="os2l"><span class="cfg-icon">&#9889;</span>OS2L</button>
@@ -2273,6 +2276,67 @@
           <div class="modal-actions">
             <button class="btn btn-secondary" onclick="closeModal('artnetNodeModal')">Cancel</button>
             <button class="btn btn-primary" id="btnSaveArtnetNode">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── MIDI Controller ─── -->
+      <div class="config-sub-page" id="cfgpage-midi">
+        <div class="config-section">
+          <h3>MIDI Controller</h3>
+          <p class="config-desc">Connect and map an Akai APC Mini (or compatible MIDI controller) to trigger DMX actions. Buttons can be mapped to colors, effects, scenes, blackout, strobe, and more. Faders can control master dimmer, effect speed, and group dimmers.</p>
+
+          <!-- Connection status -->
+          <div class="config-card" style="margin-bottom:16px">
+            <h4>Connection</h4>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+              <div id="midiStatusDot" style="width:10px;height:10px;border-radius:50%;background:#f44"></div>
+              <span id="midiStatusLabel" style="font-size:13px;color:var(--text-dim)">Disconnected</span>
+              <span style="flex:1"></span>
+              <button class="btn btn-primary btn-sm" id="btnMidiConnect">Connect</button>
+              <button class="btn btn-secondary btn-sm" id="btnMidiDisconnect" style="display:none">Disconnect</button>
+              <button class="btn btn-secondary btn-sm" id="btnMidiRefreshPorts">Refresh Ports</button>
+            </div>
+            <div class="config-row" style="margin-bottom:6px">
+              <label>Device</label>
+              <select id="midiDeviceSelect" style="width:280px">
+                <option value="">— scanning for devices —</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Mapping table -->
+          <div class="config-card">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <h4 style="margin:0">MIDI Mappings</h4>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--text-dim)"><strong id="midiMappingsEnabledCount">0</strong> enabled of <strong id="midiMappingsTotalCount">0</strong></span>
+              <button class="btn btn-primary btn-sm" id="btnAddMidiMapping">+ Add Mapping</button>
+              <button class="btn btn-secondary btn-sm" id="btnMidiLearn" title="Press a button/fader on your controller to auto-detect">MIDI Learn</button>
+              <button class="btn btn-secondary btn-sm" id="btnMidiDefaults" title="Create default APC Mini layout">Load Defaults</button>
+            </div>
+            <table class="subs-table">
+              <thead>
+                <tr>
+                  <th style="width:36px">On</th>
+                  <th>Name</th>
+                  <th style="width:70px">Type</th>
+                  <th style="width:50px">#</th>
+                  <th>Action</th>
+                  <th style="width:65px">Mode</th>
+                  <th style="width:40px">LED</th>
+                  <th style="width:130px">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="midiMappingsTableBody"></tbody>
+            </table>
+          </div>
+
+          <!-- APC Mini visual grid -->
+          <div class="config-card" style="margin-top:16px">
+            <h4>APC Mini Layout</h4>
+            <p class="config-desc" style="margin-bottom:10px">Visual representation of your APC Mini button layout. Coloured buttons have active mappings.</p>
+            <div id="apcMiniGrid" style="display:grid;grid-template-columns:repeat(9,36px);grid-template-rows:repeat(10,32px) 60px;gap:2px;font-size:9px;font-family:var(--mono)"></div>
           </div>
         </div>
       </div>
@@ -3793,6 +3857,196 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════
+     MODAL — Add/Edit MIDI Mapping
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="midiMapModal">
+  <div class="modal" style="max-width:620px">
+    <h2 id="midiMapModalTitle">Add MIDI Mapping</h2>
+    <input type="hidden" id="midiMapEditId">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="mmName" placeholder="e.g. Blackout Pad">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>MIDI Type</label>
+        <select id="mmMidiType">
+          <option value="note">Note (Button/Pad)</option>
+          <option value="cc">CC (Fader/Knob)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>MIDI Number</label>
+        <input type="number" id="mmMidiNumber" min="0" max="127" value="0">
+        <div style="font-size:10px;color:var(--text-dim);margin-top:4px">Note/CC number (0-127). Use <strong>MIDI Learn</strong> to auto-detect.</div>
+      </div>
+      <div class="form-group">
+        <label>Channel</label>
+        <input type="number" id="mmMidiChannel" min="0" max="15" value="0" style="width:60px">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Action Type</label>
+      <select id="mmActionType"></select>
+    </div>
+    <div class="form-group" id="mmToggleModeGroup">
+      <label>Trigger Mode</label>
+      <select id="mmToggleMode">
+        <option value="momentary">Momentary (on while pressed)</option>
+        <option value="toggle">Toggle (press to flip on/off)</option>
+      </select>
+    </div>
+    <div id="mmActionDataSection">
+      <!-- Color RGBW fields -->
+      <div id="mmColorFields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>R</label><input type="number" id="mmColorR" min="0" max="255" value="255"></div>
+          <div class="form-group"><label>G</label><input type="number" id="mmColorG" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>B</label><input type="number" id="mmColorB" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>W</label><input type="number" id="mmColorW" min="0" max="255" value="0"></div>
+        </div>
+        <div class="form-group">
+          <label>Target Group</label>
+          <select id="mmColorGroup"><option value="">All Fixtures</option></select>
+        </div>
+      </div>
+      <!-- Effect dropdown -->
+      <div id="mmEffectFields" style="display:none">
+        <div class="form-group"><label>Effect</label><select id="mmEffectSelect"></select></div>
+        <div class="form-group"><label>Target Group</label><select id="mmEffectGroup"><option value="">All Fixtures</option></select></div>
+      </div>
+      <!-- Scene dropdown -->
+      <div id="mmSceneFields" style="display:none">
+        <div class="form-group"><label>Scene</label><select id="mmSceneSelect"></select></div>
+      </div>
+      <!-- Master dimmer value -->
+      <div id="mmDimmerFields" style="display:none">
+        <div class="form-group"><label>Dimmer Value (0-255)</label><input type="number" id="mmDimmerValue" min="0" max="255" value="255" style="width:120px"></div>
+      </div>
+      <!-- Group dimmer (fader) -->
+      <div id="mmGroupDimmerFields" style="display:none">
+        <div class="form-group"><label>Group</label><select id="mmGroupDimmerGroup"><option value="">All Fixtures</option></select></div>
+      </div>
+      <!-- Direct channel -->
+      <div id="mmChannelFields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>Universe</label><input type="number" id="mmChannelUniverse" min="1" max="32768" value="1" style="width:70px"></div>
+          <div class="form-group"><label>Channel</label><input type="number" id="mmChannelNumber" min="1" max="512" value="1" style="width:70px"></div>
+        </div>
+      </div>
+      <!-- Raw JSON -->
+      <div class="form-group" id="mmJsonGroup" style="display:none">
+        <label>Channel Data (JSON)</label>
+        <textarea id="mmActionData" rows="4" style="width:100%;padding:8px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;font-family:'Cascadia Code','Consolas',monospace" placeholder='{"universe":1,"channels":[{"ch":1,"val":255}]}'></textarea>
+      </div>
+    </div>
+    <div id="mmLedGroup" class="form-row">
+      <div class="form-group">
+        <label>LED Color (idle)</label>
+        <select id="mmLedColor">
+          <option value="0">Off</option>
+          <option value="1">Dim Gray</option>
+          <option value="2">Gray</option>
+          <option value="3">White</option>
+          <option value="4">Light Red</option>
+          <option value="5">Red</option>
+          <option value="6">Dark Red</option>
+          <option value="8">Orange</option>
+          <option value="9">Bright Orange</option>
+          <option value="12">Light Yellow</option>
+          <option value="13">Yellow</option>
+          <option value="14">Dark Yellow</option>
+          <option value="16">Lime</option>
+          <option value="17">Bright Green</option>
+          <option value="18">Dark Green</option>
+          <option value="21">Green</option>
+          <option value="25">Spring Green</option>
+          <option value="33">Cyan</option>
+          <option value="36">Light Blue</option>
+          <option value="37">Sky Blue</option>
+          <option value="45">Blue</option>
+          <option value="43">Dark Blue</option>
+          <option value="48">Purple</option>
+          <option value="49">Bright Purple</option>
+          <option value="53">Magenta</option>
+          <option value="56">Pink</option>
+          <option value="57">Hot Pink</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>LED Color (active)</label>
+        <select id="mmLedActiveColor">
+          <option value="0">Off</option>
+          <option value="1">Dim Gray</option>
+          <option value="2">Gray</option>
+          <option value="3">White</option>
+          <option value="4">Light Red</option>
+          <option value="5">Red</option>
+          <option value="6">Dark Red</option>
+          <option value="8">Orange</option>
+          <option value="9">Bright Orange</option>
+          <option value="12">Light Yellow</option>
+          <option value="13">Yellow</option>
+          <option value="14">Dark Yellow</option>
+          <option value="16">Lime</option>
+          <option value="17">Bright Green</option>
+          <option value="18">Dark Green</option>
+          <option value="21" selected>Green</option>
+          <option value="25">Spring Green</option>
+          <option value="33">Cyan</option>
+          <option value="36">Light Blue</option>
+          <option value="37">Sky Blue</option>
+          <option value="45">Blue</option>
+          <option value="43">Dark Blue</option>
+          <option value="48">Purple</option>
+          <option value="49">Bright Purple</option>
+          <option value="53">Magenta</option>
+          <option value="56">Pink</option>
+          <option value="57">Hot Pink</option>
+        </select>
+      </div>
+    </div>
+    <div id="mmLedBehaviorGroup" class="form-row">
+      <div class="form-group">
+        <label>LED Mode (idle)</label>
+        <select id="mmLedBehavior">
+          <option value="0">Static</option>
+          <option value="1">Pulsing (slow)</option>
+          <option value="2">Pulsing</option>
+          <option value="3">Pulsing (fast)</option>
+          <option value="4">Pulsing (faster)</option>
+          <option value="5">Blinking (slow)</option>
+          <option value="6">Blinking</option>
+          <option value="7">Blinking (fast)</option>
+          <option value="8">Blinking (faster)</option>
+          <option value="9">Blinking (fastest)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>LED Mode (active)</label>
+        <select id="mmLedActiveBehavior">
+          <option value="0">Static</option>
+          <option value="1">Pulsing (slow)</option>
+          <option value="2">Pulsing</option>
+          <option value="3">Pulsing (fast)</option>
+          <option value="4">Pulsing (faster)</option>
+          <option value="5">Blinking (slow)</option>
+          <option value="6">Blinking</option>
+          <option value="7">Blinking (fast)</option>
+          <option value="8">Blinking (faster)</option>
+          <option value="9">Blinking (fastest)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-error" id="midiMapError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('midiMapModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveMidiMap">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
      MODAL — Add/Edit OS2L Button Map
      ══════════════════════════════════════════════════════════════ -->
 <div class="modal-overlay" id="btnMapModal">
@@ -4322,6 +4576,8 @@ function connect() {
       document.getElementById('qaEffectSpeedVal').textContent = msg.value.toFixed(2) + '×';
     }
     else if (msg.type === 'os2l_button_map_created') { loadButtonMaps(); }
+    else if (msg.type === 'midi_mappings_changed' || msg.type === 'midi_mapping_created') { if (typeof loadMidiMappings === 'function') loadMidiMappings(); }
+    else if (msg.type === 'midi_status') { if (typeof updateMidiStatus === 'function') updateMidiStatus(msg); }
     else if (msg.type === 'stem_progress') {
       const fill = document.getElementById('stemProgressFill');
       const lbl = document.getElementById('stemProgressLabel');
@@ -11161,6 +11417,523 @@ document.getElementById('btnImport').addEventListener('click', async () => {
     resultDiv.style.border = '1px solid rgba(255,60,60,.3)';
     resultDiv.innerHTML = `<strong>&#10007; Import failed:</strong> ${e.message}`;
   }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  MIDI Controller Management
+// ═══════════════════════════════════════════════════════════════
+
+const MIDI_ACTION_LABELS = {
+  none: 'None', blackout: 'Blackout', strobe: 'Strobe', full_on: 'Full On',
+  color: 'Color', effect: 'Effect', scene_activate: 'Scene',
+  master_dimmer: 'Master Dimmer', effect_speed: 'Effect Speed',
+  group_dimmer: 'Group Dimmer', channel: 'Channel', set_channels: 'Set Channels',
+};
+
+const MIDI_LED_COLORS = {
+  0:'Off', 1:'Dim Gray', 2:'Gray', 3:'White', 4:'Light Red', 5:'Red', 6:'Dark Red',
+  8:'Orange', 9:'Bright Orange', 12:'Light Yellow', 13:'Yellow', 14:'Dark Yellow',
+  16:'Lime', 17:'Bright Green', 18:'Dark Green', 21:'Green', 25:'Spring Green',
+  33:'Cyan', 36:'Light Blue', 37:'Sky Blue', 45:'Blue', 43:'Dark Blue',
+  48:'Purple', 49:'Bright Purple', 53:'Magenta', 56:'Pink', 57:'Hot Pink',
+};
+// Full velocity-to-CSS color palette (mk2 has 128 entries)
+const VELOCITY_COLORS = [
+  '#000000','#1E1E1E','#7F7F7F','#FFFFFF','#FF4C4C','#FF0000','#590000','#190000',
+  '#FFBD6C','#FF5400','#591D00','#271B00','#FFFF4C','#FFFF00','#595900','#191900',
+  '#88FF4C','#54FF00','#1D5900','#142B00','#4CFF4C','#00FF00','#005900','#001900',
+  '#4CFF5E','#00FF19','#00590D','#001902','#4CFF88','#00FF55','#00591D','#001912',
+  '#4CFFB7','#00FF99','#005935','#001912','#4CC3FF','#00A9FF','#004152','#001019',
+  '#4C88FF','#0055FF','#001D59','#000819','#4C4CFF','#0000FF','#000059','#000019',
+  '#874CFF','#5400FF','#190059','#0F0030','#FF4CFF','#FF00FF','#590059','#190019',
+  '#FF4C87','#FF0054','#59001D','#190013','#FF1500','#993500','#795100','#436400',
+  '#033900','#005735','#001D52','#000F60','#0F0030','#3A0018','#7A0000','#3E4100',
+  '#003A00','#005432','#001C3E','#180046','#3A001C','#290000','#0F2B00','#003100',
+  '#00310F','#001931','#0D0031','#310017','#4CFF4C','#00FF00','#004C00','#001200',
+  '#4CFFCC','#00FF66','#004C19','#001204','#006459','#002819','#3F0064','#280046',
+  '#643F00','#4C2800','#191900','#640000','#4C0000','#003200','#001900','#001932',
+  '#000064','#004C4C','#4C004C','#190064','#4C0032','#640019','#321900','#193200',
+  '#003219','#001964','#320064','#640032','#640000','#640032','#640064','#320064',
+  '#006464','#003232','#326400','#643200','#644C00','#644C32','#644C64','#4C4C64',
+];
+function midiLedCssColor(vel) { return VELOCITY_COLORS[vel] || '#333'; }
+
+function updateMidiStatus(data) {
+  const dot = document.getElementById('midiStatusDot');
+  const label = document.getElementById('midiStatusLabel');
+  if (!dot) return;
+  if (data.connected) {
+    dot.style.background = '#0c0';
+    label.textContent = `Connected: ${data.device}`;
+    label.style.color = 'var(--text)';
+    document.getElementById('btnMidiConnect').style.display = 'none';
+    document.getElementById('btnMidiDisconnect').style.display = '';
+  } else {
+    dot.style.background = '#f44';
+    label.textContent = data.error ? `Error: ${data.error}` : 'Disconnected';
+    label.style.color = 'var(--text-dim)';
+    document.getElementById('btnMidiConnect').style.display = '';
+    document.getElementById('btnMidiDisconnect').style.display = 'none';
+  }
+}
+
+async function refreshMidiPorts() {
+  try {
+    const ports = await (await fetch('/api/midi/ports')).json();
+    const sel = document.getElementById('midiDeviceSelect');
+    const allPorts = [...new Set([...ports.inputs, ...ports.outputs])];
+    sel.innerHTML = allPorts.length
+      ? allPorts.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')
+      : '<option value="">— no MIDI devices found —</option>';
+  } catch (e) {
+    console.error('[MIDI] Error refreshing ports:', e);
+  }
+}
+
+async function loadMidiStatus() {
+  try {
+    const data = await (await fetch('/api/midi/status')).json();
+    updateMidiStatus(data);
+    // Populate port list
+    const sel = document.getElementById('midiDeviceSelect');
+    const allPorts = [...new Set([...(data.availablePorts?.inputs || []), ...(data.availablePorts?.outputs || [])])];
+    sel.innerHTML = allPorts.length
+      ? allPorts.map(p => `<option value="${esc(p)}" ${p === data.device ? 'selected' : ''}>${esc(p)}</option>`).join('')
+      : '<option value="">— no MIDI devices found —</option>';
+  } catch (e) {}
+}
+
+async function loadMidiMappings() {
+  try {
+    const mappings = await (await fetch('/api/midi/mappings')).json();
+    const tbody = document.getElementById('midiMappingsTableBody');
+    const enabled = mappings.filter(m => m.enabled).length;
+    document.getElementById('midiMappingsEnabledCount').textContent = enabled;
+    document.getElementById('midiMappingsTotalCount').textContent = mappings.length;
+
+    tbody.innerHTML = mappings.map(m => {
+      const disClass = m.enabled ? '' : ' sub-disabled';
+      const actionLabel = MIDI_ACTION_LABELS[m.action_type] || m.action_type;
+      const modeLabel = m.toggle_mode === 'toggle' ? 'Toggle' : 'Momentary';
+      const modeClass = m.toggle_mode === 'toggle' ? 'soundswitch' : 'custom';
+      const ledBehavior = m.led_behavior || 0;
+      const ledAnim = ledBehavior >= 5 ? 'animation:blink-led .5s step-end infinite;' : ledBehavior >= 1 ? 'animation:pulse-led 1s ease-in-out infinite;' : '';
+      const ledDot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${midiLedCssColor(m.led_color||0)};border:1px solid #555;${ledAnim}"></span>`;
+      return `<tr class="${disClass}">
+        <td><input type="checkbox" class="sub-toggle" ${m.enabled ? 'checked' : ''} onchange="toggleMidiMap(${m.id})"></td>
+        <td>${esc(m.name)}</td>
+        <td><span class="sub-cat">${esc(m.midi_type)}</span></td>
+        <td>${m.midi_number}</td>
+        <td><span class="sub-cat custom">${esc(actionLabel)}</span></td>
+        <td><span class="sub-cat ${modeClass}">${esc(modeLabel)}</span></td>
+        <td>${ledDot}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" onclick="testMidiMap(${m.id})" title="Test">&#9654;</button>
+          <button class="btn btn-secondary btn-sm" onclick="editMidiMap(${m.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteMidiMap(${m.id}, '${esc(m.name)}')">Del</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    renderApcMiniGrid(mappings);
+  } catch (e) {
+    console.error('[MIDI] Error loading mappings:', e);
+  }
+}
+
+function renderApcMiniGrid(mappings) {
+  const grid = document.getElementById('apcMiniGrid');
+  if (!grid) return;
+
+  // Build lookup: note → mapping
+  const noteMap = {};
+  for (const m of mappings) {
+    if (m.midi_type === 'note') noteMap[m.midi_number] = m;
+  }
+
+  let html = '';
+  // Rows 7 (top) to 0 (bottom) — 8 grid rows + right column
+  for (let row = 7; row >= 0; row--) {
+    for (let col = 0; col < 8; col++) {
+      const note = row * 8 + col;
+      const m = noteMap[note];
+      const bg = m ? (m.enabled ? midiLedCssColor(m.led_color || 13) : '#444') : '#222';
+      const title = m ? `${m.name} (note ${note})` : `Note ${note}`;
+      const label = m ? m.name.substring(0, 5) : '';
+      html += `<div style="background:${bg};border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:8px;cursor:pointer;border:1px solid #444;overflow:hidden;text-overflow:ellipsis" title="${esc(title)}" onclick="editMidiMapByNote(${note})">${esc(label)}</div>`;
+    }
+    // Right column button (scene launch notes 0x70-0x77 / 112-119)
+    // Scene Launch 1 (0x70) is at top, Scene Launch 8 (0x77) is at bottom
+    const rightNote = 0x77 - row;
+    const rm = noteMap[rightNote];
+    const rbg = rm ? (rm.enabled ? midiLedCssColor(rm.led_color || 13) : '#444') : '#333';
+    const rtitle = rm ? `${rm.name} (note ${rightNote})` : `Note ${rightNote}`;
+    const rlabel = rm ? rm.name.substring(0, 4) : `S${8-row}`;
+    html += `<div style="background:${rbg};border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:8px;cursor:pointer;border:1px solid #555" title="${esc(rtitle)}" onclick="editMidiMapByNote(${rightNote})">${esc(rlabel)}</div>`;
+  }
+  // Bottom row (notes 0x64-0x6B / 100-107) + shift placeholder
+  for (let col = 0; col < 8; col++) {
+    const note = 0x64 + col;
+    const m = noteMap[note];
+    const bg = m ? (m.enabled ? midiLedCssColor(m.led_color || 13) : '#444') : '#333';
+    const title = m ? `${m.name} (note ${note})` : `Note ${note}`;
+    const label = m ? m.name.substring(0, 5) : `T${col+1}`;
+    html += `<div style="background:${bg};border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:8px;cursor:pointer;border:1px solid #555" title="${esc(title)}" onclick="editMidiMapByNote(${note})">${esc(label)}</div>`;
+  }
+  html += `<div style="background:#555;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;border:1px solid #666">SHIFT</div>`;
+
+  // Fader row (CC 48-56 = Faders 1-9)
+  const ccMap = {};
+  for (const m of mappings) {
+    if (m.midi_type === 'cc') ccMap[m.midi_number] = m;
+  }
+  for (let i = 0; i < 9; i++) {
+    const cc = 48 + i;  // 0x30-0x38
+    const m = ccMap[cc];
+    const faderLabel = i < 8 ? `F${i+1}` : 'MST';
+    const bg = m ? (m.enabled ? '#1a6b1a' : '#444') : '#2a2a2a';
+    const title = m ? `${m.name} (CC ${cc})` : `Fader ${i+1} (CC ${cc})`;
+    const label = m ? m.name.substring(0, 5) : faderLabel;
+    html += `<div style="background:${bg};border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-size:8px;cursor:pointer;border:1px solid #555;gap:2px" title="${esc(title)}" onclick="editMidiMapByCC(${cc})">`;
+    html += `<div style="width:4px;height:28px;background:#666;border-radius:2px;position:relative"><div style="width:10px;height:4px;background:#aaa;border-radius:1px;position:absolute;left:-3px;top:${m ? '4' : '12'}px"></div></div>`;
+    html += `<div style="font-size:7px;color:#aaa">${esc(label)}</div></div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+// Update action-specific fields visibility
+function updateMmActionFields() {
+  const type = document.getElementById('mmActionType').value;
+  const midiType = document.getElementById('mmMidiType').value;
+  document.getElementById('mmColorFields').style.display = type === 'color' ? '' : 'none';
+  document.getElementById('mmEffectFields').style.display = type === 'effect' ? '' : 'none';
+  document.getElementById('mmSceneFields').style.display = type === 'scene_activate' ? '' : 'none';
+  // For master_dimmer: show value field only for button mode (note), hide for fader (cc)
+  document.getElementById('mmDimmerFields').style.display = (type === 'master_dimmer' && midiType === 'note') ? '' : 'none';
+  document.getElementById('mmGroupDimmerFields').style.display = type === 'group_dimmer' ? '' : 'none';
+  document.getElementById('mmChannelFields').style.display = type === 'channel' ? '' : 'none';
+  document.getElementById('mmJsonGroup').style.display = type === 'set_channels' ? '' : 'none';
+}
+document.getElementById('mmActionType').addEventListener('change', updateMmActionFields);
+document.getElementById('mmMidiType').addEventListener('change', updateMmMidiTypeActions);
+
+const MM_ACTION_TYPES_NOTE = [
+  { value: 'none', label: 'None (placeholder)' },
+  { value: 'color', label: 'Color (RGBW)' },
+  { value: 'effect', label: 'Run Effect' },
+  { value: 'scene_activate', label: 'Activate Scene' },
+  { value: 'blackout', label: 'Blackout' },
+  { value: 'full_on', label: 'Full On (all channels to 255)' },
+  { value: 'strobe', label: 'Strobe' },
+  { value: 'master_dimmer', label: 'Master Dimmer (toggle on/off)' },
+  { value: 'set_channels', label: 'Set Specific Channels (JSON)' },
+];
+const MM_ACTION_TYPES_CC = [
+  { value: 'none', label: 'None (placeholder)' },
+  { value: 'master_dimmer', label: 'Master Dimmer' },
+  { value: 'effect_speed', label: 'Effect Speed' },
+  { value: 'group_dimmer', label: 'Group Dimmer' },
+  { value: 'channel', label: 'Direct Channel' },
+];
+
+function updateMmMidiTypeActions() {
+  const midiType = document.getElementById('mmMidiType').value;
+  const sel = document.getElementById('mmActionType');
+  const prevVal = sel.value;
+  const opts = midiType === 'cc' ? MM_ACTION_TYPES_CC : MM_ACTION_TYPES_NOTE;
+  sel.innerHTML = opts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+  // Restore previous selection if still valid
+  if (opts.some(o => o.value === prevVal)) sel.value = prevVal;
+  // Hide trigger mode and LED colors for CC/fader (they don't have LEDs)
+  const isCC = midiType === 'cc';
+  document.getElementById('mmToggleModeGroup').style.display = isCC ? 'none' : '';
+  document.getElementById('mmLedGroup').style.display = isCC ? 'none' : '';
+  document.getElementById('mmLedBehaviorGroup').style.display = isCC ? 'none' : '';
+  updateMmActionFields();
+}
+updateMmMidiTypeActions(); // populate on load
+
+// Open mapping modal
+async function openMidiMapModal(mapId) {
+  document.getElementById('midiMapEditId').value = mapId || '';
+  document.getElementById('midiMapModalTitle').textContent = mapId ? 'Edit MIDI Mapping' : 'Add MIDI Mapping';
+  document.getElementById('midiMapError').textContent = '';
+
+  // Populate dropdowns
+  try {
+    const effects = await (await fetch('/api/effects')).json();
+    document.getElementById('mmEffectSelect').innerHTML = effects.map(e => `<option value="${e.id}">${esc(e.name)} (${e.type})</option>`).join('');
+  } catch(e) {}
+  try {
+    const scenes = await (await fetch('/api/scenes')).json();
+    document.getElementById('mmSceneSelect').innerHTML = scenes.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  } catch(e) {}
+  try {
+    const groups = await (await fetch('/api/groups')).json();
+    const opts = '<option value="">All Fixtures</option>' + groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+    document.getElementById('mmColorGroup').innerHTML = opts;
+    document.getElementById('mmEffectGroup').innerHTML = opts;
+    document.getElementById('mmGroupDimmerGroup').innerHTML = opts;
+  } catch(e) {}
+
+  if (mapId) {
+    const m = await (await fetch(`/api/midi/mappings/${mapId}`)).json();
+    document.getElementById('mmName').value = m.name;
+    document.getElementById('mmMidiType').value = m.midi_type;
+    updateMmMidiTypeActions(); // populate action options for note/cc
+    document.getElementById('mmMidiNumber').value = m.midi_number;
+    document.getElementById('mmMidiChannel').value = m.midi_channel;
+    document.getElementById('mmActionType').value = m.action_type;
+    document.getElementById('mmToggleMode').value = m.toggle_mode;
+    document.getElementById('mmLedColor').value = m.led_color;
+    document.getElementById('mmLedActiveColor').value = m.led_active_color;
+    document.getElementById('mmLedBehavior').value = m.led_behavior || 0;
+    document.getElementById('mmLedActiveBehavior').value = m.led_active_behavior || 0;
+
+    let ad = {};
+    try { ad = JSON.parse(m.action_data || '{}'); } catch(e) {}
+
+    if (m.action_type === 'color') {
+      document.getElementById('mmColorR').value = ad.red || 0;
+      document.getElementById('mmColorG').value = ad.green || 0;
+      document.getElementById('mmColorB').value = ad.blue || 0;
+      document.getElementById('mmColorW').value = ad.white || 0;
+      if (ad.group_id) document.getElementById('mmColorGroup').value = ad.group_id;
+    } else if (m.action_type === 'effect') {
+      if (ad.effect_id) document.getElementById('mmEffectSelect').value = ad.effect_id;
+      if (ad.group_id) document.getElementById('mmEffectGroup').value = ad.group_id;
+    } else if (m.action_type === 'scene_activate') {
+      if (ad.scene_id) document.getElementById('mmSceneSelect').value = ad.scene_id;
+    } else if (m.action_type === 'master_dimmer') {
+      document.getElementById('mmDimmerValue').value = ad.value !== undefined ? ad.value : 255;
+    } else if (m.action_type === 'group_dimmer') {
+      if (ad.group_id) document.getElementById('mmGroupDimmerGroup').value = ad.group_id;
+    } else if (m.action_type === 'channel') {
+      document.getElementById('mmChannelUniverse').value = ad.universe || 1;
+      document.getElementById('mmChannelNumber').value = ad.channel || 1;
+    } else {
+      document.getElementById('mmActionData').value = m.action_data || '{}';
+    }
+  } else {
+    document.getElementById('mmName').value = '';
+    document.getElementById('mmMidiType').value = 'note';
+    updateMmMidiTypeActions(); // populate action options for note
+    document.getElementById('mmMidiNumber').value = '0';
+    document.getElementById('mmMidiChannel').value = '0';
+    document.getElementById('mmActionType').value = 'color';
+    document.getElementById('mmToggleMode').value = 'momentary';
+    document.getElementById('mmLedColor').value = '13';
+    document.getElementById('mmLedActiveColor').value = '21';
+    document.getElementById('mmLedBehavior').value = '0';
+    document.getElementById('mmLedActiveBehavior').value = '0';
+    document.getElementById('mmColorR').value = 255;
+    document.getElementById('mmColorG').value = 0;
+    document.getElementById('mmColorB').value = 0;
+    document.getElementById('mmColorW').value = 0;
+    document.getElementById('mmActionData').value = '{}';
+  }
+  updateMmActionFields();
+  document.getElementById('midiMapModal').classList.add('open');
+}
+
+// Save mapping
+document.getElementById('btnSaveMidiMap').addEventListener('click', async () => {
+  const editId = document.getElementById('midiMapEditId').value;
+  const name = document.getElementById('mmName').value.trim();
+  const midi_type = document.getElementById('mmMidiType').value;
+  const midi_number = +document.getElementById('mmMidiNumber').value;
+  const midi_channel = +document.getElementById('mmMidiChannel').value;
+  const action_type = document.getElementById('mmActionType').value;
+  const toggle_mode = document.getElementById('mmToggleMode').value;
+  const led_color = +document.getElementById('mmLedColor').value;
+  const led_active_color = +document.getElementById('mmLedActiveColor').value;
+  const led_behavior = +document.getElementById('mmLedBehavior').value;
+  const led_active_behavior = +document.getElementById('mmLedActiveBehavior').value;
+
+  if (!name) return showError('midiMapError', 'Name is required');
+
+  let action_data = '{}';
+  if (action_type === 'color') {
+    const data = {
+      red: +document.getElementById('mmColorR').value || 0,
+      green: +document.getElementById('mmColorG').value || 0,
+      blue: +document.getElementById('mmColorB').value || 0,
+      white: +document.getElementById('mmColorW').value || 0,
+    };
+    const gid = document.getElementById('mmColorGroup').value;
+    if (gid) data.group_id = +gid;
+    action_data = JSON.stringify(data);
+  } else if (action_type === 'effect') {
+    const eid = +document.getElementById('mmEffectSelect').value;
+    if (!eid) return showError('midiMapError', 'Please select an effect');
+    const data = { effect_id: eid };
+    const gid = document.getElementById('mmEffectGroup').value;
+    if (gid) data.group_id = +gid;
+    action_data = JSON.stringify(data);
+  } else if (action_type === 'scene_activate') {
+    const sid = +document.getElementById('mmSceneSelect').value;
+    if (!sid) return showError('midiMapError', 'Please select a scene');
+    action_data = JSON.stringify({ scene_id: sid });
+  } else if (action_type === 'master_dimmer') {
+    action_data = JSON.stringify({ value: Math.max(0, Math.min(255, +document.getElementById('mmDimmerValue').value || 255)) });
+  } else if (action_type === 'group_dimmer') {
+    const gid = document.getElementById('mmGroupDimmerGroup').value;
+    action_data = JSON.stringify(gid ? { group_id: +gid } : {});
+  } else if (action_type === 'channel') {
+    action_data = JSON.stringify({
+      universe: +document.getElementById('mmChannelUniverse').value || 1,
+      channel: +document.getElementById('mmChannelNumber').value || 1,
+    });
+  } else if (action_type === 'set_channels') {
+    action_data = document.getElementById('mmActionData').value.trim() || '{}';
+    try { JSON.parse(action_data); } catch (e) { return showError('midiMapError', 'Action data must be valid JSON'); }
+  }
+
+  const body = { name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior };
+  const url = editId ? `/api/midi/mappings/${editId}` : '/api/midi/mappings';
+  const method = editId ? 'PUT' : 'POST';
+
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) return showError('midiMapError', data.error);
+
+  closeModal('midiMapModal');
+  loadMidiMappings();
+});
+
+// Global handlers
+window.editMidiMap = (id) => openMidiMapModal(id);
+window.editMidiMapByNote = (note) => {
+  // Find existing mapping for this note, or create new with pre-filled note
+  fetch('/api/midi/mappings').then(r => r.json()).then(mappings => {
+    const existing = mappings.find(m => m.midi_type === 'note' && m.midi_number === note);
+    if (existing) {
+      openMidiMapModal(existing.id);
+    } else {
+      openMidiMapModal();
+      setTimeout(() => {
+        document.getElementById('mmMidiType').value = 'note';
+        document.getElementById('mmMidiNumber').value = note;
+        updateMmMidiTypeActions();
+        // Auto-name based on note region
+        let autoName = `Note ${note}`;
+        if (note >= 0 && note <= 63) { autoName = `Grid ${Math.floor(note/8)+1}:${note%8+1}`; }
+        else if (note >= 64 && note <= 71) { autoName = `Bottom ${note-63}`; }
+        else if (note >= 82 && note <= 89) { autoName = `Scene ${note-81}`; }
+        document.getElementById('mmName').value = autoName;
+      }, 50);
+    }
+  });
+};
+
+window.editMidiMapByCC = (cc) => {
+  // Find existing mapping for this CC, or create new with pre-filled CC
+  fetch('/api/midi/mappings').then(r => r.json()).then(mappings => {
+    const existing = mappings.find(m => m.midi_type === 'cc' && m.midi_number === cc);
+    if (existing) {
+      openMidiMapModal(existing.id);
+    } else {
+      openMidiMapModal();
+      setTimeout(() => {
+        document.getElementById('mmMidiType').value = 'cc';
+        document.getElementById('mmMidiNumber').value = cc;
+        updateMmMidiTypeActions();
+        // Auto-name based on fader index
+        const faderIdx = cc - 48;
+        const autoName = faderIdx === 8 ? 'Master Fader' : `Fader ${faderIdx + 1}`;
+        document.getElementById('mmName').value = autoName;
+        // Default to master_dimmer for fader 9, group_dimmer for others
+        document.getElementById('mmActionType').value = faderIdx === 8 ? 'master_dimmer' : 'group_dimmer';
+        updateMmActionFields();
+      }, 50);
+    }
+  });
+};
+
+window.deleteMidiMap = async (id, name) => {
+  if (!confirm(`Delete MIDI mapping "${name}"?`)) return;
+  await fetch(`/api/midi/mappings/${id}`, { method: 'DELETE' });
+  loadMidiMappings();
+};
+
+window.toggleMidiMap = async (id) => {
+  await fetch(`/api/midi/mappings/${id}/toggle`, { method: 'POST' });
+  loadMidiMappings();
+};
+
+window.testMidiMap = async (id) => {
+  await fetch(`/api/midi/mappings/test/${id}`, { method: 'POST' });
+};
+
+// Buttons
+document.getElementById('btnAddMidiMapping').addEventListener('click', () => openMidiMapModal());
+
+document.getElementById('btnMidiConnect').addEventListener('click', async () => {
+  const device = document.getElementById('midiDeviceSelect').value;
+  const res = await fetch('/api/midi/connect', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device }),
+  });
+  const data = await res.json();
+  updateMidiStatus(data);
+});
+
+document.getElementById('btnMidiDisconnect').addEventListener('click', async () => {
+  await fetch('/api/midi/disconnect', { method: 'POST' });
+  updateMidiStatus({ connected: false });
+});
+
+document.getElementById('btnMidiRefreshPorts').addEventListener('click', refreshMidiPorts);
+
+document.getElementById('btnMidiDefaults').addEventListener('click', async () => {
+  if (!confirm('This will replace all existing MIDI mappings with the default APC Mini layout. Continue?')) return;
+  await fetch('/api/midi/presets/default', { method: 'POST' });
+  loadMidiMappings();
+});
+
+document.getElementById('btnMidiLearn').addEventListener('click', async () => {
+  const btn = document.getElementById('btnMidiLearn');
+  btn.textContent = 'Listening...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/midi/learn', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      alert(`MIDI Learn: ${data.error}`);
+    } else {
+      // Open a new mapping modal pre-filled with the learned MIDI message
+      openMidiMapModal();
+      setTimeout(() => {
+        document.getElementById('mmMidiType').value = data.type;
+        document.getElementById('mmMidiNumber').value = data.number;
+        document.getElementById('mmMidiChannel').value = data.channel;
+        const note = data.number;
+        let autoName = `${data.type === 'cc' ? 'Fader' : 'Pad'} ${note}`;
+        if (data.type === 'note') {
+          if (note >= 0 && note <= 63) autoName = `Grid ${Math.floor(note/8)+1}:${note%8+1}`;
+          else if (note >= 64 && note <= 71) autoName = `Bottom ${note-63}`;
+          else if (note >= 82 && note <= 89) autoName = `Scene ${note-81}`;
+        } else {
+          if (note >= 48 && note <= 56) autoName = `Fader ${note-47}`;
+        }
+        document.getElementById('mmName').value = autoName;
+      }, 50);
+    }
+  } catch (e) {
+    alert('MIDI Learn failed');
+  } finally {
+    btn.textContent = 'MIDI Learn';
+    btn.disabled = false;
+  }
+});
+
+// Load MIDI tab when selected
+const origCfgTabHandler = document.querySelector('.config-sidebar').onclick;
+document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.cfgtab === 'midi') { loadMidiStatus(); loadMidiMappings(); }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
