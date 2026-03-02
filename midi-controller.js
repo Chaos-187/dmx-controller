@@ -155,6 +155,9 @@ let computeEffectValue;
 let isFixtureCompatibleWithEffect;
 let applyMasterDimmer;
 let applyInvert;
+let pauseAllSequences;
+let getFixtureChannelMapCached;
+let getFixtureChannelMapByIdMap;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -168,8 +171,20 @@ let currentDeviceName = '';
 // Active toggle states for buttons
 const activeToggles = new Set();   // set of mapping IDs currently "on"
 
+// Cached MIDI mappings (avoid DB query on every MIDI event)
+let _cachedMidiMappings = null;
+function getCachedMidiMappings() {
+  if (!_cachedMidiMappings) _cachedMidiMappings = db.getEnabledMidiMappings();
+  return _cachedMidiMappings;
+}
+function invalidateMidiMappingCache() { _cachedMidiMappings = null; }
+
 // Running effects started by MIDI (slot → { timer, effectId, fixtureIds })
 const midiRunningEffects = {};
+
+// Active color override state (set when a color toggle is ON, cleared when OFF)
+// { red, green, blue, white, group_id } — allows re-applying when master dimmer changes
+let activeColorOverride = null;
 
 // ─── Initialise ─────────────────────────────────────────────────────────────
 
@@ -195,6 +210,9 @@ function init(deps) {
   isFixtureCompatibleWithEffect = deps.isFixtureCompatibleWithEffect;
   applyMasterDimmer        = deps.applyMasterDimmer;
   applyInvert              = deps.applyInvert;
+  pauseAllSequences        = deps.pauseAllSequences;
+  getFixtureChannelMapCached = deps.getFixtureChannelMapCached;
+  getFixtureChannelMapByIdMap = deps.getFixtureChannelMapByIdMap;
 }
 
 // ─── Device Discovery ───────────────────────────────────────────────────────
@@ -503,8 +521,8 @@ function handleNoteMessage(note, isOn, velocity) {
     return;
   }
 
-  // Find matching mapping
-  const mappings = db.getEnabledMidiMappings();
+  // Find matching mapping (cached to avoid DB query per note event)
+  const mappings = getCachedMidiMappings();
   let matched = false;
 
   for (const mapping of mappings) {
@@ -561,8 +579,8 @@ function handleCCMessage(cc, value) {
 
   const faderIndex = cc - FADER_CC.min; // 0-8
 
-  // Find matching mapping
-  const mappings = db.getEnabledMidiMappings();
+  // Find matching mapping (cached to avoid DB query per CC event)
+  const mappings = getCachedMidiMappings();
   let matched = false;
 
   for (const mapping of mappings) {
@@ -591,6 +609,67 @@ function handleCCMessage(cc, value) {
   }
 
   broadcast({ type: 'midi_fader', fader: faderIndex, value, cc });
+}
+
+// ─── Color DMX Helper ───────────────────────────────────────────────────────
+
+/**
+ * Send a color to all (or group-filtered) fixtures via DMX.
+ * Applies the current master dimmer. Returns the list of affected fixture IDs.
+ */
+function sendColorToDmx(red, green, blue, white, group_id, activate) {
+  const channelMap = getFixtureChannelMapCached();
+  const channelUpdates = {};
+  const colorFixtureIds = [];
+
+  for (const fix of channelMap) {
+    if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+    colorFixtureIds.push(fix.id);
+    const u = fix.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = [];
+    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+    for (const ch of fix.channels) {
+      const colorMap = { red, green, blue, white };
+      if (colorMap[ch.type] !== undefined) {
+        let val = activate ? colorMap[ch.type] : 0;
+        if (activate) {
+          // Apply master dimmer: if fixture has a dedicated dimmer channel, only dim that;
+          // otherwise dim the color channels directly
+          if (!fixHasDimmer) val = applyMasterDimmer(val, ch.type);
+        }
+        channelUpdates[u].push({ ch: ch.dmx_address, val });
+      } else if (ch.type === 'color_wheel' && fix.color_wheel_map && fix.color_wheel_map.length) {
+        // Find nearest color wheel position for this RGB color
+        if (activate) {
+          let best = null, bestDist = Infinity;
+          for (const entry of fix.color_wheel_map) {
+            const hex = entry.color_hex;
+            const cr = parseInt(hex.slice(1,3), 16);
+            const cg = parseInt(hex.slice(3,5), 16);
+            const cb = parseInt(hex.slice(5,7), 16);
+            const dist = (cr-red)*(cr-red) + (cg-green)*(cg-green) + (cb-blue)*(cb-blue);
+            if (dist < bestDist) { bestDist = dist; best = entry; }
+          }
+          channelUpdates[u].push({ ch: ch.dmx_address, val: best ? best.dmx_start : 0 });
+        } else {
+          channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
+        }
+      } else if (ch.type === 'dimmer' && activate) {
+        channelUpdates[u].push({ ch: ch.dmx_address, val: applyMasterDimmer(255, ch.type) });
+      } else if (ch.type === 'dimmer' && !activate) {
+        channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
+      }
+    }
+  }
+
+  const dmxEnabled = getDmxOutputEnabled();
+  if (dmxEnabled) {
+    for (const [u, channels] of Object.entries(channelUpdates)) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+  return colorFixtureIds;
 }
 
 // ─── Action Execution ───────────────────────────────────────────────────────
@@ -658,7 +737,7 @@ function executeMidiAction(mapping, isOn) {
 
     case 'strobe': {
       const strobeSpeed = parseInt(db.getConfig('strobe_speed') || '200', 10);
-      const channelMap = db.getFixtureChannelMap();
+      const channelMap = getFixtureChannelMapCached();
       const channelUpdates = {};
       const strobeFixtureIds = [];
 
@@ -697,33 +776,12 @@ function executeMidiAction(mapping, isOn) {
 
     case 'color': {
       const { red = 0, green = 0, blue = 0, white = 0, group_id } = actionData;
-      const channelMap = db.getFixtureChannelMap();
-      const channelUpdates = {};
-      const colorFixtureIds = [];
-
-      for (const fix of channelMap) {
-        if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
-        colorFixtureIds.push(fix.id);
-        const u = fix.universe;
-        if (!channelUpdates[u]) channelUpdates[u] = [];
-        for (const ch of fix.channels) {
-          const colorMap = { red, green, blue, white };
-          if (colorMap[ch.type] !== undefined) {
-            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? colorMap[ch.type] : 0 });
-          } else if (ch.type === 'dimmer' && activate) {
-            channelUpdates[u].push({ ch: ch.dmx_address, val: 255 });
-          } else if (ch.type === 'dimmer' && !activate) {
-            channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
-          }
-        }
+      if (activate) {
+        activeColorOverride = { red, green, blue, white, group_id };
+      } else {
+        activeColorOverride = null;
       }
-
-      if (dmxOutputEnabled) {
-        for (const [u, channels] of Object.entries(channelUpdates)) {
-          artnetServer.setChannels(+u, channels);
-          dmxUsbServer.setChannels(+u, channels);
-        }
-      }
+      const colorFixtureIds = sendColorToDmx(red, green, blue, white, group_id, activate);
       setOverride(colorFixtureIds, activate);
       broadcast({ type: 'midi_action', action: 'color', mapping: mapping.name, active: activate });
       break;
@@ -734,7 +792,8 @@ function executeMidiAction(mapping, isOn) {
       if (activate && effect_id) {
         const effect = db.getEffect(effect_id);
         if (effect) {
-          const channelMap = db.getFixtureChannelMap();
+          const channelMap = getFixtureChannelMapCached();
+          const fixtureByIdMap = getFixtureChannelMapByIdMap();
           let fixtureIds = channelMap.map(f => f.id);
           if (group_id) {
             fixtureIds = channelMap.filter(f => (f.group_ids || []).includes(group_id)).map(f => f.id);
@@ -744,7 +803,6 @@ function executeMidiAction(mapping, isOn) {
             stopRunningEffect(slot, true);
             setOverride(fixtureIds, true);
             const startTime = Date.now();
-            const fixMap = channelMap;
 
             const timer = setInterval(() => {
               if (!getDmxOutputEnabled()) return;
@@ -752,7 +810,7 @@ function executeMidiAction(mapping, isOn) {
               const chUpdates = {};
               for (let fi = 0; fi < fixtureIds.length; fi++) {
                 const fixtureId = fixtureIds[fi];
-                const fix = fixMap.find(f => f.id === fixtureId);
+                const fix = fixtureByIdMap.get(fixtureId);
                 if (!fix || !isFixtureCompatibleWithEffect(effect, fix)) continue;
                 for (const ch of fix.channels) {
                   let progress = effect.type === 'color_fade' ? (elapsed % 4) / 4 : elapsed;
@@ -760,7 +818,7 @@ function executeMidiAction(mapping, isOn) {
                   const channelCtx = buildChannelCtx(ch, fix);
                   channelCtx._fixtureOrdinal = fi;
                   channelCtx._fixtureCount = fixtureIds.length;
-                  channelCtx._rigFixtureCount = fixMap.length;
+                  channelCtx._rigFixtureCount = channelMap.length;
                   let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
                   if (value !== null && value !== undefined) {
                     if (!chUpdates[fix.universe]) chUpdates[fix.universe] = {};
@@ -846,6 +904,68 @@ function executeMidiAction(mapping, isOn) {
       break;
     }
 
+    case 'stop_all_effects': {
+      if (activate) {
+        // Stop all MIDI-started effects and release their overrides
+        for (const slot of Object.keys(midiRunningEffects)) {
+          const entry = midiRunningEffects[slot];
+          if (entry && entry.fixtureIds) setOverride(entry.fixtureIds, false);
+          delete midiRunningEffects[slot];
+        }
+        // Stop all running QA effects (clears intervals and resets channels)
+        stopRunningEffect(undefined, false);
+        // Deactivate any active scene (stops scene effect timer too)
+        deactivateScene();
+        // Clear active color override state
+        activeColorOverride = null;
+        // Clear ALL active toggles (effects, colors, strobes, scenes, etc.)
+        // and reset their LEDs + release overrides
+        const mappings = getCachedMidiMappings();
+        for (const m of mappings) {
+          if (activeToggles.has(m.id)) {
+            activeToggles.delete(m.id);
+            if (midiOutput && m.midi_type === 'note') {
+              setLed(m.midi_number, m.led_color || LED.YELLOW, m.led_behavior || 0);
+            }
+          }
+        }
+        // Pause all active sequences so the sequencer doesn't immediately
+        // resume writing DMX values after overrides are cleared
+        if (pauseAllSequences) pauseAllSequences();
+        // Release all overrides
+        setOverride(getAffectedFixtureIds(), false);
+        // Zero out all fixtures to ensure nothing stays lit
+        const dmxOutputEnabled = getDmxOutputEnabled();
+        if (dmxOutputEnabled) {
+          const channelMap = db.getFixtureChannelMap();
+          const channelUpdates = {};
+          for (const fix of channelMap) {
+            const u = fix.universe;
+            if (!channelUpdates[u]) channelUpdates[u] = {};
+            for (const ch of fix.channels) {
+              if (['dimmer','red','green','blue','white','amber','uv','strobe'].includes(ch.type)) {
+                channelUpdates[u][ch.dmx_address] = 0;
+              } else if (ch.type === 'pan') {
+                channelUpdates[u][ch.dmx_address] = fix.home_pan ?? 128;
+              } else if (ch.type === 'tilt') {
+                channelUpdates[u][ch.dmx_address] = fix.home_tilt ?? 128;
+              }
+            }
+          }
+          for (const [u, chMap] of Object.entries(channelUpdates)) {
+            const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
+            if (channels.length > 0) {
+              artnetServer.setChannels(+u, channels);
+              dmxUsbServer.setChannels(+u, channels);
+            }
+          }
+        }
+        console.log('[MIDI] Stopped all effects, scenes, and overrides');
+      }
+      broadcast({ type: 'midi_action', action: 'stop_all_effects', mapping: mapping.name, active: activate });
+      break;
+    }
+
     case 'master_dimmer': {
       const val = actionData.value !== undefined ? actionData.value : 255;
       if (activate) {
@@ -853,7 +973,12 @@ function executeMidiAction(mapping, isOn) {
       } else {
         touchOverrides.masterDimmer = 255;
       }
-      broadcast({ type: 'touchMasterDimmer', value: touchOverrides.masterDimmer });
+      broadcast({ type: 'masterDimmer', value: touchOverrides.masterDimmer });
+      // Re-apply active color override with new master dimmer
+      if (activeColorOverride && dmxOutputEnabled) {
+        const { red, green, blue, white, group_id } = activeColorOverride;
+        sendColorToDmx(red, green, blue, white, group_id, true);
+      }
       broadcast({ type: 'midi_action', action: 'master_dimmer', mapping: mapping.name, active: activate });
       break;
     }
@@ -882,6 +1007,11 @@ function executeFaderAction(mapping, value) {
       const dimVal = Math.round((value / 127) * 255);
       touchOverrides.masterDimmer = dimVal;
       broadcast({ type: 'masterDimmer', value: dimVal });
+      // Re-apply active color override with new master dimmer
+      if (activeColorOverride && dmxOutputEnabled) {
+        const { red, green, blue, white, group_id } = activeColorOverride;
+        sendColorToDmx(red, green, blue, white, group_id, true);
+      }
       break;
     }
 
@@ -1006,6 +1136,7 @@ function registerRoutes(app) {
   app.post('/api/midi/mappings', (req, res) => {
     const result = db.createMidiMapping(req.body);
     if (result.error) return res.status(400).json(result);
+    invalidateMidiMappingCache();
     refreshAllLeds();
     broadcast({ type: 'midi_mappings_changed' });
     res.status(201).json(result);
@@ -1015,6 +1146,7 @@ function registerRoutes(app) {
     const result = db.updateMidiMapping(+req.params.id, req.body);
     if (!result) return res.status(404).json({ error: 'Not found' });
     if (result.error) return res.status(400).json(result);
+    invalidateMidiMappingCache();
     refreshAllLeds();
     broadcast({ type: 'midi_mappings_changed' });
     res.json(result);
@@ -1022,6 +1154,7 @@ function registerRoutes(app) {
 
   app.delete('/api/midi/mappings/:id', (req, res) => {
     db.deleteMidiMapping(+req.params.id);
+    invalidateMidiMappingCache();
     refreshAllLeds();
     broadcast({ type: 'midi_mappings_changed' });
     res.json({ deleted: true });
@@ -1030,6 +1163,7 @@ function registerRoutes(app) {
   app.post('/api/midi/mappings/:id/toggle', (req, res) => {
     const result = db.toggleMidiMapping(+req.params.id);
     if (!result) return res.status(404).json({ error: 'Not found' });
+    invalidateMidiMappingCache();
     refreshAllLeds();
     broadcast({ type: 'midi_mappings_changed' });
     res.json(result);
@@ -1124,6 +1258,7 @@ function registerRoutes(app) {
   // ── Preset layouts ────────────────────────────────────────────────────
   app.post('/api/midi/presets/default', async (req, res) => {
     createDefaultMappings();
+    invalidateMidiMappingCache();
     refreshAllLeds();
     broadcast({ type: 'midi_mappings_changed' });
     res.json({ ok: true, message: 'Default APC Mini mappings created' });
@@ -1290,9 +1425,9 @@ function createDefaultMappings() {
     });
   }
 
-  // ── Scene buttons (112-119): Activate scenes ─────────────────────────
+  // ── Scene buttons (112-118): Activate scenes ─────────────────────────
   const scenes = db.getScenes ? db.getScenes() : [];
-  for (let i = 0; i < Math.min(scenes.length, 8); i++) {
+  for (let i = 0; i < Math.min(scenes.length, 7); i++) {
     db.createMidiMapping({
       name: `Scene: ${scenes[i].name}`,
       midi_type: 'note', midi_number: 0x70 + i, midi_channel: 0,
@@ -1304,6 +1439,15 @@ function createDefaultMappings() {
       enabled: 1,
     });
   }
+
+  // Scene button 119 (0x77): Stop All Effects
+  db.createMidiMapping({
+    name: 'Stop All Effects', midi_type: 'note', midi_number: 0x77, midi_channel: 0,
+    action_type: 'stop_all_effects', action_data: '{}', toggle_mode: 'momentary',
+    led_color: LED.DARK_RED, led_active_color: LED.RED,
+    led_behavior: 0, led_active_behavior: LED_BEHAVIOR.BLINKING_2X,
+    enabled: 1,
+  });
 
   // ── Faders ────────────────────────────────────────────────────────────
   // Fader 9 (CC 56): Master Dimmer

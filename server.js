@@ -300,8 +300,9 @@ function handleOs2lSubscribed(data) {
                 }
               }
 
-              // Auto-separate stems if not already present
-              if (analysis && !analysis.stem_energy && actualFilePath && fileExists) {
+              // Auto-separate stems if not already present (unless disabled in config)
+              const noStems = db.getConfig('seq_no_stems') === '1';
+              if (!noStems && analysis && !analysis.stem_energy && actualFilePath && fileExists) {
                 try {
                   console.log(`[SEQ] Auto-separating stems for "${track.title || track.filename}"...`);
                   const stemResult = await stemSeparator.separateStems(actualFilePath, {
@@ -650,6 +651,7 @@ app.get('/api/fixture-types/:id', (req, res) => {
 app.post('/api/fixture-types', (req, res) => {
   try {
     const result = db.createFixtureType(req.body);
+    invalidateFixtureChannelMapCache();
     res.status(201).json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -660,6 +662,7 @@ app.post('/api/fixture-types', (req, res) => {
 app.post('/api/fixture-types/led-bar', (req, res) => {
   try {
     const result = db.createLedBarFixtureType(req.body);
+    invalidateFixtureChannelMapCache();
     res.status(201).json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -670,6 +673,7 @@ app.post('/api/fixture-types/led-bar', (req, res) => {
 app.post('/api/fixture-types/multi-cell', (req, res) => {
   try {
     const result = db.createMultiCellFixtureType(req.body);
+    invalidateFixtureChannelMapCache();
     res.status(201).json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -679,12 +683,14 @@ app.post('/api/fixture-types/multi-cell', (req, res) => {
 app.put('/api/fixture-types/:id', (req, res) => {
   const result = db.updateFixtureType(+req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
+  invalidateFixtureChannelMapCache();
   res.json(result);
 });
 
 app.delete('/api/fixture-types/:id', (req, res) => {
   const result = db.deleteFixtureType(+req.params.id);
   if (result.error) return res.status(409).json(result);
+  invalidateFixtureChannelMapCache();
   res.json(result);
 });
 
@@ -699,6 +705,7 @@ app.put('/api/fixture-types/:id/color-wheel', (req, res) => {
     const colors = req.body.colors;
     if (!Array.isArray(colors)) return res.status(400).json({ error: 'colors array required' });
     const result = db.setColorWheelMap(+req.params.id, colors);
+    invalidateFixtureChannelMapCache();
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -707,6 +714,7 @@ app.put('/api/fixture-types/:id/color-wheel', (req, res) => {
 
 app.delete('/api/fixture-types/:id/color-wheel', (req, res) => {
   db.deleteColorWheelMap(+req.params.id);
+  invalidateFixtureChannelMapCache();
   res.json({ ok: true });
 });
 
@@ -729,6 +737,7 @@ app.post('/api/fixtures', (req, res) => {
   try {
     const result = db.createFixture(req.body);
     if (result.error) return res.status(400).json(result);
+    invalidateFixtureChannelMapCache();
     res.status(201).json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -739,11 +748,13 @@ app.put('/api/fixtures/:id', (req, res) => {
   const result = db.updateFixture(+req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
   if (result.error) return res.status(400).json(result);
+  invalidateFixtureChannelMapCache();
   res.json(result);
 });
 
 app.delete('/api/fixtures/:id', (req, res) => {
   db.deleteFixture(+req.params.id);
+  invalidateFixtureChannelMapCache();
   res.json({ deleted: true });
 });
 
@@ -855,6 +866,7 @@ app.get('/api/groups', (req, res) => {
 app.post('/api/groups', (req, res) => {
   const result = db.createGroup(req.body);
   if (result.error) return res.status(400).json(result);
+  invalidateFixtureChannelMapCache();
   res.status(201).json(result);
 });
 
@@ -862,17 +874,20 @@ app.put('/api/groups/:id', (req, res) => {
   const result = db.updateGroup(+req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
   if (result.error) return res.status(400).json(result);
+  invalidateFixtureChannelMapCache();
   res.json(result);
 });
 
 app.delete('/api/groups/:id', (req, res) => {
   db.deleteGroup(+req.params.id);
+  invalidateFixtureChannelMapCache();
   res.json({ deleted: true });
 });
 
 app.put('/api/groups/:id/fixtures', (req, res) => {
   const result = db.setGroupFixtures(+req.params.id, req.body.fixture_ids || []);
   if (result.error) return res.status(400).json(result);
+  invalidateFixtureChannelMapCache();
   res.json(result);
 });
 
@@ -926,17 +941,20 @@ app.get('/api/mover-presets/:id', (req, res) => {
 app.post('/api/mover-presets', (req, res) => {
   const result = db.createMoverPreset(req.body);
   if (result.error) return res.status(400).json(result);
+  invalidateMoverPresetCache();
   res.json(result);
 });
 
 app.put('/api/mover-presets/:id', (req, res) => {
   const result = db.updateMoverPreset(+req.params.id, req.body);
+  invalidateMoverPresetCache();
   result ? res.json(result) : res.status(404).json({ error: 'Not found' });
 });
 
 app.delete('/api/mover-presets/:id', (req, res) => {
   const result = db.deleteMoverPreset(+req.params.id);
   if (result.error) return res.status(403).json(result);
+  invalidateMoverPresetCache();
   res.json(result);
 });
 
@@ -1244,6 +1262,11 @@ app.post('/api/import', (req, res) => {
         } catch (e) { results.errors.push(`Scene "${sc.name}": ${e.message}`); }
       }
     }
+
+    // Invalidate all hot-path caches after bulk import
+    invalidateFixtureChannelMapCache();
+    invalidateEffectCache();
+    invalidateMoverPresetCache();
 
     res.json(results);
   } catch (e) {
@@ -2093,6 +2116,7 @@ app.get('/api/effects/:id', (req, res) => {
 app.post('/api/effects', (req, res) => {
   const result = db.createEffect(req.body);
   if (result.error) return res.status(400).json(result);
+  invalidateEffectCache();
   res.status(201).json(result);
 });
 
@@ -2100,11 +2124,13 @@ app.put('/api/effects/:id', (req, res) => {
   const result = db.updateEffect(+req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
   if (result.error) return res.status(400).json(result);
+  invalidateEffectCache();
   res.json(result);
 });
 
 app.delete('/api/effects/:id', (req, res) => {
   db.deleteEffect(+req.params.id);
+  invalidateEffectCache();
   res.json({ deleted: true });
 });
 
@@ -2139,10 +2165,10 @@ function stopRunningEffect(slot, skipBlackout) {
     clearInterval(running.timer);
 
     if (!skipBlackout) {
-      const fixMap = db.getFixtureChannelMap();
+      const fixMap = getFixtureChannelMapCached();
       const channelUpdates = {};
       for (const fixtureId of running.fixtureIds) {
-        const fix = fixMap.find(f => f.id === fixtureId);
+        const fix = getFixtureChannelMapByIdCached(fixtureId);
         if (!fix) continue;
         for (const ch of fix.channels) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
@@ -2183,7 +2209,7 @@ app.post('/api/effects/run', (req, res) => {
   stopRunningEffect(slot, true); // skip blackout for seamless switching
 
   const startTime = Date.now();
-  const fixMap = db.getFixtureChannelMap();
+  const allFixtures = getFixtureChannelMapCached();
 
   const timer = setInterval(() => {
     if (!dmxOutputEnabled) return;
@@ -2193,7 +2219,7 @@ app.post('/api/effects/run', (req, res) => {
 
     for (let fi = 0; fi < fixtureIds.length; fi++) {
       const fixtureId = fixtureIds[fi];
-      const fix = fixMap.find(f => f.id === fixtureId);
+      const fix = getFixtureChannelMapByIdCached(fixtureId);
       if (!fix) continue;
       if (!isFixtureCompatibleWithEffect(effect, fix)) continue;
 
@@ -2209,7 +2235,7 @@ app.post('/api/effects/run', (req, res) => {
         const channelCtx = buildChannelCtx(ch, fix);
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
-        channelCtx._rigFixtureCount = fixMap.length;
+        channelCtx._rigFixtureCount = allFixtures.length;
         let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
 
         if (value !== null && value !== undefined) {
@@ -2629,7 +2655,7 @@ function deactivateScene() {
  */
 function applySceneStaticValues(scene) {
   if (!dmxOutputEnabled) return;
-  const fixMap = db.getFixtureChannelMap();
+  const fixMap = getFixtureChannelMapCached();
   const channelUpdates = {};
 
   for (const entry of scene.entries) {
@@ -2637,7 +2663,7 @@ function applySceneStaticValues(scene) {
     const fixtureIds = resolveEntryFixtures(entry, fixMap);
     for (const fid of fixtureIds) {
       if (touchOverrides.disabledFixtures.has(fid)) continue;
-      const fix = fixMap.find(f => f.id === fid);
+      const fix = getFixtureChannelMapByIdCached(fid);
       if (!fix) continue;
       applyChannelValues(fix, entry.channel_values, channelUpdates);
     }
@@ -2650,20 +2676,20 @@ function applySceneStaticValues(scene) {
  * Process effect entries each tick.
  */
 function processSceneEffects(scene, startTime) {
-  const fixMap = db.getFixtureChannelMap();
+  const fixMap = getFixtureChannelMapCached();
   const channelUpdates = {};
   const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
 
   for (const entry of scene.entries) {
     if (!entry.effect_id) continue;
-    const effect = db.getEffect(entry.effect_id);
+    const effect = getEffectCached(entry.effect_id);
     if (!effect) continue;
 
     const fixtureIds = resolveEntryFixtures(entry, fixMap);
     for (let fi = 0; fi < fixtureIds.length; fi++) {
       const fid = fixtureIds[fi];
       if (touchOverrides.disabledFixtures.has(fid)) continue;
-      const fix = fixMap.find(f => f.id === fid);
+      const fix = getFixtureChannelMapByIdCached(fid);
       if (!fix) continue;
       // Skip fixtures that aren't compatible with this effect's target
       if (!isFixtureCompatibleWithEffect(effect, fix)) continue;
@@ -2762,13 +2788,13 @@ function sendChannelUpdates(channelUpdates) {
  */
 function blackoutSceneFixtures(scene) {
   if (!dmxOutputEnabled) return;
-  const fixMap = db.getFixtureChannelMap();
+  const fixMap = getFixtureChannelMapCached();
   const channelUpdates = {};
 
   for (const entry of scene.entries) {
     const fixtureIds = resolveEntryFixtures(entry, fixMap);
     for (const fid of fixtureIds) {
-      const fix = fixMap.find(f => f.id === fid);
+      const fix = getFixtureChannelMapByIdCached(fid);
       if (!fix) continue;
       const u = fix.universe;
       if (!channelUpdates[u]) channelUpdates[u] = {};
@@ -2973,6 +2999,25 @@ function stopPlaybackTimer(deck) {
 }
 
 /**
+ * Pause all active sequences across all decks.
+ * Stops playback timers, blacks out fixtures, and broadcasts state.
+ * Used by MIDI stop_all_effects to ensure the sequencer doesn't
+ * immediately resume writing DMX values after overrides are cleared.
+ */
+function pauseAllSequences() {
+  for (const deck of Object.keys(activeSequences)) {
+    const ds = activeSequences[deck];
+    if (ds && ds.playing) {
+      ds.playing = false;
+      stopPlaybackTimer(deck);
+      blackoutDeckFixtures(deck);
+      broadcast({ type: 'seq_playing', deck: +deck, playing: false });
+      console.log(`[SEQ] Paused deck ${deck} (stop_all_effects)`);
+    }
+  }
+}
+
+/**
  * Apply the configured action when a sequence reaches the end of the track.
  * Options: 'none' (keep last values), 'blackout' (zero all), 'scene' (activate default scene).
  */
@@ -3016,16 +3061,20 @@ function blackoutDeckFixtures(deck) {
 
   const cues = deckSeq.sequence.cues || [];
   const fixtureIds = [...new Set(cues.map(c => c.fixture_id).filter(Boolean))];
-  const allFixtures = db.getFixtureChannelMap();
+  const allFixtures = getFixtureChannelMapCached();
   const channelUpdates = {};
 
   for (const fid of fixtureIds) {
-    const fixMap = allFixtures.find(f => f.id === fid);
+    const fixMap = _cachedFixtureChannelMapById ? _cachedFixtureChannelMapById.get(fid) : allFixtures.find(f => f.id === fid);
     if (!fixMap) continue;
     const u = fixMap.universe;
     if (!channelUpdates[u]) channelUpdates[u] = {};
     for (const ch of fixMap.channels) {
-      channelUpdates[u][ch.dmx_address] = 0;
+      // Send pan/tilt to home position, everything else to 0
+      let resetVal = 0;
+      if (ch.type === 'pan') resetVal = fixMap.home_pan ?? 128;
+      else if (ch.type === 'tilt') resetVal = fixMap.home_tilt ?? 128;
+      channelUpdates[u][ch.dmx_address] = resetVal;
     }
   }
 
@@ -3152,7 +3201,7 @@ function handleSequenceCommand(ws, msg) {
       const fixtureId = msg.fixture_id;
       const vals = msg.channel_values; // { red: 255, green: 0, ... }
       if (!fixtureId || !vals) break;
-      const fixMap = db.getFixtureChannelMap().find(f => f.id === fixtureId);
+      const fixMap = getFixtureChannelMapByIdCached(fixtureId);
       if (!fixMap) break;
       for (const ch of fixMap.channels) {
         if (msg.cell != null && ch.cell != null && ch.cell !== msg.cell) continue;
@@ -3239,6 +3288,46 @@ function buildChannelCtx(ch, fix) {
   return ctx;
 }
 
+// Cached fixture channel map for hot-path processing (refreshed on fixture/group changes)
+let _cachedFixtureChannelMap = null;
+let _cachedFixtureChannelMapById = null;
+function getFixtureChannelMapCached() {
+  if (!_cachedFixtureChannelMap) {
+    _cachedFixtureChannelMap = db.getFixtureChannelMap();
+    _cachedFixtureChannelMapById = new Map();
+    for (const f of _cachedFixtureChannelMap) _cachedFixtureChannelMapById.set(f.id, f);
+  }
+  return _cachedFixtureChannelMap;
+}
+function getFixtureChannelMapByIdCached(id) {
+  if (!_cachedFixtureChannelMapById) getFixtureChannelMapCached();
+  return _cachedFixtureChannelMapById.get(id) || null;
+}
+function invalidateFixtureChannelMapCache() {
+  _cachedFixtureChannelMap = null;
+  _cachedFixtureChannelMapById = null;
+}
+
+// Cached effects for hot-path processing (refreshed on effect changes)
+const _effectCache = new Map();
+function getEffectCached(id) {
+  if (_effectCache.has(id)) return _effectCache.get(id);
+  const e = db.getEffect(id);
+  _effectCache.set(id, e);
+  return e;
+}
+function invalidateEffectCache() { _effectCache.clear(); }
+
+// Cached mover presets for hot-path processing (refreshed on preset changes)
+const _moverPresetCache = new Map();
+function getMoverPresetCached(id) {
+  if (_moverPresetCache.has(id)) return _moverPresetCache.get(id);
+  const p = db.getMoverPreset(id);
+  _moverPresetCache.set(id, p);
+  return p;
+}
+function invalidateMoverPresetCache() { _moverPresetCache.clear(); }
+
 function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   const deckSeq = activeSequences[deckNum];
   if (!deckSeq || !deckSeq.sequence) return;
@@ -3247,6 +3336,10 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
   const seq = deckSeq.sequence;
   const cues = seq.cues || [];
+
+  // Pre-fetch fixture channel map once for the entire tick (avoid per-cue DB queries)
+  const allFixtures = getFixtureChannelMapCached();
+  const fixtureCount = allFixtures.length;
 
   // ── Sequence end detection (VDJ-driven playback) ──
   if (seq.duration_ms && timeMs >= seq.duration_ms && !deckSeq._endActionApplied) {
@@ -3328,8 +3421,8 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
     const hasColorOverride = touchOverrides.colorOverrideFixtures.has(fixtureId);
     const hasMovementOverride = touchOverrides.movementOverrideFixtures.has(fixtureId);
 
-    // Find the fixture in fixture channel map (cache this?)
-    const fixMap = db.getFixtureChannelMap().find(f => f.id === fixtureId);
+    // Find the fixture in pre-fetched channel map (cached per tick)
+    const fixMap = getFixtureChannelMapByIdCached(fixtureId);
     if (!fixMap) continue;
 
     const progress = (timeMs - cue.start_ms) / cue.duration_ms; // 0..1
@@ -3396,11 +3489,11 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         // For now, simple on/off based on beat position
         value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
       } else if (cue.cue_type === 'effect' && cue.effect_id) {
-        const effect = db.getEffect(cue.effect_id);
+        const effect = getEffectCached(cue.effect_id);
         if (effect && isFixtureCompatibleWithEffect(effect, fixMap)) {
           const channelCtx = buildChannelCtx(ch, fixMap);
           // Rig-wide fixture count for rig effects
-          channelCtx._rigFixtureCount = db.getFixtureChannelMap().length;
+          channelCtx._rigFixtureCount = fixtureCount;
           value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, channelVals, cue.effect_params || {}, channelCtx);
           // If the effect doesn't control this channel (e.g. motion effect → color channels),
           // fall back to the cue's base channel value so colours/dimmer still get sent.
@@ -3420,7 +3513,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           // Collect positions for this fixture from all referenced presets
           const fixPositions = [];
           for (const pid of presetIds) {
-            const preset = db.getMoverPreset(pid);
+            const preset = getMoverPresetCached(pid);
             if (preset && preset.positions) {
               const pos = preset.positions.find(p => p.fixture_id === fixtureId);
               if (pos) fixPositions.push(pos);
@@ -3736,6 +3829,12 @@ midiController.init({
   isFixtureCompatibleWithEffect,
   applyMasterDimmer,
   applyInvert,
+  pauseAllSequences,
+  getFixtureChannelMapCached,
+  getFixtureChannelMapByIdMap: () => {
+    if (!_cachedFixtureChannelMapById) getFixtureChannelMapCached();
+    return _cachedFixtureChannelMapById;
+  },
 });
 
 // Auto-start MIDI controller

@@ -186,9 +186,14 @@ function startServer(port) {
 
 // ─── Message Dispatch ───────────────────────────────────────────────────────
 
+let _lastOs2lLogBroadcast = 0;
 function handleMessage(data) {
-  // Broadcast every raw OS2L message for the event log
-  broadcast({ type: 'log', ts: Date.now(), raw: data });
+  // Throttle raw OS2L log broadcasts to ~10Hz to reduce WebSocket/JSON overhead
+  const now = Date.now();
+  if (now - _lastOs2lLogBroadcast >= 100) {
+    _lastOs2lLogBroadcast = now;
+    broadcast({ type: 'log', ts: now, raw: data });
+  }
 
   const evt = data.evt;
 

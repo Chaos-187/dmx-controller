@@ -2305,6 +2305,13 @@
             </div>
           </div>
 
+          <!-- APC Mini visual grid -->
+          <div class="config-card" style="margin-bottom:16px">
+            <h4>APC Mini Layout</h4>
+            <p class="config-desc" style="margin-bottom:10px">Visual representation of your APC Mini button layout. Coloured buttons have active mappings.</p>
+            <div id="apcMiniGrid" style="display:grid;grid-template-columns:repeat(9,36px);grid-template-rows:repeat(10,32px) 60px;gap:2px;font-size:9px;font-family:var(--mono)"></div>
+          </div>
+
           <!-- Mapping table -->
           <div class="config-card">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
@@ -2330,13 +2337,6 @@
               </thead>
               <tbody id="midiMappingsTableBody"></tbody>
             </table>
-          </div>
-
-          <!-- APC Mini visual grid -->
-          <div class="config-card" style="margin-top:16px">
-            <h4>APC Mini Layout</h4>
-            <p class="config-desc" style="margin-bottom:10px">Visual representation of your APC Mini button layout. Coloured buttons have active mappings.</p>
-            <div id="apcMiniGrid" style="display:grid;grid-template-columns:repeat(9,36px);grid-template-rows:repeat(10,32px) 60px;gap:2px;font-size:9px;font-family:var(--mono)"></div>
           </div>
         </div>
       </div>
@@ -2610,6 +2610,13 @@
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="cfgSeqNoStrobes" style="width:16px;height:16px;accent-color:var(--accent)">
                 <span style="font-size:12px">Do not generate strobe cues in auto-generated sequences</span>
+              </label>
+            </div>
+            <div class="config-row" style="margin-top:8px">
+              <label>Disable Stem Separation</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgSeqNoStems" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Skip automatic stem separation during sequence generation (faster, but removes stem-aware dynamics)</span>
               </label>
             </div>
           </div>
@@ -7282,6 +7289,7 @@ async function loadSequencerConfig() {
   document.getElementById('cfgSeqAutoUnload').checked = config.seq_auto_unload === '1';
   document.getElementById('cfgSeqAutoGenerate').checked = config.seq_auto_generate === '1';
   document.getElementById('cfgSeqNoStrobes').checked = config.seq_no_strobes === '1';
+  document.getElementById('cfgSeqNoStems').checked = config.seq_no_stems === '1';
   document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
   document.getElementById('cfgSeqCrossfaderMode').value = config.seq_crossfader_mode || 'gate';
   document.getElementById('cfgSeqDeckFaderDimmer').checked = config.seq_deck_fader_dimmer === '1';
@@ -7314,6 +7322,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_auto_unload', document.getElementById('cfgSeqAutoUnload').checked ? '1' : '0'],
     ['seq_auto_generate', document.getElementById('cfgSeqAutoGenerate').checked ? '1' : '0'],
     ['seq_no_strobes', document.getElementById('cfgSeqNoStrobes').checked ? '1' : '0'],
+    ['seq_no_stems', document.getElementById('cfgSeqNoStems').checked ? '1' : '0'],
     ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],
     ['seq_crossfader_mode', document.getElementById('cfgSeqCrossfaderMode').value],
     ['seq_deck_fader_dimmer', document.getElementById('cfgSeqDeckFaderDimmer').checked ? '1' : '0'],
