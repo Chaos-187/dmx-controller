@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Config — DMX Controller</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/config.css">
+</head>
+<body>
+
+<!-- ══════ Header ══════ -->
+<header class="header">
+  <a href="index.html" class="header-back">&#8592; Controller</a>
+  <h1>DMX <span>Controller</span> &mdash; Config</h1>
+  <div class="header-spacer"></div>
+  <div class="connection-badge">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Connecting…</span>
+  </div>
+</header>
+
+<!-- ══════ Login Modal ══════ -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <h3>&#128274; Config Login</h3>
+    <div class="form-group">
+      <label for="loginUsername">Username</label>
+      <input type="text" id="loginUsername" autocomplete="username" placeholder="Username">
+    </div>
+    <div class="form-group">
+      <label for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Password">
+    </div>
+    <div class="form-error" id="loginError"></div>
+    <div class="login-actions">
+      <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="loginSubmitBtn">Log In</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ Config Layout ══════ -->
+<div class="config-layout">
+
+  <!-- ── Sidebar Navigation ── -->
+  <nav class="config-sidebar">
+    <span class="sidebar-group-label">Hardware</span>
+    <button class="config-sidebar-btn active" data-cfgtab="devices">
+      <span class="sidebar-icon">&#9783;</span> Devices
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="midi">
+      <span class="sidebar-icon">&#127929;</span> MIDI Controller
+    </button>
+
+    <span class="sidebar-group-label">DJ Integration</span>
+    <button class="config-sidebar-btn" data-cfgtab="vdj">
+      <span class="sidebar-icon">&#9835;</span> VirtualDJ
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="os2l">
+      <span class="sidebar-icon">&#9889;</span> OS2L
+    </button>
+
+    <span class="sidebar-group-label">Lighting</span>
+    <button class="config-sidebar-btn" data-cfgtab="lighting">
+      <span class="sidebar-icon">&#9728;</span> Lighting
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="movers">
+      <span class="sidebar-icon">&#10146;</span> Movers
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="effects">
+      <span class="sidebar-icon">&#10024;</span> Effects
+    </button>
+
+    <span class="sidebar-group-label">Sequencer</span>
+    <button class="config-sidebar-btn" data-cfgtab="sequencer">
+      <span class="sidebar-icon">&#9836;</span> Sequencer
+    </button>
+
+    <span class="sidebar-group-label">Touch</span>
+    <button class="config-sidebar-btn" data-cfgtab="touch-actions">
+      <span class="sidebar-icon">&#9654;</span> Touch Actions
+    </button>
+
+    <span class="sidebar-group-label">Data</span>
+    <button class="config-sidebar-btn" data-cfgtab="database">
+      <span class="sidebar-icon">&#128451;</span> Database
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="fixture-library">
+      <span class="sidebar-icon">&#128161;</span> Fixture Library
+    </button>
+
+    <div style="flex:1"></div>
+
+    <button class="config-sidebar-btn" data-cfgtab="event-log">
+      <span class="sidebar-icon">&#9776;</span> Event Log
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="app-settings">
+      <span class="sidebar-icon">&#9881;</span> App Settings
+    </button>
+    <button class="config-sidebar-btn" data-cfgtab="about">
+      <span class="sidebar-icon">&#9432;</span> About
+    </button>
+  </nav>
+
+  <!-- ── Main Content ── -->
+  <main class="config-panel">
+
+    <!-- ═══ Devices (USB + Art-Net + Network) ═══ -->
+    <div class="config-sub-page active" id="cfgpage-devices">
+      <div class="device-tabs">
+        <button class="device-tab-btn active" data-devtab="usb">&#9783; DMX USB</button>
+        <button class="device-tab-btn" data-devtab="artnet">&#9729; Art-Net</button>
+        <button class="device-tab-btn" data-devtab="network">&#127760; Network</button>
+      </div>
+
+      <!-- USB DMX Tab -->
+      <div class="device-tab-panel active" id="devtab-usb">
+        <div class="config-section">
+          <h3><span class="section-icon">&#9783;</span> USB DMX Adapters</h3>
+          <p class="config-desc">Manage known USB DMX adapters. Each adapter is mapped to a local DMX universe. Enabled adapters with auto-connect will be opened automatically on server start.</p>
+          <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+            <button class="btn btn-primary btn-sm" id="btnAddUsbDevice">+ Add USB Device</button>
+            <button class="btn btn-secondary btn-sm" id="btnScanUsb">&#128269; Scan Hardware</button>
+            <span style="flex:1"></span>
+            <span style="font-size:11px;color:var(--text-dim)" id="usbDeviceCount"></span>
+          </div>
+          <table class="subs-table" id="usbDevicesTable">
+            <thead><tr>
+              <th style="width:30px">On</th><th>Label</th><th>Type</th><th>Identifier</th><th>Universe</th><th>Auto</th><th>Status</th><th style="width:160px"></th>
+            </tr></thead>
+            <tbody id="usbDevicesBody"></tbody>
+          </table>
+        </div>
+        <div class="config-section" id="usbScanResults" style="display:none">
+          <h3>Scan Results</h3>
+          <p class="config-desc" id="usbScanSummary"></p>
+          <table class="subs-table" id="usbScanTable">
+            <thead><tr>
+              <th>Type</th><th>Description</th><th>Serial / ID</th><th>VID:PID</th><th style="width:80px"></th>
+            </tr></thead>
+            <tbody id="usbScanBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Art-Net Tab -->
+      <div class="device-tab-panel" id="devtab-artnet">
+        <div class="config-section">
+          <h3><span class="section-icon">&#9729;</span> Art-Net Output Nodes</h3>
+          <p class="config-desc">Map local DMX universes to Art-Net output nodes. Each node sends DMX data over the network via Art-Net protocol.</p>
+          <div class="config-card">
+            <h4>Global</h4>
+            <div class="config-row">
+              <label>Refresh Rate</label>
+              <input type="number" id="cfgArtnetRefreshRate" value="44" min="1" max="44" style="width:70px">
+              <span class="config-hint">Hz — applies to all nodes</span>
+              <button class="btn btn-secondary btn-sm" id="btnSaveArtnetRate" style="margin-left:12px">Save</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin:16px 0 12px">
+            <button class="btn btn-primary btn-sm" id="btnAddArtnetNode">+ Add Art-Net Node</button>
+            <button class="btn btn-secondary btn-sm" id="btnArtnetBlackout">Blackout All</button>
+            <span style="flex:1"></span>
+            <span style="font-size:11px;color:var(--text-dim)" id="artnetNodeCount"></span>
+          </div>
+          <table class="subs-table" id="artnetNodesTable">
+            <thead><tr>
+              <th style="width:30px">On</th><th>Local Uni</th><th>Label</th><th>Target IP</th><th>Port</th><th>Subnet</th><th>Art-Net Uni</th><th style="width:80px"></th>
+            </tr></thead>
+            <tbody id="artnetNodesBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Network Tab -->
+      <div class="device-tab-panel" id="devtab-network">
+        <div class="config-section">
+          <h3><span class="section-icon">&#127760;</span> Network &amp; mDNS</h3>
+          <p class="config-desc">Configure mDNS (Bonjour) so you can access the controller from any device on your network using a friendly <code>.local</code> hostname.</p>
+          <div class="config-card">
+            <h4>mDNS Responder</h4>
+            <div class="config-row">
+              <label>Enable mDNS</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgMdnsEnabled" checked style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Advertise a <code>.local</code> hostname on the network</span>
+              </label>
+            </div>
+            <div class="config-row">
+              <label>Hostname</label>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input type="text" id="cfgMdnsHostname" value="dmxcontrol" style="width:200px" placeholder="dmxcontrol">
+                <span style="font-size:13px;color:var(--text-dim)">.local</span>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" id="btnSaveMdnsConfig">Save &amp; Apply</button>
+          </div>
+          <div class="config-card" style="margin-top:20px">
+            <h4>Status</h4>
+            <div class="config-row"><label>Responder</label><span id="mdnsStatusBadge" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>Address</label><span id="mdnsStatusAddr" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>Local IP</label><span id="mdnsStatusIP" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>Web Port</label><span id="mdnsStatusWebPort" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>OS2L Port</label><span id="mdnsStatusOs2lPort" style="font-size:12px;color:var(--text-dim)">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MIDI Controller ═══ -->
+    <div class="config-sub-page" id="cfgpage-midi">
+      <div class="config-section">
+        <h3><span class="section-icon">&#127929;</span> MIDI Controller</h3>
+        <p class="config-desc">Connect and map an Akai APC Mini (or compatible MIDI controller) to trigger DMX actions.</p>
+        <div class="config-card" style="margin-bottom:16px">
+          <h4>Connection</h4>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <div id="midiStatusDot" style="width:10px;height:10px;border-radius:50%;background:#f44"></div>
+            <span id="midiStatusLabel" style="font-size:13px;color:var(--text-dim)">Disconnected</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary btn-sm" id="btnMidiConnect">Connect</button>
+            <button class="btn btn-secondary btn-sm" id="btnMidiDisconnect" style="display:none">Disconnect</button>
+            <button class="btn btn-secondary btn-sm" id="btnMidiRefreshPorts">Refresh Ports</button>
+          </div>
+          <div class="config-row" style="margin-bottom:6px">
+            <label>Device</label>
+            <select id="midiDeviceSelect" style="width:280px"><option value="">— scanning for devices —</option></select>
+          </div>
+        </div>
+        <div class="config-card" style="margin-bottom:16px">
+          <h4>APC Mini Layout</h4>
+          <p class="config-desc" style="margin-bottom:10px">Visual representation of your APC Mini button layout. Coloured buttons have active mappings.</p>
+          <div id="apcMiniGrid" style="display:grid;grid-template-columns:repeat(9,36px);grid-template-rows:repeat(10,32px) 60px;gap:2px;font-size:9px;font-family:var(--mono)"></div>
+        </div>
+        <div class="config-card">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <h4 style="margin:0">MIDI Mappings</h4>
+            <span style="flex:1"></span>
+            <span style="font-size:11px;color:var(--text-dim)"><strong id="midiMappingsEnabledCount">0</strong> enabled of <strong id="midiMappingsTotalCount">0</strong></span>
+            <button class="btn btn-primary btn-sm" id="btnAddMidiMapping">+ Add Mapping</button>
+            <button class="btn btn-secondary btn-sm" id="btnMidiLearn" title="Press a button/fader on your controller to auto-detect">MIDI Learn</button>
+            <button class="btn btn-secondary btn-sm" id="btnMidiDefaults" title="Create default APC Mini layout">Load Defaults</button>
+          </div>
+          <table class="subs-table">
+            <thead><tr>
+              <th style="width:36px">On</th><th>Name</th><th style="width:70px">Type</th><th style="width:50px">#</th><th>Action</th><th style="width:65px">Mode</th><th style="width:40px">LED</th><th style="width:130px">Actions</th>
+            </tr></thead>
+            <tbody id="midiMappingsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ VirtualDJ ═══ -->
+    <div class="config-sub-page" id="cfgpage-vdj">
+      <div class="config-section">
+        <h3><span class="section-icon">&#9835;</span> VirtualDJ Configuration</h3>
+        <p class="config-desc">Settings for the VirtualDJ connection, OS2L integration, and database paths.</p>
+        <div class="config-card">
+          <h4>OS2L Connection</h4>
+          <div class="config-row"><label>OS2L TCP Port</label><input type="number" id="cfgOs2lPort" value="8787" style="width:100px"><span class="config-hint">Default: 8787</span></div>
+          <div class="config-row"><label>Service Name</label><input type="text" id="cfgOs2lServiceName" value="DMX-Controller" style="width:200px"><span class="config-hint">mDNS/Bonjour service name</span></div>
+          <div class="config-row"><label>Web UI Port</label><input type="number" id="cfgWebPort" value="80" style="width:100px"><span class="config-hint">Restart required on change</span></div>
+          <div class="config-row"><label>Subscription Frequency</label><input type="number" id="cfgFrequency" value="25" min="1" max="60" style="width:80px"><span class="config-hint">Hz (updates per second from VDJ)</span></div>
+        </div>
+        <div class="config-card">
+          <h4>VirtualDJ Database</h4>
+          <div class="config-row"><label>VDJ Database Path</label><input type="text" id="cfgVdjDbPath" style="width:100%;max-width:500px" placeholder="C:\Users\...\VirtualDJ\database.xml"></div>
+          <div class="config-row"><label>VDJ Folder</label><input type="text" id="cfgVdjFolder" style="width:100%;max-width:500px" placeholder="C:\Users\...\Documents\VirtualDJ"><span class="config-hint">VDJ root folder for SoundSwitch data</span></div>
+          <div class="config-row">
+            <label>Auto-read Metadata</label>
+            <input type="checkbox" id="cfgVdjAutoMeta" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span class="config-hint">Read track metadata from VDJ database when loaded</span>
+          </div>
+        </div>
+        <div class="config-card">
+          <h4>Deck Configuration</h4>
+          <div class="config-row">
+            <label>Number of Decks</label>
+            <select id="cfgVdjDecks" style="width:80px"><option value="2">2</option><option value="4" selected>4</option></select>
+            <span class="config-hint">Restart required on change</span>
+          </div>
+        </div>
+        <div style="margin-top:16px"><button class="btn btn-primary btn-sm" id="btnSaveVdj">Save VDJ Settings</button></div>
+      </div>
+    </div>
+
+    <!-- ═══ OS2L (Subscriptions + Button Mappings) ═══ -->
+    <div class="config-sub-page" id="cfgpage-os2l">
+      <div class="config-section">
+        <h3><span class="section-icon">&#9889;</span> OS2L Subscriptions</h3>
+        <p class="config-desc">Manage the VirtualDJ trigger expressions sent via OS2L. Toggle, add, or remove individual subscriptions.</p>
+        <div class="subs-status-bar" id="subsStatus">
+          <span><strong id="subsEnabledCount">0</strong> enabled of <strong id="subsTotalCount">0</strong> total</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-secondary btn-sm" id="btnResendSubs" title="Re-send subscriptions to VDJ">Re-send to VDJ</button>
+          <button class="btn btn-primary btn-sm" id="btnAddSub">+ Add Subscription</button>
+        </div>
+        <table class="subs-table">
+          <thead><tr>
+            <th style="width:40px">On</th><th style="width:70px">Category</th><th>Label</th><th>Trigger Expression</th><th style="width:100px">Actions</th>
+          </tr></thead>
+          <tbody id="subsTableBody"></tbody>
+        </table>
+      </div>
+      <div class="config-section" style="margin-top:28px">
+        <h3>OS2L Button Mappings</h3>
+        <p class="config-desc">Map incoming OS2L button events from VirtualDJ to DMX actions.</p>
+        <div class="subs-status-bar" id="btnMapsStatus">
+          <span><strong id="btnMapsEnabledCount">0</strong> enabled of <strong id="btnMapsTotalCount">0</strong> total</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-primary btn-sm" id="btnAddBtnMap">+ Add Button Map</button>
+        </div>
+        <table class="subs-table">
+          <thead><tr>
+            <th style="width:40px">On</th><th>Name</th><th>OS2L Event</th><th>OS2L Value</th><th>Action</th><th style="width:70px">Mode</th><th style="width:130px">Actions</th>
+          </tr></thead>
+          <tbody id="btnMapsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ Lighting ═══ -->
+    <div class="config-sub-page" id="cfgpage-lighting">
+      <div class="config-section">
+        <h3><span class="section-icon">&#9728;</span> Lighting Defaults</h3>
+        <p class="config-desc">Configure default values for lighting effects. These are used by Quick Actions and OS2L commands.</p>
+        <div class="config-card">
+          <h4>Strobe</h4>
+          <p class="config-desc" style="margin-bottom:10px">Set the default strobe speed sent to all strobe channels when triggered via OS2L or Quick Actions.</p>
+          <div class="config-row">
+            <label>Strobe Speed</label>
+            <div style="display:flex;align-items:center;gap:10px;flex:1">
+              <input type="range" id="cfgStrobeSpeed" min="0" max="255" value="200" style="flex:1;accent-color:#f6f">
+              <span id="cfgStrobeSpeedVal" style="font-size:13px;font-weight:600;color:#f6f;min-width:32px;text-align:right;font-variant-numeric:tabular-nums">200</span>
+            </div>
+          </div>
+          <div class="config-row">
+            <label>Channels Found</label>
+            <span id="cfgStrobeChannelCount" style="font-size:12px;color:var(--text-dim)">—</span>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" id="cfgStrobeSave">Save</button>
+            <button class="btn btn-secondary btn-sm" id="cfgStrobeTest">Test Strobe</button>
+            <button class="btn btn-secondary btn-sm" id="cfgStrobeOff">Strobe Off</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Movers ═══ -->
+    <div class="config-sub-page" id="cfgpage-movers">
+      <div class="config-section">
+        <h3><span class="section-icon">&#10146;</span> Mover Presets</h3>
+        <p class="config-desc">Create position presets for moving head fixtures. Select each fixture and set its pan/tilt position using the XY pad, then save as a preset.</p>
+        <div class="mover-editor-layout">
+          <div>
+            <div class="form-group">
+              <label>Fixtures <span style="font-size:10px;color:var(--text-dim)">(click to set position)</span></label>
+              <div id="moverFixtureTabs"></div>
+            </div>
+            <div class="xy-pad-container">
+              <div class="mover-xy-pad" id="moverXYPad">
+                <div class="xy-grid"></div>
+                <div id="xyCrossH"></div>
+                <div id="xyCrossV"></div>
+                <div id="xyDot"></div>
+              </div>
+              <div class="xy-pad-values">
+                <span>Pan: <span id="xyPanVal">128</span></span>
+                <span>Tilt: <span id="xyTiltVal">128</span></span>
+              </div>
+            </div>
+            <div class="form-row" style="margin-top:10px">
+              <div class="form-group" style="flex:1"><label>Pan (0–255)</label><input type="number" id="moverPanInput" min="0" max="255" value="128"></div>
+              <div class="form-group" style="flex:1"><label>Tilt (0–255)</label><input type="number" id="moverTiltInput" min="0" max="255" value="128"></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              <input type="text" id="moverPresetName" placeholder="Preset name" style="flex:1">
+              <input type="hidden" id="moverPresetEditId" value="">
+              <button class="btn btn-primary btn-sm" id="btnSaveMoverPreset">Save Preset</button>
+              <button class="btn btn-secondary btn-sm" id="btnTestMoverPos">Test All</button>
+              <button class="btn btn-secondary btn-sm" id="btnCancelMoverEdit" style="display:none">Cancel</button>
+            </div>
+          </div>
+          <div>
+            <h4 style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Saved Presets</h4>
+            <div id="moverPresetList"><span style="font-size:11px;color:var(--text-dim)">No presets saved yet.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Sequencer ═══ -->
+    <div class="config-sub-page" id="cfgpage-sequencer">
+      <div class="seq-tabs">
+        <button class="seq-tab-btn active" data-seqtab="playback">&#9654; Playback</button>
+        <button class="seq-tab-btn" data-seqtab="colors">&#127912; Colors</button>
+        <button class="seq-tab-btn" data-seqtab="genres">&#127926; Genres &amp; Styles</button>
+        <button class="seq-tab-btn" data-seqtab="movement">&#128260; Movement</button>
+        <button class="seq-tab-btn" data-seqtab="intensity">&#128161; Intensity</button>
+        <button class="seq-tab-btn" data-seqtab="effects">&#9889; Effects</button>
+        <button class="seq-tab-btn" data-seqtab="templates">&#128196; Templates</button>
+      </div>
+      <button id="btnSaveGenConfig" style="display:none"></button>
+      <button id="btnResetGenConfig" style="display:none"></button>
+
+      <!-- Playback -->
+      <div class="seq-tab-panel active" id="seqtab-playback">
+        <div class="config-section">
+          <h3>Sequencer Auto-Play</h3>
+          <p class="config-desc">When a track is loaded onto a VirtualDJ deck, the server can automatically load and play the matching light sequence.</p>
+          <div class="config-card">
+            <h4>Automation</h4>
+            <div class="config-row"><label>Auto-Load Sequence</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoLoad" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Automatically load a linked sequence when a matching song loads on a deck</span></label></div>
+            <div class="config-row"><label>Auto-Play Sequence</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoPlay" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Start playback immediately after the sequence is loaded</span></label></div>
+            <div class="config-row"><label>Unload on Track Change</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoUnload" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Unload the current sequence from a deck when a new track is loaded</span></label></div>
+            <div class="config-row"><label>Auto-Generate Sequence</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoGenerate" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Automatically generate a sequence when no existing sequence is found</span></label></div>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <h4>Generation Options</h4>
+            <div class="config-row"><label>Exclude Strobes</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqNoStrobes" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Do not generate strobe cues in auto-generated sequences</span></label></div>
+            <div class="config-row" style="margin-top:8px"><label>Disable Stem Separation</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqNoStems" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Skip automatic stem separation during sequence generation</span></label></div>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <h4>Playback</h4>
+            <div class="config-row">
+              <label>When Sequence Ends</label>
+              <select id="cfgSeqEndAction" style="width:auto"><option value="none">Do nothing</option><option value="blackout">Blackout all fixtures</option><option value="scene">Activate default scene</option></select>
+            </div>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <h4>Mixer Integration</h4>
+            <div class="config-row">
+              <label>Crossfader Mode</label>
+              <select id="cfgSeqCrossfaderMode" style="width:180px"><option value="off">Off (no effect)</option><option value="gate">Gate (binary cut)</option><option value="blend">Blend (proportional)</option></select>
+            </div>
+            <p class="config-desc" style="margin:-4px 0 8px 0;font-size:11px"><b>Gate</b>: hard cut at crossfader midpoint. <b>Blend</b>: proportionally dims each deck.</p>
+            <div class="config-row" id="cfgSeqCrossfaderGatingRow" style="display:none"><label>Legacy Gating Override</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqCrossfaderGating" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Enable legacy gating</span></label></div>
+            <div class="config-row"><label>Deck Fader as Dimmer</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqDeckFaderDimmer" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Scale sequence output brightness by each deck's volume fader level</span></label></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="btnSaveSeqConfig">Save</button></div>
+        </div>
+        <div class="config-section">
+          <h3>Linked Sequences</h3>
+          <p class="config-desc">Sequences linked to tracks in your library. Link a sequence to a track in the <a href="sequencer.html" style="color:var(--accent)">Sequencer</a>.</p>
+          <table class="subs-table" id="linkedSeqTable"><thead><tr><th>Sequence</th><th>Track</th><th>Artist</th><th>Path</th><th>Duration</th><th>Cues</th></tr></thead><tbody id="linkedSeqBody"></tbody></table>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:8px" id="linkedSeqCount"></div>
+        </div>
+      </div>
+
+      <!-- Colors -->
+      <div class="seq-tab-panel" id="seqtab-colors">
+        <div class="config-section">
+          <h3>Color Palettes</h3>
+          <p class="config-desc">Named palettes with per-section color pairs. Click swatches to change colors.</p>
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Color Palettes</h4><button class="btn btn-sm gen-json-toggle" data-editor="genColorPalettesEditor" data-key="gen_color_palettes">{ }</button></div>
+            <div id="genColorPalettesEditor"></div>
+            <textarea id="genColorPalettesRaw" rows="16" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-danger btn-reset-gen">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Genres & Styles -->
+      <div class="seq-tab-panel" id="seqtab-genres">
+        <div class="config-section">
+          <h3>Genres &amp; Styles</h3>
+          <p class="config-desc">Configure per-section intensity, strobe chances, cue density, and per-genre multipliers.</p>
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Section Styles</h4><button class="btn btn-sm gen-json-toggle" data-editor="genSectionStylesEditor" data-key="gen_section_styles">{ }</button></div>
+            <p class="config-desc">Per-section intensity ranges, strobe chances, and cue density.</p>
+            <div id="genSectionStylesEditor"></div>
+            <textarea id="genSectionStylesRaw" rows="14" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <div class="gen-card-header"><h4>Genre Presets</h4><button class="btn btn-sm gen-json-toggle" data-editor="genGenrePresetsEditor" data-key="gen_genre_presets">{ }</button></div>
+            <p class="config-desc">Per-genre multipliers for intensity, strobes, cue density, and preferred palette.</p>
+            <div id="genGenrePresetsEditor"></div>
+            <textarea id="genGenrePresetsRaw" rows="14" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <div class="gen-card-header"><h4>Genre Aliases</h4><button class="btn btn-sm gen-json-toggle" data-editor="genGenreAliasesEditor" data-key="gen_genre_aliases">{ }</button></div>
+            <p class="config-desc">Maps genre strings (from track metadata) to preset keys above.</p>
+            <div id="genGenreAliasesEditor"></div>
+            <textarea id="genGenreAliasesRaw" rows="10" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-danger btn-reset-gen">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Movement -->
+      <div class="seq-tab-panel" id="seqtab-movement">
+        <div class="config-section">
+          <h3>Movement &amp; Speed</h3>
+          <p class="config-desc">Motor speed DMX values and per-section mover movement parameters.</p>
+          <div class="config-card">
+            <h4>Motor Speed DMX Values</h4>
+            <p class="config-desc">DMX values sent to the speed channel. Lower = faster motor speed on most fixtures.</p>
+            <div class="config-row"><label>Slow</label><input type="number" id="genSpeedSlow" min="0" max="255" style="width:70px"></div>
+            <div class="config-row"><label>Medium</label><input type="number" id="genSpeedMedium" min="0" max="255" style="width:70px"></div>
+            <div class="config-row"><label>Fast</label><input type="number" id="genSpeedFast" min="0" max="255" style="width:70px"></div>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <div class="gen-card-header"><h4>Movement Styles</h4><button class="btn btn-sm gen-json-toggle" data-editor="genMovementStylesEditor" data-key="gen_movement_styles">{ }</button></div>
+            <p class="config-desc">Per-section mover movement parameters: barsPerMove, range, and speed.</p>
+            <div id="genMovementStylesEditor"></div>
+            <textarea id="genMovementStylesRaw" rows="12" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-danger btn-reset-gen">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Intensity -->
+      <div class="seq-tab-panel" id="seqtab-intensity">
+        <div class="config-section">
+          <h3>Per-Fixture Intensity Curves</h3>
+          <p class="config-desc">Different fixture types can have different brightness levels per song section.</p>
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Fixture Role Intensity Multipliers</h4><button class="btn btn-sm gen-json-toggle" data-editor="genFixtureIntensityEditor" data-key="gen_fixture_intensity">{ }</button></div>
+            <p class="config-desc">Per-role × per-section intensity multiplier (0.0 – 1.0).</p>
+            <div id="genFixtureIntensityEditor"></div>
+            <textarea id="genFixtureIntensityRaw" rows="14" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div id="fixtureIntensityVisual" class="config-card" style="margin-top:16px">
+            <h4>Visual Editor</h4>
+            <p class="config-desc">Drag sliders to adjust intensity per fixture role and section.</p>
+            <div id="fixtureIntensitySliders"></div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-danger btn-reset-gen">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Effects & Patterns -->
+      <div class="seq-tab-panel" id="seqtab-effects">
+        <div class="config-section">
+          <h3>Effects &amp; Cell Patterns</h3>
+          <p class="config-desc">Configure which effect types are allowed per section and multi-cell pattern assignments.</p>
+          <div class="config-card">
+            <div class="gen-card-header"><h4>Section Effect Types</h4><button class="btn btn-sm gen-json-toggle" data-editor="genSectionEffectsEditor" data-key="gen_section_effects">{ }</button></div>
+            <div id="genSectionEffectsEditor"></div>
+            <textarea id="genSectionEffectsRaw" rows="12" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <div class="gen-card-header"><h4>Multi-Cell Patterns</h4><button class="btn btn-sm gen-json-toggle" data-editor="genCellPatternsEditor" data-key="gen_cell_patterns">{ }</button></div>
+            <div id="genCellPatternsEditor"></div>
+            <textarea id="genCellPatternsRaw" rows="10" class="gen-raw-editor" style="display:none"></textarea>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm btn-save-gen">Save Generator Config</button>
+            <button class="btn btn-sm btn-danger btn-reset-gen">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Templates -->
+      <div class="seq-tab-panel" id="seqtab-templates">
+        <div class="config-section">
+          <h3>Sequence Templates</h3>
+          <p class="config-desc">Save named generation presets. Templates can be selected in the Generate modal. The default template is auto-selected.</p>
+          <div class="config-card">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <button class="btn btn-primary btn-sm" id="btnAddTemplate">+ New Template</button>
+              <span style="font-size:11px;color:var(--text-dim)" id="tplCount"></span>
+            </div>
+            <div id="tplList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Effects Library ═══ -->
+    <div class="config-sub-page" id="cfgpage-effects">
+      <div class="config-section">
+        <h3><span class="section-icon">&#10024;</span> Effects Library</h3>
+        <p class="config-desc">Create and manage reusable lighting effects. Effects can be assigned to cues in the <a href="sequencer.html" style="color:var(--accent)">Sequencer</a>.</p>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <button class="btn btn-primary btn-sm" id="cfgAddEffectBtn">+ New Effect</button>
+          <span style="font-size:11px;color:var(--text-dim)" id="cfgEffectsCount"></span>
+        </div>
+        <div id="cfgEffectsList"></div>
+      </div>
+    </div>
+
+    <!-- ═══ Database ═══ -->
+    <div class="config-sub-page" id="cfgpage-database">
+      <div class="config-section">
+        <h3><span class="section-icon">&#128451;</span> Database Overview</h3>
+        <p class="config-desc">Summary of all data stored in the SQLite database.</p>
+        <div class="config-card">
+          <h4>Statistics</h4>
+          <div class="db-stat-grid" id="dbStatsGrid">
+            <div class="db-stat-card"><span class="stat-value" id="dbStatTracks">—</span><span class="stat-label">Tracks</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatAnalyses">—</span><span class="stat-label">Analyses</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatSequences">—</span><span class="stat-label">Sequences</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatCues">—</span><span class="stat-label">Cues</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatFixtures">—</span><span class="stat-label">Fixtures</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatEffects">—</span><span class="stat-label">Effects</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3>Backup &amp; Restore</h3>
+        <p class="config-desc">Download a full copy of the database or restore from a previous backup.</p>
+        <div class="config-card">
+          <h4>Download Backup</h4>
+          <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Creates a safe snapshot of the entire database file.</p>
+          <button class="btn btn-primary btn-sm" id="btnDbBackup">&#128190; Download Backup</button>
+          <div id="dbBackupStatus" style="font-size:11px;color:var(--text-dim);margin-top:6px"></div>
+        </div>
+        <div class="config-card" style="border-color:rgba(255,170,0,.25);margin-top:12px">
+          <h4 style="color:#ffa800">&#9888; Restore from Backup</h4>
+          <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px"><strong>Warning:</strong> Restoring will replace the current database. The server will automatically restart.</p>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="file" id="dbRestoreFile" accept=".db,.sqlite,.backup" style="font-size:12px;color:var(--text-dim)">
+            <button class="btn btn-danger btn-sm" id="btnDbRestore" disabled>Restore</button>
+          </div>
+          <div id="dbRestoreStatus" style="font-size:11px;color:var(--text-dim);margin-top:6px"></div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3>Individual Cleanup</h3>
+        <p class="config-desc">Remove analysis data or sequences for a single track.</p>
+        <div class="config-card">
+          <h4>Delete by Track</h4>
+          <div class="config-row" style="align-items:flex-end">
+            <label>Track</label>
+            <div style="flex:1;position:relative">
+              <input type="text" id="dbTrackSearch" autocomplete="off" placeholder="Type to search tracks…" style="width:100%">
+              <input type="hidden" id="dbTrackSelectedId" value="">
+              <div id="dbTrackResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--panel);border:1px solid var(--panel-border);border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto"></div>
+            </div>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-danger btn-sm" id="btnDeleteTrackAnalysis" disabled>Delete Analysis</button>
+            <button class="btn btn-danger btn-sm" id="btnDeleteTrackSequence" disabled>Delete Sequence</button>
+            <button class="btn btn-sm btn-primary" id="btnSeparateTrackStems" disabled>&#127925; Separate Stems</button>
+          </div>
+          <div id="dbTrackActionResult" style="font-size:11px;color:var(--text-dim);margin-top:8px"></div>
+          <div id="stemProgressBar" style="display:none;margin-top:8px">
+            <div class="stem-progress-bar"><div class="stem-progress-fill" id="stemProgressFill"></div></div>
+            <div id="stemProgressLabel" style="font-size:11px;color:var(--text-dim);margin-top:4px">Separating stems...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export / Import -->
+      <div class="config-section" style="margin-top:28px">
+        <h3>Export / Import</h3>
+        <p class="config-desc">Export your fixture setup, effects, mover presets, and scenes to a JSON file. Import from a previously exported file.</p>
+        <div class="export-section">
+          <div class="export-box">
+            <h4>Export</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Select what to include in the export file.</p>
+            <div class="export-cb-list">
+              <label><input type="checkbox" class="export-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library</label>
+              <label><input type="checkbox" class="export-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures</label>
+              <label><input type="checkbox" class="export-cb" value="groups" checked style="accent-color:var(--accent)"> Groups</label>
+              <label><input type="checkbox" class="export-cb" value="effects" checked style="accent-color:var(--accent)"> Effects</label>
+              <label><input type="checkbox" class="export-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets</label>
+              <label><input type="checkbox" class="export-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes</label>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btnExport">&#128190; Download Export File</button>
+          </div>
+          <div class="import-box">
+            <h4>Import</h4>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Upload a previously exported JSON file.</p>
+            <div style="margin-bottom:12px"><input type="file" id="importFile" accept=".json" style="font-size:12px"></div>
+            <div id="importPreview" style="display:none;margin-bottom:16px;padding:12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
+              <div style="font-size:12px;font-weight:600;margin-bottom:8px">File Contents:</div>
+              <div id="importPreviewList" style="font-size:12px;color:var(--text-dim)"></div>
+              <div class="import-cb-list" style="margin-top:12px">
+                <label><input type="checkbox" class="import-cb" value="fixture_types" checked style="accent-color:var(--accent)"> Fixture Library</label>
+                <label><input type="checkbox" class="import-cb" value="fixtures" checked style="accent-color:var(--accent)"> Fixtures</label>
+                <label><input type="checkbox" class="import-cb" value="groups" checked style="accent-color:var(--accent)"> Groups</label>
+                <label><input type="checkbox" class="import-cb" value="effects" checked style="accent-color:var(--accent)"> Effects</label>
+                <label><input type="checkbox" class="import-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets</label>
+                <label><input type="checkbox" class="import-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes</label>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btnImport" disabled>&#128230; Import Selected</button>
+            <div id="importResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:12px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="danger-zone">
+        <h4>&#9888; Danger Zone</h4>
+        <p class="config-desc">These actions are <strong>irreversible</strong>. All affected data will be permanently removed.</p>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div><div style="font-size:13px;font-weight:600">Delete All Analysis Data</div><div style="font-size:11px;color:var(--text-dim)">Remove waveform peaks, beats, energy levels, and section data for every track.</div></div>
+            <button class="btn btn-danger btn-sm" id="btnDeleteAllAnalysis">Delete All Analyses</button>
+          </div>
+          <div style="border-top:1px solid rgba(255,255,255,.06)"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div><div style="font-size:13px;font-weight:600">Delete All Sequences</div><div style="font-size:11px;color:var(--text-dim)">Remove every light sequence and all their cues.</div></div>
+            <button class="btn btn-danger btn-sm" id="btnDeleteAllSequences">Delete All Sequences</button>
+          </div>
+          <div style="border-top:1px solid rgba(255,255,255,.06)"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div><div style="font-size:13px;font-weight:600">Delete All Tracks</div><div style="font-size:11px;color:var(--text-dim)">Clear the entire track library including analyses and sequences.</div></div>
+            <button class="btn btn-danger btn-sm" id="btnDeleteAllTracks">Delete All Tracks</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Touch Actions ═══ -->
+    <div class="config-sub-page" id="cfgpage-touch-actions">
+      <div class="config-section">
+        <h3><span class="section-icon">&#9654;</span> Touch Actions Grid</h3>
+        <p class="config-desc">Configure the action buttons shown on the Touch interface. Each button can trigger a color, scene, mover preset, strobe, and more.</p>
+        <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+          <button class="btn btn-primary btn-sm" id="btnAddTouchAction">+ Add Action</button>
+          <button class="btn btn-secondary btn-sm" id="btnAutoPopulate">&#9889; Auto-Populate</button>
+          <span style="flex:1"></span>
+          <span style="font-size:11px;color:var(--text-dim)" id="touchActionCount"></span>
+        </div>
+        <table class="subs-table" id="touchActionsTable">
+          <thead><tr>
+            <th style="width:30px">On</th><th>Label</th><th>Type</th><th>Color</th><th>Row</th><th>Col</th><th>W</th><th>H</th><th style="width:140px"></th>
+          </tr></thead>
+          <tbody id="touchActionsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ Event Log ═══ -->
+    <div class="config-sub-page" id="cfgpage-event-log">
+      <div class="config-section">
+        <h3><span class="section-icon">&#9776;</span> Event Log</h3>
+        <p class="config-desc">View real-time OS2L messages from VirtualDJ. Toggle capture on/off to control whether events are recorded.</p>
+        <div class="subs-status-bar" style="margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
+            <input type="checkbox" id="logCaptureToggle" checked style="accent-color:var(--accent);width:16px;height:16px">
+            <strong>Capture Events</strong>
+          </label>
+          <span id="logCount" style="font-size:11px;color:var(--accent)">0 events</span>
+          <span style="flex:1"></span>
+          <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
+            <input type="checkbox" id="logAutoScroll" checked style="accent-color:var(--accent)"> Auto-scroll
+          </label>
+          <button class="btn btn-secondary btn-sm" id="btnClearLog">Clear</button>
+        </div>
+        <div class="event-log-container" id="eventLog">
+          <div class="log-toolbar">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="subscribed">Subscribed</button>
+            <button class="filter-btn" data-filter="beat">Beat</button>
+            <button class="filter-btn" data-filter="btn">Btn</button>
+            <button class="filter-btn" data-filter="cmd">Cmd</button>
+            <button class="filter-btn" data-filter="connection">Connection</button>
+            <button class="filter-btn" data-filter="server">Server</button>
+          </div>
+          <div id="logEntries"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ App Settings ═══ -->
+    <div class="config-sub-page" id="cfgpage-app-settings">
+      <div class="config-section">
+        <h3><span class="section-icon">&#9881;</span> App Settings</h3>
+        <p class="config-desc">Global application settings that control startup behaviour and defaults.</p>
+
+        <table class="subs-table" style="margin-top:16px">
+          <thead><tr><th>Setting</th><th style="width:200px">Value</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Enable DMX Output on Startup</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Automatically enable DMX output when the server starts.</div></td>
+              <td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="settingDmxOnStartup" style="accent-color:var(--accent);width:18px;height:18px"><span id="settingDmxOnStartupLabel" style="font-size:12px">Off</span></label></td>
+            </tr>
+            <tr>
+              <td><strong>Debug Logging</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Enable verbose debug logging for OS2L messages, deck subscriptions, and auto-generation.</div></td>
+              <td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="settingDebugLogging" style="accent-color:var(--accent);width:18px;height:18px"><span id="settingDebugLoggingLabel" style="font-size:12px">Off</span></label></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top:32px">Audio Analysis</h3>
+        <p class="config-desc">Settings that control waveform analysis quality and section detection. Changes apply to new analyses only.</p>
+        <table class="subs-table" style="margin-top:16px">
+          <thead><tr><th>Setting</th><th style="width:200px">Value</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Waveform Resolution</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Number of peak points. Higher = more detail but larger data. Default: 2000</div></td>
+              <td><select id="settingAnalysisPeaks" style="width:100%"><option value="1000">1000 (Low)</option><option value="2000" selected>2000 (Default)</option><option value="4000">4000 (High)</option><option value="8000">8000 (Ultra)</option></select></td>
+            </tr>
+            <tr>
+              <td><strong>Analysis Sample Rate</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Sample rate for PCM decoding. Default: 22050 Hz</div></td>
+              <td><select id="settingAnalysisSampleRate" style="width:100%"><option value="22050" selected>22050 Hz (Default)</option><option value="44100">44100 Hz (High)</option></select></td>
+            </tr>
+            <tr>
+              <td><strong>Section Sensitivity</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Lower = more sections, higher = fewer larger sections. Default: 1.2</div></td>
+              <td><select id="settingAnalysisSensitivity" style="width:100%"><option value="0.6">0.6 (Very sensitive)</option><option value="0.8">0.8 (Sensitive)</option><option value="1.0">1.0 (Medium)</option><option value="1.2" selected>1.2 (Default)</option><option value="1.6">1.6 (Conservative)</option><option value="2.0">2.0 (Minimal)</option></select></td>
+            </tr>
+            <tr>
+              <td><strong>Amplitude Normalisation</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Percentile for waveform normalisation. Default: 99</div></td>
+              <td><select id="settingAnalysisNormalize" style="width:100%"><option value="95">95th percentile</option><option value="98">98th percentile</option><option value="99" selected>99th percentile (Default)</option><option value="100">100% (Global max)</option></select></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top:32px">Stem Separation</h3>
+        <p class="config-desc">Optional stem separation splits songs into vocals, drums, bass, and other — enabling smarter light cue generation.</p>
+        <div id="stemStatusPanel" style="margin-top:16px;padding:16px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--panel-border)">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <span id="stemStatusIcon" style="font-size:20px">&#9203;</span>
+            <div>
+              <div id="stemStatusLabel" style="font-weight:600;font-size:14px">Checking...</div>
+              <div id="stemStatusDetail" style="font-size:12px;color:var(--text-dim)"></div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:8px"><strong>Install Demucs:</strong> <code>pip install demucs</code> (requires Python 3.8+ and ~2GB disk space)</div>
+        </div>
+
+        <h3 style="margin-top:32px">Config Authentication</h3>
+        <p class="config-desc">Protect the Config screen with a username and password.</p>
+        <table class="subs-table" style="margin-top:16px">
+          <thead><tr><th>Setting</th><th style="width:280px">Value</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Enable Config Auth</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">When enabled, users must log in before accessing configuration.</div></td>
+              <td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="settingAuthEnabled" style="accent-color:var(--accent);width:18px;height:18px"><span id="settingAuthEnabledLabel" style="font-size:12px">Off</span></label></td>
+            </tr>
+            <tr id="authCredentialsRow" style="display:none">
+              <td><strong>Credentials</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Set the username and password for config access.</div></td>
+              <td>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <input type="text" id="settingAuthUsername" placeholder="Username" autocomplete="off">
+                  <input type="password" id="settingAuthPassword" placeholder="New password" autocomplete="new-password">
+                  <button class="btn btn-primary btn-sm" id="btnSaveAuthCredentials">Save Credentials</button>
+                  <div id="authSaveStatus" style="font-size:11px;min-height:16px"></div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top:32px">Touch Interface PIN</h3>
+        <p class="config-desc">Require a numeric PIN to use the Touch interface.</p>
+        <table class="subs-table" style="margin-top:16px">
+          <thead><tr><th>Setting</th><th style="width:280px">Value</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Enable Touch PIN</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Lock the Touch interface behind a PIN entry screen.</div></td>
+              <td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="settingTouchPinEnabled" style="accent-color:var(--accent);width:18px;height:18px"><span id="settingTouchPinEnabledLabel" style="font-size:12px">Off</span></label></td>
+            </tr>
+            <tr id="touchPinConfigRow" style="display:none">
+              <td><strong>PIN Code</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">4–6 digit numeric PIN.</div></td>
+              <td>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input type="text" id="settingTouchPin" placeholder="1234" maxlength="6" pattern="[0-9]*" inputmode="numeric" style="width:100px;letter-spacing:4px;text-align:center;font-family:var(--mono);font-size:16px">
+                  <button class="btn btn-primary btn-sm" id="btnSaveTouchPin">Save</button>
+                  <span id="touchPinSaveStatus" style="font-size:11px"></span>
+                </div>
+              </td>
+            </tr>
+            <tr id="touchPinTimeoutRow" style="display:none">
+              <td><strong>Idle Timeout</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Lock after this many minutes of inactivity. 0 = disabled.</div></td>
+              <td>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input type="number" id="settingTouchPinTimeout" min="0" max="120" value="0" style="width:80px">
+                  <span style="font-size:12px;color:var(--text-dim)">minutes</span>
+                  <button class="btn btn-secondary btn-sm" id="btnSaveTouchPinTimeout">Save</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ Fixture Library ═══ -->
+    <div class="config-sub-page" id="cfgpage-fixture-library">
+      <div class="config-section">
+        <h3><span class="section-icon">&#128161;</span> Fixture Library</h3>
+        <p class="config-desc">Manage fixture types used by your fixtures. Import from OFL library files or create custom types.</p>
+        <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+          <button class="btn btn-primary btn-sm" id="btnAddType">+ Add Fixture Type</button>
+          <button class="btn btn-secondary btn-sm" id="btnImportOFL">&#11015; Import from OFL File</button>
+          <input type="file" id="oflFileInput" accept=".json" style="display:none">
+        </div>
+        <div id="oflImportPanel" class="ofl-import-panel" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <h3 style="margin:0;font-size:14px;color:var(--accent)">Import Fixtures from OFL Library</h3>
+            <button class="btn btn-secondary btn-sm" id="btnCloseOflPanel">&#10005; Close</button>
+          </div>
+          <div id="oflSummary" style="font-size:12px;color:var(--text-dim);margin-bottom:10px"></div>
+          <div id="oflFixtureList" style="max-height:400px;overflow-y:auto;margin-bottom:12px"></div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <button class="btn btn-secondary btn-sm" id="btnOflSelectAll">Select All</button>
+            <button class="btn btn-secondary btn-sm" id="btnOflSelectNone">Select None</button>
+            <span style="flex:1"></span>
+            <span id="oflSelectedCount" style="font-size:12px;color:var(--text-dim)"></span>
+            <button class="btn btn-primary" id="btnOflImportSelected">Import Selected</button>
+          </div>
+          <div id="oflImportResults" style="margin-top:10px;font-size:12px;display:none"></div>
+        </div>
+        <div class="lib-search-bar">
+          <input type="text" id="filterLibraryName" placeholder="Search by name or manufacturer…" style="flex:1;max-width:280px">
+          <select id="filterLibraryCategory"><option value="">All Categories</option></select>
+          <select id="filterLibraryManufacturer"><option value="">All Manufacturers</option></select>
+          <span style="flex:1"></span>
+          <span id="libraryCount" style="font-size:12px;color:var(--text-dim)"></span>
+        </div>
+        <div style="max-height:calc(100vh - 360px);overflow-y:auto;border:1px solid var(--panel-border);border-radius:8px">
+          <table class="subs-table" id="typesTable">
+            <thead><tr><th>Name</th><th>Manufacturer</th><th>Category</th><th>Modes</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody id="typesList"></tbody>
+          </table>
+        </div>
+        <div class="lib-pagination" id="libraryPagination"></div>
+      </div>
+    </div>
+
+    <!-- ═══ About ═══ -->
+    <div class="config-sub-page" id="cfgpage-about">
+      <div class="config-section" style="max-width:700px">
+        <div style="text-align:center;margin-bottom:28px">
+          <h2 style="font-size:28px;font-weight:700;margin:0 0 4px">DMX Controller</h2>
+          <div style="font-size:13px;color:var(--text-dim)" id="aboutVersion">Version —</div>
+        </div>
+        <table class="subs-table" style="margin-bottom:24px">
+          <tbody>
+            <tr><td style="width:140px"><strong>Version</strong></td><td id="aboutVersionValue">—</td></tr>
+            <tr><td><strong>Licence</strong></td><td id="aboutLicenceStatus" style="color:var(--text-dim)">Not licenced</td></tr>
+            <tr><td><strong>Licence Key</strong></td><td id="aboutLicenceKey" style="color:var(--text-dim);font-family:var(--mono);font-size:12px">—</td></tr>
+            <tr><td><strong>Node.js</strong></td><td id="aboutNodeVersion">—</td></tr>
+            <tr><td><strong>FFmpeg</strong></td><td id="aboutFfmpegVersion">—</td></tr>
+            <tr><td><strong>FFprobe</strong></td><td id="aboutFfprobeVersion">—</td></tr>
+          </tbody>
+        </table>
+        <h3 style="font-size:13px;color:var(--accent);margin:24px 0 10px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--panel-border);padding-bottom:6px">Open Source Licenses</h3>
+        <div style="max-height:300px;overflow-y:auto;border:1px solid var(--panel-border);border-radius:6px">
+          <table class="subs-table" style="font-size:12px">
+            <thead><tr><th>Package</th><th>Version</th><th>License</th><th>Author</th></tr></thead>
+            <tbody id="aboutLicensesBody"></tbody>
+          </table>
+        </div>
+        <div style="text-align:center;padding:20px 0 8px;border-top:1px solid var(--panel-border);margin-top:24px">
+          <div style="font-size:13px;color:var(--text-dim)">&copy; 2026 EYUP Events. All rights reserved.</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══════ Modals ══════ -->
+
+<!-- USB Device Modal -->
+<div class="modal-overlay" id="usbDeviceModal">
+  <div class="modal">
+    <h3 id="usbDeviceModalTitle">Add USB Device</h3>
+    <input type="hidden" id="usbDeviceEditId">
+    <div class="form-row">
+      <div class="form-group"><label>Label</label><input type="text" id="usbDevLabel" placeholder="e.g. Enttec Open DMX"></div>
+      <div class="form-group"><label>Source</label><select id="usbDevSource"><option value="ftdi">FTDI D2XX</option><option value="usb">USB (libusb)</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Serial Number</label><input type="text" id="usbDevSerial" placeholder="e.g. AL00XXXX"></div>
+      <div class="form-group"><label>Description</label><input type="text" id="usbDevDescription" placeholder="e.g. FT232R"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">FTDI device description (fallback if no serial)</div></div>
+    </div>
+    <div class="form-row" id="usbDevVidPidRow">
+      <div class="form-group"><label>VID</label><input type="text" id="usbDevVid" placeholder="e.g. 0x0d8c"></div>
+      <div class="form-group"><label>PID</label><input type="text" id="usbDevPid" placeholder="e.g. 0x0012"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Local Universe</label><input type="number" id="usbDevUniverse" value="1" min="1" max="64"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">DMX universe this adapter outputs to</div></div>
+      <div class="form-group"><label>Refresh Rate</label><input type="number" id="usbDevRefreshRate" value="40" min="1" max="44"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">Hz (DMX512 max ~44 Hz)</div></div>
+    </div>
+    <div class="form-group"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="usbDevAutoConnect" checked> Auto-connect on server start</label></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeUsbDeviceModal()">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveUsbDevice">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Art-Net Node Modal -->
+<div class="modal-overlay" id="artnetNodeModal">
+  <div class="modal">
+    <h3 id="artnetNodeModalTitle">Add Art-Net Node</h3>
+    <input type="hidden" id="artnetNodeEditId">
+    <div class="form-row">
+      <div class="form-group"><label>Local Universe</label><input type="number" id="anLocalUniverse" value="1" min="1" max="16"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">The universe number used in your fixture patch</div></div>
+      <div class="form-group"><label>Label</label><input type="text" id="anLabel" placeholder="e.g. Main Rig"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Target IP</label><input type="text" id="anIp" value="255.255.255.255" placeholder="255.255.255.255"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">Broadcast or specific node IP</div></div>
+      <div class="form-group"><label>Port</label><input type="number" id="anPort" value="6454" min="1" max="65535"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Art-Net Subnet</label><input type="number" id="anSubnet" value="0" min="0" max="15"></div>
+      <div class="form-group"><label>Art-Net Universe</label><input type="number" id="anArtnetUniverse" value="0" min="0" max="15"></div>
+    </div>
+    <div class="form-error" id="artnetNodeError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('artnetNodeModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveArtnetNode">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Subscription Modal -->
+<div class="modal-overlay" id="subModal">
+  <div class="modal">
+    <h3 id="subModalTitle">Add Subscription</h3>
+    <input type="hidden" id="subEditId">
+    <div class="form-group">
+      <label>VDJ Trigger Expression</label>
+      <input type="text" id="subTrigger" placeholder="e.g. deck 1 get_bpm">
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">VirtualDJ script expression. Use deck N prefix for per-deck triggers.</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Label</label><input type="text" id="subLabel" placeholder="e.g. Deck 1 BPM"></div>
+      <div class="form-group"><label>Category</label><select id="subCategory"><option value="track">Track</option><option value="transport">Transport</option><option value="mixer">Mixer</option><option value="loop">Loop</option><option value="soundswitch">SoundSwitch</option><option value="custom">Custom</option></select></div>
+    </div>
+    <div class="form-error" id="subError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('subModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveSub">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- MIDI Mapping Modal -->
+<div class="modal-overlay" id="midiMapModal">
+  <div class="modal" style="max-width:620px">
+    <h3 id="midiMapModalTitle">Add MIDI Mapping</h3>
+    <input type="hidden" id="midiMapEditId">
+    <div class="form-group"><label>Name</label><input type="text" id="mmName" placeholder="e.g. Blackout Pad"></div>
+    <div class="form-row">
+      <div class="form-group"><label>MIDI Type</label><select id="mmMidiType"><option value="note">Note (Button/Pad)</option><option value="cc">CC (Fader/Knob)</option></select></div>
+      <div class="form-group"><label>MIDI Number</label><input type="number" id="mmMidiNumber" min="0" max="127" value="0"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">Note/CC number (0-127). Use <strong>MIDI Learn</strong> to auto-detect.</div></div>
+      <div class="form-group"><label>Channel</label><input type="number" id="mmMidiChannel" min="0" max="15" value="0" style="width:60px"></div>
+    </div>
+    <div class="form-group"><label>Action Type</label><select id="mmActionType"></select></div>
+    <div class="form-group" id="mmToggleModeGroup"><label>Trigger Mode</label><select id="mmToggleMode"><option value="momentary">Momentary (on while pressed)</option><option value="toggle">Toggle (press to flip on/off)</option></select></div>
+    <div id="mmActionDataSection">
+      <div id="mmColorFields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>R</label><input type="number" id="mmColorR" min="0" max="255" value="255"></div>
+          <div class="form-group"><label>G</label><input type="number" id="mmColorG" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>B</label><input type="number" id="mmColorB" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>W</label><input type="number" id="mmColorW" min="0" max="255" value="0"></div>
+        </div>
+        <div class="form-group"><label>Target Group</label><select id="mmColorGroup"><option value="">All Fixtures</option></select></div>
+      </div>
+      <div id="mmEffectFields" style="display:none">
+        <div class="form-group"><label>Effect</label><select id="mmEffectSelect"></select></div>
+        <div class="form-group"><label>Target Group</label><select id="mmEffectGroup"><option value="">All Fixtures</option></select></div>
+      </div>
+      <div id="mmSceneFields" style="display:none"><div class="form-group"><label>Scene</label><select id="mmSceneSelect"></select></div></div>
+      <div id="mmDimmerFields" style="display:none"><div class="form-group"><label>Dimmer Value (0-255)</label><input type="number" id="mmDimmerValue" min="0" max="255" value="255" style="width:120px"></div></div>
+      <div id="mmGroupDimmerFields" style="display:none"><div class="form-group"><label>Group</label><select id="mmGroupDimmerGroup"><option value="">All Fixtures</option></select></div></div>
+      <div id="mmChannelFields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>Universe</label><input type="number" id="mmChannelUniverse" min="1" max="32768" value="1" style="width:70px"></div>
+          <div class="form-group"><label>Channel</label><input type="number" id="mmChannelNumber" min="1" max="512" value="1" style="width:70px"></div>
+        </div>
+      </div>
+      <div class="form-group" id="mmJsonGroup" style="display:none">
+        <label>Channel Data (JSON)</label>
+        <textarea id="mmActionData" rows="4" style="width:100%;font-family:var(--mono);font-size:12px" placeholder='{"universe":1,"channels":[{"ch":1,"val":255}]}'></textarea>
+      </div>
+    </div>
+    <div id="mmLedGroup" class="form-row">
+      <div class="form-group"><label>LED Color (idle)</label><select id="mmLedColor"><option value="0">Off</option><option value="1">Dim Gray</option><option value="2">Gray</option><option value="3">White</option><option value="4">Light Red</option><option value="5">Red</option><option value="6">Dark Red</option><option value="8">Orange</option><option value="9">Bright Orange</option><option value="12">Light Yellow</option><option value="13">Yellow</option><option value="14">Dark Yellow</option><option value="16">Lime</option><option value="17">Bright Green</option><option value="18">Dark Green</option><option value="21">Green</option><option value="25">Spring Green</option><option value="33">Cyan</option><option value="36">Light Blue</option><option value="37">Sky Blue</option><option value="45">Blue</option><option value="43">Dark Blue</option><option value="48">Purple</option><option value="49">Bright Purple</option><option value="53">Magenta</option><option value="56">Pink</option><option value="57">Hot Pink</option></select></div>
+      <div class="form-group"><label>LED Color (active)</label><select id="mmLedActiveColor"><option value="0">Off</option><option value="1">Dim Gray</option><option value="2">Gray</option><option value="3">White</option><option value="4">Light Red</option><option value="5">Red</option><option value="6">Dark Red</option><option value="8">Orange</option><option value="9">Bright Orange</option><option value="12">Light Yellow</option><option value="13">Yellow</option><option value="14">Dark Yellow</option><option value="16">Lime</option><option value="17">Bright Green</option><option value="18">Dark Green</option><option value="21" selected>Green</option><option value="25">Spring Green</option><option value="33">Cyan</option><option value="36">Light Blue</option><option value="37">Sky Blue</option><option value="45">Blue</option><option value="43">Dark Blue</option><option value="48">Purple</option><option value="49">Bright Purple</option><option value="53">Magenta</option><option value="56">Pink</option><option value="57">Hot Pink</option></select></div>
+    </div>
+    <div id="mmLedBehaviorGroup" class="form-row">
+      <div class="form-group"><label>LED Mode (idle)</label><select id="mmLedBehavior"><option value="0">Static</option><option value="1">Pulsing (slow)</option><option value="2">Pulsing</option><option value="3">Pulsing (fast)</option><option value="4">Pulsing (faster)</option><option value="5">Blinking (slow)</option><option value="6">Blinking</option><option value="7">Blinking (fast)</option><option value="8">Blinking (faster)</option><option value="9">Blinking (fastest)</option></select></div>
+      <div class="form-group"><label>LED Mode (active)</label><select id="mmLedActiveBehavior"><option value="0">Static</option><option value="1">Pulsing (slow)</option><option value="2">Pulsing</option><option value="3">Pulsing (fast)</option><option value="4">Pulsing (faster)</option><option value="5">Blinking (slow)</option><option value="6">Blinking</option><option value="7">Blinking (fast)</option><option value="8">Blinking (faster)</option><option value="9">Blinking (fastest)</option></select></div>
+    </div>
+    <div class="form-error" id="midiMapError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('midiMapModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveMidiMap">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- OS2L Button Map Modal -->
+<div class="modal-overlay" id="btnMapModal">
+  <div class="modal" style="max-width:620px">
+    <h3 id="btnMapModalTitle">Add Button Mapping</h3>
+    <input type="hidden" id="btnMapEditId">
+    <div class="form-group"><label>Name</label><input type="text" id="bmName" placeholder="e.g. Blackout Button"></div>
+    <div class="form-row">
+      <div class="form-group"><label>OS2L Event Type</label><select id="bmOs2lEvent"><option value="btn">Button (btn)</option><option value="cmd">Command (cmd)</option></select></div>
+      <div class="form-group"><label>OS2L Value / Button Name</label><input type="text" id="bmOs2lValue" placeholder="e.g. blackout, strobe, *"><div style="font-size:10px;color:var(--text-dim);margin-top:4px">The button name sent by VDJ. Use <strong>*</strong> to match any.</div></div>
+    </div>
+    <div class="form-group"><label>Action Type</label><select id="bmActionType"><option value="color">Color (RGBW)</option><option value="color_preset">Color Preset</option><option value="effect">Run Effect</option><option value="scene_activate">Activate Scene</option><option value="blackout">Blackout</option><option value="full_on">Full On</option><option value="strobe">Strobe</option><option value="master_dimmer">Master Dimmer</option><option value="set_channels">Set Specific Channels (JSON)</option><option value="scene">Scene JSON (legacy)</option></select></div>
+    <div class="form-group"><label>Trigger Mode</label><select id="bmToggleMode"><option value="fire">Fire (execute on every event)</option><option value="toggle">Toggle (use OS2L state on/off)</option></select><div style="font-size:10px;color:var(--text-dim);margin-top:4px"><strong>Fire:</strong> Runs every time. <strong>Toggle:</strong> Uses OS2L button state.</div></div>
+    <div id="bmActionDataSection">
+      <div id="bmColorFields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>R</label><input type="number" id="bmColorR" min="0" max="255" value="255"></div>
+          <div class="form-group"><label>G</label><input type="number" id="bmColorG" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>B</label><input type="number" id="bmColorB" min="0" max="255" value="0"></div>
+          <div class="form-group"><label>W</label><input type="number" id="bmColorW" min="0" max="255" value="0"></div>
+        </div>
+        <div class="form-group"><label>Target Group</label><select id="bmColorGroup"><option value="">All Fixtures</option></select></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><label style="font-size:12px;color:var(--text-dim)">Preview:</label><div id="bmColorPreview" style="width:40px;height:24px;border-radius:4px;border:1px solid var(--panel-border);background:#ff0000"></div></div>
+      </div>
+      <div id="bmColorPresetFields" style="display:none">
+        <div class="form-group"><label>Color Preset</label><select id="bmColorPreset"><option value="red" data-r="255" data-g="0" data-b="0" data-w="0">Red</option><option value="green" data-r="0" data-g="255" data-b="0" data-w="0">Green</option><option value="blue" data-r="0" data-g="0" data-b="255" data-w="0">Blue</option><option value="white" data-r="0" data-g="0" data-b="0" data-w="255">White</option><option value="amber" data-r="255" data-g="191" data-b="0" data-w="0">Amber</option><option value="uv" data-r="75" data-g="0" data-b="130" data-w="0">UV</option><option value="yellow" data-r="255" data-g="255" data-b="0" data-w="0">Yellow</option><option value="magenta" data-r="255" data-g="0" data-b="255" data-w="0">Magenta</option><option value="cyan" data-r="0" data-g="255" data-b="255" data-w="0">Cyan</option><option value="warm_white" data-r="255" data-g="200" data-b="100" data-w="255">Warm White</option><option value="cool_white" data-r="200" data-g="220" data-b="255" data-w="255">Cool White</option><option value="pink" data-r="255" data-g="105" data-b="180" data-w="0">Pink</option><option value="orange" data-r="255" data-g="140" data-b="0" data-w="0">Orange</option><option value="lime" data-r="180" data-g="255" data-b="0" data-w="0">Lime</option></select></div>
+        <div class="form-group"><label>Target Group</label><select id="bmColorPresetGroup"><option value="">All Fixtures</option></select></div>
+      </div>
+      <div id="bmEffectFields" style="display:none">
+        <div class="form-group"><label>Effect</label><select id="bmEffectSelect"></select></div>
+        <div class="form-group"><label>Target Group</label><select id="bmEffectGroup"><option value="">All Fixtures</option></select></div>
+      </div>
+      <div id="bmSceneFields" style="display:none"><div class="form-group"><label>Scene</label><select id="bmSceneSelect"></select></div></div>
+      <div id="bmDimmerFields" style="display:none"><div class="form-group"><label>Dimmer Value (0-255)</label><input type="number" id="bmDimmerValue" min="0" max="255" value="255" style="width:120px"></div></div>
+      <div class="form-group" id="bmChannelsGroup" style="display:none">
+        <label>Channel Data (JSON)</label>
+        <textarea id="bmActionData" rows="5" style="width:100%;font-family:var(--mono);font-size:12px" placeholder='{"universe":1,"channels":[{"ch":1,"val":255}]}'></textarea>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:4px" id="bmActionHint"></div>
+      </div>
+    </div>
+    <div class="form-error" id="btnMapError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('btnMapModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveBtnMap">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Template Modal -->
+<div class="modal-overlay" id="tplModal">
+  <div class="modal" style="max-width:400px">
+    <h3 id="tplModalTitle">New Template</h3>
+    <div class="form-group"><label>Name</label><input type="text" id="tplName" placeholder="My Preset"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Palette</label><select id="tplPalette"><option value="random">Random</option></select></div>
+      <div class="form-group"><label>Genre</label><select id="tplGenre"><option value="auto">Auto-detect</option></select></div>
+    </div>
+    <div class="form-group"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="tplNoStrobes"> Exclude Strobes</label></div>
+    <div class="form-group"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="tplSnapConfig"> Snapshot current generator config into template</label></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('tplModal')">Cancel</button>
+      <button class="btn btn-primary" id="tplSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Effect Modal -->
+<div class="modal-overlay" id="effectModal">
+  <div class="modal">
+    <h3 id="effectModalTitle">New Effect</h3>
+    <div class="form-row">
+      <div class="form-group"><label>Name</label><input type="text" id="effName" placeholder="My Effect"></div>
+      <div class="form-group"><label>Type</label>
+        <select id="effType">
+          <optgroup label="Color / Intensity"><option value="pulse">Pulse</option><option value="rainbow">Rainbow</option><option value="strobe">Strobe</option><option value="color_fade">Color Fade</option><option value="sparkle">Sparkle</option><option value="color_wave">Color Wave</option><option value="fire">Fire</option></optgroup>
+          <optgroup label="Multicell"><option value="chase">Chase</option><option value="comet">Comet</option><option value="scanner">Scanner</option><option value="buildup">Buildup</option><option value="segments">Segments</option><option value="ripple">Ripple</option><option value="cell_strobe">Cell Strobe</option><option value="gradient">Gradient</option></optgroup>
+          <optgroup label="Moving Head"><option value="pan_sweep">Pan Sweep</option><option value="tilt_sweep">Tilt Sweep</option><option value="circle">Circle</option><option value="figure_eight">Figure Eight</option><option value="random_move">Random Movement</option><option value="fan">Fan</option><option value="nod">Nod / Shake</option></optgroup>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Category</label><select id="effCategory"><option value="color">Color</option><option value="intensity">Intensity</option><option value="movement">Movement</option></select></div>
+      <div class="form-group"><label>Fixture Target</label><select id="effFixtureTarget"><option value="all">All Fixtures</option><option value="color">Color Fixtures</option><option value="moving_head">Moving Heads Only</option><option value="moving_head_wash">Moving Head Wash Only</option><option value="moving_head_spot">Moving Head Spot Only</option><option value="multicell">Multicell Only</option><option value="rig">Rig-wide (spatial)</option></select></div>
+    </div>
+    <div class="form-group"><label>Duration (beats)</label><input type="number" id="effDurBeats" value="4" min="0.25" step="0.25"></div>
+    <div id="effParamsArea"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('effectModal')">Cancel</button>
+      <button class="btn btn-primary" id="effSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Touch Action Modal -->
+<div class="modal-overlay" id="touchActionModal">
+  <div class="modal" style="max-width:540px">
+    <h3 id="touchActionModalTitle">Add Action</h3>
+    <input type="hidden" id="taId">
+    <div class="form-group"><label>Label</label><input id="taLabel" placeholder="Button label"></div>
+    <div class="form-group"><label>Icon (emoji/HTML)</label><input id="taIcon" placeholder="e.g. ☀ or ⚡"></div>
+    <div class="form-group"><label>Action Type</label>
+      <select id="taActionType"><option value="color">Color</option><option value="quick_action">Quick Action</option><option value="scene">Scene</option><option value="mover_preset">Mover Preset</option><option value="strobe">Strobe</option><option value="smoke">Smoke</option><option value="haze">Haze</option><option value="blackout">Blackout</option><option value="master_dimmer">Master Dimmer</option></select>
+    </div>
+    <div id="taColorFields" style="display:none">
+      <div class="form-row">
+        <div class="form-group"><label>R</label><input type="number" id="taColorR" min="0" max="255" value="255"></div>
+        <div class="form-group"><label>G</label><input type="number" id="taColorG" min="0" max="255" value="0"></div>
+        <div class="form-group"><label>B</label><input type="number" id="taColorB" min="0" max="255" value="0"></div>
+        <div class="form-group"><label>W</label><input type="number" id="taColorW" min="0" max="255" value="0"></div>
+      </div>
+    </div>
+    <div id="taQuickActionFields" style="display:none"><div class="form-group"><label>Action</label><select id="taQuickAction"><option value="fullWhite">Full White</option><option value="fullColor">Full Color</option><option value="dimWarm">Dim Warm</option><option value="allOff">All Off</option><option value="uvMode">UV Mode</option></select></div></div>
+    <div id="taSceneFields" style="display:none"><div class="form-group"><label>Scene</label><select id="taScene"></select></div></div>
+    <div id="taMoverFields" style="display:none"><div class="form-group"><label>Preset</label><select id="taMoverPreset"></select></div></div>
+    <div id="taDimmerFields" style="display:none"><div class="form-group"><label>Dimmer Value (0-255)</label><input type="number" id="taDimmerValue" min="0" max="255" value="255" style="width:100px"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Button Color</label><input type="color" id="taBtnColor" value="#333333"></div>
+      <div class="form-group"><label>Text Color</label><input type="color" id="taTxtColor" value="#ffffff"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Row</label><input type="number" id="taRow" min="0" value="0"></div>
+      <div class="form-group"><label>Col</label><input type="number" id="taCol" min="0" value="0"></div>
+      <div class="form-group"><label>Width</label><input type="number" id="taW" min="1" value="1"></div>
+      <div class="form-group"><label>Height</label><input type="number" id="taH" min="1" value="1"></div>
+    </div>
+    <div class="form-group"><label>Sort Order</label><input type="number" id="taSortOrder" value="0" style="width:100px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('touchActionModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveTouchAction">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pretty-print overlay for event log -->
+<div class="pp-overlay" id="ppOverlay">
+  <div class="pp-content" id="ppContent"></div>
+</div>
+
+<!-- ══════ Footer ══════ -->
+<footer class="footer">&copy; Eyup Events &mdash; DMX Controller</footer>
+
+<script src="js/config.js"></script>
+</body>
+</html>
