@@ -171,6 +171,25 @@ let currentDeviceName = '';
 // Active toggle states for buttons
 const activeToggles = new Set();   // set of mapping IDs currently "on"
 
+// ─── Page System ────────────────────────────────────────────────────────────
+// Scene buttons (0x70-0x74) switch between grid pages.
+// Each page shows a different set of 8×8 grid mappings.
+// Bottom row, faders, and scene buttons themselves are always visible (page 0).
+
+const PAGE_COUNT = 5;
+const PAGE_NAMES = ['Colors', 'Color FX', 'Cell FX', 'Mover FX', 'Rig FX'];
+const PAGE_SCENE_NOTES = [0x70, 0x71, 0x72, 0x73, 0x74]; // Scene buttons 1-5
+const STOP_ALL_NOTE = 0x77;  // Scene button 8 stays as Stop All
+const PAGE_SCENE_COLORS = [
+  { idle: LED.DARK_RED,    active: LED.RED },          // Page 1: Colors
+  { idle: LED.DARK_ORANGE, active: LED.BRIGHT_ORANGE }, // Page 2: Color Effects
+  { idle: LED.DARK_GREEN,  active: LED.GREEN },         // Page 3: Cell Effects
+  { idle: LED.DARK_BLUE,   active: LED.BLUE },          // Page 4: Mover Effects
+  { idle: LED.PURPLE,      active: LED.MAGENTA },       // Page 5: Rig Effects
+];
+
+let currentPage = 1; // Active page (1-based, matches DB page column)
+
 // Cached MIDI mappings (avoid DB query on every MIDI event)
 let _cachedMidiMappings = null;
 function getCachedMidiMappings() {
@@ -447,15 +466,23 @@ function clearAllLeds() {
 }
 
 /**
- * Refresh all LEDs based on current mapping state.
+ * Refresh all LEDs based on current mapping state and active page.
  */
 function refreshAllLeds() {
-  if (!midiOutput) return;
-  clearAllLeds();
+  if (midiOutput) {
+    clearAllLeds();
+  }
 
   const mappings = db.getMidiMappings();
   for (const m of mappings) {
     if (!m.enabled) continue;
+    const mPage = m.page || 0;
+    // Grid notes (0-63): only show if mapping is on the current page or page 0 (global)
+    if (m.midi_type === 'note' && m.midi_number >= GRID_NOTES.min && m.midi_number <= GRID_NOTES.max) {
+      if (mPage !== 0 && mPage !== currentPage) continue;
+    }
+    // Scene buttons (0x70-0x74) are managed by the page system — skip normal mapping LEDs
+    if (m.midi_type === 'note' && m.midi_number >= 0x70 && m.midi_number <= 0x74) continue;
     const isActive = activeToggles.has(m.id);
     const color = isActive ? (m.led_active_color || LED.GREEN) : (m.led_color || LED.YELLOW);
     const behavior = isActive ? (m.led_active_behavior || 0) : (m.led_behavior || 0);
@@ -463,6 +490,135 @@ function refreshAllLeds() {
       setLed(m.midi_number, color, behavior);
     }
   }
+
+  // Light up scene buttons for page navigation
+  refreshPageLeds();
+
+  // Broadcast LED state to web clients
+  broadcastLedState();
+}
+
+/**
+ * Update scene button LEDs to reflect the active page.
+ */
+function refreshPageLeds() {
+  if (!midiOutput) return;
+  for (let i = 0; i < PAGE_COUNT; i++) {
+    const note = PAGE_SCENE_NOTES[i];
+    const pageNum = i + 1;
+    if (pageNum === currentPage) {
+      setLed(note, PAGE_SCENE_COLORS[i].active, LED_BEHAVIOR.STATIC);
+    } else {
+      // Check if this page has any active toggles — pulse if so
+      const hasActive = hasActiveTogglesOnPage(pageNum);
+      setLed(note, PAGE_SCENE_COLORS[i].idle, hasActive ? LED_BEHAVIOR.PULSING : LED_BEHAVIOR.STATIC);
+    }
+  }
+}
+
+/**
+ * Check if any toggle is active on a given page.
+ */
+function hasActiveTogglesOnPage(pageNum) {
+  if (activeToggles.size === 0) return false;
+  const mappings = getCachedMidiMappings();
+  for (const m of mappings) {
+    if ((m.page || 0) === pageNum && activeToggles.has(m.id)) return true;
+  }
+  return false;
+}
+
+/**
+ * Switch to a different page. Updates grid LEDs.
+ */
+function switchPage(pageNum) {
+  if (pageNum < 1 || pageNum > PAGE_COUNT) return;
+  if (pageNum === currentPage) return;
+  currentPage = pageNum;
+  console.log(`[MIDI] Switched to page ${pageNum}: ${PAGE_NAMES[pageNum - 1]}`);
+  refreshAllLeds();
+  broadcast({ type: 'midi_page', page: currentPage, name: PAGE_NAMES[currentPage - 1] });
+}
+
+/**
+ * Compute the full LED state for the virtual MIDI layout.
+ * Returns an object with grid (0-63), track (0x64-0x6B), scene (0x70-0x77) states
+ * and metadata like current page, page names, mappings info.
+ */
+function getLedState() {
+  const mappings = db ? db.getMidiMappings() : [];
+
+  // Build lookup: note → { color, behavior, name, active }
+  const noteState = {};
+
+  for (const m of mappings) {
+    if (!m.enabled || m.midi_type !== 'note') continue;
+    const mPage = m.page || 0;
+    const note = m.midi_number;
+
+    // Grid notes: only include current page or global
+    if (note >= GRID_NOTES.min && note <= GRID_NOTES.max) {
+      if (mPage !== 0 && mPage !== currentPage) continue;
+    }
+    // Scene buttons 0x70-0x74 managed by page system
+    if (note >= 0x70 && note <= 0x74) continue;
+
+    const isActive = activeToggles.has(m.id);
+    const color = isActive ? (m.led_active_color || LED.GREEN) : (m.led_color || LED.YELLOW);
+    const behavior = isActive ? (m.led_active_behavior || 0) : (m.led_behavior || 0);
+
+    noteState[note] = {
+      color,
+      hex: VELOCITY_COLORS[color] || '#000000',
+      behavior,
+      name: m.name || '',
+      active: isActive,
+      action: m.action_type || '',
+    };
+  }
+
+  // Add page scene buttons (0x70-0x74)
+  for (let i = 0; i < PAGE_COUNT; i++) {
+    const note = PAGE_SCENE_NOTES[i];
+    const pageNum = i + 1;
+    const isCurrentPage = pageNum === currentPage;
+    const hasActive = hasActiveTogglesOnPage(pageNum);
+    const color = isCurrentPage ? PAGE_SCENE_COLORS[i].active : PAGE_SCENE_COLORS[i].idle;
+    const behavior = isCurrentPage ? LED_BEHAVIOR.STATIC : (hasActive ? LED_BEHAVIOR.PULSING : LED_BEHAVIOR.STATIC);
+    noteState[note] = {
+      color,
+      hex: VELOCITY_COLORS[color] || '#000000',
+      behavior,
+      name: PAGE_NAMES[i],
+      active: isCurrentPage,
+      action: 'page',
+    };
+  }
+
+  return {
+    page: currentPage,
+    pageName: PAGE_NAMES[currentPage - 1] || '',
+    pageCount: PAGE_COUNT,
+    pageNames: PAGE_NAMES,
+    connected: connected,
+    notes: noteState,
+    velocityColors: VELOCITY_COLORS,
+  };
+}
+
+/**
+ * Broadcast the LED state to all web clients.
+ */
+let _ledBroadcastTimer = null;
+function broadcastLedState() {
+  // Debounce — multiple rapid refreshes only send one update
+  if (_ledBroadcastTimer) return;
+  _ledBroadcastTimer = setTimeout(() => {
+    _ledBroadcastTimer = null;
+    if (broadcast) {
+      broadcast({ type: 'midi_led_state', ...getLedState() });
+    }
+  }, 50);
 }
 
 // ─── MIDI Message Handler ───────────────────────────────────────────────────
@@ -509,6 +665,13 @@ function handleNoteMessage(note, isOn, velocity) {
     return;
   }
 
+  // ── Page switching via scene buttons (0x70-0x74) ──
+  if (note >= 0x70 && note <= 0x74 && isOn) {
+    const pageNum = note - 0x70 + 1;
+    switchPage(pageNum);
+    return;
+  }
+
   // Determine region (mk2 note ranges)
   let region;
   if (note >= GRID_NOTES.min && note <= GRID_NOTES.max) {
@@ -528,6 +691,11 @@ function handleNoteMessage(note, isOn, velocity) {
   for (const mapping of mappings) {
     if (mapping.midi_type !== 'note') continue;
     if (mapping.midi_number !== note) continue;
+    // Grid notes: only match mappings on the current page (or page 0 = global)
+    if (region === 'grid') {
+      const mPage = mapping.page || 0;
+      if (mPage !== 0 && mPage !== currentPage) continue;
+    }
 
     matched = true;
     executeMidiAction(mapping, isOn);
@@ -535,6 +703,8 @@ function handleNoteMessage(note, isOn, velocity) {
 
   // Auto-create disabled placeholder for unmapped buttons (like OS2L does)
   if (!matched && isOn) {
+    // Don't auto-create placeholders for page scene buttons
+    if (note >= 0x70 && note <= 0x74) return;
     const allMappings = db.getMidiMappings();
     const exists = allMappings.some(m => m.midi_type === 'note' && m.midi_number === note);
     if (!exists) {
@@ -557,9 +727,10 @@ function handleNoteMessage(note, isOn, velocity) {
         led_color: LED.OFF,
         led_active_color: LED.GREEN,
         enabled: 0,
+        page: region === 'grid' ? currentPage : 0,
       });
       if (newMapping && !newMapping.error) {
-        console.log(`[MIDI] Auto-created placeholder mapping "${label}" (note ${note}, disabled)`);
+        console.log(`[MIDI] Auto-created placeholder mapping "${label}" (note ${note}, page ${region === 'grid' ? currentPage : 0}, disabled)`);
         broadcast({ type: 'midi_mapping_created', mapping: newMapping });
       }
     }
@@ -716,6 +887,9 @@ function executeMidiAction(mapping, isOn) {
     setLed(mapping.midi_number, ledColor, ledBehavior);
   }
 
+  // Broadcast updated state to web clients
+  broadcastLedState();
+
   switch (mapping.action_type) {
     case 'none':
       break;
@@ -847,13 +1021,27 @@ function executeMidiAction(mapping, isOn) {
           }
         }
       } else {
-        // Deactivate: release override for MIDI-started effects
-        for (const slot of Object.keys(midiRunningEffects)) {
-          const entry = midiRunningEffects[slot];
-          if (entry && entry.fixtureIds) setOverride(entry.fixtureIds, false);
-          delete midiRunningEffects[slot];
+        // Deactivate: only stop the slot for THIS specific effect
+        if (effect_id) {
+          const deactivatedEffect = db.getEffect(effect_id);
+          if (deactivatedEffect) {
+            const slot = getEffectSlot(deactivatedEffect.type);
+            const entry = midiRunningEffects[slot];
+            if (entry && entry.effectId === effect_id) {
+              if (entry.fixtureIds) setOverride(entry.fixtureIds, false);
+              delete midiRunningEffects[slot];
+              stopRunningEffect(slot, false);
+            }
+          }
+        } else {
+          // Fallback: stop all if we don't know which effect
+          for (const slot of Object.keys(midiRunningEffects)) {
+            const entry = midiRunningEffects[slot];
+            if (entry && entry.fixtureIds) setOverride(entry.fixtureIds, false);
+            delete midiRunningEffects[slot];
+          }
+          stopRunningEffect(undefined, false);
         }
-        stopRunningEffect(undefined, false);
       }
       broadcast({ type: 'midi_action', action: 'effect', mapping: mapping.name, active: activate });
       break;
@@ -892,13 +1080,33 @@ function executeMidiAction(mapping, isOn) {
 
     case 'full_on': {
       const universe = actionData.universe || 1;
-      const val = activate ? 255 : 0;
       setOverride(getAffectedFixtureIds(), activate);
-      const ch = [];
-      for (let i = 1; i <= 512; i++) ch.push({ ch: i, val });
-      if (dmxOutputEnabled) {
-        artnetServer.setChannels(universe, ch);
-        dmxUsbServer.setChannels(universe, ch);
+      if (activate) {
+        const ch = [];
+        for (let i = 1; i <= 512; i++) ch.push({ ch: i, val: 255 });
+        if (dmxOutputEnabled) {
+          artnetServer.setChannels(universe, ch);
+          dmxUsbServer.setChannels(universe, ch);
+        }
+      } else {
+        // Send home positions for pan/tilt, 0 for everything else
+        const channelMap = getFixtureChannelMapCached();
+        const chUpdates = {};
+        for (const fix of channelMap) {
+          if (fix.universe !== universe) continue;
+          for (const c of fix.channels) {
+            if (c.type === 'pan') chUpdates[c.dmx_address] = fix.home_pan ?? 128;
+            else if (c.type === 'tilt') chUpdates[c.dmx_address] = fix.home_tilt ?? 128;
+            else chUpdates[c.dmx_address] = 0;
+          }
+        }
+        // Fill gaps with 0 for any unclaimed channels
+        const ch = [];
+        for (let i = 1; i <= 512; i++) ch.push({ ch: i, val: chUpdates[i] ?? 0 });
+        if (dmxOutputEnabled) {
+          artnetServer.setChannels(universe, ch);
+          dmxUsbServer.setChannels(universe, ch);
+        }
       }
       broadcast({ type: 'midi_action', action: 'full_on', mapping: mapping.name, active: activate });
       break;
@@ -961,6 +1169,8 @@ function executeMidiAction(mapping, isOn) {
           }
         }
         console.log('[MIDI] Stopped all effects, scenes, and overrides');
+        // Refresh page LEDs since active toggles were cleared
+        refreshPageLeds();
       }
       broadcast({ type: 'midi_action', action: 'stop_all_effects', mapping: mapping.name, active: activate });
       break;
@@ -1103,6 +1313,10 @@ function registerRoutes(app) {
       shiftHeld,
       availablePorts: ports,
       enabled: db.getConfig('midi_enabled') !== '0',
+      page: currentPage,
+      pageName: PAGE_NAMES[currentPage - 1] || '',
+      pageCount: PAGE_COUNT,
+      pageNames: PAGE_NAMES,
     });
   });
 
@@ -1263,26 +1477,43 @@ function registerRoutes(app) {
     broadcast({ type: 'midi_mappings_changed' });
     res.json({ ok: true, message: 'Default APC Mini mappings created' });
   });
+
+  // ── Page Navigation ─────────────────────────────────────────────────────
+  app.get('/api/midi/page', (req, res) => {
+    res.json({ page: currentPage, name: PAGE_NAMES[currentPage - 1] || '', count: PAGE_COUNT, names: PAGE_NAMES });
+  });
+
+  app.post('/api/midi/page', (req, res) => {
+    const { page } = req.body || {};
+    const p = parseInt(page, 10);
+    if (!p || p < 1 || p > PAGE_COUNT) return res.status(400).json({ error: `Page must be 1-${PAGE_COUNT}` });
+    switchPage(p);
+    res.json({ page: currentPage, name: PAGE_NAMES[currentPage - 1] || '' });
+  });
+
+  // ── LED State (for virtual MIDI layout) ──────────────────────────────
+  app.get('/api/midi/led-state', (req, res) => {
+    res.json(getLedState());
+  });
 }
 
 // ─── Default Mapping Presets ────────────────────────────────────────────────
 
 /**
- * Create a sensible default mapping for the APC Mini mk2.
+ * Create a sensible default mapping for the APC Mini mk2 with page support.
  *
- * Grid layout (8×8 RGB pads, rows 0-7 bottom to top):
- *   Row 7 (notes 56-63): Static colors (Red, Orange, Yellow, Green, Cyan, Blue, Magenta, White)
- *   Row 6 (notes 48-55): Mover effects (circles, pans, tilts, figure-8, fan, nod)
- *   Row 5 (notes 40-47): Rig effects 2 (color waves, converge, rainbow, alternate)
- *   Row 4 (notes 32-39): Rig effects 1 (chases, sweeps)
- *   Row 3 (notes 24-31): Comets, scanners, sparkles, fire
- *   Row 2 (notes 16-23): Pulses & strobes
- *   Row 1 (notes  8-15): Color fades, waves, rainbows
- *   Row 0 (notes  0- 7): Chases
+ * Pages (selected via scene buttons 1-5 on the right):
+ *   Page 1: Colors — static color pads across the full 8×8 grid
+ *   Page 2: Color FX — rainbows, fades, pulses, strobes, sparkles, fire
+ *   Page 3: Cell FX — chases, comets, scanners, buildups, segments, ripples
+ *   Page 4: Mover FX — pan/tilt sweeps, circles, figure 8, fan, nod, random
+ *   Page 5: Rig FX — rig-wide chases, sweeps, color waves, converge, rainbow
  *
- * Track buttons (100-107): Blackout, Strobe, Full On, (spare)
- * Scene buttons (112-119): Scene activation
- * Faders: Group dimmers, effect speed, master dimmer
+ * Scene buttons 6-7 (0x75-0x76): Spare (unmapped)
+ * Scene button 8 (0x77): Stop All Effects (global)
+ *
+ * Track buttons (100-107): Blackout, Strobe, Full On, All Off (global, page 0)
+ * Faders: Group dimmers, effect speed, master dimmer (global, page 0)
  */
 function createDefaultMappings() {
   // Clear existing
@@ -1293,8 +1524,8 @@ function createDefaultMappings() {
   const byId = {};
   effects.forEach(e => byId[e.id] = e);
 
-  // Helper: find effect by ID and create a grid mapping
-  function mapEffect(note, effectId, color, activeColor, activeBehavior) {
+  // Helper: find effect by ID and create a grid mapping on a specific page
+  function mapEffect(note, effectId, color, activeColor, activeBehavior, page) {
     const e = byId[effectId];
     if (!e) return;
     db.createMidiMapping({
@@ -1306,11 +1537,12 @@ function createDefaultMappings() {
       led_color: color, led_active_color: activeColor,
       led_behavior: 0, led_active_behavior: activeBehavior || 0,
       enabled: 1,
+      page: page || 0,
     });
   }
 
-  // Helper: create a color pad mapping
-  function mapColor(note, name, r, g, b, w, ledIdle, ledActive) {
+  // Helper: create a color pad mapping on a specific page
+  function mapColor(note, name, r, g, b, w, ledIdle, ledActive, page) {
     db.createMidiMapping({
       name, midi_type: 'note', midi_number: note, midi_channel: 0,
       action_type: 'color',
@@ -1319,88 +1551,276 @@ function createDefaultMappings() {
       led_color: ledIdle, led_active_color: ledActive,
       led_behavior: 0, led_active_behavior: 0,
       enabled: 1,
+      page: page || 0,
     });
   }
 
-  // ── Row 7 (top, notes 56-63): Static colors ──────────────────────────
-  mapColor(56, 'Red',       255,   0,   0, 0, LED.DARK_RED,    LED.RED);
-  mapColor(57, 'Orange',    255, 128,   0, 0, LED.ORANGE,      LED.BRIGHT_ORANGE);
-  mapColor(58, 'Yellow',    255, 255,   0, 0, LED.DARK_YELLOW, LED.YELLOW);
-  mapColor(59, 'Green',       0, 255,   0, 0, LED.DARK_GREEN,  LED.GREEN);
-  mapColor(60, 'Cyan',        0, 255, 255, 0, LED.CYAN,        LED.CYAN);
-  mapColor(61, 'Blue',        0,   0, 255, 0, LED.DARK_BLUE,   LED.BLUE);
-  mapColor(62, 'Magenta',   255,   0, 255, 0, LED.MAGENTA,     LED.MAGENTA);
-  mapColor(63, 'White',     255, 255, 255, 255, LED.GRAY,      LED.WHITE);
+  // ════════════════════════════════════════════════════════════════════════
+  //  PAGE 1: COLORS (full 8×8 grid of static color pads)
+  // ════════════════════════════════════════════════════════════════════════
+  // Row 7 (notes 56-63): Primary colors
+  mapColor(56, 'Red',           255,   0,   0,   0, LED.DARK_RED,    LED.RED,            1);
+  mapColor(57, 'Orange',        255, 128,   0,   0, LED.ORANGE,      LED.BRIGHT_ORANGE,  1);
+  mapColor(58, 'Yellow',        255, 255,   0,   0, LED.DARK_YELLOW, LED.YELLOW,         1);
+  mapColor(59, 'Green',           0, 255,   0,   0, LED.DARK_GREEN,  LED.GREEN,          1);
+  mapColor(60, 'Cyan',            0, 255, 255,   0, LED.CYAN,        LED.CYAN,           1);
+  mapColor(61, 'Blue',            0,   0, 255,   0, LED.DARK_BLUE,   LED.BLUE,           1);
+  mapColor(62, 'Magenta',       255,   0, 255,   0, LED.MAGENTA,     LED.MAGENTA,        1);
+  mapColor(63, 'White',         255, 255, 255, 255, LED.GRAY,        LED.WHITE,          1);
 
-  // ── Row 6 (notes 48-55): Mover effects ───────────────────────────────
-  mapEffect(48, 58, LED.SKY_BLUE,    LED.CYAN);       // Circle
-  mapEffect(49, 59, LED.SKY_BLUE,    LED.CYAN);       // Fast Circle
-  mapEffect(50, 52, LED.LIGHT_BLUE,  LED.SKY_BLUE);   // Pan Sweep
-  mapEffect(51, 55, LED.LIGHT_BLUE,  LED.SKY_BLUE);   // Tilt Sweep
-  mapEffect(52, 62, LED.PURPLE,      LED.BRIGHT_PURPLE); // Figure Eight
-  mapEffect(53, 66, LED.PURPLE,      LED.BRIGHT_PURPLE); // Fan Out
-  mapEffect(54, 68, LED.MAGENTA,     LED.PINK);       // Nod
-  mapEffect(55, 64, LED.MAGENTA,     LED.PINK);       // Random Movement
+  // Row 6 (notes 48-55): Warm/cool tones
+  mapColor(48, 'Warm White',    255, 200, 150, 200, LED.WARM_WHITE,  LED.WHITE,          1);
+  mapColor(49, 'Amber',         255, 180,   0,   0, LED.ORANGE,      LED.YELLOW,         1);
+  mapColor(50, 'Gold',          255, 215,   0,   0, LED.DARK_YELLOW, LED.LIGHT_YELLOW,   1);
+  mapColor(51, 'Lime',          128, 255,   0,   0, LED.LIME,        LED.BRIGHT_GREEN,   1);
+  mapColor(52, 'Teal',            0, 180, 180,   0, LED.CYAN,        LED.LIGHT_BLUE,     1);
+  mapColor(53, 'Sky Blue',        0, 150, 255,   0, LED.SKY_BLUE,    LED.LIGHT_BLUE,     1);
+  mapColor(54, 'Indigo',         75,   0, 130,   0, LED.PURPLE,      LED.BRIGHT_PURPLE,  1);
+  mapColor(55, 'Pink',          255, 100, 150,   0, LED.PINK,        LED.HOT_PINK,       1);
 
-  // ── Row 5 (notes 40-47): Rig effects 2 (color waves, converge, rainbow) ──
-  mapEffect(40, 85, LED.SPRING_GREEN, LED.GREEN);      // Rig Color Wave L→R
-  mapEffect(41, 86, LED.SPRING_GREEN, LED.GREEN);      // Rig Color Wave R→L
-  mapEffect(42, 88, LED.SPRING_GREEN, LED.BRIGHT_GREEN); // Rig Fast Wave
-  mapEffect(43, 96, LED.CYAN,         LED.BRIGHT_GREEN); // Rig Converge
-  mapEffect(44, 97, LED.CYAN,         LED.BRIGHT_GREEN); // Rig Diverge
-  mapEffect(45, 94, LED.YELLOW,       LED.BRIGHT_GREEN); // Rig Alternate
-  mapEffect(46, 99, LED.ORANGE,       LED.YELLOW);     // Rig Rainbow
-  mapEffect(47, 100, LED.ORANGE,      LED.YELLOW);     // Rig Rainbow Fast
+  // Row 5 (notes 40-47): Deeper/darker shades
+  mapColor(40, 'Deep Red',      180,   0,   0,   0, LED.DARK_RED,    LED.LIGHT_RED,      1);
+  mapColor(41, 'Burnt Orange',  200,  80,   0,   0, LED.DARK_ORANGE, LED.BRIGHT_ORANGE,  1);
+  mapColor(42, 'Olive',         128, 128,   0,   0, LED.DARK_YELLOW, LED.YELLOW,         1);
+  mapColor(43, 'Forest',          0, 130,   0,   0, LED.DARK_GREEN,  LED.GREEN,          1);
+  mapColor(44, 'Dark Cyan',      0, 130, 130,   0, LED.CYAN,        LED.LIGHT_BLUE,     1);
+  mapColor(45, 'Navy',            0,   0, 130,   0, LED.DARK_BLUE,   LED.BLUE,           1);
+  mapColor(46, 'Purple',        128,   0, 128,   0, LED.PURPLE,      LED.BRIGHT_PURPLE,  1);
+  mapColor(47, 'Rose',          200,   0,  80,   0, LED.ROSE,        LED.HOT_PINK,       1);
 
-  // ── Row 4 (notes 32-39): Rig effects 1 (chases, sweeps) ─────────────
-  mapEffect(32, 78, LED.GREEN,    LED.BRIGHT_GREEN);   // Rig Chase L→R
-  mapEffect(33, 79, LED.GREEN,    LED.BRIGHT_GREEN);   // Rig Chase R→L
-  mapEffect(34, 80, LED.GREEN,    LED.BRIGHT_GREEN);   // Rig Chase Bounce
-  mapEffect(35, 83, LED.LIME,     LED.BRIGHT_GREEN);   // Rig Fast Chase
-  mapEffect(36, 89, LED.SKY_BLUE, LED.CYAN);           // Rig Sweep L→R
-  mapEffect(37, 90, LED.SKY_BLUE, LED.CYAN);           // Rig Sweep R→L
-  mapEffect(38, 91, LED.SKY_BLUE, LED.CYAN);           // Rig Sweep Bounce
-  mapEffect(39, 84, LED.LIME,     LED.BRIGHT_GREEN);   // Rig Wide Chase
+  // Row 4 (notes 32-39): Pastel tones
+  mapColor(32, 'Pastel Red',    255, 150, 150,   0, LED.LIGHT_RED,   LED.RED,            1);
+  mapColor(33, 'Peach',         255, 200, 150,   0, LED.ORANGE,      LED.BRIGHT_ORANGE,  1);
+  mapColor(34, 'Cream',         255, 255, 180,   0, LED.LIGHT_YELLOW, LED.YELLOW,        1);
+  mapColor(35, 'Mint',          150, 255, 180,   0, LED.SPRING_GREEN, LED.GREEN,         1);
+  mapColor(36, 'Aqua',          150, 255, 255,   0, LED.LIGHT_BLUE,  LED.CYAN,           1);
+  mapColor(37, 'Lavender',      150, 150, 255,   0, LED.LIGHT_BLUE,  LED.BLUE,           1);
+  mapColor(38, 'Lilac',         200, 150, 255,   0, LED.PURPLE,      LED.BRIGHT_PURPLE,  1);
+  mapColor(39, 'Blush',         255, 150, 200,   0, LED.PINK,        LED.HOT_PINK,       1);
 
-  // ── Row 3 (notes 24-31): Comets, scanners, sparkles, fire ────────────
-  mapEffect(24, 24, LED.ORANGE,      LED.BRIGHT_ORANGE); // Comet Left
-  mapEffect(25, 25, LED.ORANGE,      LED.BRIGHT_ORANGE); // Comet Right
-  mapEffect(26, 26, LED.ORANGE,      LED.BRIGHT_ORANGE); // Fast Comet
-  mapEffect(27, 27, LED.PURPLE,      LED.BRIGHT_PURPLE); // Scanner
-  mapEffect(28, 30, LED.LIGHT_YELLOW, LED.YELLOW);    // Sparkle
-  mapEffect(29, 32, LED.LIGHT_YELLOW, LED.YELLOW);    // Twinkle
-  mapEffect(30, 36, LED.RED,         LED.BRIGHT_ORANGE, LED_BEHAVIOR.PULSING); // Fire
-  mapEffect(31, 37, LED.RED,         LED.BRIGHT_ORANGE, LED_BEHAVIOR.PULSING_2X); // Intense Fire
+  // Row 3 (notes 24-31): Stage-friendly combos
+  mapColor(24, 'Congo Blue',     40,   0, 100,   0, LED.DARK_BLUE,   LED.PURPLE,         1);
+  mapColor(25, 'UV Effect',      80,   0, 200,   0, LED.BRIGHT_PURPLE, LED.MAGENTA,      1);
+  mapColor(26, 'Fire Red',      255,  40,   0,   0, LED.RED,         LED.BRIGHT_ORANGE,  1);
+  mapColor(27, 'Sunset',        255,  80,  40,   0, LED.ORANGE,      LED.BRIGHT_ORANGE,  1);
+  mapColor(28, 'Electric Blue',   0,  80, 255,   0, LED.BLUE,        LED.SKY_BLUE,       1);
+  mapColor(29, 'Turquoise',       0, 220, 200,   0, LED.CYAN,        LED.SPRING_GREEN,   1);
+  mapColor(30, 'Chartreuse',    180, 255,   0,   0, LED.LIME,        LED.BRIGHT_GREEN,   1);
+  mapColor(31, 'Hot Pink',      255,   0, 100,   0, LED.HOT_PINK,    LED.PINK,           1);
 
-  // ── Row 2 (notes 16-23): Pulses & strobes ────────────────────────────
-  mapEffect(16,  1, LED.PURPLE,  LED.BRIGHT_PURPLE, LED_BEHAVIOR.PULSING);     // Slow Pulse
-  mapEffect(17,  2, LED.PURPLE,  LED.BRIGHT_PURPLE, LED_BEHAVIOR.PULSING_2X);  // Fast Pulse
-  mapEffect(18,  3, LED.PINK,    LED.HOT_PINK,      LED_BEHAVIOR.PULSING);     // Heartbeat
-  mapEffect(19, 43, LED.PURPLE,  LED.BRIGHT_PURPLE, LED_BEHAVIOR.PULSING_1_2); // Breathing
-  mapEffect(20,  7, LED.YELLOW,  LED.WHITE,         LED_BEHAVIOR.BLINKING_1_2);// Slow Strobe
-  mapEffect(21,  8, LED.YELLOW,  LED.WHITE,         LED_BEHAVIOR.BLINKING);    // Medium Strobe
-  mapEffect(22,  9, LED.YELLOW,  LED.WHITE,         LED_BEHAVIOR.BLINKING_2X); // Fast Strobe
-  mapEffect(23, 10, LED.BLUE,    LED.RED,           LED_BEHAVIOR.BLINKING_2X); // Police Strobe
+  // Row 2 (notes 16-23): Cool whites and dim
+  mapColor(16, 'Cool White',    200, 200, 255, 200, LED.LIGHT_BLUE,  LED.WHITE,          1);
+  mapColor(17, 'Daylight',      255, 255, 240, 255, LED.GRAY,        LED.WHITE,          1);
+  mapColor(18, 'Candle',        255, 150,  50, 100, LED.WARM_WHITE,  LED.YELLOW,         1);
+  mapColor(19, 'dim Red',        80,   0,   0,   0, LED.DARK_RED,    LED.RED,            1);
+  mapColor(20, 'dim Green',       0,  80,   0,   0, LED.DARK_GREEN,  LED.GREEN,          1);
+  mapColor(21, 'dim Blue',        0,   0,  80,   0, LED.DARK_BLUE,   LED.BLUE,           1);
+  mapColor(22, 'dim Purple',     60,   0,  80,   0, LED.PURPLE,      LED.BRIGHT_PURPLE,  1);
+  mapColor(23, 'dim Cyan',        0,  80,  80,   0, LED.CYAN,        LED.LIGHT_BLUE,     1);
 
-  // ── Row 1 (notes 8-15): Color fades, waves, rainbows ─────────────────
-  mapEffect( 8,  4, LED.ORANGE,      LED.YELLOW);     // Rainbow Cycle
-  mapEffect( 9,  5, LED.ORANGE,      LED.YELLOW);     // Fast Rainbow
-  mapEffect(10,  6, LED.ORANGE,      LED.YELLOW);     // Double Rainbow
-  mapEffect(11, 33, LED.SPRING_GREEN, LED.CYAN);      // Rainbow Wave
-  mapEffect(12, 11, LED.DARK_RED,    LED.BLUE);       // Red to Blue Fade
-  mapEffect(13, 14, LED.ORANGE,      LED.BRIGHT_ORANGE); // Sunset Fade
-  mapEffect(14, 48, LED.LIGHT_BLUE,  LED.CYAN);       // Ice Fade
-  mapEffect(15, 35, LED.PURPLE,      LED.MAGENTA);    // Slow Color Wave
+  // Row 1 (notes 8-15): RGB mixes
+  mapColor( 8, 'Red+Blue',      200,   0, 200,   0, LED.MAGENTA,     LED.BRIGHT_PURPLE,  1);
+  mapColor( 9, 'Red+Green',     200, 200,   0,   0, LED.YELLOW,      LED.LIGHT_YELLOW,   1);
+  mapColor(10, 'Blue+Green',      0, 200, 200,   0, LED.CYAN,        LED.LIGHT_BLUE,     1);
+  mapColor(11, 'Coral',         255, 120,  80,   0, LED.ORANGE,      LED.BRIGHT_ORANGE,  1);
+  mapColor(12, 'Salmon',        250, 128, 114,   0, LED.PINK,        LED.LIGHT_RED,      1);
+  mapColor(13, 'Fuchsia',       255,   0, 200,   0, LED.HOT_PINK,    LED.MAGENTA,        1);
+  mapColor(14, 'Violet',        140,   0, 255,   0, LED.BRIGHT_PURPLE, LED.MAGENTA,      1);
+  mapColor(15, 'Spring',          0, 255, 127,   0, LED.SPRING_GREEN, LED.GREEN,         1);
 
-  // ── Row 0 (bottom, notes 0-7): Chases ────────────────────────────────
-  mapEffect( 0, 16, LED.GREEN,  LED.BRIGHT_GREEN);    // Left Chase
-  mapEffect( 1, 17, LED.GREEN,  LED.BRIGHT_GREEN);    // Right Chase
-  mapEffect( 2, 18, LED.GREEN,  LED.BRIGHT_GREEN);    // Bounce Chase
-  mapEffect( 3, 19, LED.CYAN,   LED.BRIGHT_GREEN);    // Center Out Chase
-  mapEffect( 4, 20, LED.CYAN,   LED.BRIGHT_GREEN);    // Outside In Chase
-  mapEffect( 5, 21, LED.LIME,   LED.BRIGHT_GREEN);    // Fast Chase
-  mapEffect( 6, 22, LED.LIME,   LED.BRIGHT_GREEN);    // Wide Chase
-  mapEffect( 7, 23, LED.YELLOW, LED.BRIGHT_GREEN);    // Theater Chase
+  // Row 0 (bottom, notes 0-7): Utility colors
+  mapColor( 0, 'Off (Black)',     0,   0,   0,   0, LED.DIM_GRAY,    LED.RED,            1);
+  mapColor( 1, 'dim Warm',       80,  60,  30,  50, LED.DIM_GRAY,    LED.WARM_WHITE,     1);
+  mapColor( 2, 'dim Cool',       40,  50,  80,  50, LED.DIM_GRAY,    LED.LIGHT_BLUE,     1);
+  mapColor( 3, 'Full Warm',     255, 200, 100, 255, LED.ORANGE,      LED.WHITE,          1);
+  mapColor( 4, 'Full Cool',     200, 220, 255, 255, LED.SKY_BLUE,    LED.WHITE,          1);
+  mapColor( 5, 'RGB Red 50%',   128,   0,   0,   0, LED.DARK_RED,    LED.RED,            1);
+  mapColor( 6, 'RGB Green 50%',   0, 128,   0,   0, LED.DARK_GREEN,  LED.GREEN,          1);
+  mapColor( 7, 'RGB Blue 50%',    0,   0, 128,   0, LED.DARK_BLUE,   LED.BLUE,           1);
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  PAGE 2: COLOR EFFECTS (rainbows, fades, pulses, strobes)
+  // ════════════════════════════════════════════════════════════════════════
+  // Row 7: Rainbows
+  mapEffect(56,  4, LED.ORANGE,       LED.YELLOW,        0,                          2); // Rainbow Cycle
+  mapEffect(57,  5, LED.ORANGE,       LED.YELLOW,        0,                          2); // Fast Rainbow
+  mapEffect(58,  6, LED.ORANGE,       LED.YELLOW,        0,                          2); // Double Rainbow
+  mapEffect(59, 33, LED.SPRING_GREEN, LED.CYAN,          0,                          2); // Rainbow Wave
+  mapEffect(60, 35, LED.PURPLE,       LED.MAGENTA,       0,                          2); // Slow Color Wave
+  mapEffect(61, 34, LED.PURPLE,       LED.MAGENTA,       0,                          2); // Fast Color Wave
+  mapEffect(62, 42, LED.SPRING_GREEN, LED.CYAN,          0,                          2); // Gentle Wave
+  mapEffect(63, 44, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          2); // Deep Wave
+
+  // Row 6: Color Fades
+  mapEffect(48, 11, LED.DARK_RED,     LED.BLUE,          0,                          2); // Red→Blue
+  mapEffect(49, 12, LED.BLUE,         LED.GREEN,         0,                          2); // Blue→Green
+  mapEffect(50, 13, LED.GREEN,        LED.RED,           0,                          2); // Green→Red
+  mapEffect(51, 14, LED.ORANGE,       LED.BRIGHT_ORANGE, 0,                          2); // Sunset Fade
+  mapEffect(52, 48, LED.LIGHT_BLUE,   LED.CYAN,          0,                          2); // Ice Fade
+  mapEffect(53, 15, LED.PINK,         LED.PURPLE,        0,                          2); // Purple Haze
+  mapEffect(54, 46, LED.DARK_YELLOW,  LED.YELLOW,        0,                          2); // Warm Fade
+  mapEffect(55, 47, LED.SKY_BLUE,     LED.LIGHT_BLUE,    0,                          2); // Cool Fade
+
+  // Row 5: Pulses
+  mapEffect(40,  1, LED.PURPLE,       LED.BRIGHT_PURPLE, LED_BEHAVIOR.PULSING,       2); // Slow Pulse
+  mapEffect(41,  2, LED.PURPLE,       LED.BRIGHT_PURPLE, LED_BEHAVIOR.PULSING_2X,    2); // Fast Pulse
+  mapEffect(42,  3, LED.PINK,         LED.HOT_PINK,      LED_BEHAVIOR.PULSING,       2); // Heartbeat
+  mapEffect(43, 43, LED.PURPLE,       LED.BRIGHT_PURPLE, LED_BEHAVIOR.PULSING_1_2,   2); // Breathing
+  mapEffect(44, 38, LED.ORANGE,       LED.YELLOW,        LED_BEHAVIOR.PULSING,       2); // Warm Pulse
+  mapEffect(45, 39, LED.LIGHT_BLUE,   LED.CYAN,          LED_BEHAVIOR.PULSING,       2); // Cool Pulse
+  mapEffect(46, 40, LED.MAGENTA,      LED.PINK,          LED_BEHAVIOR.PULSING_2X,    2); // Pink Pulse
+  mapEffect(47, 41, LED.GREEN,        LED.BRIGHT_GREEN,  LED_BEHAVIOR.PULSING,       2); // Green Pulse
+
+  // Row 4: Strobes
+  mapEffect(32,  7, LED.YELLOW,       LED.WHITE,         LED_BEHAVIOR.BLINKING_1_2,  2); // Slow Strobe
+  mapEffect(33,  8, LED.YELLOW,       LED.WHITE,         LED_BEHAVIOR.BLINKING,      2); // Medium Strobe
+  mapEffect(34,  9, LED.YELLOW,       LED.WHITE,         LED_BEHAVIOR.BLINKING_2X,   2); // Fast Strobe
+  mapEffect(35, 10, LED.BLUE,         LED.RED,           LED_BEHAVIOR.BLINKING_2X,   2); // Police Strobe
+  mapEffect(36, 49, LED.RED,          LED.WHITE,         LED_BEHAVIOR.BLINKING_4X,   2); // Mega Strobe
+  mapEffect(37, 50, LED.ORANGE,       LED.WHITE,         LED_BEHAVIOR.BLINKING,      2); // Warm Strobe
+  mapEffect(38, 51, LED.LIGHT_BLUE,   LED.WHITE,         LED_BEHAVIOR.BLINKING,      2); // Cool Strobe
+  mapEffect(39, 45, LED.PURPLE,       LED.WHITE,         LED_BEHAVIOR.BLINKING_2X,   2); // UV Strobe
+
+  // Row 3: Sparkles & Fire
+  mapEffect(24, 30, LED.LIGHT_YELLOW, LED.YELLOW,        0,                          2); // Sparkle
+  mapEffect(25, 31, LED.LIGHT_YELLOW, LED.WHITE,         0,                          2); // Dense Sparkle
+  mapEffect(26, 32, LED.LIGHT_YELLOW, LED.YELLOW,        0,                          2); // Twinkle
+  mapEffect(27, 36, LED.RED,          LED.BRIGHT_ORANGE, LED_BEHAVIOR.PULSING,       2); // Fire
+  mapEffect(28, 37, LED.RED,          LED.BRIGHT_ORANGE, LED_BEHAVIOR.PULSING_2X,    2); // Intense Fire
+  mapEffect(29, 29, LED.ORANGE,       LED.WARM_WHITE,    0,                          2); // Candle Flicker
+  mapEffect(30, 28, LED.YELLOW,       LED.WHITE,         0,                          2); // Soft Sparkle
+  mapEffect(31, 53, LED.RED,          LED.YELLOW,        LED_BEHAVIOR.PULSING,       2); // Lava
+
+  // Rows 2-0: Spare/additional effects (unmapped by default on page 2)
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  PAGE 3: CELL / MULTICELL EFFECTS (chases, comets, scanners, etc.)
+  // ════════════════════════════════════════════════════════════════════════
+  // Row 7: Chases
+  mapEffect(56, 16, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          3); // Left Chase
+  mapEffect(57, 17, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          3); // Right Chase
+  mapEffect(58, 18, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          3); // Bounce Chase
+  mapEffect(59, 19, LED.CYAN,         LED.BRIGHT_GREEN,  0,                          3); // Center Out Chase
+  mapEffect(60, 20, LED.CYAN,         LED.BRIGHT_GREEN,  0,                          3); // Outside In Chase
+  mapEffect(61, 21, LED.LIME,         LED.BRIGHT_GREEN,  0,                          3); // Fast Chase
+  mapEffect(62, 22, LED.LIME,         LED.BRIGHT_GREEN,  0,                          3); // Wide Chase
+  mapEffect(63, 23, LED.YELLOW,       LED.BRIGHT_GREEN,  0,                          3); // Theater Chase
+
+  // Row 6: Comets
+  mapEffect(48, 24, LED.ORANGE,       LED.BRIGHT_ORANGE, 0,                          3); // Comet Left
+  mapEffect(49, 25, LED.ORANGE,       LED.BRIGHT_ORANGE, 0,                          3); // Comet Right
+  mapEffect(50, 26, LED.ORANGE,       LED.BRIGHT_ORANGE, 0,                          3); // Fast Comet
+  mapEffect(51, 27, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          3); // Scanner
+  mapEffect(52, 54, LED.ORANGE,       LED.YELLOW,        0,                          3); // Long Comet
+  mapEffect(53, 55, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          3); // Wide Scanner
+  mapEffect(54, 56, LED.ORANGE,       LED.BRIGHT_ORANGE, 0,                          3); // Dual Comet
+  mapEffect(55, 57, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          3); // Reverse Scanner
+
+  // Row 5: Buildups & Segments
+  mapEffect(40, 69, LED.BLUE,         LED.LIGHT_BLUE,    0,                          3); // Buildup Left
+  mapEffect(41, 70, LED.BLUE,         LED.LIGHT_BLUE,    0,                          3); // Buildup Right
+  mapEffect(42, 71, LED.BLUE,         LED.CYAN,          0,                          3); // Buildup Center
+  mapEffect(43, 72, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          3); // Segments 2
+  mapEffect(44, 73, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          3); // Segments 3
+  mapEffect(45, 74, LED.GREEN,        LED.LIME,          0,                          3); // Fast Segments
+  mapEffect(46, 75, LED.YELLOW,       LED.BRIGHT_GREEN,  0,                          3); // Slow Segments
+  mapEffect(47, 76, LED.CYAN,         LED.LIGHT_BLUE,    0,                          3); // Ripple
+
+  // Row 4: Ripples & Cell Strobes
+  mapEffect(32, 77, LED.CYAN,         LED.LIGHT_BLUE,    0,                          3); // Fast Ripple
+  mapEffect(33, 101, LED.YELLOW,      LED.WHITE,         LED_BEHAVIOR.BLINKING,      3); // Cell Strobe Seq
+  mapEffect(34, 102, LED.YELLOW,      LED.WHITE,         LED_BEHAVIOR.BLINKING_2X,   3); // Cell Strobe Random
+  mapEffect(35, 103, LED.PURPLE,      LED.MAGENTA,       0,                          3); // Gradient
+  mapEffect(36, 104, LED.ORANGE,      LED.YELLOW,        0,                          3); // Warm Gradient
+  mapEffect(37, 105, LED.LIGHT_BLUE,  LED.CYAN,          0,                          3); // Cool Gradient
+  mapEffect(38, 106, LED.SPRING_GREEN, LED.GREEN,        0,                          3); // Nature Gradient
+  mapEffect(39, 107, LED.PURPLE,      LED.PINK,          0,                          3); // Sunset Gradient
+
+  // Rows 3-0: Spare on page 3
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  PAGE 4: MOVER EFFECTS (pan/tilt movements)
+  // ════════════════════════════════════════════════════════════════════════
+  // Row 7: Circles & Figure 8
+  mapEffect(56, 58, LED.SKY_BLUE,     LED.CYAN,          0,                          4); // Circle
+  mapEffect(57, 59, LED.SKY_BLUE,     LED.CYAN,          0,                          4); // Fast Circle
+  mapEffect(58, 60, LED.SKY_BLUE,     LED.LIGHT_BLUE,    0,                          4); // Small Circle
+  mapEffect(59, 61, LED.SKY_BLUE,     LED.LIGHT_BLUE,    0,                          4); // Large Circle
+  mapEffect(60, 62, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          4); // Figure Eight
+  mapEffect(61, 63, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          4); // Fast Figure 8
+  mapEffect(62, 108, LED.PURPLE,      LED.MAGENTA,       0,                          4); // Small Figure 8
+  mapEffect(63, 109, LED.PURPLE,      LED.MAGENTA,       0,                          4); // Large Figure 8
+
+  // Row 6: Pan & Tilt Sweeps
+  mapEffect(48, 52, LED.LIGHT_BLUE,   LED.SKY_BLUE,      0,                          4); // Pan Sweep
+  mapEffect(49, 53, LED.LIGHT_BLUE,   LED.SKY_BLUE,      0,                          4); // Fast Pan Sweep
+  mapEffect(50, 54, LED.LIGHT_BLUE,   LED.CYAN,          0,                          4); // Wide Pan Sweep
+  mapEffect(51, 55, LED.LIGHT_BLUE,   LED.SKY_BLUE,      0,                          4); // Tilt Sweep
+  mapEffect(52, 56, LED.LIGHT_BLUE,   LED.SKY_BLUE,      0,                          4); // Fast Tilt Sweep
+  mapEffect(53, 57, LED.LIGHT_BLUE,   LED.CYAN,          0,                          4); // Wide Tilt Sweep
+  mapEffect(54, 110, LED.CYAN,        LED.LIGHT_BLUE,    0,                          4); // Diagonal Sweep
+  mapEffect(55, 111, LED.CYAN,        LED.LIGHT_BLUE,    0,                          4); // Cross Sweep
+
+  // Row 5: Fan, Nod, Random
+  mapEffect(40, 66, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          4); // Fan Out
+  mapEffect(41, 67, LED.PURPLE,       LED.BRIGHT_PURPLE, 0,                          4); // Fan In
+  mapEffect(42, 68, LED.MAGENTA,      LED.PINK,          0,                          4); // Nod
+  mapEffect(43, 112, LED.MAGENTA,     LED.PINK,          0,                          4); // Fast Nod
+  mapEffect(44, 113, LED.MAGENTA,     LED.HOT_PINK,      0,                          4); // Pan Nod
+  mapEffect(45, 64, LED.MAGENTA,      LED.PINK,          0,                          4); // Random Move
+  mapEffect(46, 65, LED.MAGENTA,      LED.PINK,          0,                          4); // Slow Random
+  mapEffect(47, 114, LED.YELLOW,      LED.BRIGHT_GREEN,  0,                          4); // Wide Random
+
+  // Rows 4-0: Spare on page 4
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  PAGE 5: RIG-WIDE EFFECTS (spatial effects across the whole rig)
+  // ════════════════════════════════════════════════════════════════════════
+  // Row 7: Rig Chases
+  mapEffect(56, 78, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          5); // Rig Chase L→R
+  mapEffect(57, 79, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          5); // Rig Chase R→L
+  mapEffect(58, 80, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          5); // Rig Chase Bounce
+  mapEffect(59, 81, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          5); // Rig Chase T→B
+  mapEffect(60, 82, LED.GREEN,        LED.BRIGHT_GREEN,  0,                          5); // Rig Chase B→T
+  mapEffect(61, 83, LED.LIME,         LED.BRIGHT_GREEN,  0,                          5); // Rig Fast Chase
+  mapEffect(62, 84, LED.LIME,         LED.BRIGHT_GREEN,  0,                          5); // Rig Wide Chase
+  mapEffect(63, 115, LED.YELLOW,      LED.BRIGHT_GREEN,  0,                          5); // Rig Narrow Chase
+
+  // Row 6: Rig Sweeps
+  mapEffect(48, 89, LED.SKY_BLUE,     LED.CYAN,          0,                          5); // Rig Sweep L→R
+  mapEffect(49, 90, LED.SKY_BLUE,     LED.CYAN,          0,                          5); // Rig Sweep R→L
+  mapEffect(50, 91, LED.SKY_BLUE,     LED.CYAN,          0,                          5); // Rig Sweep Bounce
+  mapEffect(51, 92, LED.SKY_BLUE,     LED.CYAN,          0,                          5); // Rig Sweep T→B
+  mapEffect(52, 93, LED.LIGHT_BLUE,   LED.CYAN,          0,                          5); // Rig Sweep B→T
+  mapEffect(53, 116, LED.LIGHT_BLUE,  LED.SKY_BLUE,      0,                          5); // Rig Fast Sweep
+  mapEffect(54, 117, LED.LIGHT_BLUE,  LED.SKY_BLUE,      0,                          5); // Rig Wide Sweep
+  mapEffect(55, 118, LED.CYAN,        LED.LIGHT_BLUE,    0,                          5); // Rig Narrow Sweep
+
+  // Row 5: Rig Color Waves
+  mapEffect(40, 85, LED.SPRING_GREEN, LED.GREEN,         0,                          5); // Rig Color Wave L→R
+  mapEffect(41, 86, LED.SPRING_GREEN, LED.GREEN,         0,                          5); // Rig Color Wave R→L
+  mapEffect(42, 87, LED.SPRING_GREEN, LED.GREEN,         0,                          5); // Rig Color Wave T→B
+  mapEffect(43, 88, LED.SPRING_GREEN, LED.BRIGHT_GREEN,  0,                          5); // Rig Fast Wave
+  mapEffect(44, 119, LED.CYAN,        LED.SPRING_GREEN,  0,                          5); // Rig Slow Wave
+  mapEffect(45, 120, LED.ORANGE,      LED.YELLOW,        0,                          5); // Rig Warm Wave
+  mapEffect(46, 121, LED.LIGHT_BLUE,  LED.CYAN,          0,                          5); // Rig Cool Wave
+  mapEffect(47, 122, LED.MAGENTA,     LED.PINK,          0,                          5); // Rig Purple Wave
+
+  // Row 4: Rig Converge, Alternate, Rainbow
+  mapEffect(32, 96, LED.CYAN,         LED.BRIGHT_GREEN,  0,                          5); // Rig Converge
+  mapEffect(33, 97, LED.CYAN,         LED.BRIGHT_GREEN,  0,                          5); // Rig Diverge
+  mapEffect(34, 94, LED.YELLOW,       LED.BRIGHT_GREEN,  0,                          5); // Rig Alternate
+  mapEffect(35, 95, LED.YELLOW,       LED.BRIGHT_GREEN,  0,                          5); // Rig Fast Alternate
+  mapEffect(36, 99, LED.ORANGE,       LED.YELLOW,        0,                          5); // Rig Rainbow
+  mapEffect(37, 100, LED.ORANGE,      LED.YELLOW,        0,                          5); // Rig Rainbow Fast
+  mapEffect(38, 98, LED.ORANGE,       LED.YELLOW,        0,                          5); // Rig Rainbow Slow
+  mapEffect(39, 123, LED.MAGENTA,     LED.BRIGHT_PURPLE, 0,                          5); // Rig Rainbow Wide
+
+  // Rows 3-0: Spare on page 5
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  GLOBAL (page 0): Track buttons, faders, Stop All
+  // ════════════════════════════════════════════════════════════════════════
 
   // ── Track buttons (100-107): Utility functions ────────────────────────
   const trackDefaults = [
@@ -1421,46 +1841,33 @@ function createDefaultMappings() {
       action_type: d.action_type, action_data: d.action_data, toggle_mode: d.toggle_mode,
       led_color: d.led_color, led_active_color: d.led_active_color,
       led_behavior: d.led_behavior, led_active_behavior: d.led_active_behavior,
-      enabled: 1,
+      enabled: 1, page: 0,
     });
   }
 
-  // ── Scene buttons (112-118): Activate scenes ─────────────────────────
-  const scenes = db.getScenes ? db.getScenes() : [];
-  for (let i = 0; i < Math.min(scenes.length, 7); i++) {
-    db.createMidiMapping({
-      name: `Scene: ${scenes[i].name}`,
-      midi_type: 'note', midi_number: 0x70 + i, midi_channel: 0,
-      action_type: 'scene_activate',
-      action_data: JSON.stringify({ scene_id: scenes[i].id }),
-      toggle_mode: 'toggle',
-      led_color: LED.YELLOW, led_active_color: LED.GREEN,
-      led_behavior: 0, led_active_behavior: 0,
-      enabled: 1,
-    });
-  }
-
-  // Scene button 119 (0x77): Stop All Effects
+  // Scene button 8 (0x77): Stop All Effects (global)
   db.createMidiMapping({
     name: 'Stop All Effects', midi_type: 'note', midi_number: 0x77, midi_channel: 0,
     action_type: 'stop_all_effects', action_data: '{}', toggle_mode: 'momentary',
     led_color: LED.DARK_RED, led_active_color: LED.RED,
     led_behavior: 0, led_active_behavior: LED_BEHAVIOR.BLINKING_2X,
-    enabled: 1,
+    enabled: 1, page: 0,
   });
+
+  // Scene buttons 6-7 (0x75-0x76): spare for now
 
   // ── Faders ────────────────────────────────────────────────────────────
   // Fader 9 (CC 56): Master Dimmer
   db.createMidiMapping({
     name: 'Master Dimmer', midi_type: 'cc', midi_number: 56, midi_channel: 0,
     action_type: 'master_dimmer', action_data: '{}', toggle_mode: 'momentary',
-    led_color: 0, led_active_color: 0, led_behavior: 0, led_active_behavior: 0, enabled: 1,
+    led_color: 0, led_active_color: 0, led_behavior: 0, led_active_behavior: 0, enabled: 1, page: 0,
   });
   // Fader 8 (CC 55): Effect Speed
   db.createMidiMapping({
     name: 'Effect Speed', midi_type: 'cc', midi_number: 55, midi_channel: 0,
     action_type: 'effect_speed', action_data: '{}', toggle_mode: 'momentary',
-    led_color: 0, led_active_color: 0, led_behavior: 0, led_active_behavior: 0, enabled: 1,
+    led_color: 0, led_active_color: 0, led_behavior: 0, led_active_behavior: 0, enabled: 1, page: 0,
   });
   // Faders 1-7 (CC 48-54): Group dimmers
   const groups = db.getGroups ? db.getGroups() : [];
@@ -1469,11 +1876,11 @@ function createDefaultMappings() {
       name: `Dimmer: ${groups[i].name}`, midi_type: 'cc', midi_number: 48 + i, midi_channel: 0,
       action_type: 'group_dimmer', action_data: JSON.stringify({ group_id: groups[i].id }),
       toggle_mode: 'momentary',
-      led_color: 0, led_active_color: 0, led_behavior: 0, led_active_behavior: 0, enabled: 1,
+      led_color: 0, led_active_color: 0, led_behavior: 0, led_active_behavior: 0, enabled: 1, page: 0,
     });
   }
 
-  console.log('[MIDI] Created default APC Mini mappings');
+  console.log(`[MIDI] Created default APC Mini mappings (${PAGE_COUNT} pages)`);
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -1495,4 +1902,9 @@ module.exports = {
   LED,
   LED_BEHAVIOR,
   VELOCITY_COLORS,
+  // Page system
+  getCurrentPage: () => currentPage,
+  switchPage,
+  PAGE_NAMES,
+  PAGE_COUNT,
 };

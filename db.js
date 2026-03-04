@@ -560,6 +560,14 @@ function init() {
     console.log('[DB] Migrated midi_mappings: added led_behavior and led_active_behavior columns');
   }
 
+  // Migrate: add page column to midi_mappings (0 = global/all pages, 1+ = specific page)
+  try {
+    db.prepare('SELECT page FROM midi_mappings LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE midi_mappings ADD COLUMN page INTEGER DEFAULT 0");
+    console.log('[DB] Migrated midi_mappings: added page column');
+  }
+
   // Migrate: fixture_type_modes — create default modes for existing fixture types
   // and link channels and fixtures to their modes
   migrateToModes();
@@ -3471,12 +3479,12 @@ function getMidiMapping(id) {
   return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
 }
 
-function createMidiMapping({ name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled }) {
+function createMidiMapping({ name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled, page }) {
   if (!name || !name.trim()) return { error: 'Name is required' };
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 as next FROM midi_mappings').get().next;
   const r = db.prepare(
-    `INSERT INTO midi_mappings (name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO midi_mappings (name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled, sort_order, page)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     name.trim(),
     midi_type || 'note',
@@ -3490,16 +3498,17 @@ function createMidiMapping({ name, midi_type, midi_number, midi_channel, action_
     led_behavior !== undefined ? led_behavior : 0,
     led_active_behavior !== undefined ? led_active_behavior : 0,
     enabled !== undefined ? (enabled ? 1 : 0) : 1,
-    maxOrder
+    maxOrder,
+    page !== undefined ? page : 0
   );
   return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(r.lastInsertRowid);
 }
 
-function updateMidiMapping(id, { name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled }) {
+function updateMidiMapping(id, { name, midi_type, midi_number, midi_channel, action_type, action_data, toggle_mode, led_color, led_active_color, led_behavior, led_active_behavior, enabled, page }) {
   const existing = db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
   if (!existing) return null;
   db.prepare(
-    `UPDATE midi_mappings SET name=?, midi_type=?, midi_number=?, midi_channel=?, action_type=?, action_data=?, toggle_mode=?, led_color=?, led_active_color=?, led_behavior=?, led_active_behavior=?, enabled=? WHERE id=?`
+    `UPDATE midi_mappings SET name=?, midi_type=?, midi_number=?, midi_channel=?, action_type=?, action_data=?, toggle_mode=?, led_color=?, led_active_color=?, led_behavior=?, led_active_behavior=?, enabled=?, page=? WHERE id=?`
   ).run(
     name !== undefined ? name.trim() : existing.name,
     midi_type !== undefined ? midi_type : existing.midi_type,
@@ -3513,6 +3522,7 @@ function updateMidiMapping(id, { name, midi_type, midi_number, midi_channel, act
     led_behavior !== undefined ? led_behavior : (existing.led_behavior || 0),
     led_active_behavior !== undefined ? led_active_behavior : (existing.led_active_behavior || 0),
     enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled,
+    page !== undefined ? page : (existing.page || 0),
     id
   );
   return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
