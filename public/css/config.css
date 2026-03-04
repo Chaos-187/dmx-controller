@@ -399,7 +399,8 @@ input[type="color"] {
 
 /* ── Device Sub-tabs ── */
 .device-tabs,
-.seq-tabs {
+.seq-tabs,
+.settings-tabs {
   display: flex;
   gap: 2px;
   margin-bottom: 20px;
@@ -407,7 +408,8 @@ input[type="color"] {
   padding-bottom: 0;
 }
 .device-tab-btn,
-.seq-tab-btn {
+.seq-tab-btn,
+.settings-tab-btn {
   padding: 8px 18px;
   background: transparent;
   border: none;
@@ -420,21 +422,28 @@ input[type="color"] {
   margin-bottom: -1px;
 }
 .device-tab-btn:hover,
-.seq-tab-btn:hover {
+.seq-tab-btn:hover,
+.settings-tab-btn:hover {
   color: var(--text);
 }
 .device-tab-btn.active,
-.seq-tab-btn.active {
+.seq-tab-btn.active,
+.settings-tab-btn.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
 .device-tab-panel,
-.seq-tab-panel {
+.seq-tab-panel,
+.settings-tab-panel,
+.os2l-tab-panel {
   display: none;
 }
 .device-tab-panel.active,
-.seq-tab-panel.active {
+.seq-tab-panel.active,
+.settings-tab-panel.active,
+.os2l-tab-panel.active {
   display: block;
+  animation: fadeInPage .2s ease forwards;
 }
 
 /* ── Tables (Subs/Config style) ── */

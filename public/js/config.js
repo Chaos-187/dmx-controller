@@ -2025,6 +2025,26 @@ document.getElementById('btnSaveTouchPinTimeout').addEventListener('click', asyn
   try { await authFetch('/api/config/touch_pin_idle_timeout', { method: 'PUT', body: JSON.stringify({ value: String(timeout) }) }); } catch (e) { console.error('Failed to save touch PIN timeout', e); }
 });
 
+// ── App Settings Tab Switching ──
+document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('settab-' + btn.dataset.settab).classList.add('active');
+  });
+});
+
+// ── OS2L Tab Switching ──
+document.querySelectorAll('.settings-tab-btn[data-os2ltab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.settings-tab-btn[data-os2ltab]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.os2l-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('os2ltab-' + btn.dataset.os2ltab).classList.add('active');
+  });
+});
+
 document.getElementById('btnSaveMdnsConfig').addEventListener('click', async () => {
   const btn = document.getElementById('btnSaveMdnsConfig');
   const origText = btn.textContent;
