@@ -198,6 +198,167 @@ function scheduleBroadcast() {
   }, 66); // ~15fps
 }
 
+// ─── Now Playing Publisher ──────────────────────────────────────────────────
+// Publishes the currently playing track to an external requests system via
+// the Now Playing API (see docs/NOW-PLAYING-API.md).
+
+let _lastNowPlayingPayload = null; // track last sent payload to avoid duplicate POSTs
+
+// ─── MusicBrainz Artwork Lookup ─────────────────────────────────────────────
+// In-memory cache: "artist|title" → artworkUrl (or null if not found)
+const _artworkCache = new Map();
+const ARTWORK_CACHE_MAX = 500;
+const MB_USER_AGENT = 'DMX-Controller/1.0 (https://github.com/dmx-controller)';
+
+/**
+ * Look up album artwork via MusicBrainz + Cover Art Archive.
+ * Returns a URL string or null. Results are cached in-memory.
+ */
+async function lookupArtwork(artist, title) {
+  if (!artist || !title) return null;
+  const cacheKey = `${artist.toLowerCase()}|${title.toLowerCase()}`;
+  if (_artworkCache.has(cacheKey)) return _artworkCache.get(cacheKey);
+
+  try {
+    // Search MusicBrainz for the recording
+    const query = encodeURIComponent(`recording:"${title}" AND artist:"${artist}"`);
+    const mbUrl = `https://musicbrainz.org/ws/2/recording?query=${query}&fmt=json&limit=1`;
+    const mbRes = await fetch(mbUrl, {
+      headers: { 'User-Agent': MB_USER_AGENT, 'Accept': 'application/json' },
+    });
+    if (!mbRes.ok) {
+      console.warn(`[Artwork] MusicBrainz search returned ${mbRes.status}`);
+      _artworkCache.set(cacheKey, null);
+      return null;
+    }
+
+    const mbData = await mbRes.json();
+    const recording = mbData.recordings && mbData.recordings[0];
+    if (!recording || !recording.releases || recording.releases.length === 0) {
+      _artworkCache.set(cacheKey, null);
+      return null;
+    }
+
+    // Try each release until we find one with cover art
+    for (const release of recording.releases.slice(0, 3)) {
+      const mbid = release.id;
+      // Cover Art Archive front image (returns 307 redirect to actual image)
+      const artUrl = `https://coverartarchive.org/release/${mbid}/front-250`;
+      try {
+        const artRes = await fetch(artUrl, { method: 'HEAD', redirect: 'follow' });
+        if (artRes.ok) {
+          const finalUrl = artRes.url || artUrl;
+          if (_artworkCache.size >= ARTWORK_CACHE_MAX) {
+            // Evict oldest entry
+            const firstKey = _artworkCache.keys().next().value;
+            _artworkCache.delete(firstKey);
+          }
+          _artworkCache.set(cacheKey, finalUrl);
+          console.log(`[Artwork] Found cover art for "${title}" by "${artist}"`);
+          return finalUrl;
+        }
+      } catch { /* try next release */ }
+    }
+
+    _artworkCache.set(cacheKey, null);
+    return null;
+  } catch (err) {
+    console.warn(`[Artwork] Lookup failed: ${err.message}`);
+    _artworkCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+function publishNowPlaying(deck) {
+  if (db.getConfig('now_playing_enabled') !== '1') return;
+  const baseUrl = (db.getConfig('now_playing_base_url') || '').replace(/\/+$/, '');
+  if (!baseUrl) return;
+
+  const deckState = state.decks[deck];
+  if (!deckState || !deckState.filepath) return;
+
+  const track = db.getTrackByPath(deckState.filepath);
+  const title = (track && track.title) || deckState.filename || 'Unknown';
+  const artist = (track && track.author) || '';
+  const album = (track && track.album) || '';
+  const duration = (track && track.song_length) ? Math.round(track.song_length) : undefined;
+  // Only use the DB cover field if it looks like a URL (not a local file path)
+  const rawCover = (track && track.cover) || '';
+  const existingCover = /^https?:\/\//i.test(rawCover) ? rawCover : '';
+
+  const body = { title };
+  if (artist) body.artist = artist;
+  if (album) body.album = album;
+  if (duration) body.duration = duration;
+
+  // Attach event identifier if configured
+  const eventId = db.getConfig('now_playing_event_id') || '';
+  if (eventId) {
+    if (/^\d+$/.test(eventId)) body.eventId = parseInt(eventId, 10);
+    else body.eventSlug = eventId;
+  }
+
+  // Deduplicate: don't POST the exact same payload twice in a row
+  const payloadKey = JSON.stringify(body);
+  if (payloadKey === _lastNowPlayingPayload) return;
+  _lastNowPlayingPayload = payloadKey;
+
+  const url = `${baseUrl}/api/now-playing`;
+
+  console.log(`[NowPlaying] Preparing: "${title}" by "${artist}" (cover in DB: ${rawCover ? 'yes' : 'no'}, usable URL: ${existingCover ? 'yes' : 'no'})`);
+
+  // If track already has a cover URL, send immediately
+  if (existingCover) {
+    body.artwork = existingCover;
+    _sendNowPlaying(url, body, title, artist);
+  } else if (db.getConfig('now_playing_artwork') !== '0') {
+    // Look up artwork from MusicBrainz (async), then send
+    console.log(`[NowPlaying] Looking up artwork from MusicBrainz for "${title}" by "${artist}"...`);
+    lookupArtwork(artist, title).then(artworkUrl => {
+      if (artworkUrl) body.artwork = artworkUrl;
+      else console.log(`[NowPlaying] No artwork found on MusicBrainz`);
+      _sendNowPlaying(url, body, title, artist);
+    });
+  } else {
+    _sendNowPlaying(url, body, title, artist);
+  }
+}
+
+function _sendNowPlaying(url, body, title, artist) {
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => {
+    if (!r.ok) console.warn(`[NowPlaying] POST ${url} returned ${r.status}`);
+    else console.log(`[NowPlaying] Published: "${title}" by "${artist}"${body.artwork ? ' (with artwork)' : ''}`);
+  }).catch(err => {
+    console.warn(`[NowPlaying] Failed to publish: ${err.message}`);
+  });
+}
+
+function clearNowPlaying() {
+  if (db.getConfig('now_playing_enabled') !== '1') return;
+  const baseUrl = (db.getConfig('now_playing_base_url') || '').replace(/\/+$/, '');
+  if (!baseUrl) return;
+
+  _lastNowPlayingPayload = null;
+
+  let url = `${baseUrl}/api/now-playing`;
+  const eventId = db.getConfig('now_playing_event_id') || '';
+  if (eventId) {
+    const param = /^\d+$/.test(eventId) ? `eventId=${eventId}` : `eventSlug=${encodeURIComponent(eventId)}`;
+    url += `?${param}`;
+  }
+
+  fetch(url, { method: 'DELETE' }).then(r => {
+    if (!r.ok) console.warn(`[NowPlaying] DELETE ${url} returned ${r.status}`);
+    else console.log('[NowPlaying] Cleared now-playing');
+  }).catch(err => {
+    console.warn(`[NowPlaying] Failed to clear: ${err.message}`);
+  });
+}
+
 // ─── OS2L Message Handler (subscribed triggers) ────────────────────────────
 // This callback is invoked by os2l.js when a "subscribed" event arrives.
 // It stays here because it's tightly coupled with the sequencer subsystem.
@@ -416,7 +577,23 @@ function handleOs2lSubscribed(data) {
       }
     }
 
+    // ─── Publish now-playing on track load (filepath change while playing) ────
+    if (key === 'filepath' && state.decks[deck].play) {
+      publishNowPlaying(deck);
+    }
+
     // ─── Sync sequence playback with deck play/pause state ─────
+    if (key === 'play') {
+      const deckNowPlaying = state.decks[deck].play;  // already normalized to 1/0
+      if (deckNowPlaying) {
+        // Deck started playing — publish now-playing
+        publishNowPlaying(deck);
+      } else {
+        // Deck stopped — clear now-playing if no other deck is playing
+        const anyPlaying = Object.values(state.decks).some(d => d.play === 1 || d.play === true);
+        if (!anyPlaying) clearNowPlaying();
+      }
+    }
     if (key === 'play' && activeSequences[deck]) {
       const deckNowPlaying = state.decks[deck].play;  // already normalized to 1/0
       if (deckNowPlaying && !activeSequences[deck].playing) {

@@ -284,6 +284,26 @@
             <span class="config-hint">Restart required on change</span>
           </div>
         </div>
+        <div class="config-card" style="margin-top:16px">
+          <h4>Now Playing &mdash; Requests System</h4>
+          <p class="config-desc" style="margin-bottom:8px">Publish the currently playing track to an external requests system (e.g.&nbsp;MobileDJay) so customers can see what&rsquo;s playing.</p>
+          <div class="config-row">
+            <label>Enable</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfgNowPlayingEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span style="font-size:12px">Send now-playing updates when a track starts on a deck</span>
+            </label>
+          </div>
+          <div class="config-row"><label>Base URL</label><input type="text" id="cfgNowPlayingBaseUrl" placeholder="http://localhost:3000" style="width:100%;max-width:400px"><span class="config-hint">Root URL of the requests system (no trailing slash)</span></div>
+          <div class="config-row"><label>Event ID / Slug</label><input type="text" id="cfgNowPlayingEventId" placeholder="saturday-night-party" style="width:100%;max-width:300px"><span class="config-hint">Numeric event ID or event slug. Leave blank for global.</span></div>
+          <div class="config-row">
+            <label>Album Artwork</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfgNowPlayingArtwork" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span style="font-size:12px">Look up album artwork from MusicBrainz when not already available</span>
+            </label>
+          </div>
+        </div>
         <div style="margin-top:16px"><button class="btn btn-primary btn-sm" id="btnSaveVdj">Save VDJ Settings</button></div>
       </div>
     </div>

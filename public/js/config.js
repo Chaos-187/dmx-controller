@@ -467,6 +467,10 @@ async function loadConfigPage() {
     document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
     document.getElementById('cfgVdjAutoMeta').checked = config.vdj_auto_meta === '1';
     document.getElementById('cfgVdjDecks').value = config.vdj_deck_count || '4';
+    document.getElementById('cfgNowPlayingEnabled').checked = config.now_playing_enabled === '1';
+    document.getElementById('cfgNowPlayingBaseUrl').value = config.now_playing_base_url || '';
+    document.getElementById('cfgNowPlayingEventId').value = config.now_playing_event_id || '';
+    document.getElementById('cfgNowPlayingArtwork').checked = config.now_playing_artwork !== '0';
   } catch (e) {
     console.error('Failed to load config:', e);
   }
@@ -2182,6 +2186,10 @@ document.getElementById('btnSaveVdj').addEventListener('click', () => {
     ['vdj_folder', document.getElementById('cfgVdjFolder').value],
     ['vdj_auto_meta', document.getElementById('cfgVdjAutoMeta').checked ? '1' : '0'],
     ['vdj_deck_count', document.getElementById('cfgVdjDecks').value],
+    ['now_playing_enabled', document.getElementById('cfgNowPlayingEnabled').checked ? '1' : '0'],
+    ['now_playing_base_url', document.getElementById('cfgNowPlayingBaseUrl').value.replace(/\/+$/, '')],
+    ['now_playing_event_id', document.getElementById('cfgNowPlayingEventId').value.trim()],
+    ['now_playing_artwork', document.getElementById('cfgNowPlayingArtwork').checked ? '1' : '0'],
   ], 'btnSaveVdj');
 });
 
@@ -3576,8 +3584,8 @@ function renderModeTabs() {
   document.getElementById('chCountLabel').textContent = `(${typeChannels.length} in this mode)`;
 }
 
-document.getElementById('tModeName').addEventListener('input', (e) => { if (typeModes[activeMode]) { typeModes[activeMode].name = e.target.value; renderModeTabs(); } });
-document.getElementById('tModeShortName').addEventListener('input', (e) => { if (typeModes[activeMode]) typeModes[activeMode].short_name = e.target.value; });
+if (document.getElementById('tModeName')) document.getElementById('tModeName').addEventListener('input', (e) => { if (typeModes[activeMode]) { typeModes[activeMode].name = e.target.value; renderModeTabs(); } });
+if (document.getElementById('tModeShortName')) document.getElementById('tModeShortName').addEventListener('input', (e) => { if (typeModes[activeMode]) typeModes[activeMode].short_name = e.target.value; });
 
 function renderChannelsEditor() {
   const ed = document.getElementById('channelsEditor');
@@ -3687,7 +3695,7 @@ function renderChannelsEditor() {
 
 window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs(); };
 
-document.getElementById('btnAddChannel').addEventListener('click', () => {
+if (document.getElementById('btnAddChannel')) document.getElementById('btnAddChannel').addEventListener('click', () => {
   const num = typeChannels.length + 1;
   typeChannels.push({ channel_number: num, name: `Channel ${num}`, type: 'dimmer', default_value: 0, min_value: 0, max_value: 255, ranges: null, cell: null });
   renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs();
@@ -3697,7 +3705,7 @@ function updateMultiCellVisibility() {
   const cat = document.getElementById('tCategory').value;
   document.getElementById('tMultiCellGroup').style.display = (cat === 'multi_cell' || cat === 'led_bar') ? '' : 'none';
 }
-document.getElementById('tCategory').addEventListener('change', updateMultiCellVisibility);
+if (document.getElementById('tCategory')) document.getElementById('tCategory').addEventListener('change', updateMultiCellVisibility);
 
 const MULTI_CELL_PATTERNS = {
   rgb: ['red', 'green', 'blue'], rgbw: ['red', 'green', 'blue', 'white'],
@@ -3705,7 +3713,7 @@ const MULTI_CELL_PATTERNS = {
   rgbwd: ['red', 'green', 'blue', 'white', 'dimmer'],
 };
 
-document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
+if (document.getElementById('btnBuildMultiCell')) document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
   const cellCount = Math.max(1, +document.getElementById('tMultiCellCount').value || 4);
   const patternKey = document.getElementById('tMultiCellPattern').value;
   const pattern = MULTI_CELL_PATTERNS[patternKey] || MULTI_CELL_PATTERNS.rgb;
@@ -3762,7 +3770,7 @@ function renderCwEditor() {
   container.querySelectorAll('.cw-remove').forEach(btn => { btn.addEventListener('click', () => { cwColors.splice(+btn.dataset.idx, 1); renderCwEditor(); }); });
 }
 
-document.getElementById('btnAddCwColor').addEventListener('click', () => {
+if (document.getElementById('btnAddCwColor')) document.getElementById('btnAddCwColor').addEventListener('click', () => {
   const lastEnd = cwColors.length > 0 ? cwColors[cwColors.length - 1].dmx_end + 1 : 0;
   cwColors.push({ dmx_start: Math.min(lastEnd, 255), dmx_end: Math.min(lastEnd + 9, 255), color_hex: '#ffffff', label: '' });
   renderCwEditor();
@@ -3815,7 +3823,7 @@ window.deleteType = async (id, name) => {
   loadTypes();
 };
 
-document.getElementById('btnSaveType').addEventListener('click', async () => {
+if (document.getElementById('btnSaveType')) document.getElementById('btnSaveType').addEventListener('click', async () => {
   const editId = document.getElementById('typeEditId').value;
   saveModeChannels();
   const modes = typeModes.map(m => {
@@ -3860,9 +3868,9 @@ function updateDuplicateHint() {
     else hint.style.color = 'var(--text-dim)';
   }
 }
-document.getElementById('tDuplicateCount').addEventListener('input', updateDuplicateHint);
+if (document.getElementById('tDuplicateCount')) document.getElementById('tDuplicateCount').addEventListener('input', updateDuplicateHint);
 
-document.getElementById('btnDuplicateChannels').addEventListener('click', () => {
+if (document.getElementById('btnDuplicateChannels')) document.getElementById('btnDuplicateChannels').addEventListener('click', () => {
   const count = Math.max(1, +document.getElementById('tDuplicateCount').value || 1);
   if (typeChannels.length === 0) return showError('typeError', 'Add at least one channel first');
   if (count <= 1) return showError('typeError', 'Set repeat to more than 1');
