@@ -244,8 +244,26 @@ body {
 /* Info grid */
 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .info-item { display: flex; flex-direction: column; gap: 2px; }
+.info-item-full { grid-column: 1 / -1; }
 .info-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
 .info-val { font-size: 14px; font-weight: 600; color: var(--yellow); font-family: var(--mono); }
+.info-edit {
+  padding: 4px 6px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font-size: 12px; font-family: var(--mono);
+  width: 100%; box-sizing: border-box;
+}
+.info-edit:focus { border-color: var(--accent); outline: none; }
+.info-edit-sm { width: 80px; }
+.offset-row {
+  display: flex; align-items: center; gap: 4px;
+}
+.offset-row .info-edit-sm { width: 60px; text-align: center; }
+.offset-nudge {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); font-size: 12px; padding: 3px 7px; cursor: pointer; line-height: 1;
+  font-family: var(--mono); transition: all .12s;
+}
+.offset-nudge:hover { border-color: var(--accent); color: var(--accent); }
 .mini-select {
   padding: 3px 6px; background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-sm); color: var(--text); font-size: 12px; font-family: var(--mono);
@@ -544,6 +562,34 @@ body {
   color: var(--text-dim); border-radius: var(--radius-sm); cursor: pointer;
 }
 .ch-copy-btn:hover { border-color: var(--accent); color: var(--text); }
+
+/* ── Color Wheel Swatch Grid ── */
+.cw-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+  padding: 6px 0;
+}
+.cw-swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  cursor: pointer; padding: 4px; border-radius: var(--radius-sm);
+  border: 2px solid transparent; transition: border-color .15s, box-shadow .15s;
+}
+.cw-swatch:hover { border-color: var(--text-muted); }
+.cw-swatch.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 255, 136, .35);
+}
+.cw-swatch-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.2);
+  flex-shrink: 0;
+}
+.cw-swatch-name {
+  font-size: 8px; color: var(--text-dim); text-align: center;
+  line-height: 1.1; max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Modal

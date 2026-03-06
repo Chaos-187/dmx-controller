@@ -25,7 +25,6 @@ function generateBarBased(cues, fixtures, ctx) {
     const fix = fixtures[fiIdx];
     const lane = fiIdx;
     const hasDimmer = fix.channels.some(ch => ch.type === 'dimmer');
-    const hasWhite = fix.channels.some(ch => ch.type === 'white');
 
     for (let bar = 0; bar < totalBars; bar += sectionBars) {
       const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
@@ -42,16 +41,13 @@ function generateBarBased(cues, fixtures, ctx) {
       const endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
 
       if (hasDimmer) { startVals.dimmer = 255; endVals.dimmer = 255; }
-      if (hasWhite) {
-        startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.2);
-        endVals.white = Math.round((endColor.r + endColor.g + endColor.b) / 3 * 0.2);
-      }
+      // Don't set white on normal color cues — it washes out the color
 
       cues.push({
         lane,
         start_ms: Math.round(startMs),
         duration_ms: Math.round(durMs),
-        cue_type: useFades ? 'fade' : 'static',
+        cue_type: useFades ? 'static' : 'solid',
         fixture_id: fix.id,
         channel_values: startVals,
         end_channel_values: endVals,

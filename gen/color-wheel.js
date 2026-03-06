@@ -9,11 +9,22 @@
 
 const { applyIntensity, findNearestWheelColor, findSplitWheelPosition, getFixtureIntensity } = require('./helpers');
 const { sectionStyles, getSectionPalettes } = require('./palettes');
+const { getFixtureGroup, pickCoordMode, getColorOffset } = require('./group-coordination');
 
 function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels, ctx) {
   const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBeat, snapBar } = ctx;
+  const groupMap = ctx.groupMap;
 
   const useSections = sections && sections.length > 0;
+
+  // ── Pre-compute group info for color-wheel fixtures ───────────────
+  const cwIdSet = new Set(cwFixtures.map(f => f.id));
+  const cwGroupInfo = new Map();
+  const cwSectionModes = new Map();
+  for (const fix of cwFixtures) {
+    const gi = groupMap ? getFixtureGroup(fix, groupMap, cwIdSet) : null;
+    cwGroupInfo.set(fix.id, gi);
+  }
 
   for (let fiIdx = 0; fiIdx < cwFixtures.length; fiIdx++) {
     const fix = cwFixtures[fiIdx];
@@ -53,7 +64,21 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           if (cueDur <= 0) continue;
 
           // Pick a palette colour pair and find nearest wheel positions
-          const paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % palettes.length;
+          let paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % palettes.length;
+
+          // ── Group-aware palette coordination ──
+          const gi = cwGroupInfo.get(fix.id);
+          if (gi && palettes.length > 0) {
+            const cmKey = `cw-${gi.groupId}-${si}`;
+            if (!cwSectionModes.has(cmKey)) {
+              cwSectionModes.set(cmKey, pickCoordMode(sec.label, rand));
+            }
+            const coordMode = cwSectionModes.get(cmKey);
+            const leaderIdx = gi.members[0] ? cwFixtures.indexOf(gi.members[0]) : 0;
+            const basePaletteIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / 4)) % palettes.length;
+            paletteIdx = getColorOffset(gi, coordMode, basePaletteIdx, palettes.length);
+          }
+
           const palette = palettes[paletteIdx];
 
           // Energy-driven intensity
@@ -120,7 +145,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
             lane,
             start_ms: Math.round(cueStart),
             duration_ms: Math.round(cueDur),
-            cue_type: 'static',
+            cue_type: 'color_wheel',
             fixture_id: fix.id,
             channel_values: startVals,
             color: cwDisplayColor,
@@ -175,7 +200,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
                   lane,
                   start_ms: Math.round(spinStart),
                   duration_ms: spinDurMs,
-                  cue_type: 'static',
+                  cue_type: 'color_wheel',
                   fixture_id: fix.id,
                   channel_values: spinVals,
                   color: '#e0e0e0',
@@ -216,7 +241,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           lane,
           start_ms: Math.round(startMs),
           duration_ms: Math.round(durMs),
-          cue_type: 'static',
+          cue_type: 'color_wheel',
           fixture_id: fix.id,
           channel_values: startVals,
           color: startWheel.color_hex || '#888888',

@@ -780,12 +780,24 @@ app.post('/api/fixture-library/import', (req, res) => {
         const existing = db.getFixtureTypes().find(
           t => t.name === ft.name && t.manufacturer === ft.manufacturer
         );
+        let fixtureTypeId;
         if (existing) {
           db.updateFixtureType(existing.id, ft);
+          fixtureTypeId = existing.id;
           results.updated++;
         } else {
-          db.createFixtureType(ft);
+          const created = db.createFixtureType(ft);
+          fixtureTypeId = created.id;
           results.imported++;
+        }
+
+        // Save color wheel map if the OFL fixture had wheel slot data
+        if (fixtureTypeId && ft._colorWheel && ft._colorWheel.length) {
+          db.setColorWheelMap(fixtureTypeId, ft._colorWheel);
+        }
+        // Save gobo wheel map if the OFL fixture had gobo slot data
+        if (fixtureTypeId && ft._goboWheel && ft._goboWheel.length) {
+          db.setGoboWheelMap(fixtureTypeId, ft._goboWheel);
         }
       } catch (e) {
         results.errors.push(`"${ft.name}": ${e.message}`);
@@ -815,9 +827,10 @@ app.get('/api/fixture-types/search', (req, res) => {
   const search = req.query.q || '';
   const category = req.query.category || '';
   const manufacturer = req.query.manufacturer || '';
+  const channels = req.query.channels ? +req.query.channels : 0;
   const limit = Math.min(Math.max(+req.query.limit || 50, 1), 200);
   const offset = Math.max(+req.query.offset || 0, 0);
-  res.json(db.searchFixtureTypes({ search, category, manufacturer, limit, offset }));
+  res.json(db.searchFixtureTypes({ search, category, manufacturer, channels, limit, offset }));
 });
 
 app.get('/api/fixture-types/:id', (req, res) => {
@@ -897,6 +910,34 @@ app.delete('/api/fixture-types/:id/color-wheel', (req, res) => {
 
 app.get('/api/color-wheel-maps', (req, res) => {
   res.json(db.getAllColorWheelMaps());
+});
+
+// ─── Gobo Wheel Map API ─────────────────────────────────────────────────────
+
+app.get('/api/fixture-types/:id/gobo-wheel', (req, res) => {
+  res.json(db.getGoboWheelMap(+req.params.id));
+});
+
+app.put('/api/fixture-types/:id/gobo-wheel', (req, res) => {
+  try {
+    const slots = req.body.slots;
+    if (!Array.isArray(slots)) return res.status(400).json({ error: 'slots array required' });
+    const result = db.setGoboWheelMap(+req.params.id, slots);
+    invalidateFixtureChannelMapCache();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/fixture-types/:id/gobo-wheel', (req, res) => {
+  db.deleteGoboWheelMap(+req.params.id);
+  invalidateFixtureChannelMapCache();
+  res.json({ ok: true });
+});
+
+app.get('/api/gobo-wheel-maps', (req, res) => {
+  res.json(db.getAllGoboWheelMaps());
 });
 
 // ─── Fixture API ────────────────────────────────────────────────────────────
@@ -3618,7 +3659,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
       let value = null;
       let skipRangeMap = false; // true when value is already mapped to a specific range
 
-      if (cue.cue_type === 'static' || cue.cue_type === 'fade') {
+      if (cue.cue_type === 'solid' || cue.cue_type === 'color_wheel' || cue.cue_type === 'static' || cue.cue_type === 'fade') {
         // All cues support start→end transitions; if no end values, hold start
         const startVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
         if (startVal === null) { value = null; }

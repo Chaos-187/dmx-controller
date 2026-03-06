@@ -6,6 +6,7 @@
   <title>Config — DMX Controller</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/config.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 
@@ -71,6 +72,9 @@
     <button class="config-sidebar-btn" data-cfgtab="effects">
       <span class="sidebar-icon">&#10024;</span> Effects
     </button>
+    <button class="config-sidebar-btn" data-cfgtab="fixture-library">
+      <span class="sidebar-icon">&#128161;</span> Fixture Library
+    </button>
 
     <span class="sidebar-group-label">Sequencer</span>
     <button class="config-sidebar-btn" data-cfgtab="sequencer">
@@ -85,9 +89,6 @@
     <span class="sidebar-group-label">Data</span>
     <button class="config-sidebar-btn" data-cfgtab="database">
       <span class="sidebar-icon">&#128451;</span> Database
-    </button>
-    <button class="config-sidebar-btn" data-cfgtab="fixture-library">
-      <span class="sidebar-icon">&#128161;</span> Fixture Library
     </button>
 
     <div style="flex:1"></div>
@@ -945,8 +946,10 @@
         <p class="config-desc">Manage fixture types used by your fixtures. Import from OFL library files or create custom types.</p>
         <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
           <button class="btn btn-primary btn-sm" id="btnAddType">+ Add Fixture Type</button>
-          <button class="btn btn-secondary btn-sm" id="btnImportOFL">&#11015; Import from OFL File</button>
+          <button class="btn btn-secondary btn-sm" id="btnImportOFL">&#11015; Import AGLight File</button>
           <input type="file" id="oflFileInput" accept=".json" style="display:none">
+          <button class="btn btn-secondary btn-sm" id="btnImportOFLZip">&#128230; Import OFL ZIP</button>
+          <input type="file" id="oflZipFileInput" accept=".zip" style="display:none">
         </div>
         <div id="oflImportPanel" class="ofl-import-panel" style="display:none">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -962,12 +965,23 @@
             <span id="oflSelectedCount" style="font-size:12px;color:var(--text-dim)"></span>
             <button class="btn btn-primary" id="btnOflImportSelected">Import Selected</button>
           </div>
+          <div id="oflProgressWrap" style="display:none;margin-top:10px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span id="oflProgressLabel" style="font-size:12px;color:var(--text-dim)">Importing…</span>
+              <span style="flex:1"></span>
+              <span id="oflProgressCount" style="font-size:12px;color:var(--text-dim)"></span>
+            </div>
+            <div style="height:6px;background:var(--panel-border);border-radius:3px;overflow:hidden">
+              <div id="oflProgressBar" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.15s ease"></div>
+            </div>
+          </div>
           <div id="oflImportResults" style="margin-top:10px;font-size:12px;display:none"></div>
         </div>
         <div class="lib-search-bar">
           <input type="text" id="filterLibraryName" placeholder="Search by name or manufacturer…" style="flex:1;max-width:280px">
           <select id="filterLibraryCategory"><option value="">All Categories</option></select>
           <select id="filterLibraryManufacturer"><option value="">All Manufacturers</option></select>
+          <select id="filterLibraryChannels"><option value="">All Channels</option></select>
           <span style="flex:1"></span>
           <span id="libraryCount" style="font-size:12px;color:var(--text-dim)"></span>
         </div>
@@ -1284,6 +1298,118 @@
 <!-- Pretty-print overlay for event log -->
 <div class="pp-overlay" id="ppOverlay">
   <div class="pp-content" id="ppContent"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Add/Edit Fixture Type
+     ══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="typeModal">
+  <div class="modal">
+    <h2 id="typeModalTitle">Add Fixture Type</h2>
+    <input type="hidden" id="typeEditId">
+
+    <!-- ── Header fields (always visible) ── -->
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="tName" placeholder="e.g. Chauvet SlimPAR 56">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Manufacturer</label>
+        <input type="text" id="tManufacturer" placeholder="e.g. Chauvet">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="tCategory">
+          <option value="par">Par Can</option>
+          <option value="moving_head">Moving Head</option>
+          <option value="moving_head_wash">Moving Head Wash</option>
+          <option value="moving_head_spot">Moving Head Spot</option>
+          <option value="strobe">Strobe</option>
+          <option value="laser">Laser</option>
+          <option value="fog">Fog / Haze</option>
+          <option value="dimmer">Dimmer</option>
+          <option value="led_bar">LED Bar</option>
+          <option value="multi_cell">Multi-Cell</option>
+          <option value="effect">Effect</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Section Tabs ── -->
+    <div class="type-modal-tabs" id="typeModalTabs">
+      <button type="button" class="type-modal-tab active" data-tmtab="channels">&#9776; Channels</button>
+      <button type="button" class="type-modal-tab" data-tmtab="colorwheel">&#127912; Color Wheel</button>
+      <button type="button" class="type-modal-tab" data-tmtab="gobos">&#9678; Gobos</button>
+    </div>
+
+    <!-- ── Tab: Channels ── -->
+    <div class="type-modal-panel active" id="tmPanelChannels" data-tmtab-content="channels">
+      <div class="form-group" style="margin-bottom:8px">
+        <label>Modes</label>
+        <div class="mode-tabs" id="modeTabs"></div>
+        <div class="mode-header-fields" id="modeHeaderFields">
+          <input type="text" id="tModeName" placeholder="Mode name (e.g. 16-bit)">
+          <input type="text" id="tModeShortName" placeholder="Short name (e.g. 16b)" style="width:100px">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Channels <span id="chCountLabel" style="font-size:11px;color:var(--text-dim)"></span></label>
+        <div class="channels-editor" id="channelsEditor"></div>
+        <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
+      </div>
+      <div class="form-group" id="tMultiCellGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
+        <label>Multi-Cell Builder</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Quickly build a multi-cell fixture: define master channels above, then set the per-cell pattern and count below.</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Cells:</label>
+          <input type="number" id="tMultiCellCount" value="4" min="1" max="64" style="width:60px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Pattern:</label>
+          <select id="tMultiCellPattern" style="width:auto">
+            <option value="rgb">RGB (3ch)</option>
+            <option value="rgbw">RGBW (4ch)</option>
+            <option value="rgbwa">RGBWA (5ch)</option>
+            <option value="rgbd">RGB + Dimmer (4ch)</option>
+            <option value="rgbwd">RGBW + Dimmer (5ch)</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" id="btnBuildMultiCell" type="button">Build Channels</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tMultiCellHint"></div>
+      </div>
+      <div class="form-group" id="tDuplicateGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+        <label>Duplicate Channel Pattern</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Repeat the channels above N times. Names auto-number (e.g. Red 1, Green 1, Blue 1, Red 2, Green 2...)</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Repeat:</label>
+          <input type="number" id="tDuplicateCount" value="1" min="1" max="512" style="width:80px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">times</label>
+          <button class="btn btn-secondary btn-sm" id="btnDuplicateChannels" type="button">Duplicate</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tDuplicateHint"></div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Color Wheel ── -->
+    <div class="type-modal-panel" id="tmPanelColorwheel" data-tmtab-content="colorwheel">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">Map DMX values to physical color wheel positions. Used by the sequence generator to match RGB palette colors to the nearest available wheel slot.</div>
+      <div class="cw-editor-rows" id="cwEditorRows"></div>
+      <button class="btn btn-secondary btn-sm" id="btnAddCwColor" type="button">+ Add Color</button>
+    </div>
+
+    <!-- ── Tab: Gobos ── -->
+    <div class="type-modal-panel" id="tmPanelGobos" data-tmtab-content="gobos">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">Map DMX values to gobo wheel positions. Define each gobo slot with its DMX range and label.</div>
+      <div class="cw-editor-rows" id="goboEditorRows"></div>
+      <button class="btn btn-secondary btn-sm" id="btnAddGoboSlot" type="button">+ Add Gobo</button>
+    </div>
+
+    <div class="form-error" id="typeError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('typeModal')">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveType">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- ══════ Footer ══════ -->

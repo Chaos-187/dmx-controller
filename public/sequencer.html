@@ -20,6 +20,10 @@
       <button class="tr-btn" id="btnPlay" title="Play"><svg width="14" height="14"><polygon points="3,1 13,7 3,13" fill="currentColor"/></svg></button>
       <button class="tr-btn" id="btnPause" title="Pause"><svg width="14" height="14"><rect x="2" y="1" width="3.5" height="12" fill="currentColor"/><rect x="8.5" y="1" width="3.5" height="12" fill="currentColor"/></svg></button>
       <span class="time-display" id="timeDisplay">0:00.0</span>
+      <select id="deckSel" class="mini-select" title="Playback deck" style="margin-left:8px">
+        <option value="1">D1</option><option value="2">D2</option>
+        <option value="3">D3</option><option value="4">D4</option>
+      </select>
     </div>
   </div>
   <div class="topbar-right">
@@ -60,14 +64,29 @@
     <div class="sidebar-section">
       <h3 class="sidebar-title">Sequence Info</h3>
       <div class="info-grid" id="seqInfoGrid">
-        <div class="info-item"><span class="info-label">BPM</span><span class="info-val" id="infoBpm">--</span></div>
-        <div class="info-item"><span class="info-label">Duration</span><span class="info-val" id="infoDur">--</span></div>
+        <div class="info-item info-item-full">
+          <span class="info-label">Name</span>
+          <input type="text" id="infoName" class="info-edit" placeholder="Sequence name">
+        </div>
+        <div class="info-item">
+          <span class="info-label">BPM</span>
+          <input type="number" id="infoBpm" class="info-edit info-edit-sm" step="0.1" min="1" max="300" value="">
+        </div>
+        <div class="info-item">
+          <span class="info-label">Duration</span>
+          <input type="number" id="infoDur" class="info-edit info-edit-sm" step="0.1" min="0.1" placeholder="sec" value="">
+        </div>
+        <div class="info-item info-item-full">
+          <span class="info-label">Beat Offset</span>
+          <div class="offset-row">
+            <button class="offset-nudge" id="offsetNudgeDown" title="-10ms">&laquo;</button>
+            <input type="number" id="infoOffset" class="info-edit info-edit-sm" step="1" placeholder="ms" value="0">
+            <button class="offset-nudge" id="offsetNudgeUp" title="+10ms">&raquo;</button>
+          </div>
+        </div>
         <div class="info-item"><span class="info-label">Cues</span><span class="info-val" id="infoCues">0</span></div>
-        <div class="info-item"><span class="info-label">Deck</span>
-          <select id="deckSel" class="mini-select">
-            <option value="1">1</option><option value="2">2</option>
-            <option value="3">3</option><option value="4">4</option>
-          </select>
+        <div class="info-item info-item-full" style="margin-top:4px">
+          <button class="sb-btn sb-btn-accent" id="btnSaveSeq" style="width:100%">Save Sequence</button>
         </div>
       </div>
     </div>
@@ -169,6 +188,7 @@
         <label>Type</label>
         <select id="propType" class="prop-input">
           <option value="solid">Solid</option>
+          <option value="color_wheel">Color Wheel</option>
           <option value="static">Transition</option>
           <option value="strobe">Strobe</option>
           <option value="chase">Chase</option>

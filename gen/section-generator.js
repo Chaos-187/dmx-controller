@@ -7,6 +7,7 @@
 
 const { applyIntensity, rgbToHex, CUE_COLORS, getFixtureIntensity, hasVocals, getDrumDensity, getStemEnergy } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
+const { getFixtureGroup, pickCoordMode, getColorOffset } = require('./group-coordination');
 
 /**
  * Generate section-based color cues for an array of fixtures.
@@ -22,9 +23,19 @@ const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes'
 function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx, opts = {}) {
   const { bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, snapBeat, snapBar } = ctx;
   const colorOnly = opts.colorOnly || false;
+  const groupMap = ctx.groupMap;
 
   const useFades = bpmFactor < 0.5;
   const fadeOverlapFactor = Math.max(0, 1 - bpmFactor);
+
+  // ── Pre-compute group info for every fixture in this set ──────────
+  const fixtureIdSet = new Set(fixtures.map(f => f.id));
+  const fixtureGroupInfo = new Map();
+  const sectionColorModes = new Map(); // `${groupId}-${si}` → coordMode
+  for (const fix of fixtures) {
+    const gi = groupMap ? getFixtureGroup(fix, groupMap, fixtureIdSet) : null;
+    fixtureGroupInfo.set(fix.id, gi);
+  }
 
   // ── Color cascade: stagger colour changes across the rig ──────────
   const rigSorted = [...fixtures].sort((a, b) => {
@@ -83,6 +94,29 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         } else {
           paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % paletteCount;
         }
+
+        // ── Group-aware palette coordination ──
+        // If this fixture is in a group, override the palette index so all
+        // group members use coordinated colors (sync, mirror, opposite, etc.)
+        const gi = fixtureGroupInfo.get(fix.id);
+        if (gi && paletteCount > 0) {
+          const cmKey = `${gi.groupId}-${si}`;
+          if (!sectionColorModes.has(cmKey)) {
+            sectionColorModes.set(cmKey, pickCoordMode(sec.label, rand));
+          }
+          const coordMode = sectionColorModes.get(cmKey);
+          // Use the group-leader's base palette (first member in group)
+          const leaderIdx = gi.members[0] ? fixtures.indexOf(gi.members[0]) : 0;
+          let basePaletteIdx;
+          if (style.beatColorChange) {
+            const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
+            basePaletteIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / adjustedBars)) % paletteCount;
+          } else {
+            basePaletteIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / 4)) % paletteCount;
+          }
+          paletteIdx = getColorOffset(gi, coordMode, basePaletteIdx, paletteCount);
+        }
+
         const palette = palettes[paletteIdx];
 
         let energyMod = 1.0;
@@ -146,12 +180,10 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         const endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
 
         if (hasDimmer) { startVals.dimmer = 255; endVals.dimmer = 255; }
-        if (hasWhite) {
-          startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.25);
-          endVals.white = Math.round((endColor.r + endColor.g + endColor.b) / 3 * 0.25);
-        }
+        // Don't set white on normal color cues — it washes out the color;
+        // white is only added for strobe hits where a full flash is desired.
 
-        const cueType = useFades ? 'fade' : 'static';
+        const cueType = useFades ? 'static' : 'solid';
 
         let cascadeOffset = 0;
         if (CASCADE_COLOR_SECTIONS.has(sec.label) && fixtures.length > 1) {
@@ -182,35 +214,53 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         const strobeBeats = beats.filter(b => b >= secStartMs && b < secEndMs);
         const strobeDurMs = Math.round((style.strobeDurationBeats || 0.5) * beatMs);
 
+        // ── Group-coordinated strobe decisions ──
+        // Grouped fixtures use a stable hash per beat so all members
+        // fire strobes together instead of independently.
+        const giStrobe = fixtureGroupInfo.get(fix.id);
+
         for (let bi = 0; bi < strobeBeats.length; bi++) {
           const beatInSection = Math.floor((strobeBeats[bi] - secStartMs) / beatMs);
           const isDownbeat = beatInSection % 4 === 0;
 
-          if (isDownbeat && rand() < finalStrobeChance) {
-            let beatEnergy = 0.8;
-            if (energyLevels.length > 0) {
-              const closest = energyLevels.reduce((best, e) =>
-                Math.abs(e.time_ms - strobeBeats[bi]) < Math.abs(best.time_ms - strobeBeats[bi]) ? e : best
-              );
-              beatEnergy = Math.min(1, closest.energy * 2);
+          if (isDownbeat) {
+            let shouldStrobe;
+            if (giStrobe) {
+              // Group-stable roll: hash groupId + section + beat index
+              const key = `strobe-${giStrobe.groupId}-${si}-${bi}`;
+              let h = 0;
+              for (let k = 0; k < key.length; k++) h = ((h << 5) - h + key.charCodeAt(k)) | 0;
+              shouldStrobe = (((h * 2654435761) >>> 0) / 4294967296) < finalStrobeChance;
+            } else {
+              shouldStrobe = rand() < finalStrobeChance;
             }
 
-            const strobeIntensity = Math.round(200 + beatEnergy * 55);
-            const strobeVals = { red: strobeIntensity, green: strobeIntensity, blue: strobeIntensity };
-            if (hasDimmer) strobeVals.dimmer = 255;
-            if (hasWhite) strobeVals.white = strobeIntensity;
+            if (shouldStrobe) {
+              let beatEnergy = 0.8;
+              if (energyLevels.length > 0) {
+                const closest = energyLevels.reduce((best, e) =>
+                  Math.abs(e.time_ms - strobeBeats[bi]) < Math.abs(best.time_ms - strobeBeats[bi]) ? e : best
+                );
+                beatEnergy = Math.min(1, closest.energy * 2);
+              }
 
-            cues.push({
-              lane,
-              start_ms: Math.round(strobeBeats[bi]),
-              duration_ms: strobeDurMs,
-              cue_type: 'strobe',
-              fixture_id: fix.id,
-              channel_values: { ...strobeVals, strobe_hz: sec.label === 'drop' ? 15 : 10 },
-              end_channel_values: {},
-              color: '#ffffff',
-              label: 'strobe',
-            });
+              const strobeIntensity = Math.round(200 + beatEnergy * 55);
+              const strobeVals = { red: strobeIntensity, green: strobeIntensity, blue: strobeIntensity };
+              if (hasDimmer) strobeVals.dimmer = 255;
+              if (hasWhite) strobeVals.white = strobeIntensity;
+
+              cues.push({
+                lane,
+                start_ms: Math.round(strobeBeats[bi]),
+                duration_ms: strobeDurMs,
+                cue_type: 'strobe',
+                fixture_id: fix.id,
+                channel_values: { ...strobeVals, strobe_hz: sec.label === 'drop' ? 15 : 10 },
+                end_channel_values: {},
+                color: '#ffffff',
+                label: 'strobe',
+              });
+            }
           }
         }
       }

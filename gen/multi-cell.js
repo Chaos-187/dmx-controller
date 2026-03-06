@@ -49,15 +49,13 @@ function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, l
     startVals.dimmer = 255;
     if (endColor) endVals.dimmer = 255;
   }
-  if (p.hasWhite) {
-    startVals.white = Math.round((startColor.r + startColor.g + startColor.b) / 3 * 0.15);
-    if (endColor) endVals.white = Math.round((endColor.r + endColor.g + endColor.b) / 3 * 0.15);
-  }
+  // Don't set white on normal color cues — it washes out the color;
+  // white is only added for strobe hits.
   cues.push({
     lane: p.lane,
     start_ms: Math.round(startMs),
     duration_ms: Math.round(Math.max(10, durMs)),
-    cue_type: cueType || 'static',
+    cue_type: cueType || 'solid',
     fixture_id: resolved.fix.id,
     cell: resolved.cell,
     channel_values: startVals,
@@ -90,7 +88,7 @@ function cellPatternChase(cues, p, speed) {
       const cueStart = t + step * cellDur;
       if (cueStart >= secEndMs) break;
       const dur = Math.min(cellDur, secEndMs - cueStart);
-      cellCue(cues, p, cell, cueStart, dur, onColor, offColor, 'static', 'chase');
+      cellCue(cues, p, cell, cueStart, dur, onColor, offColor, 'solid', 'chase');
     }
     t += cycleDur;
     if (rand() > 0.6) direction *= -1;
@@ -120,7 +118,7 @@ function cellPatternChaseAccel(cues, p) {
       const cueStart = t + step * cellDur;
       if (cueStart >= secEndMs) break;
       const dur = Math.min(cellDur, secEndMs - cueStart);
-      cellCue(cues, p, cell, cueStart, dur, c, dimColor, 'static', 'build');
+      cellCue(cues, p, cell, cueStart, dur, c, dimColor, 'solid', 'build');
     }
     t += cycleDur;
   }
@@ -143,7 +141,7 @@ function cellPatternAlternate(cues, p, speed) {
     for (let cell = 1; cell <= cellCount; cell++) {
       const isOdd = cell % 2 === 1;
       const useA = isOdd ? !swapState : swapState;
-      cellCue(cues, p, cell, t, dur, useA ? colorA : colorB, null, 'static', 'alt');
+      cellCue(cues, p, cell, t, dur, useA ? colorA : colorB, null, 'solid', 'alt');
     }
     t += swapInterval;
     swapState = !swapState;
@@ -165,7 +163,7 @@ function cellPatternColorWave(cues, p) {
       const cellStart = t + offset * waveDur * 0.5;
       const dur = Math.min(waveDur, secEndMs - cellStart);
       if (cellStart >= secEndMs || dur <= 0) continue;
-      cellCue(cues, p, cell, cellStart, dur, color1, color2, 'fade', 'wave');
+      cellCue(cues, p, cell, cellStart, dur, color1, color2, 'static', 'wave');
     }
     t += waveDur;
   }
@@ -203,7 +201,7 @@ function cellPatternScatter(cues, p, strobeMode) {
         });
       } else {
         const dimColor = { r: 0, g: 0, b: 0 };
-        cellCue(cues, p, cell, t, dur, color, dimColor, 'static', 'scatter');
+        cellCue(cues, p, cell, t, dur, color, dimColor, 'solid', 'scatter');
       }
     }
     t += flashInterval + rand() * flashInterval * 0.5;
@@ -226,12 +224,12 @@ function cellPatternFillSweep(cues, p) {
 
     const fadeInDur = Math.min(cellDelay * 1.5, secEndMs - onTime);
     if (fadeInDur > 0 && onTime < secEndMs) {
-      cellCue(cues, p, cell, onTime, fadeInDur, dimColor, color, 'fade', 'sweep');
+      cellCue(cues, p, cell, onTime, fadeInDur, dimColor, color, 'static', 'sweep');
     }
 
     const holdStart = secStartMs + sweepDur;
     if (holdStart < secEndMs && holdDur > 0) {
-      cellCue(cues, p, cell, holdStart, Math.min(holdDur, secEndMs - holdStart), color, null, 'static', 'hold');
+      cellCue(cues, p, cell, holdStart, Math.min(holdDur, secEndMs - holdStart), color, null, 'solid', 'hold');
     }
   }
 }
@@ -256,7 +254,7 @@ function cellPatternBuildReveal(cues, p) {
 
     for (let i = 0; i < activeCells; i++) {
       const cell = i + 1;
-      cellCue(cues, p, cell, stageStart, dur, color, null, 'static', 'build');
+      cellCue(cues, p, cell, stageStart, dur, color, null, 'solid', 'build');
     }
   }
 
@@ -264,7 +262,7 @@ function cellPatternBuildReveal(cues, p) {
   if (finalStart > secStartMs) {
     const maxColor = applyIntensity(pal[0], Math.min(1, baseIntensity * 1.4));
     for (let cell = 1; cell <= cellCount; cell++) {
-      cellCue(cues, p, cell, finalStart, secEndMs - finalStart, maxColor, null, 'static', 'peak');
+      cellCue(cues, p, cell, finalStart, secEndMs - finalStart, maxColor, null, 'solid', 'peak');
     }
   }
 }
@@ -285,7 +283,7 @@ function cellPatternAllFlash(cues, p) {
 
     for (let cell = 1; cell <= cellCount; cell++) {
       const useColor = cell % 2 === 0 ? color1 : color2;
-      cellCue(cues, p, cell, t, dur, useColor, null, 'static', 'flash');
+      cellCue(cues, p, cell, t, dur, useColor, null, 'solid', 'flash');
     }
 
     if (!noStrobes && palIdx % 4 === 3) {
@@ -323,9 +321,9 @@ function cellPatternBreathe(cues, p) {
     const halfDur = dur / 2;
 
     for (let cell = 1; cell <= cellCount; cell++) {
-      cellCue(cues, p, cell, t, halfDur, dimColor, brightColor, 'fade', 'breathe');
+      cellCue(cues, p, cell, t, halfDur, dimColor, brightColor, 'static', 'breathe');
       if (t + halfDur < secEndMs) {
-        cellCue(cues, p, cell, t + halfDur, Math.min(halfDur, secEndMs - t - halfDur), brightColor, dimColor, 'fade', 'breathe');
+        cellCue(cues, p, cell, t + halfDur, Math.min(halfDur, secEndMs - t - halfDur), brightColor, dimColor, 'static', 'breathe');
       }
     }
     t += breatheCycle;

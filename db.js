@@ -207,6 +207,16 @@ function init() {
       sort_order      INTEGER DEFAULT 0
     );
 
+    -- Gobo wheel slot maps (per fixture type)
+    CREATE TABLE IF NOT EXISTS gobo_wheel_slots (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      fixture_type_id INTEGER NOT NULL REFERENCES fixture_types(id) ON DELETE CASCADE,
+      dmx_start       INTEGER NOT NULL DEFAULT 0,
+      dmx_end         INTEGER NOT NULL DEFAULT 0,
+      label           TEXT    DEFAULT '',
+      sort_order      INTEGER DEFAULT 0
+    );
+
     -- Effects library
     CREATE TABLE IF NOT EXISTS effects (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,14 +231,15 @@ function init() {
 
     -- Light sequences (linked to tracks)
     CREATE TABLE IF NOT EXISTS light_sequences (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      name        TEXT    NOT NULL,
-      track_id    INTEGER DEFAULT NULL,
-      bpm         REAL    DEFAULT 120,
-      duration_ms INTEGER DEFAULT 0,
-      loop        INTEGER DEFAULT 0,
-      created_at  TEXT    DEFAULT (datetime('now')),
-      updated_at  TEXT    DEFAULT (datetime('now'))
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      name            TEXT    NOT NULL,
+      track_id        INTEGER DEFAULT NULL,
+      bpm             REAL    DEFAULT 120,
+      duration_ms     INTEGER DEFAULT 0,
+      beat_offset_ms  REAL    DEFAULT 0,
+      loop            INTEGER DEFAULT 0,
+      created_at      TEXT    DEFAULT (datetime('now')),
+      updated_at      TEXT    DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_light_sequences_track ON light_sequences(track_id);
 
@@ -566,6 +577,14 @@ function init() {
   } catch (e) {
     db.exec("ALTER TABLE midi_mappings ADD COLUMN page INTEGER DEFAULT 0");
     console.log('[DB] Migrated midi_mappings: added page column');
+  }
+
+  // Migrate: add beat_offset_ms column to light_sequences
+  try {
+    db.prepare('SELECT beat_offset_ms FROM light_sequences LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE light_sequences ADD COLUMN beat_offset_ms REAL DEFAULT 0");
+    console.log('[DB] Migrated light_sequences: added beat_offset_ms column');
   }
 
   // Migrate: fixture_type_modes — create default modes for existing fixture types
@@ -1399,7 +1418,7 @@ function getFixtureTypeSummaries() {
  * @param {number} [opts.offset=0] - offset
  * @returns {{ types: Array, total: number, categories: string[], manufacturers: string[] }}
  */
-function searchFixtureTypes({ search, category, manufacturer, limit = 50, offset = 0 } = {}) {
+function searchFixtureTypes({ search, category, manufacturer, channels, limit = 50, offset = 0 } = {}) {
   const where = [];
   const params = [];
   if (search) {
@@ -1413,6 +1432,10 @@ function searchFixtureTypes({ search, category, manufacturer, limit = 50, offset
   if (manufacturer) {
     where.push("ft.manufacturer = ?");
     params.push(manufacturer);
+  }
+  if (channels) {
+    where.push("EXISTS (SELECT 1 FROM fixture_type_modes m WHERE m.fixture_type_id = ft.id AND m.channel_count = ?)");
+    params.push(channels);
   }
   const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
 
@@ -1436,12 +1459,14 @@ function searchFixtureTypes({ search, category, manufacturer, limit = 50, offset
   // Get all categories and manufacturers for filter dropdowns (only on first page to avoid waste)
   let categories = [];
   let manufacturers = [];
+  let channelCounts = [];
   if (offset === 0) {
     categories = db.prepare("SELECT DISTINCT category FROM fixture_types ORDER BY category").all().map(r => r.category);
     manufacturers = db.prepare("SELECT DISTINCT manufacturer FROM fixture_types WHERE manufacturer != '' ORDER BY manufacturer").all().map(r => r.manufacturer);
+    channelCounts = db.prepare("SELECT DISTINCT channel_count FROM fixture_type_modes ORDER BY channel_count").all().map(r => r.channel_count);
   }
 
-  return { types, total, categories, manufacturers };
+  return { types, total, categories, manufacturers, channelCounts };
 }
 
 function getFixtureType(id) {
@@ -2255,6 +2280,45 @@ function deleteColorWheelMap(fixtureTypeId) {
   db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(fixtureTypeId);
 }
 
+// ─── Gobo Wheel Map ──────────────────────────────────────────────────────────
+
+function getGoboWheelMap(fixtureTypeId) {
+  return db.prepare(
+    'SELECT id, dmx_start, dmx_end, label FROM gobo_wheel_slots WHERE fixture_type_id = ? ORDER BY sort_order, dmx_start'
+  ).all(fixtureTypeId);
+}
+
+function getAllGoboWheelMaps() {
+  const rows = db.prepare(
+    'SELECT fixture_type_id, dmx_start, dmx_end, label FROM gobo_wheel_slots ORDER BY fixture_type_id, sort_order, dmx_start'
+  ).all();
+  const maps = {};
+  for (const r of rows) {
+    if (!maps[r.fixture_type_id]) maps[r.fixture_type_id] = [];
+    maps[r.fixture_type_id].push({ dmx_start: r.dmx_start, dmx_end: r.dmx_end, label: r.label });
+  }
+  return maps;
+}
+
+function setGoboWheelMap(fixtureTypeId, slots) {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM gobo_wheel_slots WHERE fixture_type_id = ?').run(fixtureTypeId);
+    const ins = db.prepare(
+      'INSERT INTO gobo_wheel_slots (fixture_type_id, dmx_start, dmx_end, label, sort_order) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      ins.run(fixtureTypeId, s.dmx_start, s.dmx_end, s.label || '', i);
+    }
+  });
+  tx();
+  return getGoboWheelMap(fixtureTypeId);
+}
+
+function deleteGoboWheelMap(fixtureTypeId) {
+  db.prepare('DELETE FROM gobo_wheel_slots WHERE fixture_type_id = ?').run(fixtureTypeId);
+}
+
 // ─── Fixture Groups ──────────────────────────────────────────────────────────
 
 function getGroups() {
@@ -2808,16 +2872,17 @@ function createSequence({ name, track_id, bpm, duration_ms, loop }) {
   return getSequence(result.lastInsertRowid);
 }
 
-function updateSequence(id, { name, track_id, bpm, duration_ms, loop }) {
+function updateSequence(id, { name, track_id, bpm, duration_ms, beat_offset_ms, loop }) {
   const existing = db.prepare('SELECT * FROM light_sequences WHERE id = ?').get(id);
   if (!existing) return null;
   db.prepare(
-    "UPDATE light_sequences SET name=?, track_id=?, bpm=?, duration_ms=?, loop=?, updated_at=datetime('now') WHERE id=?"
+    "UPDATE light_sequences SET name=?, track_id=?, bpm=?, duration_ms=?, beat_offset_ms=?, loop=?, updated_at=datetime('now') WHERE id=?"
   ).run(
     name !== undefined ? name.trim() : existing.name,
     track_id !== undefined ? track_id : existing.track_id,
     bpm !== undefined ? bpm : existing.bpm,
     duration_ms !== undefined ? duration_ms : existing.duration_ms,
+    beat_offset_ms !== undefined ? beat_offset_ms : (existing.beat_offset_ms || 0),
     loop !== undefined ? (loop ? 1 : 0) : existing.loop,
     id
   );
@@ -3548,6 +3613,7 @@ module.exports = {
   createLedBarFixtureType,
   createMultiCellFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
+  getGoboWheelMap, getAllGoboWheelMaps, setGoboWheelMap, deleteGoboWheelMap,
   getFixtures, getFixture, createFixture, updateFixture, deleteFixture, updateFixtureRigPositions,
   getRigElements, createRigElement, updateRigElement, deleteRigElement, bulkUpdateRigElements,
   getRigLayouts, getRigLayout, createRigLayout, updateRigLayout, loadRigLayout, deleteRigLayout, setActiveRigLayout, getActiveRigLayout,

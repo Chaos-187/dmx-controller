@@ -227,6 +227,93 @@ function buildRanges(capabilities, channelName, wheels) {
   });
 }
 
+// ─── Extract Wheel Data (Color Wheel / Gobo Wheel) from OFL ─────────────────
+
+/**
+ * Extract color wheel and gobo wheel slot data from an OFL fixture definition.
+ * Matches the wheel slot definitions to the channel capabilities (which have DMX ranges)
+ * so we can build the internal color_wheel_colors / gobo_wheel_slots database records.
+ *
+ * @param {object} fixture - Full OFL fixture object
+ * @returns {{ colorWheel: Array, goboWheel: Array }}
+ */
+function extractWheelData(fixture) {
+  const wheels = fixture.wheels || {};
+  const availableChannels = fixture.availableChannels || {};
+  const result = { colorWheel: [], goboWheel: [] };
+
+  for (const [wheelName, wheelDef] of Object.entries(wheels)) {
+    const slots = wheelDef.slots || [];
+    if (!slots.length) continue;
+
+    const hasGobo = slots.some(s => s.type === 'Gobo');
+    const hasColor = slots.some(s => s.type === 'Color');
+    if (!hasGobo && !hasColor) continue;
+
+    // Find the channel whose capabilities reference this wheel.
+    // First try exact name match, then look for a cap with wheel === wheelName.
+    let channelDef = availableChannels[wheelName];
+    if (!channelDef) {
+      for (const [, chDef] of Object.entries(availableChannels)) {
+        const caps = chDef.capabilities || (chDef.capability ? [chDef.capability] : []);
+        if (caps.some(c => c.wheel === wheelName)) {
+          channelDef = chDef;
+          break;
+        }
+      }
+    }
+
+    // Need capabilities with dmxRange to know DMX values
+    const capabilities = channelDef
+      ? (channelDef.capabilities || (channelDef.capability ? [channelDef.capability] : []))
+      : [];
+    if (!capabilities.length) continue;
+
+    // Build a map from slotNumber → first WheelSlot DMX range
+    const slotDmxMap = {};
+    for (const cap of capabilities) {
+      if (cap.type === 'WheelSlot' && cap.dmxRange && cap.slotNumber != null) {
+        if (!slotDmxMap[cap.slotNumber]) {
+          slotDmxMap[cap.slotNumber] = { dmx_start: cap.dmxRange[0], dmx_end: cap.dmxRange[1] };
+        }
+      }
+    }
+
+    // Walk through wheel slots and pair with DMX ranges
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+      const slotNum = i + 1; // OFL slotNumbers are 1-based
+      const dmx = slotDmxMap[slotNum];
+      if (!dmx) continue;
+
+      if (hasColor && !hasGobo) {
+        // Color wheel
+        if (slot.type === 'Open') {
+          result.colorWheel.push({ dmx_start: dmx.dmx_start, dmx_end: dmx.dmx_end, color_hex: '#FFFFFF', label: 'Open' });
+        } else if (slot.type === 'Color') {
+          result.colorWheel.push({
+            dmx_start: dmx.dmx_start,
+            dmx_end: dmx.dmx_end,
+            color_hex: (slot.colors && slot.colors[0]) || '#FFFFFF',
+            label: slot.name || '',
+          });
+        }
+      }
+
+      if (hasGobo) {
+        // Gobo wheel
+        if (slot.type === 'Open') {
+          result.goboWheel.push({ dmx_start: dmx.dmx_start, dmx_end: dmx.dmx_end, label: 'Open' });
+        } else if (slot.type === 'Gobo') {
+          result.goboWheel.push({ dmx_start: dmx.dmx_start, dmx_end: dmx.dmx_end, label: slot.name || `Gobo ${i}` });
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 // ─── Convert a single OFL fixture + mode → internal fixture_type ────────────
 
 /**
@@ -360,11 +447,17 @@ function convertOflFixture(fixture, manufacturer) {
   // Convert all modes
   const modes = (fixture.modes || []).map(mode => convertOflMode(fixture, mode));
 
+  // Extract color wheel and gobo wheel slot data from wheels definitions
+  const wheelData = extractWheelData(fixture);
+
   return {
     name: fixture.name,
     manufacturer: manufacturer || '',
     category,
     modes,
+    // Wheel data for import (saved separately to color_wheel_colors / gobo_wheel_slots tables)
+    _colorWheel: wheelData.colorWheel,
+    _goboWheel: wheelData.goboWheel,
     // Extra metadata stored but not required by fixture_types table
     _ofl: {
       fixtureKey: fixture.fixtureKey || '',
@@ -465,6 +558,7 @@ module.exports = {
   summarizeOflLibrary,
   convertOflFixture,
   convertOflMode,
+  extractWheelData,
   OFL_CATEGORY_MAP,
   OFL_TYPE_MAP,
 };

@@ -386,6 +386,24 @@ input[type="color"] {
   text-transform: uppercase;
   letter-spacing: .5px;
 }
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
 .form-row {
   display: flex;
   gap: 14px;
@@ -840,9 +858,9 @@ textarea.gen-raw-editor {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   padding: 28px 32px;
-  max-width: 620px;
-  width: 90vw;
-  max-height: 85vh;
+  max-width: 780px;
+  width: 94vw;
+  max-height: 90vh;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
 }
@@ -1390,4 +1408,157 @@ textarea.gen-raw-editor {
 .toggle-switch-label input:checked + .toggle-track::after {
   left: 20px;
   background: #fff;
+}
+
+/* ── Fixture Type Modal ── */
+.modal h2 { font-size: 18px; font-weight: 700; margin-bottom: 20px; color: var(--accent); }
+
+/* Mode tabs */
+.mode-tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.mode-tab {
+  font-size: 12px; padding: 5px 12px; border-radius: 6px 6px 0 0;
+  background: var(--input-bg); border: 1px solid var(--input-border); border-bottom: none;
+  color: var(--text-dim); cursor: pointer; transition: all .15s; position: relative;
+}
+.mode-tab:hover { color: var(--text); background: rgba(255,255,255,.08); }
+.mode-tab.active { background: var(--bg-raised); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.mode-tab .mode-tab-remove { margin-left: 6px; font-size: 14px; color: var(--text-dim); cursor: pointer; line-height: 1; }
+.mode-tab .mode-tab-remove:hover { color: var(--danger); }
+.mode-tab-add { font-size: 18px; color: var(--accent); padding: 4px 10px; cursor: pointer; background: none; border: 1px dashed var(--input-border); border-radius: 6px; }
+.mode-tab-add:hover { border-color: var(--accent); background: rgba(0,176,255,.08); }
+.mode-header-fields { display: flex; gap: 10px; margin-bottom: 10px; }
+.mode-header-fields input { flex: 1; }
+
+/* Color wheel / Gobo map editor */
+.cw-editor-rows { margin-top: 8px; }
+.cw-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.cw-row input[type="number"] { width: 52px; }
+.cw-row input[type="text"] { flex: 1; min-width: 80px; }
+.cw-row input[type="color"] { width: 36px; height: 28px; padding: 1px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); cursor: pointer; }
+.cw-row .cw-hex { width: 80px; font-family: monospace; font-size: 12px; }
+.cw-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
+/* Wheel editor tabs (Color Wheel / Gobos) — replaced by type-modal-tabs */
+
+/* ── Type Modal Section Tabs ── */
+.type-modal-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--panel-border);
+  margin-bottom: 0;
+  margin-top: 4px;
+}
+.type-modal-tab {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 18px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.type-modal-tab:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.type-modal-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.type-modal-panel {
+  display: none;
+  padding-top: 16px;
+}
+.type-modal-panel.active {
+  display: block;
+}
+
+/* ── Channels Editor ── */
+.channels-editor { margin-top: 8px; }
+.ch-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+.ch-row input,
+.ch-row select {
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.ch-row input:focus,
+.ch-row select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.ch-row input { width: 50px; }
+.ch-row input.ch-name { flex: 1; width: auto; }
+.ch-row select { width: 120px; }
+.ch-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+.ch-add { margin-top: 4px; }
+
+/* Channel number label */
+.ch-num {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 18px;
+  padding-top: 8px;
+}
+
+/* Channel main row + ranges toggle */
+.ch-main { display: flex; gap: 8px; align-items: center; flex: 1; }
+.ch-ranges-toggle {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 10px; padding: 2px 4px; white-space: nowrap; opacity: .6; transition: all .15s;
+}
+.ch-ranges-toggle:hover { color: var(--accent); opacity: 1; }
+.ch-ranges-toggle.has-ranges { color: var(--accent); opacity: 1; }
+
+/* Channel ranges editor */
+.ch-ranges-wrap {
+  margin: 0 0 10px 28px;
+  border-left: 2px solid var(--accent);
+  padding: 8px 0 8px 12px;
+}
+.ch-ranges-wrap table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ch-ranges-wrap th {
+  text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-dim); padding: 0 6px 4px 0; font-weight: 500;
+}
+.ch-ranges-wrap td { padding: 2px 6px 2px 0; vertical-align: middle; }
+.ch-ranges-wrap input,
+.ch-ranges-wrap select {
+  background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 3px;
+  color: var(--text); font-size: 11px; padding: 4px 6px;
+}
+.ch-ranges-wrap input:focus,
+.ch-ranges-wrap select:focus { border-color: var(--accent); outline: none; }
+.ch-ranges-wrap input.range-min,
+.ch-ranges-wrap input.range-max { width: 50px; text-align: center; }
+.ch-ranges-wrap input.range-label { width: 100%; min-width: 80px; }
+.ch-ranges-wrap select { width: 100%; }
+.ch-ranges-wrap .range-remove {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 13px; padding: 2px 4px; opacity: .5; transition: all .15s;
+}
+.ch-ranges-wrap .range-remove:hover { color: var(--danger); opacity: 1; }
+.ch-ranges-wrap .range-actions { display: flex; gap: 8px; margin-top: 6px; }
+.ch-ranges-wrap .range-actions button { font-size: 10px; padding: 3px 8px; }
+
+/* Mode header fields in modal */
+.mode-header-fields input {
+  padding: 6px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
 }

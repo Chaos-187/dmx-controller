@@ -27,6 +27,7 @@ const { generateColorWheelCues }   = require('./gen/color-wheel');
 const { MOVEMENT_STYLES, DEFAULT_MOVEMENT, SPEED_DMX, generateMoverMovement } = require('./gen/mover-movement');
 const { SECTION_EFFECT_TYPES, generateEffectCues } = require('./gen/effects');
 const { CELL_PATTERN_MAP, generateMultiCellPatterns } = require('./gen/multi-cell');
+const { buildGroupMap } = require('./gen/group-coordination');
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
@@ -152,11 +153,15 @@ function generateSequence(opts) {
   const cues = [];
   const snapBeat = (t) => snapToBeat(t, beats);
   const snapBar  = (t) => snapToBar(t, beats);
+
+  // ── Build fixture-group map for coordinated generation ──────────────
+  const groupMap = buildGroupMap(fixtures);
+
   const ctx = {
     bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
     activePalettes, activeSectionStyles, activeMovementStyles, activeSpeedDmx,
     activeSectionEffects, activeCellPatterns, activeFixtureIntensity, fixtureRoleMap,
-    stemEnergy,
+    stemEnergy, groupMap,
   };
 
   // Multi-cell fixtures get dedicated per-cell patterns, so exclude them

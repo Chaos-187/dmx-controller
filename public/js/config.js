@@ -3359,11 +3359,13 @@ async function loadTypes(resetPage) {
   const q = (document.getElementById('filterLibraryName').value || '').trim();
   const cat = document.getElementById('filterLibraryCategory').value;
   const mfr = document.getElementById('filterLibraryManufacturer').value;
+  const chn = document.getElementById('filterLibraryChannels').value;
   const offset = (_libraryPage.page - 1) * _libraryPage.pageSize;
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (cat) params.set('category', cat);
   if (mfr) params.set('manufacturer', mfr);
+  if (chn) params.set('channels', chn);
   params.set('limit', _libraryPage.pageSize);
   params.set('offset', offset);
   try {
@@ -3381,6 +3383,12 @@ async function loadTypes(resetPage) {
       const prevMfr = mfrSel.value;
       mfrSel.innerHTML = '<option value="">All Manufacturers</option>' + data.manufacturers.map(m => `<option value="${m}">${esc(m)}</option>`).join('');
       mfrSel.value = prevMfr;
+    }
+    if (data.channelCounts) {
+      const chnSel = document.getElementById('filterLibraryChannels');
+      const prevChn = chnSel.value;
+      chnSel.innerHTML = '<option value="">All Channels</option>' + data.channelCounts.map(c => `<option value="${c}">${c}ch</option>`).join('');
+      chnSel.value = prevChn;
     }
     renderLibraryList();
   } catch (e) { console.error('Library search error:', e); }
@@ -3446,10 +3454,12 @@ function triggerLibrarySearch() { clearTimeout(_libSearchTimer); _libSearchTimer
 document.getElementById('filterLibraryName').addEventListener('input', triggerLibrarySearch);
 document.getElementById('filterLibraryCategory').addEventListener('change', () => loadTypes(true));
 document.getElementById('filterLibraryManufacturer').addEventListener('change', () => loadTypes(true));
+document.getElementById('filterLibraryChannels').addEventListener('change', () => loadTypes(true));
 
 // ─── OFL Import ─────────────────────────────────────────────────────────────
 let _oflParsedData = null;
 let _oflPreview = null;
+let _oflZipFixtures = null; // array of raw fixture JSONs from ZIP import
 
 document.getElementById('btnImportOFL').addEventListener('click', () => { document.getElementById('oflFileInput').click(); });
 
@@ -3457,6 +3467,7 @@ document.getElementById('oflFileInput').addEventListener('change', async (e) => 
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
+  _oflZipFixtures = null; // Clear ZIP state when doing single-file import
   try {
     const text = await file.text();
     const data = JSON.parse(text);
@@ -3500,7 +3511,7 @@ function updateOflSelectedCount() {
 document.getElementById('oflImportPanel').addEventListener('change', (e) => { if (e.target.classList.contains('ofl-fixture-check')) updateOflSelectedCount(); });
 document.getElementById('btnOflSelectAll').addEventListener('click', () => { document.querySelectorAll('.ofl-fixture-check').forEach(c => c.checked = true); updateOflSelectedCount(); });
 document.getElementById('btnOflSelectNone').addEventListener('click', () => { document.querySelectorAll('.ofl-fixture-check').forEach(c => c.checked = false); updateOflSelectedCount(); });
-document.getElementById('btnCloseOflPanel').addEventListener('click', () => { document.getElementById('oflImportPanel').style.display = 'none'; _oflParsedData = null; _oflPreview = null; });
+document.getElementById('btnCloseOflPanel').addEventListener('click', () => { document.getElementById('oflImportPanel').style.display = 'none'; _oflParsedData = null; _oflPreview = null; _oflZipFixtures = null; });
 
 document.getElementById('btnOflImportSelected').addEventListener('click', async () => {
   if (!_oflParsedData) return;
@@ -3509,25 +3520,195 @@ document.getElementById('btnOflImportSelected').addEventListener('click', async 
   if (selected.length === 0) return alert('No fixtures selected');
   const btn = document.getElementById('btnOflImportSelected');
   btn.disabled = true; btn.textContent = 'Importing\u2026';
-  try {
-    const res = await fetch('/api/fixture-library/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: _oflParsedData, selectedFixtures: selected }) });
-    const result = await res.json();
-    const resultsEl = document.getElementById('oflImportResults');
-    resultsEl.style.display = '';
-    if (result.error) {
-      resultsEl.innerHTML = `<div style="color:var(--danger)">Error: ${esc(result.error)}</div>`;
+
+  // Show progress bar
+  const progressWrap = document.getElementById('oflProgressWrap');
+  const progressBar = document.getElementById('oflProgressBar');
+  const progressLabel = document.getElementById('oflProgressLabel');
+  const progressCount = document.getElementById('oflProgressCount');
+  const resultsEl = document.getElementById('oflImportResults');
+  progressWrap.style.display = '';
+  resultsEl.style.display = 'none';
+  progressBar.style.width = '0%';
+  progressLabel.textContent = 'Importing\u2026';
+  progressCount.textContent = '0 / ' + selected.length;
+
+  const totalCount = selected.length;
+  let imported = 0, updated = 0;
+  const errors = [];
+  const BATCH_SIZE = 10;
+
+  // Import in small batches for speed while still showing progress
+  for (let batchStart = 0; batchStart < totalCount; batchStart += BATCH_SIZE) {
+    const batchIndices = selected.slice(batchStart, batchStart + BATCH_SIZE);
+    let payload;
+    if (_oflZipFixtures) {
+      const batchFixtures = batchIndices.map(i => _oflZipFixtures[i]).filter(Boolean);
+      payload = JSON.stringify({ data: batchFixtures });
     } else {
-      let html = `<div style="color:var(--green)">Imported: ${result.imported} | Updated: ${result.updated}</div>`;
-      if (result.errors && result.errors.length > 0) {
-        html += `<div style="color:var(--warning);margin-top:4px">${result.errors.length} error(s):</div>`;
-        html += result.errors.slice(0, 20).map(e => `<div style="color:var(--text-dim);padding-left:12px;font-size:11px">${esc(e)}</div>`).join('');
-        if (result.errors.length > 20) html += `<div style="color:var(--text-dim);padding-left:12px">\u2026and ${result.errors.length - 20} more</div>`;
-      }
-      resultsEl.innerHTML = html;
-      loadTypes();
+      payload = JSON.stringify({ data: _oflParsedData, selectedFixtures: batchIndices });
     }
-  } catch (err) { alert('Import failed: ' + err.message); }
-  finally { btn.disabled = false; btn.textContent = 'Import Selected'; }
+    try {
+      const res = await fetch('/api/fixture-library/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
+      const result = await res.json();
+      if (result.error) {
+        errors.push(result.error);
+      } else {
+        imported += result.imported || 0;
+        updated += result.updated || 0;
+        if (result.errors) errors.push(...result.errors);
+      }
+    } catch (err) {
+      errors.push('Batch error: ' + err.message);
+    }
+    const done = Math.min(batchStart + BATCH_SIZE, totalCount);
+    const pct = Math.round((done / totalCount) * 100);
+    progressBar.style.width = pct + '%';
+    progressCount.textContent = done + ' / ' + totalCount;
+    const lastName = (_oflPreview.fixtures[batchIndices[batchIndices.length - 1]] || {}).name || '';
+    progressLabel.textContent = 'Importing: ' + lastName;
+    // Yield to UI
+    await new Promise(function(r) { setTimeout(r, 0); });
+  }
+
+  // Done
+  progressBar.style.width = '100%';
+  progressLabel.textContent = 'Import complete';
+  progressCount.textContent = totalCount + ' / ' + totalCount;
+
+  resultsEl.style.display = '';
+  let html = '<div style="color:var(--green)">Imported: ' + imported + ' | Updated: ' + updated + '</div>';
+  if (errors.length > 0) {
+    html += '<div style="color:var(--warning);margin-top:4px">' + errors.length + ' error(s):</div>';
+    html += errors.slice(0, 20).map(function(e) { return '<div style="color:var(--text-dim);padding-left:12px;font-size:11px">' + esc(e) + '</div>'; }).join('');
+    if (errors.length > 20) html += '<div style="color:var(--text-dim);padding-left:12px">\u2026and ' + (errors.length - 20) + ' more</div>';
+  }
+  resultsEl.innerHTML = html;
+  loadTypes();
+  btn.disabled = false; btn.textContent = 'Import Selected';
+});
+
+// ─── OFL ZIP Import ─────────────────────────────────────────────────────────
+
+document.getElementById('btnImportOFLZip').addEventListener('click', () => { document.getElementById('oflZipFileInput').click(); });
+
+document.getElementById('oflZipFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+  try {
+    const zip = await JSZip.loadAsync(file);
+
+    // Find manufacturers.json (may be at root or inside a subfolder like ofl_export_ofl/)
+    let manufacturers = {};
+    for (const path of Object.keys(zip.files)) {
+      if (path.endsWith('manufacturers.json') && !zip.files[path].dir) {
+        try {
+          const mfText = await zip.files[path].async('string');
+          manufacturers = JSON.parse(mfText);
+        } catch (e) { console.warn('Failed to parse manufacturers.json:', e); }
+        break;
+      }
+    }
+
+    // Collect all fixture JSON files (inside manufacturer subfolders, not manufacturers.json itself)
+    const fixtureFiles = [];
+    for (const [path, entry] of Object.entries(zip.files)) {
+      if (entry.dir) continue;
+      if (!path.endsWith('.json')) continue;
+      // Skip manufacturers.json
+      const filename = path.split('/').pop();
+      if (filename === 'manufacturers.json') continue;
+      fixtureFiles.push({ path, entry });
+    }
+
+    // Parse each fixture JSON and inject manufacturer name
+    const fixtures = [];
+    const parseErrors = [];
+    let processed = 0;
+    const total = fixtureFiles.length;
+    const panel = document.getElementById('oflImportPanel');
+    panel.style.display = '';
+    document.getElementById('oflImportResults').style.display = 'none';
+    document.getElementById('oflSummary').textContent = `Extracting ZIP: 0 / ${total} files…`;
+    document.getElementById('oflFixtureList').innerHTML = '';
+
+    for (const { path, entry } of fixtureFiles) {
+      try {
+        const text = await entry.async('string');
+        const data = JSON.parse(text);
+
+        // Only process files that look like OFL fixture definitions
+        if (!data.availableChannels && !data.templateChannels) continue;
+        if (!data.modes || !data.modes.length) {
+          parseErrors.push(`${path}: no modes defined, skipping.`);
+          continue;
+        }
+
+        // Determine manufacturer name from manufacturers.json or folder name
+        const parts = path.replace(/\\/g, '/').split('/');
+        // The manufacturer folder is typically the second-to-last part
+        // e.g. "ofl_export_ofl/adj/mega-par.json" → manufacturer folder = "adj"
+        // or "adj/mega-par.json" → manufacturer folder = "adj"
+        let mfKey = data.manufacturerKey || '';
+        if (!mfKey && parts.length >= 2) {
+          mfKey = parts[parts.length - 2];
+        }
+
+        let mfName = '';
+        if (manufacturers[mfKey]) {
+          mfName = manufacturers[mfKey].name || mfKey;
+        } else if (mfKey) {
+          // Capitalize the key as a fallback name
+          mfName = mfKey.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        // Inject manufacturer into fixture data for server-side processing
+        data.manufacturer = mfName;
+        fixtures.push(data);
+      } catch (err) {
+        parseErrors.push(`${path}: ${err.message}`);
+      }
+      processed++;
+      if (processed % 100 === 0 || processed === total) {
+        document.getElementById('oflSummary').textContent = `Extracting ZIP: ${processed} / ${total} files…`;
+        // Yield to UI
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    if (fixtures.length === 0) {
+      alert('No valid OFL fixtures found in the ZIP file.' + (parseErrors.length ? '\n\nErrors:\n' + parseErrors.slice(0, 5).join('\n') : ''));
+      panel.style.display = 'none';
+      return;
+    }
+
+    // Store as an array for the existing import flow
+    _oflParsedData = fixtures;
+    _oflZipFixtures = fixtures;
+
+    // Build preview data client-side (avoid sending huge payload to server for preview)
+    _oflPreview = {
+      count: fixtures.length,
+      fixtures: fixtures.map(f => ({
+        name: f.name || 'Unknown',
+        manufacturer: f.manufacturer || '',
+        categories: f.categories || [],
+        modes: (f.modes || []).map(m => ({
+          name: m.name,
+          channelCount: (m.channels || []).filter(c => c !== null).length,
+        })),
+      })),
+    };
+
+    if (parseErrors.length > 0) {
+      console.warn('OFL ZIP parse errors:', parseErrors);
+    }
+
+    renderOflPanel();
+  } catch (err) {
+    alert('Failed to read OFL ZIP file: ' + err.message);
+  }
 });
 
 // ─── Type Modal (create/edit fixture type) ──────────────────────────────────
@@ -3734,11 +3915,22 @@ if (document.getElementById('btnBuildMultiCell')) document.getElementById('btnBu
 
 // ─── Color Wheel Map Editor ─────────────────────────────────────
 let cwColors = [];
+let goboSlots = [];
+
+// ─── Type Modal Tab Switching ─────────────────────────────────────
+document.querySelectorAll('.type-modal-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.type-modal-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.type-modal-panel').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.tmtab;
+    const content = document.querySelector(`[data-tmtab-content="${target}"]`);
+    if (content) content.classList.add('active');
+  });
+});
 
 function updateColorWheelVisibility() {
-  const currentHas = typeChannels.some(ch => ch.type === 'color_wheel');
-  const othersHave = typeModes.some((m, i) => i !== activeMode && (m.channels || []).some(ch => ch.type === 'color_wheel'));
-  document.getElementById('colorWheelGroup').style.display = (currentHas || othersHave) ? '' : 'none';
+  // No-op — color wheel and gobo are now always-visible tabs
 }
 
 function renderCwEditor() {
@@ -3776,8 +3968,43 @@ if (document.getElementById('btnAddCwColor')) document.getElementById('btnAddCwC
   renderCwEditor();
 });
 
+// ─── Gobo Wheel Map Editor ──────────────────────────────────────
+
+function renderGoboEditor() {
+  const container = document.getElementById('goboEditorRows');
+  if (!container) return;
+  container.innerHTML = '';
+  goboSlots.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'cw-row';
+    row.innerHTML = `
+      <span style="font-size:11px;color:var(--text-dim);width:16px;padding-top:2px">${i+1}</span>
+      <input type="number" value="${s.dmx_start}" min="0" max="255" title="DMX start value" data-idx="${i}" data-field="dmx_start" style="width:52px">
+      <input type="number" value="${s.dmx_end}" min="0" max="255" title="DMX end value" data-idx="${i}" data-field="dmx_end" style="width:52px">
+      <input type="text" value="${esc(s.label || '')}" data-idx="${i}" data-field="label" placeholder="Gobo name" style="flex:1;min-width:120px">
+      <button type="button" class="cw-remove" data-idx="${i}">&times;</button>`;
+    container.appendChild(row);
+  });
+  container.querySelectorAll('input').forEach(el => {
+    el.addEventListener('change', () => {
+      const idx = +el.dataset.idx, field = el.dataset.field;
+      if (field === 'dmx_start') goboSlots[idx].dmx_start = Math.max(0, Math.min(255, +el.value));
+      else if (field === 'dmx_end') goboSlots[idx].dmx_end = Math.max(0, Math.min(255, +el.value));
+      else if (field === 'label') goboSlots[idx].label = el.value;
+    });
+  });
+  container.querySelectorAll('.cw-remove').forEach(btn => { btn.addEventListener('click', () => { goboSlots.splice(+btn.dataset.idx, 1); renderGoboEditor(); }); });
+}
+
+if (document.getElementById('btnAddGoboSlot')) document.getElementById('btnAddGoboSlot').addEventListener('click', () => {
+  const lastEnd = goboSlots.length > 0 ? goboSlots[goboSlots.length - 1].dmx_end + 1 : 0;
+  goboSlots.push({ dmx_start: Math.min(lastEnd, 255), dmx_end: Math.min(lastEnd + 9, 255), label: '' });
+  renderGoboEditor();
+});
+
 async function openTypeModal(typeId) {
   cwColors = [];
+  goboSlots = [];
   if (typeId) {
     const t = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json());
     document.getElementById('typeModalTitle').textContent = 'Edit Fixture Type';
@@ -3794,6 +4021,10 @@ async function openTypeModal(typeId) {
       const cwData = await fetch(`/api/fixture-types/${typeId}/color-wheel`).then(r=>r.json());
       if (Array.isArray(cwData)) cwColors = cwData.map(c => ({ dmx_start: c.dmx_start, dmx_end: c.dmx_end, color_hex: c.color_hex, label: c.label || '' }));
     } catch(e) {}
+    try {
+      const goboData = await fetch(`/api/fixture-types/${typeId}/gobo-wheel`).then(r=>r.json());
+      if (Array.isArray(goboData)) goboSlots = goboData.map(s => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label || '' }));
+    } catch(e) {}
   } else {
     document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
     document.getElementById('typeEditId').value = '';
@@ -3806,7 +4037,10 @@ async function openTypeModal(typeId) {
   typeChannels = (typeModes[0].channels || []).map(ch => ({...ch}));
   document.getElementById('tModeName').value = typeModes[0].name || '';
   document.getElementById('tModeShortName').value = typeModes[0].short_name || '';
-  renderModeTabs(); renderChannelsEditor(); updateMultiCellVisibility(); updateColorWheelVisibility(); renderCwEditor();
+  renderModeTabs(); renderChannelsEditor(); updateMultiCellVisibility(); updateColorWheelVisibility(); renderCwEditor(); renderGoboEditor();
+  // Reset wheel tabs to Color Wheel
+  document.querySelectorAll('.wheel-tab').forEach(t => t.classList.toggle('active', t.dataset.wheelTab === 'cw'));
+  document.querySelectorAll('.wheel-tab-content').forEach(c => c.classList.toggle('active', c.dataset.wheelTabContent === 'cw'));
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('tDuplicateHint').textContent = '';
   updateDuplicateHint();
@@ -3850,6 +4084,13 @@ if (document.getElementById('btnSaveType')) document.getElementById('btnSaveType
     await fetch(`/api/fixture-types/${savedId}/color-wheel`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ colors: sorted }) });
   } else if (savedId && !hasColorWheel) {
     await fetch(`/api/fixture-types/${savedId}/color-wheel`, { method: 'DELETE' });
+  }
+  const hasGobo = modes.some(m => m.channels.some(ch => ch.type === 'gobo'));
+  if (savedId && hasGobo && goboSlots.length > 0) {
+    const sorted = goboSlots.map((s, i) => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label, sort_order: i + 1 }));
+    await fetch(`/api/fixture-types/${savedId}/gobo-wheel`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ slots: sorted }) });
+  } else if (savedId && !hasGobo) {
+    await fetch(`/api/fixture-types/${savedId}/gobo-wheel`, { method: 'DELETE' });
   }
   closeModal('typeModal');
   loadTypes();

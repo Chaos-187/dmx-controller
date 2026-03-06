@@ -137,8 +137,10 @@ const SEQ = (() => {
 
   function snapToGrid(ms) {
     if (!snapBeats || !currentSeq?.bpm) return ms;
-    // If we have fluid beat positions from analysis, snap to those
-    const beats = wfAnalysis?.beats;
+    const beatOffsetMs = currentSeq.beat_offset_ms || 0;
+    // If we have fluid beat positions from analysis, snap to those (with offset)
+    const rawBeats = wfAnalysis?.beats;
+    const beats = rawBeats && rawBeats.length > 1 ? rawBeats.map(b => b + beatOffsetMs) : null;
     if (beats && beats.length > 1) {
       // Snap granularity: snapBeats 4=bar(every 4th beat), 1=beat, 0.5=half, 0.25=quarter
       const step = Math.max(1, Math.round(snapBeats));
@@ -162,9 +164,10 @@ const SEQ = (() => {
       }
       return best;
     }
-    // Fallback: uniform grid
+    // Fallback: uniform grid (with offset)
     const snapMs = (60000 / currentSeq.bpm) * snapBeats;
-    return Math.round(ms / snapMs) * snapMs;
+    const shifted = ms - beatOffsetMs;
+    return Math.round(shifted / snapMs) * snapMs + beatOffsetMs;
   }
 
   // ── API ───────────────────────────────────────────────────────
@@ -411,9 +414,27 @@ const SEQ = (() => {
 
   // ── Info Panel ────────────────────────────────────────────────
   function updateInfoPanel() {
-    $('infoBpm').textContent = currentSeq?.bpm ? currentSeq.bpm.toFixed(1) : '--';
-    $('infoDur').textContent = currentSeq ? formatDur(currentSeq.duration_ms / 1000) : '--';
+    $('infoName').value = currentSeq?.name || '';
+    $('infoBpm').value = currentSeq?.bpm ? currentSeq.bpm.toFixed(1) : '';
+    $('infoDur').value = currentSeq?.duration_ms ? (currentSeq.duration_ms / 1000).toFixed(1) : '';
+    $('infoOffset').value = currentSeq?.beat_offset_ms || 0;
     $('infoCues').textContent = cues.length;
+    $('btnSaveSeq').disabled = !currentSeq;
+  }
+
+  async function saveSequenceInfo() {
+    if (!currentId || !currentSeq) return;
+    const name = $('infoName').value.trim();
+    const bpm = parseFloat($('infoBpm').value) || currentSeq.bpm;
+    const durSec = parseFloat($('infoDur').value) || (currentSeq.duration_ms / 1000);
+    const beatOffset = parseFloat($('infoOffset').value) || 0;
+    const update = { name: name || currentSeq.name, bpm, duration_ms: Math.round(durSec * 1000), beat_offset_ms: beatOffset };
+    const result = await apiPut(`/api/sequences/${currentId}`, update);
+    Object.assign(currentSeq, result);
+    // Update the sidebar list entry
+    const listEntry = sequences.find(s => s.id === currentId);
+    if (listEntry) Object.assign(listEntry, { name: result.name, bpm: result.bpm, duration_ms: result.duration_ms });
+    renderSeqList(); renderTimeline(); updateInfoPanel();
   }
 
   // ── Fixture Chips ─────────────────────────────────────────────
@@ -445,7 +466,6 @@ const SEQ = (() => {
   function refreshMoverDropdown() {
     const el = $('propMover');
     el.innerHTML = '<option value="">-- Select --</option>' +
-      '<option value="__all__">All Presets</option>' +
       moverPresets.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   }
 
@@ -464,8 +484,11 @@ const SEQ = (() => {
       cue.end_display_color = (ech.red !== undefined || ech.green !== undefined || ech.blue !== undefined)
         ? colorFromCh(ech) : null;
     }
-    cue.mover_preset_id = ch.mover_preset_id || null;
-    cue.mover_preset_ids = Array.isArray(ch.mover_preset_ids) ? ch.mover_preset_ids : null;
+    // Only overwrite preset fields from channel_values when it exists;
+    // lightweight cues (no channel_values) already carry these as top-level props from the server
+    if (cue.channel_values) {
+      cue.mover_preset_id = ch.mover_preset_id || null;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -497,24 +520,29 @@ const SEQ = (() => {
     // Determine actual beat positions (fluid from analysis, or uniform fallback)
     const analysisBeats = wfAnalysis?.beats;
     const useFluidBeats = analysisBeats && analysisBeats.length > 4;
+    const beatOffsetMs = currentSeq.beat_offset_ms || 0;
     let beatPositions; // array of beat times in ms
     if (useFluidBeats) {
-      beatPositions = analysisBeats;
+      // Shift all analysis beats by user offset
+      beatPositions = analysisBeats.map(b => b + beatOffsetMs);
     } else {
       beatPositions = [];
-      let t = 0;
+      let t = beatOffsetMs;
       while (t < durMs) { beatPositions.push(t); t += beatMs; }
     }
 
     // Grid: when using fluid beats, disable CSS repeating gradient and use
     // per-beat positioned grid lines in the overlay so variable spacing is visible.
     const gridOverlay = $('tlGridOverlay');
-    if (useFluidBeats) {
+    if (useFluidBeats || beatOffsetMs !== 0) {
+      // Use positioned overlay divs: necessary for fluid beats (variable spacing) or
+      // when a beat offset is applied (CSS repeating-gradient can't be phase-shifted)
       canvas.style.setProperty('--beat-px', '0px');
       canvas.style.setProperty('--bar-px', '0px');
       let gridHtml = '';
       for (let i = 0; i < beatPositions.length; i++) {
         const x = (beatPositions[i] / 1000) * zoomPxPerSec;
+        if (x < -2) continue; // skip off-screen left
         const isBar = i % 4 === 0;
         gridHtml += `<div class="tl-grid ${isBar ? 'bar' : 'beat'}" style="left:${x.toFixed(1)}px"></div>`;
       }
@@ -739,16 +767,12 @@ const SEQ = (() => {
     }
     const sel = selectedIds.has(cue.id) ? ' selected' : '';
     const sc = cue.display_color || cue.color || '#e94560';
-    const bg = (cue.end_display_color && cue.cue_type !== 'solid')
+    const bg = (cue.end_display_color && cue.cue_type !== 'solid' && cue.cue_type !== 'color_wheel')
       ? `background:linear-gradient(to right,${sc},${cue.end_display_color})` : `background:${sc}`;
-    let label = cue.label || (cue.cue_type === 'solid' ? '' : cue.cue_type);
-    if (cue.cue_type === 'movement') {
-      if (cue.mover_preset_ids && cue.mover_preset_ids.length > 0) {
-        label = 'All Presets';
-      } else if (cue.mover_preset_id) {
-        const mp = moverPresets.find(p => p.id === cue.mover_preset_id);
-        if (mp) label = mp.name;
-      }
+    let label = cue.label || (cue.cue_type === 'solid' || cue.cue_type === 'color_wheel' ? '' : cue.cue_type);
+    if (cue.cue_type === 'movement' && cue.mover_preset_id) {
+      const mp = moverPresets.find(p => p.id === cue.mover_preset_id);
+      if (mp) label = mp.name;
     }
     return `<div class="tl-cue${sel}" data-cue="${cue.id}" style="left:${left}px;width:${width}px;${bg}" ` +
       `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s)">${esc(label)}<div class="tl-cue-resize"></div></div>`;
@@ -952,12 +976,10 @@ const SEQ = (() => {
     $('propColor').value = cue.display_color || cue.color || '#e94560';
     $('propEffect').value = cue.effect_id || '';
     $('propMoverRow').style.display = t === 'movement' ? '' : 'none';
+    // Hide manual color picker when color_wheel swatches are available
+    $('propColor').closest('.prop-row').style.display = t === 'color_wheel' ? 'none' : '';
     if (t === 'movement') {
-      if (cue.mover_preset_ids && cue.mover_preset_ids.length > 0) {
-        $('propMover').value = '__all__';
-      } else {
-        $('propMover').value = cue.mover_preset_id || '';
-      }
+      $('propMover').value = cue.mover_preset_id || '';
     }
 
     if (!cue.channel_values) {
@@ -965,11 +987,36 @@ const SEQ = (() => {
       api(`/api/cues/${cue.id}`).then(full => {
         cue.channel_values = full.channel_values || {};
         cue.end_channel_values = full.end_channel_values || null;
-        if (selectedPrimary === cue.id) buildChannelSliders(cue);
+        computeDisplay(cue); // re-derive preset fields from full channel data
+        if (selectedPrimary === cue.id) {
+          // Update mover dropdown now that we have real channel data
+          if ((cue.cue_type || 'solid') === 'movement') {
+            $('propMover').value = cue.mover_preset_id || '';
+          }
+          buildChannelSliders(cue);
+        }
       });
     } else { buildChannelSliders(cue); }
 
     $('selectionHint').textContent = selectedIds.size > 1 ? `${selectedIds.size} cues selected` : '';
+  }
+
+  /**
+   * Collect channel values from sliders, omitting channels that are at default 0
+   * and were NOT in the original cue data. This prevents untouched control channels
+   * (macro, other, function etc.) from being saved/sent as 0, which on many fixtures
+   * triggers sound-active or auto-program mode.
+   */
+  function collectChannelValues(group, originalChVals) {
+    const orig = originalChVals || {};
+    const vals = {};
+    $$(`#channelSliders .ch-row[data-group="${group}"]`).forEach(r => {
+      const ch = r.dataset.ch;
+      const v = +r.querySelector('.ch-range').value;
+      // Include if: value is non-zero, OR channel was already stored in the cue
+      if (v !== 0 || orig[ch] !== undefined) vals[ch] = v;
+    });
+    return vals;
   }
 
   function buildChannelSliders(cue) {
@@ -982,10 +1029,81 @@ const SEQ = (() => {
     if (cue.cell) channels = channels.filter(ch => !ch.cell || ch.cell === cue.cell);
     const moverTypes = new Set(['pan','tilt','gobo','gobo_rotation','speed']);
     const isMover = fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
-    if (isMover && cue.label === 'move') channels = channels.filter(ch => moverTypes.has(ch.type));
+    // Movement cues using presets: hide pan/tilt (preset controls position) but keep speed/gobo
+    const hasPreset = t === 'movement' && (chVals.mover_preset_id || $('propMover').value);
+    if (isMover && t === 'movement' && hasPreset) channels = channels.filter(ch => ch.type !== 'pan' && ch.type !== 'tilt' && moverTypes.has(ch.type));
+    else if (isMover && cue.label === 'move') channels = channels.filter(ch => moverTypes.has(ch.type));
     else if (isMover && expandedFixtures.has(fix.id) && cue.label !== 'move') channels = channels.filter(ch => !moverTypes.has(ch.type));
 
     const colors = { red:'#f44', green:'#4f4', blue:'#44f', white:'#fff', dimmer:'#ff0', amber:'#fa0', uv:'#a0f' };
+
+    // ── Color Wheel swatch mode ──
+    if (t === 'color_wheel' && fix.color_wheel_map && fix.color_wheel_map.length > 0) {
+      const cwMap = fix.color_wheel_map.slice().sort((a, b) => a.dmx_start - b.dmx_start);
+      const cwVal = chVals.color_wheel !== undefined ? chVals.color_wheel : cwMap[0].dmx_start;
+      let html = `<div class="ch-section-label">Color Wheel</div><div class="cw-swatch-grid">`;
+      for (const entry of cwMap) {
+        const sel = (cwVal >= entry.dmx_start && cwVal <= entry.dmx_end) ? ' selected' : '';
+        html += `<div class="cw-swatch${sel}" data-dmx="${entry.dmx_start}" data-hex="${entry.color_hex}" title="${entry.name || ''}">` +
+          `<div class="cw-swatch-dot" style="background:${entry.color_hex}"></div>` +
+          `<span class="cw-swatch-name">${entry.name || ''}</span></div>`;
+      }
+      html += `</div>`;
+      // Hidden input so applyCueProps/autoApply can read color_wheel value
+      html += `<div class="ch-row" data-ch="color_wheel" data-group="start" style="display:none">` +
+        `<input type="range" class="ch-range" min="0" max="255" value="${cwVal}"></div>`;
+      // Show remaining channels (dimmer, speed, gobo etc.) as normal sliders
+      const otherChs = channels.filter(ch => ch.type !== 'color_wheel');
+      if (otherChs.length > 0) {
+        html += `<div class="ch-section-label">Channels</div>`;
+        for (const ch of otherChs) {
+          const v = chVals[ch.type] !== undefined ? chVals[ch.type] : 0;
+          const c = colors[ch.type] || '#888';
+          html += `<div class="ch-row" data-ch="${ch.type}" data-group="start"><span class="ch-label" style="color:${c}">${ch.type.substring(0,4).toUpperCase()}</span>` +
+            `<input type="range" class="ch-range" min="0" max="255" value="${v}"><span class="ch-val">${v}</span></div>`;
+        }
+      }
+      el.innerHTML = html;
+      // Swatch click handler
+      $$('.cw-swatch', el).forEach(sw => {
+        sw.addEventListener('click', () => {
+          $$('.cw-swatch', el).forEach(s => s.classList.remove('selected'));
+          sw.classList.add('selected');
+          const dmx = +sw.dataset.dmx;
+          const hex = sw.dataset.hex;
+          // Update hidden range input
+          const hiddenRow = el.querySelector('.ch-row[data-ch="color_wheel"] .ch-range');
+          if (hiddenRow) hiddenRow.value = dmx;
+          // Update color picker to match
+          if (hex) $('propColor').value = hex;
+          // Live DMX preview
+          if (editMode && cue.fixture_id) {
+            const preview = { color_wheel: dmx };
+            $$('#channelSliders .ch-row[data-group="start"]:not([style*="display:none"])').forEach(r => {
+              preview[r.dataset.ch] = +r.querySelector('.ch-range').value;
+            });
+            wsSend({ type: 'sequence', action: 'preview_channel', deck, fixture_id: cue.fixture_id, cell: cue.cell || null, channel_values: preview });
+          }
+        });
+      });
+      // Slider event handlers for other channels
+      let _sliderPreviewTimer = null;
+      $$('.ch-row:not([style*="display:none"]) .ch-range', el).forEach(inp => {
+        inp.addEventListener('input', () => {
+          inp.nextElementSibling.textContent = inp.value;
+          if (editMode && cue.fixture_id) {
+            clearTimeout(_sliderPreviewTimer);
+            _sliderPreviewTimer = setTimeout(() => {
+              const chV = collectChannelValues('start', cue.channel_values || {});
+              wsSend({ type: 'sequence', action: 'preview_channel', deck, fixture_id: cue.fixture_id, cell: cue.cell || null, channel_values: chV });
+            }, 30);
+          }
+        });
+      });
+      return; // done for color_wheel mode
+    }
+
+    // ── Standard slider mode ──
     let html = `<div class="ch-section-label">${t === 'solid' ? 'Color' : 'Start Values'}</div>`;
     for (const ch of channels) {
       const v = chVals[ch.type] !== undefined ? chVals[ch.type] : 0;
@@ -1024,11 +1142,8 @@ const SEQ = (() => {
         if (editMode && cue.fixture_id) {
           clearTimeout(_sliderPreviewTimer);
           _sliderPreviewTimer = setTimeout(() => {
-            const chVals = {};
-            $$('#channelSliders .ch-row[data-group="start"]').forEach(r => {
-              chVals[r.dataset.ch] = +r.querySelector('.ch-range').value;
-            });
-            wsSend({ type: 'sequence', action: 'preview_channel', deck, fixture_id: cue.fixture_id, cell: cue.cell || null, channel_values: chVals });
+            const pVals = collectChannelValues('start', cue.channel_values || {});
+            wsSend({ type: 'sequence', action: 'preview_channel', deck, fixture_id: cue.fixture_id, cell: cue.cell || null, channel_values: pVals });
           }, 30);
         }
       });
@@ -1072,8 +1187,8 @@ const SEQ = (() => {
     const durMs = parseFloat($('propDur').value) * 1000;
     const label = $('propLabel').value;
     const effectId = $('propEffect').value || null;
-    const chVals = {};
-    $$('#channelSliders .ch-row[data-group="start"]').forEach(r => { chVals[r.dataset.ch] = +r.querySelector('.ch-range').value; });
+    const origCh = cue.channel_values || {};
+    const chVals = collectChannelValues('start', origCh);
     // Derive display color: RGB from sliders, or color_wheel map lookup, or fallback to picker
     let color;
     if (chVals.red !== undefined || chVals.green !== undefined || chVals.blue !== undefined) {
@@ -1085,15 +1200,13 @@ const SEQ = (() => {
     }
     let endChVals = null;
     const endRows = $$('#channelSliders .ch-row[data-group="end"]');
-    if (endRows.length > 0) { endChVals = {}; endRows.forEach(r => { endChVals[r.dataset.ch] = +r.querySelector('.ch-range').value; }); }
+    if (endRows.length > 0) { endChVals = collectChannelValues('end', cue.end_channel_values || origCh); }
     if (type === 'strobe') { const hz = document.querySelector('#channelSliders .ch-row[data-ch="strobe_hz"] .ch-range'); if (hz) chVals.strobe_hz = +hz.value; }
     if (type === 'movement') {
       const pid = $('propMover').value;
-      if (pid === '__all__') {
-        chVals.mover_preset_ids = moverPresets.map(p => p.id);
-      } else if (pid) {
-        chVals.mover_preset_id = +pid;
-      }
+      if (pid) { chVals.mover_preset_id = +pid; }
+      // When a preset is selected, strip raw pan/tilt — preset controls position; keep speed/gobo
+      if (pid) { delete chVals.pan; delete chVals.tilt; }
     }
 
     const update = { cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs), label, color, channel_values: chVals, end_channel_values: endChVals, effect_id: effectId ? +effectId : null };
@@ -1162,8 +1275,8 @@ const SEQ = (() => {
     const cue = cues.find(c => c.id === selectedPrimary);
     if (!cue) return;
     const type = $('propType').value;
-    const chVals = {};
-    $$('#channelSliders .ch-row[data-group="start"]').forEach(r => { chVals[r.dataset.ch] = +r.querySelector('.ch-range').value; });
+    const origCh = cue.channel_values || {};
+    const chVals = collectChannelValues('start', origCh);
     let color;
     if (chVals.red !== undefined || chVals.green !== undefined || chVals.blue !== undefined) {
       color = colorFromCh(chVals);
@@ -1174,8 +1287,13 @@ const SEQ = (() => {
     }
     let endChVals = null;
     const endRows = $$('#channelSliders .ch-row[data-group="end"]');
-    if (endRows.length > 0) { endChVals = {}; endRows.forEach(r => { endChVals[r.dataset.ch] = +r.querySelector('.ch-range').value; }); }
+    if (endRows.length > 0) { endChVals = collectChannelValues('end', cue.end_channel_values || origCh); }
     if (type === 'strobe') { const hz = document.querySelector('#channelSliders .ch-row[data-ch="strobe_hz"] .ch-range'); if (hz) chVals.strobe_hz = +hz.value; }
+    if (type === 'movement') {
+      const pid = $('propMover').value;
+      if (pid) { chVals.mover_preset_id = +pid; }
+      if (pid) { delete chVals.pan; delete chVals.tilt; }
+    }
     const update = { cue_type: type, start_ms: Math.round(parseFloat($('propStart').value)*1000), duration_ms: Math.round(parseFloat($('propDur').value)*1000), label: $('propLabel').value, color, channel_values: chVals, end_channel_values: endChVals, effect_id: $('propEffect').value ? +$('propEffect').value : null };
     apiPut(`/api/cues/${selectedPrimary}`, update);
     Object.assign(cue, update);
@@ -1292,6 +1410,21 @@ const SEQ = (() => {
       _sqt = setTimeout(() => { renderSeqList(); }, _seqQuery.length > 1 ? 80 : 200);
     });
 
+    // ── Save Sequence ──
+    on('btnSaveSeq', 'click', saveSequenceInfo);
+
+    // ── Beat Offset Nudge ──
+    on('offsetNudgeDown', 'click', () => {
+      const el = $('infoOffset');
+      el.value = Math.round((parseFloat(el.value) || 0) - 10);
+      saveSequenceInfo();
+    });
+    on('offsetNudgeUp', 'click', () => {
+      const el = $('infoOffset');
+      el.value = Math.round((parseFloat(el.value) || 0) + 10);
+      saveSequenceInfo();
+    });
+
     // ── New / Delete Sequence ──
     on('btnNewSeq', 'click', async () => {
       const name = prompt('Sequence name:', 'New Sequence'); if (!name) return;
@@ -1314,7 +1447,14 @@ const SEQ = (() => {
     on('btnApplyCue', 'click', applyCueProps);
     on('btnDeleteCue', 'click', deleteSelectedCues);
     on('propType', 'change', () => {
-      $('propMoverRow').style.display = $('propType').value === 'movement' ? '' : 'none';
+      const tv = $('propType').value;
+      $('propMoverRow').style.display = tv === 'movement' ? '' : 'none';
+      // Hide the manual color picker when color_wheel swatches are shown
+      $('propColor').closest('.prop-row').style.display = tv === 'color_wheel' ? 'none' : '';
+      if (selectedPrimary) { const cue = cues.find(c => c.id === selectedPrimary); if (cue) buildChannelSliders(cue); }
+    });
+    // When mover preset dropdown changes, rebuild sliders (show/hide raw channels)
+    on('propMover', 'change', () => {
       if (selectedPrimary) { const cue = cues.find(c => c.id === selectedPrimary); if (cue) buildChannelSliders(cue); }
     });
 
@@ -1382,7 +1522,17 @@ const SEQ = (() => {
       const sub = track.dataset.sub || null;
       let body;
       if (sub === 'movement') {
-        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'fade', fixture_id: fixId, channel_values: { pan: 128, tilt: 128 }, end_channel_values: { pan: 128, tilt: 128 }, color: '#4488ff', label: 'move' };
+        const mvChVals = moverPresets.length > 0
+          ? { mover_preset_id: moverPresets[0].id }
+          : { pan: 128, tilt: 128 };
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'movement', fixture_id: fixId, channel_values: mvChVals, color: '#4488ff', label: 'move' };
+      } else if (isColorWheelFixture(fixId)) {
+        const fix = fixtures.find(f => f.id === fixId);
+        const cwMap = fix && fix.color_wheel_map ? fix.color_wheel_map.slice().sort((a,b) => a.dmx_start - b.dmx_start) : [];
+        const firstEntry = cwMap[0];
+        const cwDmx = firstEntry ? firstEntry.dmx_start : 0;
+        const cwColor = firstEntry ? firstEntry.color_hex : '#ffffff';
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'color_wheel', fixture_id: fixId, channel_values: { color_wheel: cwDmx }, color: cwColor, label: '' };
       } else {
         body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'solid', fixture_id: fixId, channel_values: { red: 255, green: 0, blue: 0 }, color: '#ff0000', label: '' };
       }
