@@ -548,8 +548,8 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const SECTION_MIN_BARS    = cfg.SECTION_MIN_BARS   || DEFAULTS.SECTION_MIN_BARS;
   const SECTION_WINDOW_BARS = cfg.SECTION_WINDOW_BARS || DEFAULTS.SECTION_WINDOW_BARS;
   const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
-  const MAX_SECTION_BARS    = 16;   // force-split any section longer than this
-  const MAX_INTRO_BARS     = 8;    // intro/outro can't exceed this many bars
+  const MAX_SECTION_BARS    = 32;   // force-split any section longer than this
+  const MAX_INTRO_BARS     = 16;   // intro/outro can't exceed this many bars
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
@@ -558,6 +558,20 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const bars = beatsToBarBoundaries(beats, durationMs);
   const totalBars = bars.length;
   if (totalBars < SECTION_MIN_BARS * 2) return [];
+
+  // ── Grid phase from beatgrid_pos ──────────────────────────────────────
+  //   The DJ's "bar 1" (firstBeatMs) tells us where phrases really start.
+  //   Align the 4/8-bar grid to that position so boundaries land on real
+  //   musical phrase boundaries, not arbitrary multiples of 4 from bar 0.
+  let gridPhase = 0;
+  if (firstBeatMs > 0) {
+    let closestBar = 0, closestDist = Infinity;
+    for (let b = 0; b < totalBars; b++) {
+      const dist = Math.abs(bars[b].start_ms - firstBeatMs);
+      if (dist < closestDist) { closestDist = dist; closestBar = b; }
+    }
+    gridPhase = closestBar % 4;  // offset so closestBar is on-grid
+  }
 
   // ── 1. Per-bar energy averages (using actual bar boundaries) ──────────
   function barAverages(field) {
@@ -629,12 +643,14 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
 
   // ── 3. Multi-scale novelty ────────────────────────────────────────────
   //   a) Short-term: absolute energy difference bar-to-bar
-  //   b) Phrase-level: compare bar i energy to mean of bars [i-phraseK .. i-1]
+  //   b) Phrase-level (4-bar): compare bar i energy to mean of bars [i-phraseK .. i-1]
   //      vs mean of bars [i .. i+phraseK-1]
-  //   c) Spectral: cosine distance of 5-band vectors
-  //   d) Spectral flux change: bar-to-bar flux difference
+  //   c) Long phrase (8-bar): same as (b) but with 8-bar context
+  //   d) Spectral: cosine distance of 5-band vectors
+  //   e) Spectral flux change: bar-to-bar flux difference
 
   const phraseK = Math.min(4, Math.floor(totalBars / 4)); // 4-bar context each side
+  const phraseL = Math.min(8, Math.floor(totalBars / 4)); // 8-bar context each side
 
   function meanRange(arr, lo, hi) {
     lo = Math.max(0, lo);
@@ -672,17 +688,22 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     // Short-term magnitude change (normalised)
     const shortDiff = Math.abs(smTotal[i] - smTotal[i - 1]) / eRange;
 
-    // Phrase-level contrast
+    // 4-bar phrase-level contrast
     const leftMean  = meanRange(smTotal, i - phraseK, i - 1);
     const rightMean = meanRange(smTotal, i, i + phraseK - 1);
     const phraseDiff = Math.abs(rightMean - leftMean) / eRange;
+
+    // 8-bar phrase-level contrast (captures larger structural changes)
+    const leftMeanL  = meanRange(smTotal, i - phraseL, i - 1);
+    const rightMeanL = meanRange(smTotal, i, i + phraseL - 1);
+    const phraseDiffL = Math.abs(rightMeanL - leftMeanL) / eRange;
 
     // 5-band spectral change (cosine distance)
     const vecPrev = [smSubBass[i-1], smBass[i-1], smMid[i-1], smHiMid[i-1], smTreble[i-1]];
     const vecCurr = [smSubBass[i],   smBass[i],   smMid[i],   smHiMid[i],   smTreble[i]];
     const specDiff = cosineDistN(vecPrev, vecCurr);
 
-    // Phrase-level spectral contrast (average 5-band energy left vs right)
+    // 4-bar phrase-level spectral contrast
     const lVec = [meanRange(smSubBass, i-phraseK, i-1), meanRange(smBass, i-phraseK, i-1),
                   meanRange(smMid, i-phraseK, i-1), meanRange(smHiMid, i-phraseK, i-1),
                   meanRange(smTreble, i-phraseK, i-1)];
@@ -691,12 +712,26 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
                   meanRange(smTreble, i, i+phraseK-1)];
     const phraseSpec = cosineDistN(lVec, rVec);
 
+    // 8-bar phrase-level spectral contrast
+    const lVecL = [meanRange(smSubBass, i-phraseL, i-1), meanRange(smBass, i-phraseL, i-1),
+                   meanRange(smMid, i-phraseL, i-1), meanRange(smHiMid, i-phraseL, i-1),
+                   meanRange(smTreble, i-phraseL, i-1)];
+    const rVecL = [meanRange(smSubBass, i, i+phraseL-1), meanRange(smBass, i, i+phraseL-1),
+                   meanRange(smMid, i, i+phraseL-1), meanRange(smHiMid, i, i+phraseL-1),
+                   meanRange(smTreble, i, i+phraseL-1)];
+    const phraseSpecL = cosineDistN(lVecL, rVecL);
+
     // Spectral flux change (normalised)
     const fluxDiff = Math.abs(smFlux[i] - smFlux[i - 1]) / fRange;
 
-    // Weighted combination (added flux component)
-    novelty[i] = shortDiff * 0.10 + phraseDiff * 0.30 + specDiff * 0.10
-               + phraseSpec * 0.30 + fluxDiff * 0.20;
+    // Weighted combination: 4-bar phrase is primary, 8-bar supplements
+    novelty[i] = shortDiff   * 0.10
+               + phraseDiff  * 0.25
+               + phraseDiffL * 0.10
+               + specDiff    * 0.10
+               + phraseSpec  * 0.20
+               + phraseSpecL * 0.10
+               + fluxDiff    * 0.15;
   }
 
   // Adaptive threshold
@@ -706,60 +741,157 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const novStd  = Math.sqrt(novSq / totalBars - novMean * novMean);
   const novThreshold = novMean + SECTION_SENSITIVITY * novStd;
 
-  // ── 4. Pick boundaries & snap to 4-bar grid ──────────────────────────
-  const boundaries = [0];
-  let lastBoundary = 0;
+  // ── 4. Pick boundaries using greedy strongest-first approach ────────
+  //   Instead of scanning left-to-right (which misses strong boundaries
+  //   near weaker ones that were picked first), collect ALL candidate
+  //   peaks above threshold, sort by novelty strength descending, then
+  //   greedily add them enforcing minimum spacing.  This ensures the
+  //   strongest transitions in the track always become boundaries.
 
+  // 4a. Detect dramatic energy transitions (>30% of range in 1-2 bars)
+  //     These get an extra novelty boost so they're always picked.
+  //     Also collect "energy cliffs" — mandatory boundaries that are so
+  //     dramatic they must become section boundaries regardless of grid.
+  // Use RAW (unsmoothed) bar energy for cliff/dramatic detection —
+  // smoothing dilutes single-bar jumps so cliffs go undetected.
+  const dramaticThreshold = eRange * 0.25;
+  const cliffThreshold    = eRange * 0.30; // mandatory boundary
+  const energyCliffs = new Set();
   for (let i = 1; i < totalBars; i++) {
-    if (novelty[i] > novThreshold && (i - lastBoundary) >= SECTION_MIN_BARS) {
-      // Local peak check: must be highest within ±1 bar
-      if ((i === 1 || novelty[i] >= novelty[i - 1]) &&
-          (i === totalBars - 1 || novelty[i] >= novelty[i + 1])) {
-        // Snap to nearest 8-bar boundary first (natural phrase length),
-        // falling back to 4-bar if 8-bar is too far away
-        const nearest8 = Math.round(i / 8) * 8;
-        const nearest4 = Math.round(i / 4) * 4;
-        let snapped = i;
-        if (Math.abs(nearest8 - i) <= 2 && nearest8 > lastBoundary && nearest8 < totalBars) {
-          snapped = nearest8;
-        } else if (Math.abs(nearest4 - i) <= 2 && nearest4 > lastBoundary && nearest4 < totalBars) {
-          snapped = nearest4;
-        }
-        if (snapped > lastBoundary) {
-          boundaries.push(snapped);
-          lastBoundary = snapped;
+    // Raw (unsmoothed) single-bar jump
+    const rawDiff = Math.abs(barTotal[i] - barTotal[i - 1]);
+    // Smoothed for novelty boost (less aggressive)
+    const smDiff = Math.abs(smTotal[i] - smTotal[i - 1]);
+    const bestDiff = Math.max(rawDiff, smDiff);
+    if (bestDiff > dramaticThreshold) {
+      novelty[i] = Math.max(novelty[i], novelty[i] + bestDiff / eRange * 0.5);
+    }
+    // Energy cliff: raw single-bar change > 30% of range → mandatory boundary
+    // Verify it's a STRUCTURAL change by comparing wider context windows
+    // (3 bars on each side, EXCLUDING the immediate cliff pair to avoid
+    // contamination from transient dips/spikes)
+    if (rawDiff > cliffThreshold) {
+      const lookBack = Math.max(0, i - 4);  // up to 3 bars before i-1
+      const lookAhead = Math.min(totalBars - 1, i + 3);
+      let sumBefore = 0, cntBefore = 0;
+      for (let j = lookBack; j < i - 1; j++) { sumBefore += barTotal[j]; cntBefore++; }
+      let sumAfter = 0, cntAfter = 0;
+      for (let j = i + 1; j <= lookAhead; j++) { sumAfter += barTotal[j]; cntAfter++; }
+      const widerBefore = cntBefore > 0 ? sumBefore / cntBefore : barTotal[Math.max(0, i - 1)];
+      const widerAfter = cntAfter > 0 ? sumAfter / cntAfter : barTotal[i];
+      const widerDiff = Math.abs(widerAfter - widerBefore);
+      if (widerDiff > cliffThreshold * 0.5) {
+        energyCliffs.add(i);
+      }
+    }
+    // Also check 2-bar transitions
+    if (i >= 2) {
+      const rawDiff2 = Math.abs(barTotal[i] - barTotal[i - 2]);
+      const smDiff2  = Math.abs(smTotal[i] - smTotal[i - 2]);
+      const bestDiff2 = Math.max(rawDiff2, smDiff2);
+      if (bestDiff2 > dramaticThreshold * 1.5) {
+        novelty[i] = Math.max(novelty[i], novelty[i] + bestDiff2 / eRange * 0.3);
+      }
+      // 2-bar cliff: also require structural context change
+      if (rawDiff2 > cliffThreshold * 1.3) {
+        const lookBack2 = Math.max(0, i - 5);
+        const lookAhead2 = Math.min(totalBars - 1, i + 3);
+        let sumB2 = 0, cntB2 = 0;
+        for (let j = lookBack2; j < i - 2; j++) { sumB2 += barTotal[j]; cntB2++; }
+        let sumA2 = 0, cntA2 = 0;
+        for (let j = i + 1; j <= lookAhead2; j++) { sumA2 += barTotal[j]; cntA2++; }
+        const wb2 = cntB2 > 0 ? sumB2 / cntB2 : barTotal[Math.max(0, i - 2)];
+        const wa2 = cntA2 > 0 ? sumA2 / cntA2 : barTotal[i];
+        if (Math.abs(wa2 - wb2) > cliffThreshold * 0.6) {
+          energyCliffs.add(i);
         }
       }
     }
   }
+
+  // Recompute threshold after boosting
+  let novSum2 = 0, novSq2 = 0;
+  for (let i = 0; i < totalBars; i++) { novSum2 += novelty[i]; novSq2 += novelty[i] * novelty[i]; }
+  const novMean2 = novSum2 / totalBars;
+  const novStd2  = Math.sqrt(novSq2 / totalBars - novMean2 * novMean2);
+  const novThresholdFinal = novMean2 + SECTION_SENSITIVITY * novStd2;
+
+  // 4b. Collect ALL candidate local maxima above threshold
+  const candidates = []; // { bar, novelty }
+  for (let i = 1; i < totalBars; i++) {
+    if (novelty[i] < novThresholdFinal) continue;
+    // Local peak check: must be highest within ±2 bars
+    const lo = Math.max(1, i - 2);
+    const hi = Math.min(totalBars - 1, i + 2);
+    let isLocalMax = true;
+    for (let j = lo; j <= hi; j++) {
+      if (j !== i && novelty[j] > novelty[i]) { isLocalMax = false; break; }
+    }
+    if (isLocalMax) {
+      candidates.push({ bar: i, nov: novelty[i] });
+    }
+  }
+
+  // 4c. Sort candidates by novelty strength (strongest first)
+  candidates.sort((a, b) => b.nov - a.nov);
+
+  // 4d. Greedily add boundaries, enforcing minimum spacing
+  //   Start with energy cliffs as mandatory (unsnapped) boundaries.
+  const boundarySet = new Set([0]);
+  for (const cliff of energyCliffs) {
+    if (cliff > 0 && cliff < totalBars) boundarySet.add(cliff);
+  }
+
+  // Phase-aligned snap helpers
+  function snapToGrid4(bar) {
+    // Snap to nearest bar where (bar - gridPhase) % 4 == 0
+    const offset = bar - gridPhase;
+    return Math.round(offset / 4) * 4 + gridPhase;
+  }
+  function snapToGrid8(bar) {
+    const offset = bar - gridPhase;
+    return Math.round(offset / 8) * 8 + gridPhase;
+  }
+
+  for (const cand of candidates) {
+    // Check minimum spacing from all existing boundaries
+    let tooClose = false;
+    for (const existing of boundarySet) {
+      if (Math.abs(cand.bar - existing) < SECTION_MIN_BARS) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) {
+      // Don't snap if this bar is an energy cliff (keep exact position)
+      if (energyCliffs.has(cand.bar)) {
+        boundarySet.add(cand.bar);
+        continue;
+      }
+      // Snap to nearest phrase-aligned grid (respecting beatgrid phase)
+      const rel8 = snapToGrid8(cand.bar);
+      const rel4 = snapToGrid4(cand.bar);
+      let snapped = cand.bar;
+      if (Math.abs(rel8 - cand.bar) <= 2 && rel8 > 0 && rel8 < totalBars) {
+        snapped = rel8;
+      } else if (Math.abs(rel4 - cand.bar) <= 2 && rel4 > 0 && rel4 < totalBars) {
+        snapped = rel4;
+      }
+      // Verify snapped position doesn't conflict
+      let snapConflict = false;
+      for (const existing of boundarySet) {
+        if (existing !== 0 && Math.abs(snapped - existing) < SECTION_MIN_BARS) {
+          snapConflict = true;
+          break;
+        }
+      }
+      boundarySet.add(snapConflict ? cand.bar : snapped);
+    }
+  }
+
+  const finalBoundaries = [...boundarySet].sort((a, b) => a - b);
 
   // Force-split any section longer than MAX_SECTION_BARS
-  const splitBoundaries = [boundaries[0]];
-  for (let b = 1; b <= boundaries.length; b++) {
-    const start = splitBoundaries[splitBoundaries.length - 1];
-    const end   = b < boundaries.length ? boundaries[b] : totalBars;
-    if ((end - start) > MAX_SECTION_BARS) {
-      // Find the highest novelty point inside this oversized section
-      // aligned to 4-bar or 8-bar grid
-      let bestBar = -1, bestNov = -1;
-      for (let j = start + SECTION_MIN_BARS; j <= end - SECTION_MIN_BARS; j++) {
-        if (j % 4 === 0 && novelty[j] > bestNov) {
-          bestNov = novelty[j];
-          bestBar = j;
-        }
-      }
-      if (bestBar > start) {
-        splitBoundaries.push(bestBar);
-      }
-    }
-    if (b < boundaries.length) {
-      splitBoundaries.push(boundaries[b]);
-    }
-  }
-  // Sort & dedupe after splitting
-  const finalBoundaries = [...new Set(splitBoundaries)].sort((a, b) => a - b);
-
-  // Repeat force-split pass until no section exceeds max (handles very long gaps)
   let changed = true;
   while (changed) {
     changed = false;
@@ -767,18 +899,25 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       const start = finalBoundaries[b];
       const end   = b + 1 < finalBoundaries.length ? finalBoundaries[b + 1] : totalBars;
       if ((end - start) > MAX_SECTION_BARS) {
+        // Find highest novelty on phase-aligned 8-bar or 4-bar grid
         let bestBar = -1, bestNov = -1;
         for (let j = start + SECTION_MIN_BARS; j <= end - SECTION_MIN_BARS; j++) {
-          if (j % 4 === 0 && novelty[j] > bestNov) {
-            bestNov = novelty[j];
-            bestBar = j;
+          if ((j - gridPhase) % 8 === 0 && novelty[j] > bestNov) {
+            bestNov = novelty[j]; bestBar = j;
+          }
+        }
+        if (bestBar < 0) {
+          for (let j = start + SECTION_MIN_BARS; j <= end - SECTION_MIN_BARS; j++) {
+            if ((j - gridPhase) % 4 === 0 && novelty[j] > bestNov) {
+              bestNov = novelty[j]; bestBar = j;
+            }
           }
         }
         if (bestBar > start && !finalBoundaries.includes(bestBar)) {
           finalBoundaries.push(bestBar);
           finalBoundaries.sort((a, b) => a - b);
           changed = true;
-          break; // restart scan
+          break;
         }
       }
     }
@@ -788,6 +927,119 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   if (finalBoundaries.length < 2) {
     finalBoundaries.length = 0;
     for (let i = 0; i < totalBars; i += 8) finalBoundaries.push(i);
+  }
+
+  // ── 4e. Energy-variance split ──────────────────────────────────────────
+  //   Novelty-based detection misses gradual transitions (e.g. 10-bar
+  //   ramp from verse into drop).  Scan each section: if it contains bars
+  //   from very different energy zones, split at the steepest crossing.
+  const varianceSplitThreshold = eRange * 0.35;
+  let varChanged = true;
+  while (varChanged) {
+    varChanged = false;
+    for (let b = 0; b < finalBoundaries.length; b++) {
+      const start = finalBoundaries[b];
+      const end = b + 1 < finalBoundaries.length ? finalBoundaries[b + 1] : totalBars;
+      // Allow split if section has at least 3 bars on each side (was MIN_BARS*2=8,
+      // now MIN_BARS+2=6 so even 6-bar sections with huge internal variance get split)
+      if ((end - start) < SECTION_MIN_BARS + 2) continue;
+
+      // Find min/max energy in this section
+      let minE = Infinity, maxE = -Infinity;
+      for (let j = start; j < end; j++) {
+        if (smTotal[j] < minE) minE = smTotal[j];
+        if (smTotal[j] > maxE) maxE = smTotal[j];
+      }
+      if ((maxE - minE) < varianceSplitThreshold) continue;
+
+      // Find the bar with the steepest energy gradient (biggest rolling
+      // difference over a 2-bar window).  Allow splits as close as 2 bars
+      // from edges when the gradient is extreme.
+      const minEdge = Math.min(SECTION_MIN_BARS, Math.max(2, Math.floor((end - start) / 3)));
+      let bestBar = -1, bestGrad = 0;
+      for (let j = start + minEdge; j <= end - minEdge; j++) {
+        // Use a 2-bar rolling difference for robustness
+        const lo = Math.max(start, j - 2);
+        const hi = Math.min(end - 1, j + 1);
+        const leftE = (smTotal[lo] + smTotal[Math.min(lo + 1, j - 1)]) / 2;
+        const rightE = (smTotal[j] + smTotal[hi]) / 2;
+        const grad = Math.abs(rightE - leftE);
+        if (grad > bestGrad) {
+          bestGrad = grad;
+          bestBar = j;
+        }
+      }
+      if (bestBar > start && !finalBoundaries.includes(bestBar)) {
+        // Snap to phase-aligned 4-bar grid if close
+        const snap4 = snapToGrid4(bestBar);
+        const useBar = (Math.abs(snap4 - bestBar) <= 2 && snap4 > start && snap4 < end)
+          ? snap4 : bestBar;
+        if (!finalBoundaries.includes(useBar)) {
+          finalBoundaries.push(useBar);
+          finalBoundaries.sort((a, b) => a - b);
+          varChanged = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // ── 4f. Merge tiny sections (< 2 bars) into nearest neighbor ─────────
+  //   Cliff detection can create very short sections.  Merge them with the
+  //   adjacent section that has the most similar energy.
+  //   Exception: preserve tiny sections at the very end/start of the track
+  //   when they have very different energy (intro/outro patterns).
+  {
+    let mergeNeeded = true;
+    while (mergeNeeded) {
+      mergeNeeded = false;
+      for (let b = 0; b < finalBoundaries.length; b++) {
+        const start = finalBoundaries[b];
+        const end = b + 1 < finalBoundaries.length ? finalBoundaries[b + 1] : totalBars;
+        if ((end - start) >= 2) continue;
+        // Preserve tiny start/end sections if energy differs substantially
+        const myE = smTotal[start] || 0;
+        if (b === 0 || b === finalBoundaries.length - 1) {
+          // Check energy difference from neighbor
+          const neighborStart = b === 0
+            ? (finalBoundaries.length > 1 ? finalBoundaries[1] : 0)
+            : finalBoundaries[b - 1];
+          const neighborEnd = b === 0
+            ? (finalBoundaries.length > 2 ? finalBoundaries[2] : totalBars)
+            : finalBoundaries[b];
+          let nSum = 0, nCnt = 0;
+          for (let j = neighborStart; j < neighborEnd; j++) { nSum += smTotal[j]; nCnt++; }
+          const nAvg = nCnt > 0 ? nSum / nCnt : 0;
+          if (Math.abs(myE - nAvg) > eRange * 0.3) continue;  // preserve it
+        }
+        const prevIdx = b > 0 ? b : -1;
+        const nextIdx = b + 1 < finalBoundaries.length ? b + 1 : -1;
+        let prevE = Infinity, nextE = Infinity;
+        if (prevIdx >= 0) {
+          const ps = prevIdx > 0 ? finalBoundaries[prevIdx - 1] : 0;
+          const pe = finalBoundaries[prevIdx];
+          let sum = 0;
+          for (let j = ps; j < pe; j++) sum += smTotal[j];
+          prevE = Math.abs(myE - sum / Math.max(1, pe - ps));
+        }
+        if (nextIdx >= 0 && nextIdx < finalBoundaries.length) {
+          const ns = finalBoundaries[nextIdx];
+          const ne = nextIdx + 1 < finalBoundaries.length ? finalBoundaries[nextIdx + 1] : totalBars;
+          let sum = 0;
+          for (let j = ns; j < ne; j++) sum += smTotal[j];
+          nextE = Math.abs(myE - sum / Math.max(1, ne - ns));
+        }
+        if (prevE <= nextE && prevIdx >= 0) {
+          finalBoundaries.splice(b, 1);
+        } else if (nextIdx >= 0) {
+          finalBoundaries.splice(b + 1, 1);
+        } else {
+          finalBoundaries.splice(b, 1);
+        }
+        mergeNeeded = true;
+        break;
+      }
+    }
   }
 
   // ── 5. Compute per-section features ────────────────────────────────────
@@ -1027,22 +1279,29 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     clusterProps.sort((a, b) => b.avgEnergy - a.avgEnergy);
 
     // ── Assign labels to clusters ───────────────────────────────────────
+    //   The top-energy cluster label applies to any mid-cluster that's
+    //   energetically close to it (relPos > 0.6).  This prevents the
+    //   same drop from being split between "drop" and "chorus".
+    const topLabel = clusterProps[0].avgBR > brP75 ? 'drop' : 'chorus';
     if (clusterProps.length >= 3) {
-      // Highest energy → chorus/drop; Lowest → verse; Middle → bridge if rare
       for (const idx of clusterProps[0].members) {
-        sectionLabels[idx] = clusterProps[0].avgBR > brP75 ? 'drop' : 'chorus';
+        sectionLabels[idx] = topLabel;
       }
       for (const idx of clusterProps[clusterProps.length - 1].members) {
         sectionLabels[idx] = 'verse';
       }
       for (let c = 1; c < clusterProps.length - 1; c++) {
-        const label = clusterProps[c].count <= 2 ? 'bridge' : 'verse';
+        const midEnergy = clusterProps[c].avgEnergy;
+        const highEnergy = clusterProps[0].avgEnergy;
+        const lowEnergy = clusterProps[clusterProps.length - 1].avgEnergy;
+        const relPos = (midEnergy - lowEnergy) / ((highEnergy - lowEnergy) || 1);
+        // Mid-clusters close to the top get the same top label
+        const label = relPos > 0.6 ? topLabel : 'verse';
         for (const idx of clusterProps[c].members) sectionLabels[idx] = label;
       }
     } else if (clusterProps.length === 2) {
-      // Two clusters: higher energy = chorus, lower = verse
       for (const idx of clusterProps[0].members) {
-        sectionLabels[idx] = clusterProps[0].avgBR > brP75 ? 'drop' : 'chorus';
+        sectionLabels[idx] = topLabel;
       }
       for (const idx of clusterProps[1].members) {
         sectionLabels[idx] = 'verse';
@@ -1096,20 +1355,25 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
              f.energy < p75 && (normGrad < 0.1 || f.energy <= p50)) {
       sectionLabels[s] = 'outro';
     }
-    // Buildup: rising energy gradient + rising onset density (snare rolls / accelerating rhythm)
-    else if (normGrad > 0.15 && normOG > 0.15 && f.energy < p75 && f.nextEnergy > f.energy * 1.10) {
+    // Buildup: rising energy gradient + rising onset density (snare rolls)
+    //   Requires BOTH rising energy gradient AND rising onset density,
+    //   plus the next section must be meaningfully higher energy.
+    //   Real buildups are short (4-8 bars), not 16+ bar sections.
+    else if (normGrad > 0.20 && normOG > 0.15 && f.numBars <= 8 && f.energy < p75 && f.nextEnergy > f.energy * 1.15) {
       sectionLabels[s] = 'buildup';
     }
-    // Buildup: rising gradient with next section significantly higher
-    else if (normGrad > 0.2 && f.energy < p75 && f.nextEnergy > f.energy * 1.15) {
+    // Buildup: strong rising gradient with next section dramatically higher
+    else if (normGrad > 0.30 && f.numBars <= 8 && f.energy < p50 && f.nextEnergy > f.energy * 1.30) {
       sectionLabels[s] = 'buildup';
     }
-    // Buildup: low energy leading into high-energy section (even without gradient)
-    else if (f.energy <= p50 && f.nextEnergy > p75) {
+    // Buildup: very low energy leading into dramatically high-energy section
+    //   Only trigger when the jump from this section to next is the biggest
+    //   transition in the song (prevents verses from being mislabeled)
+    else if (f.energy <= p25 && f.nextEnergy > p75 && f.numBars <= 8) {
       sectionLabels[s] = 'buildup';
     }
-    // Buildup: strong onset density ramp (snare rolls) even if energy is moderate
-    else if (normOG > 0.35 && f.nextEnergy > f.energy * 1.10 && s > 0 && s < numSections - 1) {
+    // Buildup: strong onset density ramp (snare rolls) with clear energy jump
+    else if (normOG > 0.40 && f.nextEnergy > f.energy * 1.20 && s > 0 && s < numSections - 1) {
       sectionLabels[s] = 'buildup';
     }
     // Breakdown: very low energy + sparse rhythm after a high-energy section
@@ -1117,11 +1381,11 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       sectionLabels[s] = 'breakdown';
     }
     // Breakdown: very low energy with falling gradient (not intro/outro)
-    else if (f.energy <= p25 && normGrad < -0.1 && s > 0 && s < numSections - 1) {
+    else if (f.energy <= p25 && normGrad < -0.15 && s > 0 && s < numSections - 1) {
       sectionLabels[s] = 'breakdown';
     }
     // Breakdown: sparse onset density + low energy mid-track
-    else if (f.onsetDensity <= odP25 && f.energy <= p50 && s > 0 && s < numSections - 1
+    else if (f.onsetDensity <= odP25 && f.energy <= p25 && s > 0 && s < numSections - 1
              && (f.prevEnergy > p50 || f.nextEnergy > p50)) {
       sectionLabels[s] = 'breakdown';
     }
@@ -1161,12 +1425,14 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   //   A verse that is spectrally distant from the majority of verses is
   //   likely a bridge (different melody/instrumentation, one-off section).
   //   Uses 5-band fingerprints for better timbral differentiation.
-  if (numSections >= 5) {
+  //   Requires BOTH spectral distance AND energy difference to avoid
+  //   over-labeling in tracks with varied verses.
+  if (numSections >= 6) {
     const verseIdxs = [];
     for (let i = 0; i < numSections; i++) {
       if (sectionLabels[i] === 'verse') verseIdxs.push(i);
     }
-    if (verseIdxs.length >= 2) {
+    if (verseIdxs.length >= 3) {
       // Compute the centroid fingerprint of all verses (5-band)
       const fpLen = sectionFeats[verseIdxs[0]].fingerprint.length;
       const centroid = new Array(fpLen).fill(0);
@@ -1181,8 +1447,9 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
         const fp = sectionFeats[vi].fingerprint;
         const dist = cosineDistN(centroid, fp);
         const eDiff = Math.abs(sectionFeats[vi].energy - avgVerseEnergy) / eRange;
-        // Spectrally distant from the verse centroid → bridge
-        if (dist > 0.10 || eDiff > 0.20) {
+        // Must be BOTH spectrally distant AND energy-different (not just one)
+        // Only label as bridge if it's a clear outlier among verses
+        if (dist > 0.18 && eDiff > 0.25) {
           sectionLabels[vi] = 'bridge';
         }
       }
@@ -1204,17 +1471,16 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
     });
   }
 
-  // ── 11. Conservative merge: same-label neighbours ─────────────────────
-  //    Merge adjacent sections with the same label when both are short
-  //    enough that the combined section stays within MAX_SECTION_BARS.
+  // ── 11. Merge same-label neighbours ─────────────────────────────────
+  //    Merge adjacent sections with the same label as long as the combined
+  //    section doesn't exceed MAX_SECTION_BARS.  This undoes unnecessary
+  //    force-splits and reduces section fragmentation.
   if (sections.length === 0) return [];
   const merged = [sections[0]];
   for (let i = 1; i < sections.length; i++) {
     const prev = merged[merged.length - 1];
-    const canMerge = sections[i].label === prev.label && (
-      (prev.bars <= 4 && sections[i].bars <= 4) ||
-      (prev.bars <= 8 && sections[i].bars <= 8 && prev.bars + sections[i].bars <= MAX_SECTION_BARS)
-    );
+    const canMerge = sections[i].label === prev.label &&
+      (prev.bars + sections[i].bars) <= MAX_SECTION_BARS;
     if (canMerge) {
       prev.end_ms = sections[i].end_ms;
       prev.bars  += sections[i].bars;

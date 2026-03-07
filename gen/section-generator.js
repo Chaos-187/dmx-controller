@@ -174,16 +174,47 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         }
 
         const startColor = applyIntensity(palette[0], startIntensity);
-        const endColor = applyIntensity(palette[1], endIntensity);
 
         const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
-        const endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
 
-        if (hasDimmer) { startVals.dimmer = 255; endVals.dimmer = 255; }
+        if (hasDimmer) { startVals.dimmer = 255; }
         // Don't set white on normal color cues — it washes out the color;
         // white is only added for strobe hits where a full flash is desired.
 
         const cueType = useFades ? 'static' : 'solid';
+
+        // For transitions, fade into the NEXT cue's color for a smooth flow
+        let endVals = null;
+        if (cueType === 'static') {
+          // Look ahead to the next palette colour
+          let nextPaletteIdx;
+          if (style.beatColorChange) {
+            const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
+            nextPaletteIdx = (fiIdx + si + Math.floor((ci + 1) / adjustedBars)) % paletteCount;
+          } else {
+            nextPaletteIdx = (fiIdx + si + Math.floor((ci + 1) / 4)) % paletteCount;
+          }
+          // If we have group coordination, offset the next index the same way
+          if (gi && paletteCount > 0) {
+            const cmKey = `${gi.groupId}-${si}`;
+            const coordMode = sectionColorModes.get(cmKey);
+            if (coordMode) {
+              let baseNext;
+              const leaderIdx = gi.members[0] ? fixtures.indexOf(gi.members[0]) : 0;
+              if (style.beatColorChange) {
+                const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
+                baseNext = (Math.max(0, leaderIdx) + si + Math.floor((ci + 1) / adjustedBars)) % paletteCount;
+              } else {
+                baseNext = (Math.max(0, leaderIdx) + si + Math.floor((ci + 1) / 4)) % paletteCount;
+              }
+              nextPaletteIdx = getColorOffset(gi, coordMode, baseNext, paletteCount);
+            }
+          }
+          const nextPalette = palettes[nextPaletteIdx];
+          const endColor = applyIntensity(nextPalette[0], endIntensity);
+          endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
+          if (hasDimmer) endVals.dimmer = 255;
+        }
 
         let cascadeOffset = 0;
         if (CASCADE_COLOR_SECTIONS.has(sec.label) && fixtures.length > 1) {

@@ -36,12 +36,22 @@ function generateBarBased(cues, fixtures, ctx) {
 
       const intensity = Math.min(1, 0.7 * preset.intensityMult * getFixtureIntensity(fix.id, 'verse', ctx));
       const startColor = applyIntensity(palette[0], intensity);
-      const endColor = applyIntensity(palette[1], intensity);
       const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
-      const endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
 
-      if (hasDimmer) { startVals.dimmer = 255; endVals.dimmer = 255; }
+      if (hasDimmer) { startVals.dimmer = 255; }
       // Don't set white on normal color cues — it washes out the color
+
+      const cueType = useFades ? 'static' : 'solid';
+
+      // For transitions, fade into the NEXT cue's color for smooth flow
+      let endVals = null;
+      if (cueType === 'static') {
+        const nextPaletteIdx = (Math.floor((bar + sectionBars) / sectionBars) % allPalettes.length + fiIdx) % allPalettes.length;
+        const nextPalette = allPalettes[nextPaletteIdx];
+        const endColor = applyIntensity(nextPalette[0], intensity);
+        endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
+        if (hasDimmer) endVals.dimmer = 255;
+      }
 
       cues.push({
         lane,

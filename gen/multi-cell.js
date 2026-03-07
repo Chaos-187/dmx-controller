@@ -44,10 +44,16 @@ function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, l
   if (!resolved) return;
 
   const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
-  const endVals = endColor ? { red: endColor.r, green: endColor.g, blue: endColor.b } : {};
   if (p.hasDimmer) {
     startVals.dimmer = 255;
-    if (endColor) endVals.dimmer = 255;
+  }
+  // For solid cues, don't store end values — no transition needed.
+  // For transitions, derive end values from endColor.
+  let endVals = null;
+  const t = cueType || 'solid';
+  if (t === 'static' && endColor) {
+    endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
+    if (p.hasDimmer) endVals.dimmer = 255;
   }
   // Don't set white on normal color cues — it washes out the color;
   // white is only added for strobe hits.

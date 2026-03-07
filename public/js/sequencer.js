@@ -471,7 +471,11 @@ const SEQ = (() => {
 
   // ── Compute Display Fields ────────────────────────────────────
   function computeDisplay(cue) {
-    const ch = cue.channel_values || {};
+    // Lightweight cues (from initial load) have no channel_values but already
+    // carry server-computed display_color / end_display_color — don't overwrite.
+    if (!cue.channel_values) return;
+
+    const ch = cue.channel_values;
     const ech = cue.end_channel_values || {};
     // For color-wheel fixtures, derive display color from wheel position
     if (ch.color_wheel !== undefined && isColorWheelFixture(cue.fixture_id)) {
@@ -484,11 +488,7 @@ const SEQ = (() => {
       cue.end_display_color = (ech.red !== undefined || ech.green !== undefined || ech.blue !== undefined)
         ? colorFromCh(ech) : null;
     }
-    // Only overwrite preset fields from channel_values when it exists;
-    // lightweight cues (no channel_values) already carry these as top-level props from the server
-    if (cue.channel_values) {
-      cue.mover_preset_id = ch.mover_preset_id || null;
-    }
+    cue.mover_preset_id = ch.mover_preset_id || null;
   }
 
   // ═══════════════════════════════════════════════════════════════
