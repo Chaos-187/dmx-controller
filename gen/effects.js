@@ -112,9 +112,10 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
 
   const CASCADE_TYPES = new Set(['chase', 'comet', 'scanner', 'sparkle', 'color_wave', 'pulse', 'rainbow', 'buildup', 'strobe', 'wave', 'fade', 'flash']);
 
+  // Lower overall chances — effects should be special moments, not constant
   const sectionEffectChance = {
-    intro: 0.3, verse: 0.4, chorus: 0.8, bridge: 0.35,
-    breakdown: 0.35, buildup: 0.7, drop: 0.95, outro: 0.25,
+    intro: 0.10, verse: 0.15, chorus: 0.40, bridge: 0.12,
+    breakdown: 0.15, buildup: 0.35, drop: 0.50, outro: 0.08,
   };
 
   function emitGroupCues(group, effect, startMs, durationMs, baseColor, lane, cascade) {
@@ -156,6 +157,7 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
         duration_ms: Math.round(cueDur),
         cue_type: 'effect',
         fixture_id: fix.id,
+        track: 'fx',
         effect_id: effect.id,
         effect_params: params,
         channel_values: { red: baseColor.r, green: baseColor.g, blue: baseColor.b, dimmer: 255 },
@@ -165,29 +167,33 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
     }
   }
 
-  function emitRigWideCues(fixtures, effect, startMs, durationMs, baseColor, lane) {
-    const sorted = [...fixtures].sort((a, b) => {
-      if ((a.rig_order || 0) !== (b.rig_order || 0)) return (a.rig_order || 0) - (b.rig_order || 0);
-      return (a.rig_x || 0.5) - (b.rig_x || 0.5);
+  function emitRigWideCue(effect, startMs, durationMs, baseColor, lane) {
+    // Single cue with fixture_id 0 — playback engine fans out to all fixtures
+    cues.push({
+      lane,
+      start_ms: startMs,
+      duration_ms: Math.round(durationMs),
+      cue_type: 'effect',
+      fixture_id: 0,
+      track: 'fx-rig',
+      effect_id: effect.id,
+      effect_params: {},
+      channel_values: { red: baseColor.r, green: baseColor.g, blue: baseColor.b, dimmer: 255 },
+      color: EFFECT_COLORS[effect.type] || '#00bfa5',
+      label: `⟷ ${effect.name}`,
     });
-    for (const fix of sorted) {
-      cues.push({
-        lane,
-        start_ms: startMs,
-        duration_ms: Math.round(durationMs),
-        cue_type: 'effect',
-        fixture_id: fix.id,
-        effect_id: effect.id,
-        effect_params: {},
-        channel_values: { red: baseColor.r, green: baseColor.g, blue: baseColor.b, dimmer: 255 },
-        color: EFFECT_COLORS[effect.type] || '#00bfa5',
-        label: `⟷ ${effect.name}`,
-      });
-    }
   }
 
   // ── Assign a dedicated lane for rig-wide effects ──────────────────────
   const rigLane = laneCounter++;
+
+  // Helper: check if a time window overlaps any occupied interval
+  function overlapsOccupied(start, end, intervals) {
+    for (const iv of intervals) {
+      if (start < iv.end && end > iv.start) return true;
+    }
+    return false;
+  }
 
   // ── Section-based effect generation ───────────────────────────────────
   if (sections.length > 0) {
@@ -197,6 +203,10 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       groupLanes[typeName] = laneCounter++;
     }
 
+    // ── Pass 1: place per-group effects, collecting occupied time ranges ──
+    let lastGroupEndMs = -Infinity;
+    const groupEffectIntervals = []; // { start, end } of placed group effects
+
     for (const section of sections) {
       const label = section.label || 'verse';
       const sectionStart = Math.round(section.start_ms || (section.start * 1000));
@@ -204,49 +214,33 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       const sectionDuration = sectionEnd - sectionStart;
       if (sectionDuration < barMs) continue;
 
+      // Enforce gap between group effects
+      if (sectionStart < lastGroupEndMs + barMs * 2) continue;
+
+      const chance = (sectionEffectChance[label] || 0.12) * preset.cueDensityMult;
+      if (rand() > Math.min(chance, 0.60)) continue;
+
       const activeSE = ctx.activeSectionEffects || SECTION_EFFECT_TYPES;
       const typesMap = activeSE[label] || DEFAULT_EFFECT_TYPES;
       const sectionPalette = getSectionPalettes(paletteKey, label, ctx.activePalettes);
+      const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
 
-      // ── Rig-wide effects ──────────────────────────────────────────
-      const rigWideMult = preset.rigWideMult || 1.0;
-      let rigDesired = typesMap.rigWide || DEFAULT_EFFECT_TYPES.rigWide || [];
-      if (preset.rigWidePreference && preset.rigWidePreference.length > 0) {
-        const preferred = rigDesired.filter(t => preset.rigWidePreference.includes(t));
-        if (preferred.length > 0) rigDesired = preferred;
+      const isHighEnergy = label === 'chorus' || label === 'drop' || label === 'buildup';
+      const maxBars = isHighEnergy ? 4 : 2;
+      const effectDur = Math.min(barMs * maxBars, sectionDuration);
+
+      let effectStart;
+      if (isHighEnergy) {
+        effectStart = sectionStart;
+      } else {
+        const offsetBars = Math.floor(rand() * 2) + 1;
+        effectStart = Math.min(sectionStart + barMs * offsetBars, sectionEnd - effectDur);
+        if (effectStart < sectionStart) effectStart = sectionStart;
       }
-      const isHighEnergySec = label === 'chorus' || label === 'drop' || label === 'buildup';
-      const rigThreshold = isHighEnergySec && rigWideMult >= 0.8
-        ? 0
-        : Math.max(0.05, 0.2 / rigWideMult);
-      if (rigDesired.length > 0 && allNonMovers.length >= 2 && rand() > rigThreshold) {
-        const rigEffect = pickEffect(rigDesired);
-        if (rigEffect) {
-          const maxBars = isHighEnergySec ? 4 : 8;
-          const rigDur = Math.min(sectionDuration, barMs * maxBars);
-          const rigEffDur = Math.max(barMs * 2, rigDur);
-          let t = sectionStart;
-          let segIdx = 0;
-
-          while (t < sectionEnd) {
-            const dur = Math.min(rigEffDur, sectionEnd - t);
-            if (dur < barMs) break;
-            const baseColor = sectionPalette[segIdx % sectionPalette.length];
-            emitRigWideCues(allNonMovers, rigEffect, t, dur, baseColor, rigLane);
-            t += rigEffDur;
-            segIdx++;
-          }
-        }
-      }
-
-      // ── Group effects ─────────────────────────────────────────────
-      const chance = (sectionEffectChance[label] || 0.3) * preset.cueDensityMult;
-      if (rand() > Math.min(chance, 0.95)) continue;
 
       for (const [typeName, group] of groupEntries) {
         let desiredTypes = group.isLedBar ? typesMap.cellAware : typesMap.regular;
 
-        // Stem-aware: filter out strobe during vocal sections to avoid harsh lighting
         const vocalsActive = hasVocals(sectionStart, sectionEnd, ctx);
         if (vocalsActive === true) {
           desiredTypes = desiredTypes.filter(t => t !== 'strobe');
@@ -256,26 +250,62 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
         if (!effect) continue;
 
         const useCascade = CASCADE_TYPES.has(effect.type) && group.fixtures.length > 1;
-        const maxDur = Math.min(sectionDuration, barMs * 8);
-        const effectDurationMs = Math.max(barMs * 2, maxDur);
-        let t = sectionStart;
-        let segIdx = 0;
-
-        while (t < sectionEnd) {
-          const dur = Math.min(effectDurationMs, sectionEnd - t);
-          if (dur < barMs) break;
-          const baseColor = sectionPalette[segIdx % sectionPalette.length];
-          emitGroupCues(group, effect, t, dur, baseColor, groupLanes[typeName], useCascade);
-          t += effectDurationMs;
-          segIdx++;
-        }
+        emitGroupCues(group, effect, effectStart, effectDur, baseColor, groupLanes[typeName], useCascade);
       }
+      groupEffectIntervals.push({ start: effectStart, end: effectStart + effectDur });
+      lastGroupEndMs = effectStart + effectDur;
+    }
+
+    // ── Pass 2: place rig-wide effects only where no group effects exist ──
+    let lastRigEndMs = -Infinity;
+
+    for (const section of sections) {
+      const label = section.label || 'verse';
+      const sectionStart = Math.round(section.start_ms || (section.start * 1000));
+      const sectionEnd = Math.round(section.end_ms || (section.end * 1000));
+      const sectionDuration = sectionEnd - sectionStart;
+      if (sectionDuration < barMs) continue;
+      if (allNonMovers.length < 2) continue;
+
+      // Only high-energy sections are candidates for rig-wide effects
+      const isHighEnergy = label === 'chorus' || label === 'drop' || label === 'buildup';
+      if (!isHighEnergy) continue;
+
+      // Enforce gap from last rig-wide effect
+      if (sectionStart < lastRigEndMs + barMs * 4) continue;
+
+      // Low chance — rig effects are rare highlights
+      const rigWideMult = preset.rigWideMult || 1.0;
+      if (rand() > 0.30 * rigWideMult) continue;
+
+      const maxBars = 4;
+      const effectDur = Math.min(barMs * maxBars, sectionDuration);
+      const effectStart = sectionStart;
+
+      // Skip if any group effect overlaps this window
+      if (overlapsOccupied(effectStart, effectStart + effectDur, groupEffectIntervals)) continue;
+
+      const activeSE = ctx.activeSectionEffects || SECTION_EFFECT_TYPES;
+      const typesMap = activeSE[label] || DEFAULT_EFFECT_TYPES;
+      let rigDesired = typesMap.rigWide || DEFAULT_EFFECT_TYPES.rigWide || [];
+      if (preset.rigWidePreference && preset.rigWidePreference.length > 0) {
+        const preferred = rigDesired.filter(t => preset.rigWidePreference.includes(t));
+        if (preferred.length > 0) rigDesired = preferred;
+      }
+
+      const rigEffect = pickEffect(rigDesired);
+      if (!rigEffect) continue;
+
+      const sectionPalette = getSectionPalettes(paletteKey, label, ctx.activePalettes);
+      const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
+      emitRigWideCue(rigEffect, effectStart, effectDur, baseColor, rigLane);
+      lastRigEndMs = effectStart + effectDur;
     }
   } else {
     // ── Bar-based fallback ──────────────────────────────────────────────
     const totalBars = Math.floor(durationMs / barMs);
-    const effectEveryBars = Math.max(2, Math.round(4 / preset.cueDensityMult));
-    const effectDurationBars = Math.max(2, effectEveryBars);
+    const effectEveryBars = Math.max(8, Math.round(12 / preset.cueDensityMult));
+    const effectDurationBars = Math.min(4, Math.max(2, Math.round(effectEveryBars * 0.3)));
     const defaultTypes = DEFAULT_EFFECT_TYPES;
 
     const groupEntries = Object.entries(fixtureGroups);
@@ -284,8 +314,10 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       groupLanes[typeName] = laneCounter++;
     }
 
+    // Pass 1: group effects
+    const barGroupIntervals = [];
     for (let bar = 0; bar < totalBars; bar += effectEveryBars) {
-      if (rand() > 0.5 * preset.cueDensityMult) continue;
+      if (rand() > 0.25 * preset.cueDensityMult) continue;
 
       const startMs = bar * barMs;
       const dur = Math.min(effectDurationBars * barMs, durationMs - startMs);
@@ -302,11 +334,23 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
         const useCascade = CASCADE_TYPES.has(effect.type) && group.fixtures.length > 1;
         emitGroupCues(group, effect, startMs, dur, baseColor, groupLanes[typeName], useCascade);
       }
+      barGroupIntervals.push({ start: startMs, end: startMs + dur });
+    }
 
-      // Rig-wide effects in bar-based mode
+    // Pass 2: rig-wide only in unoccupied windows
+    if (allNonMovers.length >= 2) {
       const rigWideMult = preset.rigWideMult || 1.0;
-      const barRigThreshold = Math.max(0.05, 0.25 / rigWideMult);
-      if (allNonMovers.length >= 2 && rand() > barRigThreshold) {
+      for (let bar = 0; bar < totalBars; bar += effectEveryBars * 2) {
+        if (rand() > 0.20 * rigWideMult) continue;
+
+        const startMs = bar * barMs;
+        const dur = Math.min(effectDurationBars * barMs, durationMs - startMs);
+        if (dur < barMs) break;
+        if (overlapsOccupied(startMs, startMs + dur, barGroupIntervals)) continue;
+
+        const sectionPalette = getSectionPalettes(paletteKey, 'verse', ctx.activePalettes);
+        const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
+
         let rigDesired = defaultTypes.rigWide || [];
         if (preset.rigWidePreference && preset.rigWidePreference.length > 0) {
           const preferred = rigDesired.filter(t => preset.rigWidePreference.includes(t));
@@ -314,7 +358,7 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
         }
         const rigEffect = pickEffect(rigDesired);
         if (rigEffect) {
-          emitRigWideCues(allNonMovers, rigEffect, startMs, dur, baseColor, rigLane);
+          emitRigWideCue(rigEffect, startMs, dur, baseColor, rigLane);
         }
       }
     }

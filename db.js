@@ -446,6 +446,51 @@ function init() {
     console.log('[DB] Migrated sequence_cues: added cell column');
   }
 
+  // Migrate: add track column to sequence_cues if missing
+  // (sub-track type: 'color', 'fx', 'move')
+  try {
+    db.prepare("SELECT track FROM sequence_cues LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE sequence_cues ADD COLUMN track TEXT DEFAULT NULL");
+    // Backfill existing cues based on cue_type
+    db.exec("UPDATE sequence_cues SET track='move' WHERE cue_type='movement'");
+    db.exec("UPDATE sequence_cues SET track='fx' WHERE cue_type='effect'");
+    db.exec("UPDATE sequence_cues SET track='color' WHERE track IS NULL");
+    console.log('[DB] Migrated sequence_cues: added track column');
+  }
+
+  // Migrate: consolidate rig-wide effect cues (label starts with ⟷) into
+  // single fixture_id=0 master cues and mark as track='fx-rig'.
+  // Old generator emitted one cue per fixture for rig effects; new generator
+  // emits a single fixture_id=0 cue. Deduplicate by keeping one per group.
+  {
+    const rigCues = db.prepare(
+      "SELECT * FROM sequence_cues WHERE cue_type='effect' AND label LIKE '⟷%'"
+    ).all();
+    if (rigCues.length > 0) {
+      // Group by sequence_id + start_ms + effect_id (same rig placement)
+      const groups = new Map();
+      for (const c of rigCues) {
+        const key = `${c.sequence_id}:${c.start_ms}:${c.effect_id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(c);
+      }
+      const updateStmt = db.prepare("UPDATE sequence_cues SET fixture_id=0, track='fx-rig' WHERE id=?");
+      const deleteStmt = db.prepare("DELETE FROM sequence_cues WHERE id=?");
+      const consolidateTx = db.transaction(() => {
+        for (const [, group] of groups) {
+          // Keep the first cue, update it to master, delete the rest
+          updateStmt.run(group[0].id);
+          for (let i = 1; i < group.length; i++) {
+            deleteStmt.run(group[i].id);
+          }
+        }
+      });
+      consolidateTx();
+      console.log(`[DB] Consolidated ${rigCues.length} rig-wide cues into ${groups.size} master cues`);
+    }
+  }
+
   // Migrate: add fixture_target column to effects if missing
   try {
     db.prepare("SELECT fixture_target FROM effects LIMIT 1").get();
@@ -2958,7 +3003,7 @@ function toggleUsbDevice(id) {
 
 function getSequenceCuesLightweight(sequenceId) {
   const cues = db.prepare(
-    'SELECT id, sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, color, label, cell, effect_id, channel_values, end_channel_values FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms'
+    'SELECT id, sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, color, label, cell, track, effect_id, channel_values, end_channel_values FROM sequence_cues WHERE sequence_id = ? ORDER BY lane, start_ms'
   ).all(sequenceId);
   // Pre-compute display colors from channel_values to avoid sending full channel data
   return cues.map(c => {
@@ -2982,7 +3027,8 @@ function getSequenceCuesLightweight(sequenceId) {
     return {
       id: c.id, lane: c.lane, start_ms: c.start_ms, duration_ms: c.duration_ms,
       cue_type: c.cue_type, fixture_id: c.fixture_id, color: c.color,
-      label: c.label, cell: c.cell, effect_id: c.effect_id,
+      label: c.label, cell: c.cell, track: c.track || 'color',
+      effect_id: c.effect_id,
       display_color, end_display_color,
       mover_preset_id: chV.mover_preset_id || null,
     };
@@ -3007,8 +3053,8 @@ function createCue(sequenceId, cue) {
   const effectParamsJson = typeof cue.effect_params === 'string' ? cue.effect_params : JSON.stringify(cue.effect_params || {});
   const result = db.prepare(`
     INSERT INTO sequence_cues (sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, group_id,
-      channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order, cell)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order, cell, track)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     sequenceId,
     cue.lane || 0,
@@ -3024,7 +3070,8 @@ function createCue(sequenceId, cue) {
     cue.color || '#e94560',
     cue.label || '',
     cue.sort_order || 0,
-    cue.cell || null
+    cue.cell || null,
+    cue.track || 'color'
   );
   // Update sequence timestamp
   db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);
@@ -3056,7 +3103,7 @@ function updateCue(id, updates) {
     : existing.effect_params;
   db.prepare(`
     UPDATE sequence_cues SET lane=?, start_ms=?, duration_ms=?, cue_type=?, fixture_id=?, group_id=?,
-      channel_values=?, end_channel_values=?, effect_id=?, effect_params=?, color=?, label=?, sort_order=?, cell=?
+      channel_values=?, end_channel_values=?, effect_id=?, effect_params=?, color=?, label=?, sort_order=?, cell=?, track=?
     WHERE id=?
   `).run(
     updates.lane !== undefined ? updates.lane : existing.lane,
@@ -3073,6 +3120,7 @@ function updateCue(id, updates) {
     updates.label !== undefined ? updates.label : existing.label,
     updates.sort_order !== undefined ? updates.sort_order : existing.sort_order,
     updates.cell !== undefined ? (updates.cell || null) : (existing.cell || null),
+    updates.track !== undefined ? updates.track : (existing.track || 'color'),
     id
   );
   // Update sequence timestamp
@@ -3094,8 +3142,8 @@ function bulkUpdateCues(sequenceId, cues) {
     // Insert all cues
     const ins = db.prepare(`
       INSERT INTO sequence_cues (sequence_id, lane, start_ms, duration_ms, cue_type, fixture_id, group_id,
-        channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order, cell)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        channel_values, end_channel_values, effect_id, effect_params, color, label, sort_order, cell, track)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const cue of cues) {
       const channelJson = typeof cue.channel_values === 'string' ? cue.channel_values : JSON.stringify(cue.channel_values || {});
@@ -3107,7 +3155,8 @@ function bulkUpdateCues(sequenceId, cues) {
         sequenceId, cue.lane || 0, cue.start_ms || 0, cue.duration_ms || 1000,
         cue.cue_type || 'static', cue.fixture_id || null, cue.group_id || null,
         channelJson, endChannelJson, cue.effect_id || null, effectParamsJson,
-        cue.color || '#e94560', cue.label || '', cue.sort_order || 0, cue.cell || null
+        cue.color || '#e94560', cue.label || '', cue.sort_order || 0, cue.cell || null,
+        cue.track || 'color'
       );
     }
     db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);

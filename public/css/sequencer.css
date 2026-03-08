@@ -20,6 +20,7 @@
   --yellow:       #ffd600;
   --cyan:         #00e5ff;
   --blue:         #448aff;
+  --purple:       #8e24aa;
   --text:         #e8e8ee;
   --text-dim:     #7a7a90;
   --text-muted:   #555568;
@@ -499,6 +500,8 @@ body {
 .tl-lane.sub-lane { min-height: 30px; background: rgba(255,255,255,.008); }
 .tl-lane.sub-lane .tl-lane-hdr { padding-left: 20px; font-size: 10px; }
 .tl-lane.master-lane { background: rgba(0,0,0,.08); }
+.tl-lane.fx-lane    { background: rgba(142,36,170,.04); }
+.tl-lane.rig-fx-lane { background: rgba(142,36,170,.07); border-bottom: 1px solid rgba(142,36,170,.15); }
 .tl-lane.mover-move { background: rgba(68,136,255,.03); }
 
 /* ═══════════════════════════════════════════════════════════════

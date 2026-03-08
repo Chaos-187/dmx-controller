@@ -71,53 +71,52 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       const palettes = getSectionPalettes(paletteKey, sec.label, ctx.activePalettes);
 
       const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
-      const adjustedCuePerBars = Math.max(1, Math.round(style.cuePerBars / (preset.cueDensityMult * bpmDensityScale)));
+      const rawCueBars = style.cuePerBars / (preset.cueDensityMult * bpmDensityScale);
+      const adjustedCuePerBars = Math.max(0.25, rawCueBars < 1 ? rawCueBars : Math.round(rawCueBars));
+      const subBar = adjustedCuePerBars < 1;
       const cueBarMs = adjustedCuePerBars * barMs;
       const numCues = Math.max(1, Math.floor(secDurMs / cueBarMs));
 
+      // How many cues pass before we change palette color
+      const rawColorBars = (style.beatColorBars || style.cuePerBars) * (preset.beatColorMult || 1);
+      const cuesPerColorChange = style.beatColorChange
+        ? Math.max(1, Math.round(rawColorBars / adjustedCuePerBars))
+        : 4;
+
+      // Flatten all palette colors for maximum variety on beat-level changes
+      const flatColors = palettes.reduce((acc, p) => acc.concat(p), []);
+      const totalFlatColors = flatColors.length;
+
       for (let ci = 0; ci < numCues; ci++) {
         const rawCueStart = secStartMs + ci * cueBarMs;
-        const cueStart = ci === 0 ? secStartMs : snapBar(rawCueStart);
+        const snap = subBar ? snapBeat : snapBar;
+        const cueStart = ci === 0 ? secStartMs : snap(rawCueStart);
         const rawNextStart = rawCueStart + cueBarMs;
-        const nextCueStart = ci < numCues - 1 ? snapBar(rawNextStart) : secEndMs;
+        const nextCueStart = ci < numCues - 1 ? snap(rawNextStart) : secEndMs;
         let cueDur = nextCueStart - cueStart;
-        if (cueDur < barMs * 0.5) cueDur = Math.min(barMs, secEndMs - cueStart);
+        const minCueDur = subBar ? beatMs * 0.5 : barMs * 0.5;
+        if (cueDur < minCueDur) cueDur = Math.min(subBar ? beatMs : barMs, secEndMs - cueStart);
         if (cueDur <= 0) continue;
 
         const secProgress = numCues > 1 ? ci / (numCues - 1) : 0.5;
 
-        const paletteCount = palettes.length;
-        let paletteIdx;
-        if (style.beatColorChange) {
-          const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
-          paletteIdx = (fiIdx + si + Math.floor(ci / adjustedBars)) % paletteCount;
-        } else {
-          paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % paletteCount;
-        }
+        // ── Color index from flattened palette ──
+        let colorIdx = (fiIdx + si + Math.floor(ci / cuesPerColorChange)) % totalFlatColors;
 
         // ── Group-aware palette coordination ──
-        // If this fixture is in a group, override the palette index so all
-        // group members use coordinated colors (sync, mirror, opposite, etc.)
         const gi = fixtureGroupInfo.get(fix.id);
-        if (gi && paletteCount > 0) {
+        if (gi && totalFlatColors > 0) {
           const cmKey = `${gi.groupId}-${si}`;
           if (!sectionColorModes.has(cmKey)) {
             sectionColorModes.set(cmKey, pickCoordMode(sec.label, rand));
           }
           const coordMode = sectionColorModes.get(cmKey);
-          // Use the group-leader's base palette (first member in group)
           const leaderIdx = gi.members[0] ? fixtures.indexOf(gi.members[0]) : 0;
-          let basePaletteIdx;
-          if (style.beatColorChange) {
-            const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
-            basePaletteIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / adjustedBars)) % paletteCount;
-          } else {
-            basePaletteIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / 4)) % paletteCount;
-          }
-          paletteIdx = getColorOffset(gi, coordMode, basePaletteIdx, paletteCount);
+          const baseColorIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / cuesPerColorChange)) % totalFlatColors;
+          colorIdx = getColorOffset(gi, coordMode, baseColorIdx, totalFlatColors);
         }
 
-        const palette = palettes[paletteIdx];
+        const cueColor = flatColors[colorIdx];
 
         let energyMod = 1.0;
         if (energyLevels.length > 0) {
@@ -173,7 +172,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
           endIntensity = Math.min(1, endIntensity * 1.1);
         }
 
-        const startColor = applyIntensity(palette[0], startIntensity);
+        const startColor = applyIntensity(cueColor, startIntensity);
 
         const startVals = { red: startColor.r, green: startColor.g, blue: startColor.b };
 
@@ -181,37 +180,33 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         // Don't set white on normal color cues — it washes out the color;
         // white is only added for strobe hits where a full flash is desired.
 
-        const cueType = useFades ? 'static' : 'solid';
+        // Per-section cue type: energetic sections mostly solid, calm ones mostly fades
+        let cueType;
+        const isEnergetic = sec.label === 'drop' || sec.label === 'chorus' || sec.label === 'buildup';
+        if (isEnergetic) {
+          cueType = rand() < 0.8 ? 'solid' : 'static';
+        } else if (sec.label === 'intro' || sec.label === 'breakdown' || sec.label === 'outro') {
+          cueType = rand() < 0.7 ? 'static' : 'solid';
+        } else {
+          cueType = rand() < 0.5 ? 'solid' : 'static';
+        }
 
         // For transitions, fade into the NEXT cue's color for a smooth flow
         let endVals = null;
         if (cueType === 'static') {
-          // Look ahead to the next palette colour
-          let nextPaletteIdx;
-          if (style.beatColorChange) {
-            const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
-            nextPaletteIdx = (fiIdx + si + Math.floor((ci + 1) / adjustedBars)) % paletteCount;
-          } else {
-            nextPaletteIdx = (fiIdx + si + Math.floor((ci + 1) / 4)) % paletteCount;
-          }
-          // If we have group coordination, offset the next index the same way
-          if (gi && paletteCount > 0) {
+          // Look ahead to the next colour in the flat array
+          let nextColorIdx = (fiIdx + si + Math.floor((ci + 1) / cuesPerColorChange)) % totalFlatColors;
+          if (gi && totalFlatColors > 0) {
             const cmKey = `${gi.groupId}-${si}`;
             const coordMode = sectionColorModes.get(cmKey);
             if (coordMode) {
-              let baseNext;
               const leaderIdx = gi.members[0] ? fixtures.indexOf(gi.members[0]) : 0;
-              if (style.beatColorChange) {
-                const adjustedBars = Math.max(1, Math.round((style.beatColorBars || 1) * preset.beatColorMult));
-                baseNext = (Math.max(0, leaderIdx) + si + Math.floor((ci + 1) / adjustedBars)) % paletteCount;
-              } else {
-                baseNext = (Math.max(0, leaderIdx) + si + Math.floor((ci + 1) / 4)) % paletteCount;
-              }
-              nextPaletteIdx = getColorOffset(gi, coordMode, baseNext, paletteCount);
+              const baseNext = (Math.max(0, leaderIdx) + si + Math.floor((ci + 1) / cuesPerColorChange)) % totalFlatColors;
+              nextColorIdx = getColorOffset(gi, coordMode, baseNext, totalFlatColors);
             }
           }
-          const nextPalette = palettes[nextPaletteIdx];
-          const endColor = applyIntensity(nextPalette[0], endIntensity);
+          const nextColor = flatColors[nextColorIdx];
+          const endColor = applyIntensity(nextColor, endIntensity);
           endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
           if (hasDimmer) endVals.dimmer = 255;
         }
@@ -224,12 +219,13 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         cues.push({
           lane,
           start_ms: Math.round(cueStart) + cascadeOffset,
-          duration_ms: Math.max(Math.round(barMs * 0.5), Math.round(cueDur) - cascadeOffset),
+          duration_ms: Math.max(Math.round(subBar ? beatMs * 0.5 : barMs * 0.5), Math.round(cueDur) - cascadeOffset),
           cue_type: cueType,
           fixture_id: fix.id,
+          track: 'color',
           channel_values: startVals,
           end_channel_values: endVals,
-          color: sec.color || CUE_COLORS[si % CUE_COLORS.length],
+          color: rgbToHex(cueColor.r, cueColor.g, cueColor.b),
           label: sec.label || '',
         });
       }
@@ -286,6 +282,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
                 duration_ms: strobeDurMs,
                 cue_type: 'strobe',
                 fixture_id: fix.id,
+                track: 'color',
                 channel_values: { ...strobeVals, strobe_hz: sec.label === 'drop' ? 15 : 10 },
                 end_channel_values: {},
                 color: '#ffffff',
@@ -313,6 +310,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
             duration_ms: flashDur,
             cue_type: 'static',
             fixture_id: fix.id,
+            track: 'color',
             channel_values: flashVals,
             end_channel_values: fadeVals,
             color: '#ffffff',
@@ -371,6 +369,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
               duration_ms: pulseDur,
               cue_type: 'static',
               fixture_id: fix.id,
+              track: 'color',
               channel_values: pulseVals,
               end_channel_values: pulseEnd,
               color: rgbToHex(accentColor.r, accentColor.g, accentColor.b),

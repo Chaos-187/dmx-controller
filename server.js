@@ -3617,9 +3617,23 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   // then cell-specific cues overwrite. This ensures cell cues always
   // take priority over master cues on the same fixture.
   const activeCues = [];
+  const rigWideCues = []; // fixture_id 0 — applied to all fixtures after individual processing
+  // Build a map of active color-track cues per fixture for effect base-color resolution
+  const activeColorCuesByFixture = new Map(); // fixtureId → color cue
+  const fixturesWithFx = new Set(); // fixtures that have their own per-fixture effect cue
   for (const cue of cues) {
     if (timeMs < cue.start_ms || timeMs >= cue.start_ms + cue.duration_ms) continue;
+    // Rig-wide master cues (fixture_id 0) are processed in a separate pass
+    if (cue.fixture_id === 0) { rigWideCues.push(cue); continue; }
     activeCues.push(cue);
+    // Track the latest active color-track cue per fixture (last one wins)
+    if ((cue.track || 'color') === 'color') {
+      activeColorCuesByFixture.set(cue.fixture_id, cue);
+    }
+    // Track fixtures that have per-fixture FX cues
+    if (cue.cue_type === 'effect' && cue.effect_id) {
+      fixturesWithFx.add(cue.fixture_id);
+    }
   }
   activeCues.sort((a, b) => (a.cell ? 1 : 0) - (b.cell ? 1 : 0));
 
@@ -3712,11 +3726,31 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           const channelCtx = buildChannelCtx(ch, fixMap);
           // Rig-wide fixture count for rig effects
           channelCtx._rigFixtureCount = fixtureCount;
-          value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, channelVals, cue.effect_params || {}, channelCtx);
+          // Resolve base color from the active color-track cue on this fixture
+          // so effects modulate the color timeline instead of using their own stored color.
+          let effectBaseVals = channelVals;
+          const colorCue = activeColorCuesByFixture.get(fixtureId);
+          if (colorCue) {
+            const colorChVals = colorCue.channel_values || {};
+            const colorEndVals = colorCue.end_channel_values;
+            const colorProgress = (timeMs - colorCue.start_ms) / colorCue.duration_ms;
+            // Interpolate color-track values at current time
+            effectBaseVals = { ...channelVals };
+            for (const cType of ['red', 'green', 'blue', 'white', 'dimmer']) {
+              const sv = colorChVals[cType];
+              if (sv === undefined) continue;
+              if (colorEndVals && colorEndVals[cType] !== undefined) {
+                effectBaseVals[cType] = Math.round(sv + (colorEndVals[cType] - sv) * colorProgress);
+              } else {
+                effectBaseVals[cType] = sv;
+              }
+            }
+          }
+          value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, cue.effect_params || {}, channelCtx);
           // If the effect doesn't control this channel (e.g. motion effect → color channels),
-          // fall back to the cue's base channel value so colours/dimmer still get sent.
+          // fall back to the resolved base channel value so colours/dimmer still get sent.
           if (value === null || value === undefined) {
-            value = channelVals[ch.type] !== undefined ? channelVals[ch.type]
+            value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
                   : (ch.type === 'dimmer' ? 255 : null);
           }
         }
@@ -3795,6 +3829,81 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           finalValue = mapValueToRange(finalValue, ch, ch.type);
         }
         channelUpdates[universe][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, finalValue)), ch);
+      }
+    }
+  }
+
+  // ── Rig-wide master effects (fixture_id 0): fan out to all fixtures ──
+  // Only applies to fixtures that don't already have a per-fixture effect active.
+  for (const rigCue of rigWideCues) {
+    if (rigCue.cue_type !== 'effect' || !rigCue.effect_id) continue;
+    const effect = getEffectCached(rigCue.effect_id);
+    if (!effect) continue;
+    const progress = (timeMs - rigCue.start_ms) / rigCue.duration_ms;
+    const rigChannelVals = rigCue.channel_values || {};
+
+    for (const fixMap of allFixtures) {
+      const fid = fixMap.id;
+      // Skip fixtures that have their own per-fixture effect cue active
+      if (fixturesWithFx.has(fid)) continue;
+      if (touchOverrides.disabledFixtures.has(fid)) continue;
+      if (touchOverrides.os2lOverrideFixtures.has(fid)) continue;
+      if (!isFixtureCompatibleWithEffect(effect, fixMap)) continue;
+
+      const hasColorOverride = touchOverrides.colorOverrideFixtures.has(fid);
+      const hasMovementOverride = touchOverrides.movementOverrideFixtures.has(fid);
+
+      for (const ch of fixMap.channels) {
+        if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
+        if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
+
+        const channelCtx = buildChannelCtx(ch, fixMap);
+        channelCtx._rigFixtureCount = fixtureCount;
+
+        // Resolve base color from the active color-track cue on this fixture
+        let effectBaseVals = rigChannelVals;
+        const colorCue = activeColorCuesByFixture.get(fid);
+        if (colorCue) {
+          const colorChVals = colorCue.channel_values || {};
+          const colorEndVals = colorCue.end_channel_values;
+          const colorProgress = (timeMs - colorCue.start_ms) / colorCue.duration_ms;
+          effectBaseVals = { ...rigChannelVals };
+          for (const cType of ['red', 'green', 'blue', 'white', 'dimmer']) {
+            const sv = colorChVals[cType];
+            if (sv === undefined) continue;
+            if (colorEndVals && colorEndVals[cType] !== undefined) {
+              effectBaseVals[cType] = Math.round(sv + (colorEndVals[cType] - sv) * colorProgress);
+            } else {
+              effectBaseVals[cType] = sv;
+            }
+          }
+        }
+
+        let value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, rigCue.effect_params || {}, channelCtx);
+        if (value === null || value === undefined) {
+          value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
+                : (ch.type === 'dimmer' ? 255 : null);
+        }
+
+        if (value !== null && value !== undefined) {
+          const universe = fixMap.universe;
+          if (!channelUpdates[universe]) channelUpdates[universe] = {};
+          let finalValue = Math.max(0, Math.min(255, Math.round(value)));
+          if (crossfaderLevel < 1 && DIMMABLE_CHANNELS.has(ch.type)) {
+            finalValue = Math.round(finalValue * crossfaderLevel);
+          }
+          if (deckLevel < 1 && DIMMABLE_CHANNELS.has(ch.type)) {
+            finalValue = Math.round(finalValue * deckLevel);
+          }
+          const fixHasDimmer = fixMap.channels.some(c => c.type === 'dimmer');
+          if (fixHasDimmer) {
+            if (ch.type === 'dimmer') finalValue = applyMasterDimmer(finalValue, ch.type);
+          } else {
+            finalValue = applyMasterDimmer(finalValue, ch.type);
+          }
+          finalValue = mapValueToRange(finalValue, ch, ch.type);
+          channelUpdates[universe][ch.dmx_address] = applyInvert(Math.max(0, Math.min(255, finalValue)), ch);
+        }
       }
     }
   }

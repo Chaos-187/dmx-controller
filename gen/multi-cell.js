@@ -64,6 +64,7 @@ function cellCue(cues, p, cell, startMs, durMs, startColor, endColor, cueType, l
     cue_type: cueType || 'solid',
     fixture_id: resolved.fix.id,
     cell: resolved.cell,
+    track: 'color',
     channel_values: startVals,
     end_channel_values: endVals,
     color: rgbToHex(startColor.r, startColor.g, startColor.b),
@@ -202,6 +203,7 @@ function cellPatternScatter(cues, p, strobeMode) {
         cues.push({
           lane: p.lane, start_ms: Math.round(t), duration_ms: Math.round(dur),
           cue_type: 'strobe', fixture_id: resolved.fix.id, cell: resolved.cell,
+          track: 'color',
           channel_values: strobeVals, end_channel_values: {},
           color: '#ffffff', label: 'scatter',
         });
@@ -301,6 +303,7 @@ function cellPatternAllFlash(cues, p) {
         cues.push({
           lane: p.lane, start_ms: Math.round(t), duration_ms: Math.round(Math.min(beatMs * 0.5, dur)),
           cue_type: 'strobe', fixture_id: resolved.fix.id, cell: resolved.cell,
+          track: 'color',
           channel_values: strobeVals, end_channel_values: {},
           color: '#ffffff', label: 'strobe',
         });

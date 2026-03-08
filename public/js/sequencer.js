@@ -589,22 +589,31 @@ const SEQ = (() => {
         `<div class="tl-lane-track"><canvas id="wfCanvas"></canvas></div></div>`;
     }
 
+    // Rig FX master lane (for rig-wide effects with fixture_id 0)
+    const hasRigFx = cues.some(c => c.track === 'fx-rig');
+    if (hasRigFx || editMode) {
+      html += `<div class="tl-lane sub-lane fx-lane rig-fx-lane" data-fix="0" data-lane="-1" data-sub="fx-rig">` +
+        `<div class="tl-lane-hdr"><div class="lane-color" style="background:var(--purple)"></div>` +
+        `<span class="lane-name">Rig FX</span><span class="lane-tag">Master</span></div>` +
+        `<div class="tl-lane-track" data-fix="0" data-sub="fx-rig" data-lane-key="rig:fx"></div></div>`;
+    }
+
     // Fixture lanes
     for (let i = 0; i < laneFixes.length; i++) {
       const fix = laneFixes[i];
       const isMulti = fix.cell_count > 0;
       const isMover = !isMulti && fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
-      const isExp = (isMulti || isMover) && expandedFixtures.has(fix.id);
+      const isExp = expandedFixtures.has(fix.id);
       const hasRGB = fix.channels.some(c => c.type === 'red');
-      const expBtn = (isMulti || isMover)
-        ? `<span class="lane-expand" data-fix="${fix.id}">${isExp ? '&#9660;' : '&#9654;'}</span>` : '';
+      // All fixtures can expand into sub-tracks (Color/FX/Motion)
+      const expBtn = `<span class="lane-expand" data-fix="${fix.id}">${isExp ? '&#9660;' : '&#9654;'}</span>`;
 
       if (!isExp) {
         html += renderSingleLane(fix, i, expBtn, hasRGB);
-      } else if (isMover) {
-        html += renderMoverLanes(fix, i, expBtn, hasRGB);
-      } else {
+      } else if (isMulti) {
         html += renderMultiCellLanes(fix, i, expBtn, hasRGB);
+      } else {
+        html += renderExpandedLanes(fix, i, expBtn, hasRGB, isMover);
       }
     }
 
@@ -664,19 +673,36 @@ const SEQ = (() => {
     for (const fix of laneFixes) {
       const isMulti = fix.cell_count > 0;
       const isMover = !isMulti && fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
-      const isExp = (isMulti || isMover) && expandedFixtures.has(fix.id);
+      const isExp = expandedFixtures.has(fix.id);
       fixMeta.set(fix.id, { isMulti, isMover, isExp });
     }
     for (const cue of cues) {
       if (cue.duration_ms > _maxCueDurMs) _maxCueDurMs = cue.duration_ms;
+      const track = cue.track || 'color';
+      // Rig-wide master cues (fixture_id 0) go to the dedicated rig:fx lane
+      if (track === 'fx-rig' || cue.fixture_id === 0) {
+        const key = 'rig:fx';
+        if (!_cuesByKey.has(key)) _cuesByKey.set(key, []);
+        _cuesByKey.get(key).push(cue);
+        continue;
+      }
       const meta = fixMeta.get(cue.fixture_id);
       let key;
       if (!meta || !meta.isExp) {
+        // Collapsed: all cues on single lane
         key = `f${cue.fixture_id}`;
-      } else if (meta.isMover) {
-        key = cue.label === 'move' ? `f${cue.fixture_id}:move` : `f${cue.fixture_id}:light`;
-      } else {
+      } else if (meta.isMulti) {
+        // Multi-cell expanded: route by cell
         key = `f${cue.fixture_id}:c${cue.cell || 0}`;
+      } else {
+        // Expanded into sub-tracks: route by track type
+        if (track === 'fx') {
+          key = `f${cue.fixture_id}:fx`;
+        } else if (track === 'move') {
+          key = `f${cue.fixture_id}:move`;
+        } else {
+          key = `f${cue.fixture_id}:color`;
+        }
       }
       if (!_cuesByKey.has(key)) _cuesByKey.set(key, []);
       _cuesByKey.get(key).push(cue);
@@ -786,14 +812,29 @@ const SEQ = (() => {
   }
 
   function renderMoverLanes(fix, lane, expBtn, hasRGB) {
-    return `<div class="tl-lane" data-fix="${fix.id}" data-lane="${lane}" data-sub="light">` +
+    // Legacy — redirect to new expanded lanes renderer
+    return renderExpandedLanes(fix, lane, expBtn, hasRGB, true);
+  }
+
+  function renderExpandedLanes(fix, lane, expBtn, hasRGB, isMover) {
+    // Color sub-track
+    let html = `<div class="tl-lane" data-fix="${fix.id}" data-lane="${lane}" data-sub="color">` +
       `<div class="tl-lane-hdr">${expBtn}<div class="lane-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
-      `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Light</span></div>` +
-      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="light" data-lane-key="f${fix.id}:light"></div></div>` +
-      `<div class="tl-lane sub-lane mover-move" data-fix="${fix.id}" data-lane="${lane}" data-sub="movement">` +
-      `<div class="tl-lane-hdr"><div class="lane-color" style="background:var(--blue)"></div>` +
-      `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Move</span></div>` +
-      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="movement" data-lane-key="f${fix.id}:move"></div></div>`;
+      `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Color</span></div>` +
+      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="color" data-lane-key="f${fix.id}:color"></div></div>`;
+    // FX sub-track
+    html += `<div class="tl-lane sub-lane fx-lane" data-fix="${fix.id}" data-lane="${lane}" data-sub="fx">` +
+      `<div class="tl-lane-hdr"><div class="lane-color" style="background:var(--purple,#8e24aa)"></div>` +
+      `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">FX</span></div>` +
+      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="fx" data-lane-key="f${fix.id}:fx"></div></div>`;
+    // Motion sub-track (movers only)
+    if (isMover) {
+      html += `<div class="tl-lane sub-lane mover-move" data-fix="${fix.id}" data-lane="${lane}" data-sub="movement">` +
+        `<div class="tl-lane-hdr"><div class="lane-color" style="background:var(--blue)"></div>` +
+        `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Move</span></div>` +
+        `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="movement" data-lane-key="f${fix.id}:move"></div></div>`;
+    }
+    return html;
   }
 
   function renderMultiCellLanes(fix, lane, expBtn, hasRGB) {
@@ -1209,7 +1250,7 @@ const SEQ = (() => {
       if (pid) { delete chVals.pan; delete chVals.tilt; }
     }
 
-    const update = { cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs), label, color, channel_values: chVals, end_channel_values: endChVals, effect_id: effectId ? +effectId : null };
+    const update = { cue_type: type, start_ms: Math.round(startMs), duration_ms: Math.round(durMs), label, color, channel_values: chVals, end_channel_values: endChVals, effect_id: effectId ? +effectId : null, track: cue.track };
     await apiPut(`/api/cues/${selectedPrimary}`, update);
     Object.assign(cue, update);
     computeDisplay(cue);
@@ -1232,7 +1273,7 @@ const SEQ = (() => {
     // Push undo for delete
     pushUndo('delete', async () => {
       for (const snap of deleted) {
-        const body = { lane: snap.lane, start_ms: snap.start_ms, duration_ms: snap.duration_ms, cue_type: snap.cue_type || 'static', fixture_id: snap.fixture_id, channel_values: snap.channel_values, end_channel_values: snap.end_channel_values || null, color: snap.color, label: snap.label || '', effect_id: snap.effect_id || null };
+        const body = { lane: snap.lane, start_ms: snap.start_ms, duration_ms: snap.duration_ms, cue_type: snap.cue_type || 'static', fixture_id: snap.fixture_id, channel_values: snap.channel_values, end_channel_values: snap.end_channel_values || null, color: snap.color, label: snap.label || '', effect_id: snap.effect_id || null, track: snap.track || 'color' };
         if (snap.cell != null) body.cell = snap.cell;
         const nc = await apiPost(`/api/sequences/${seqId}/cues`, body);
         computeDisplay(nc); cues.push(nc);
@@ -1294,7 +1335,7 @@ const SEQ = (() => {
       if (pid) { chVals.mover_preset_id = +pid; }
       if (pid) { delete chVals.pan; delete chVals.tilt; }
     }
-    const update = { cue_type: type, start_ms: Math.round(parseFloat($('propStart').value)*1000), duration_ms: Math.round(parseFloat($('propDur').value)*1000), label: $('propLabel').value, color, channel_values: chVals, end_channel_values: endChVals, effect_id: $('propEffect').value ? +$('propEffect').value : null };
+    const update = { cue_type: type, start_ms: Math.round(parseFloat($('propStart').value)*1000), duration_ms: Math.round(parseFloat($('propDur').value)*1000), label: $('propLabel').value, color, channel_values: chVals, end_channel_values: endChVals, effect_id: $('propEffect').value ? +$('propEffect').value : null, track: cue.track };
     apiPut(`/api/cues/${selectedPrimary}`, update);
     Object.assign(cue, update);
     computeDisplay(cue);
@@ -1509,32 +1550,40 @@ const SEQ = (() => {
 
     // ── Double-click to add cue ──
     on('tlLanes', 'dblclick', async e => {
-      const track = e.target.closest('.tl-lane-track');
-      if (!track || !currentId || e.target.closest('.tl-cue')) return;
-      const fixId = +track.dataset.fix;
-      const rect = track.getBoundingClientRect();
+      const trackEl = e.target.closest('.tl-lane-track');
+      if (!trackEl || !currentId || e.target.closest('.tl-cue')) return;
+      const fixId = +trackEl.dataset.fix;
+      const rect = trackEl.getBoundingClientRect();
       const clickMs = snapToGrid(((e.clientX - rect.left) / zoomPxPerSec) * 1000);
       const bpm = currentSeq.bpm || 128;
       const durMs = (60000 / bpm) * 4;
       const lane = +e.target.closest('.tl-lane').dataset.lane;
-      const cellAttr = track.dataset.cell;
+      const cellAttr = trackEl.dataset.cell;
       const cell = cellAttr !== undefined ? +cellAttr : null;
-      const sub = track.dataset.sub || null;
+      const sub = trackEl.dataset.sub || null;
       let body;
-      if (sub === 'movement') {
+      if (sub === 'fx-rig') {
+        // Rig-wide master effect
+        const defaultEffect = effects.length > 0 ? effects[0] : null;
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'effect', fixture_id: 0, channel_values: { red: 255, green: 0, blue: 0, dimmer: 255 }, color: '#8e24aa', label: defaultEffect ? `⟷ ${defaultEffect.name}` : '⟷ effect', track: 'fx-rig', effect_id: defaultEffect ? defaultEffect.id : null };
+      } else if (sub === 'movement') {
         const mvChVals = moverPresets.length > 0
           ? { mover_preset_id: moverPresets[0].id }
           : { pan: 128, tilt: 128 };
-        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'movement', fixture_id: fixId, channel_values: mvChVals, color: '#4488ff', label: 'move' };
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'movement', fixture_id: fixId, channel_values: mvChVals, color: '#4488ff', label: 'move', track: 'move' };
+      } else if (sub === 'fx') {
+        // Create an effect cue — pick the first available effect
+        const defaultEffect = effects.length > 0 ? effects[0] : null;
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'effect', fixture_id: fixId, channel_values: { red: 255, green: 0, blue: 0, dimmer: 255 }, color: '#8e24aa', label: defaultEffect ? defaultEffect.name : 'effect', track: 'fx', effect_id: defaultEffect ? defaultEffect.id : null };
       } else if (isColorWheelFixture(fixId)) {
         const fix = fixtures.find(f => f.id === fixId);
         const cwMap = fix && fix.color_wheel_map ? fix.color_wheel_map.slice().sort((a,b) => a.dmx_start - b.dmx_start) : [];
         const firstEntry = cwMap[0];
         const cwDmx = firstEntry ? firstEntry.dmx_start : 0;
         const cwColor = firstEntry ? firstEntry.color_hex : '#ffffff';
-        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'color_wheel', fixture_id: fixId, channel_values: { color_wheel: cwDmx }, color: cwColor, label: '' };
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'color_wheel', fixture_id: fixId, channel_values: { color_wheel: cwDmx }, color: cwColor, label: '', track: 'color' };
       } else {
-        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'solid', fixture_id: fixId, channel_values: { red: 255, green: 0, blue: 0 }, color: '#ff0000', label: '' };
+        body = { lane, start_ms: Math.round(clickMs), duration_ms: Math.round(durMs), cue_type: 'solid', fixture_id: fixId, channel_values: { red: 255, green: 0, blue: 0 }, color: '#ff0000', label: '', track: sub === 'color' ? 'color' : 'color' };
       }
       if (cell) body.cell = cell;
       const cue = await apiPost(`/api/sequences/${currentId}/cues`, body);
@@ -1811,7 +1860,7 @@ const SEQ = (() => {
         }
         const newIds = [];
         for (const clip of clipboard) {
-          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: targetFix || clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: targetFix || clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null, track: clip.track || 'color' };
           if (!targetFix && clip.cell) body.cell = clip.cell; // clear cell when retargeting fixture
           const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
           computeDisplay(nc); cues.push(nc); newIds.push(nc.id);
@@ -1829,7 +1878,7 @@ const SEQ = (() => {
           $('infoCues').textContent = cues.length; clearSelection(); renderTimeline();
         }, async () => {
           for (const clip of frozenClip) {
-            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: targetFix || clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: targetFix || clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null, track: clip.track || 'color' };
             if (!targetFix && clip.cell) body.cell = clip.cell;
             const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
             computeDisplay(nc); cues.push(nc);
@@ -1847,7 +1896,7 @@ const SEQ = (() => {
         const offset = Math.round(playheadMs) - minStart;
         const newIds = [];
         for (const clip of srcCues) {
-          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+          const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null, track: clip.track || 'color' };
           if (clip.cell != null) body.cell = clip.cell;
           const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
           computeDisplay(nc); cues.push(nc); newIds.push(nc.id);
@@ -1860,7 +1909,7 @@ const SEQ = (() => {
           $('infoCues').textContent = cues.length; clearSelection(); renderTimeline();
         }, async () => {
           for (const clip of srcCues) {
-            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null };
+            const body = { lane: clip.lane, start_ms: Math.max(0, clip.start_ms + offset), duration_ms: clip.duration_ms, cue_type: clip.cue_type || 'static', fixture_id: clip.fixture_id, channel_values: clip.channel_values, end_channel_values: clip.end_channel_values || null, color: clip.color, label: clip.label || '', effect_id: clip.effect_id || null, track: clip.track || 'color' };
             if (clip.cell != null) body.cell = clip.cell;
             const nc = await apiPost(`/api/sequences/${currentId}/cues`, body);
             computeDisplay(nc); cues.push(nc);
