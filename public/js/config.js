@@ -3936,7 +3936,6 @@ function updateColorWheelVisibility() {
   document.getElementById('colorWheelGroup').style.display = hasCW ? '' : 'none';
   document.getElementById('colorWheelEmpty').style.display = hasCW ? 'none' : '';
 }
-}
 
 function renderCwEditor() {
   const container = document.getElementById('cwEditorRows');

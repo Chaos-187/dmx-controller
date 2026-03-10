@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Actions — DMX Controller Release
+#
+# Creates a GitHub release with a standalone Windows exe whenever a version
+# tag is pushed.  The build uses @yao-pkg/pkg to bundle Node.js + all JS
+# into dmx-controller.exe, then packages the exe plus native addons into a
+# zip and attaches it to the release.
+#
+# Trigger a release:
+#   git tag v1.2.0
+#   git push origin v1.2.0
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  PACKAGE_NAME: dmx-controller
+
+jobs:
+  # ── Build ────────────────────────────────────────────────────────────────
+  build:
+    name: Build Windows exe
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (pkg + native addons)
+        run: npm run build
+
+      - name: Create release zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zipFile = "${{ env.PACKAGE_NAME }}-${tag}.zip"
+          Compress-Archive -Path dist\* -DestinationPath $zipFile -Force
+          Write-Host "Created $zipFile — $([math]::Round((Get-Item $zipFile).Length / 1MB, 1)) MB"
+          echo "ZIP_FILE=$zipFile" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-zip
+          path: ${{ env.ZIP_FILE }}
+          retention-days: 7
+
+  # ── Release ──────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-zip
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ env.PACKAGE_NAME }} ${{ github.ref_name }}"
+          body: "DMX Controller release ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          files: "${{ env.PACKAGE_NAME }}-${{ github.ref_name }}.zip"
