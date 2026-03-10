@@ -878,6 +878,78 @@ textarea.gen-raw-editor {
   border-top: 1px solid var(--panel-border);
 }
 
+/* ── Mode Tabs (Fixture Type Modal) ── */
+.mode-tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.mode-tab {
+  font-size: 12px; padding: 5px 12px; border-radius: 6px 6px 0 0;
+  background: var(--input-bg); border: 1px solid var(--input-border); border-bottom: none;
+  color: var(--text-dim); cursor: pointer; transition: all .15s; position: relative;
+}
+.mode-tab:hover { color: var(--text); background: rgba(255,255,255,.08); }
+.mode-tab.active { background: var(--bg-raised); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.mode-tab .mode-tab-remove { margin-left: 6px; font-size: 14px; color: var(--text-dim); cursor: pointer; line-height: 1; }
+.mode-tab .mode-tab-remove:hover { color: var(--danger); }
+.mode-tab-add { font-size: 18px; color: var(--accent); padding: 4px 10px; cursor: pointer; background: none; border: 1px dashed var(--input-border); border-radius: 6px; }
+.mode-tab-add:hover { border-color: var(--accent); background: rgba(0,176,255,.08); }
+.mode-header-fields { display: flex; gap: 10px; margin-bottom: 10px; }
+.mode-header-fields input { flex: 1; }
+
+/* ── Channel Editor ── */
+.channels-editor { margin-top: 8px; max-height: 400px; overflow-y: auto; }
+.ch-item { margin-bottom: 2px; }
+.ch-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.ch-row input { width: 50px; }
+.ch-row input.ch-name { flex: 1; width: auto; }
+.ch-row select { width: 120px; }
+.ch-main { display: flex; gap: 6px; align-items: center; flex: 1; flex-wrap: wrap; }
+.ch-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+.ch-add { margin-top: 4px; }
+.ch-ranges-toggle {
+  font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer;
+  background: transparent; border: 1px solid var(--input-border); color: var(--text-dim);
+  transition: all .15s; white-space: nowrap;
+}
+.ch-ranges-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.ch-ranges-toggle.has-ranges { border-color: var(--accent); color: var(--accent); background: rgba(233,69,96,.08); }
+.ch-ranges-wrap {
+  margin: 4px 0 8px 28px; padding: 8px 10px;
+  background: rgba(255,255,255,.02); border: 1px solid var(--input-border); border-radius: 6px;
+}
+.ch-ranges-wrap table { width: 100%; border-collapse: collapse; }
+.ch-ranges-wrap th { font-size: 10px; text-transform: uppercase; color: var(--text-dim); text-align: left; padding: 2px 4px; letter-spacing: .5px; }
+.ch-ranges-wrap td { padding: 2px 4px; }
+.ch-ranges-wrap input[type="number"] { width: 55px; }
+.ch-ranges-wrap input[type="text"] { width: 100%; min-width: 60px; }
+.ch-ranges-wrap select { width: 100px; }
+.range-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 14px; }
+.range-actions { margin-top: 6px; display: flex; gap: 8px; }
+
+/* ── Color Wheel Map Editor ── */
+.cw-editor-rows { margin-top: 8px; }
+.cw-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.cw-row input[type="number"] { width: 52px; }
+.cw-row input[type="text"] { flex: 1; min-width: 80px; }
+.cw-row input[type="color"] { width: 36px; height: 28px; padding: 1px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); cursor: pointer; }
+.cw-row .cw-hex { width: 80px; font-family: monospace; font-size: 12px; }
+.cw-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
+/* ── Type Modal Tabs ── */
+.type-modal-tabs { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 2px solid var(--input-border); }
+.type-modal-tab { background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color .15s, border-color .15s; }
+.type-modal-tab:hover { color: var(--text); }
+.type-modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.type-tab-pane { display: none; }
+.type-tab-pane.active { display: block; }
+.tab-empty-msg { text-align: center; padding: 24px 12px; color: var(--text-dim); }
+.tab-empty-msg p { margin: 4px 0; }
+
+/* ── Gobo Wheel Map Editor ── */
+.gobo-editor-rows { margin-top: 8px; }
+.gobo-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.gobo-row input[type="number"] { width: 52px; }
+.gobo-row input[type="text"] { flex: 1; min-width: 80px; }
+.gobo-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
 /* ── Login Overlay ── */
 .login-overlay {
   display: none;

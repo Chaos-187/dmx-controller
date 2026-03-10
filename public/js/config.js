@@ -3871,7 +3871,7 @@ function renderChannelsEditor() {
       renderChannelsEditor();
     });
   });
-  updateColorWheelVisibility();
+  updateTabVisibility();
 }
 
 window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs(); };
@@ -3915,22 +3915,27 @@ if (document.getElementById('btnBuildMultiCell')) document.getElementById('btnBu
 
 // ─── Color Wheel Map Editor ─────────────────────────────────────
 let cwColors = [];
-let goboSlots = [];
 
 // ─── Type Modal Tab Switching ─────────────────────────────────────
-document.querySelectorAll('.type-modal-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.type-modal-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.type-modal-panel').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    const target = tab.dataset.tmtab;
-    const content = document.querySelector(`[data-tmtab-content="${target}"]`);
-    if (content) content.classList.add('active');
+(function initTypeModalTabs() {
+  const tabBar = document.getElementById('typeModalTabs');
+  if (!tabBar) return;
+  tabBar.addEventListener('click', (e) => {
+    const btn = e.target.closest('.type-modal-tab');
+    if (!btn) return;
+    const tabName = btn.dataset.tab;
+    tabBar.querySelectorAll('.type-modal-tab').forEach(t => t.classList.toggle('active', t === btn));
+    document.querySelectorAll('#typeModal .type-tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === tabName));
   });
-});
+})();
 
 function updateColorWheelVisibility() {
-  // No-op — color wheel and gobo are now always-visible tabs
+  const currentHas = typeChannels.some(ch => ch.type === 'color_wheel');
+  const othersHave = typeModes.some((m, i) => i !== activeMode && (m.channels || []).some(ch => ch.type === 'color_wheel'));
+  const hasCW = currentHas || othersHave;
+  document.getElementById('colorWheelGroup').style.display = hasCW ? '' : 'none';
+  document.getElementById('colorWheelEmpty').style.display = hasCW ? 'none' : '';
+}
 }
 
 function renderCwEditor() {
@@ -3969,20 +3974,28 @@ if (document.getElementById('btnAddCwColor')) document.getElementById('btnAddCwC
 });
 
 // ─── Gobo Wheel Map Editor ──────────────────────────────────────
+let goboSlots = [];
+
+function updateGoboVisibility() {
+  const currentHas = typeChannels.some(ch => ch.type === 'gobo');
+  const othersHave = typeModes.some((m, i) => i !== activeMode && (m.channels || []).some(ch => ch.type === 'gobo'));
+  const hasGobo = currentHas || othersHave;
+  document.getElementById('goboWheelGroup').style.display = hasGobo ? '' : 'none';
+  document.getElementById('goboWheelEmpty').style.display = hasGobo ? 'none' : '';
+}
 
 function renderGoboEditor() {
   const container = document.getElementById('goboEditorRows');
-  if (!container) return;
   container.innerHTML = '';
   goboSlots.forEach((s, i) => {
     const row = document.createElement('div');
-    row.className = 'cw-row';
+    row.className = 'gobo-row';
     row.innerHTML = `
       <span style="font-size:11px;color:var(--text-dim);width:16px;padding-top:2px">${i+1}</span>
-      <input type="number" value="${s.dmx_start}" min="0" max="255" title="DMX start value" data-idx="${i}" data-field="dmx_start" style="width:52px">
-      <input type="number" value="${s.dmx_end}" min="0" max="255" title="DMX end value" data-idx="${i}" data-field="dmx_end" style="width:52px">
-      <input type="text" value="${esc(s.label || '')}" data-idx="${i}" data-field="label" placeholder="Gobo name" style="flex:1;min-width:120px">
-      <button type="button" class="cw-remove" data-idx="${i}">&times;</button>`;
+      <input type="number" value="${s.dmx_start}" min="0" max="255" title="DMX start value" data-idx="${i}" data-field="dmx_start">
+      <input type="number" value="${s.dmx_end}" min="0" max="255" title="DMX end value" data-idx="${i}" data-field="dmx_end">
+      <input type="text" value="${esc(s.label || '')}" data-idx="${i}" data-field="label" placeholder="Gobo name (e.g. Open, Circle, Star)">
+      <button type="button" class="gobo-remove" data-idx="${i}">&times;</button>`;
     container.appendChild(row);
   });
   container.querySelectorAll('input').forEach(el => {
@@ -3993,7 +4006,7 @@ function renderGoboEditor() {
       else if (field === 'label') goboSlots[idx].label = el.value;
     });
   });
-  container.querySelectorAll('.cw-remove').forEach(btn => { btn.addEventListener('click', () => { goboSlots.splice(+btn.dataset.idx, 1); renderGoboEditor(); }); });
+  container.querySelectorAll('.gobo-remove').forEach(btn => { btn.addEventListener('click', () => { goboSlots.splice(+btn.dataset.idx, 1); renderGoboEditor(); }); });
 }
 
 if (document.getElementById('btnAddGoboSlot')) document.getElementById('btnAddGoboSlot').addEventListener('click', () => {
@@ -4001,6 +4014,11 @@ if (document.getElementById('btnAddGoboSlot')) document.getElementById('btnAddGo
   goboSlots.push({ dmx_start: Math.min(lastEnd, 255), dmx_end: Math.min(lastEnd + 9, 255), label: '' });
   renderGoboEditor();
 });
+
+function updateTabVisibility() {
+  updateColorWheelVisibility();
+  updateGoboVisibility();
+}
 
 async function openTypeModal(typeId) {
   cwColors = [];
@@ -4022,8 +4040,8 @@ async function openTypeModal(typeId) {
       if (Array.isArray(cwData)) cwColors = cwData.map(c => ({ dmx_start: c.dmx_start, dmx_end: c.dmx_end, color_hex: c.color_hex, label: c.label || '' }));
     } catch(e) {}
     try {
-      const goboData = await fetch(`/api/fixture-types/${typeId}/gobo-wheel`).then(r=>r.json());
-      if (Array.isArray(goboData)) goboSlots = goboData.map(s => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label || '' }));
+      const goboData = await fetch(`/api/fixture-types/${typeId}/gobos`).then(r=>r.json());
+      if (Array.isArray(goboData)) goboSlots = goboData.map(s => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label || '', image_url: s.image_url || '' }));
     } catch(e) {}
   } else {
     document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
@@ -4037,10 +4055,13 @@ async function openTypeModal(typeId) {
   typeChannels = (typeModes[0].channels || []).map(ch => ({...ch}));
   document.getElementById('tModeName').value = typeModes[0].name || '';
   document.getElementById('tModeShortName').value = typeModes[0].short_name || '';
-  renderModeTabs(); renderChannelsEditor(); updateMultiCellVisibility(); updateColorWheelVisibility(); renderCwEditor(); renderGoboEditor();
-  // Reset wheel tabs to Color Wheel
-  document.querySelectorAll('.wheel-tab').forEach(t => t.classList.toggle('active', t.dataset.wheelTab === 'cw'));
-  document.querySelectorAll('.wheel-tab-content').forEach(c => c.classList.toggle('active', c.dataset.wheelTabContent === 'cw'));
+  renderModeTabs(); renderChannelsEditor(); updateMultiCellVisibility(); updateTabVisibility(); renderCwEditor(); renderGoboEditor();
+  // Reset to Channels tab
+  const tabBar = document.getElementById('typeModalTabs');
+  if (tabBar) {
+    tabBar.querySelectorAll('.type-modal-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'channels'));
+    document.querySelectorAll('#typeModal .type-tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === 'channels'));
+  }
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('tDuplicateHint').textContent = '';
   updateDuplicateHint();
@@ -4087,10 +4108,10 @@ if (document.getElementById('btnSaveType')) document.getElementById('btnSaveType
   }
   const hasGobo = modes.some(m => m.channels.some(ch => ch.type === 'gobo'));
   if (savedId && hasGobo && goboSlots.length > 0) {
-    const sorted = goboSlots.map((s, i) => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label, sort_order: i + 1 }));
-    await fetch(`/api/fixture-types/${savedId}/gobo-wheel`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ slots: sorted }) });
+    const sorted = goboSlots.map((s, i) => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label, image_url: s.image_url || '', sort_order: i + 1 }));
+    await fetch(`/api/fixture-types/${savedId}/gobos`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ slots: sorted }) });
   } else if (savedId && !hasGobo) {
-    await fetch(`/api/fixture-types/${savedId}/gobo-wheel`, { method: 'DELETE' });
+    await fetch(`/api/fixture-types/${savedId}/gobos`, { method: 'DELETE' });
   }
   closeModal('typeModal');
   loadTypes();

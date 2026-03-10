@@ -914,11 +914,11 @@ app.get('/api/color-wheel-maps', (req, res) => {
 
 // ─── Gobo Wheel Map API ─────────────────────────────────────────────────────
 
-app.get('/api/fixture-types/:id/gobo-wheel', (req, res) => {
+app.get('/api/fixture-types/:id/gobos', (req, res) => {
   res.json(db.getGoboWheelMap(+req.params.id));
 });
 
-app.put('/api/fixture-types/:id/gobo-wheel', (req, res) => {
+app.put('/api/fixture-types/:id/gobos', (req, res) => {
   try {
     const slots = req.body.slots;
     if (!Array.isArray(slots)) return res.status(400).json({ error: 'slots array required' });
@@ -930,7 +930,7 @@ app.put('/api/fixture-types/:id/gobo-wheel', (req, res) => {
   }
 });
 
-app.delete('/api/fixture-types/:id/gobo-wheel', (req, res) => {
+app.delete('/api/fixture-types/:id/gobos', (req, res) => {
   db.deleteGoboWheelMap(+req.params.id);
   invalidateFixtureChannelMapCache();
   res.json({ ok: true });

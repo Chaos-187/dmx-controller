@@ -1122,6 +1122,23 @@
     .cw-row .cw-hex { width: 80px; font-family: monospace; font-size: 12px; }
     .cw-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
 
+    /* Type Modal Tabs */
+    .type-modal-tabs { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 2px solid var(--input-border); }
+    .type-modal-tab { background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color .15s, border-color .15s; }
+    .type-modal-tab:hover { color: var(--text); }
+    .type-modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .type-tab-pane { display: none; }
+    .type-tab-pane.active { display: block; }
+    .tab-empty-msg { text-align: center; padding: 24px 12px; color: var(--text-dim); }
+    .tab-empty-msg p { margin: 4px 0; }
+
+    /* Gobo Wheel Map Editor */
+    .gobo-editor-rows { margin-top: 8px; }
+    .gobo-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .gobo-row input[type="number"] { width: 52px; }
+    .gobo-row input[type="text"] { flex: 1; min-width: 80px; }
+    .gobo-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
     /* ═══════════════════════════════════════════════════════════════
        DMX Control Panel
        ═══════════════════════════════════════════════════════════════ */
@@ -3829,54 +3846,88 @@
         </select>
       </div>
     </div>
-    <div class="form-group">
-      <label>Modes</label>
-      <div class="mode-tabs" id="modeTabs"></div>
-      <div class="mode-header-fields" id="modeHeaderFields">
-        <input type="text" id="tModeName" placeholder="Mode name (e.g. 16-bit)" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
-        <input type="text" id="tModeShortName" placeholder="Short name (e.g. 16b)" style="width:100px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+
+    <!-- ─── Type Modal Tabs ─── -->
+    <div class="type-modal-tabs" id="typeModalTabs">
+      <button class="type-modal-tab active" data-tab="channels">Channels</button>
+      <button class="type-modal-tab" data-tab="colorwheels">Color Wheels</button>
+      <button class="type-modal-tab" data-tab="gobos">Gobos</button>
+    </div>
+
+    <!-- ─── Channels Tab ─── -->
+    <div class="type-tab-pane active" id="typeTabChannels" data-tab="channels">
+      <div class="form-group">
+        <label>Modes</label>
+        <div class="mode-tabs" id="modeTabs"></div>
+        <div class="mode-header-fields" id="modeHeaderFields">
+          <input type="text" id="tModeName" placeholder="Mode name (e.g. 16-bit)" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+          <input type="text" id="tModeShortName" placeholder="Short name (e.g. 16b)" style="width:100px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Channels <span id="chCountLabel" style="font-size:11px;color:var(--text-dim)"></span></label>
+        <div class="channels-editor" id="channelsEditor"></div>
+        <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
+      </div>
+      <div class="form-group" id="tMultiCellGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
+        <label>Multi-Cell Builder</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Quickly build a multi-cell fixture: define master channels above, then set the per-cell pattern and count below.</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Cells:</label>
+          <input type="number" id="tMultiCellCount" value="4" min="1" max="64" style="width:60px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Pattern:</label>
+          <select id="tMultiCellPattern" style="width:auto">
+            <option value="rgb">RGB (3ch)</option>
+            <option value="rgbw">RGBW (4ch)</option>
+            <option value="rgbwa">RGBWA (5ch)</option>
+            <option value="rgbd">RGB + Dimmer (4ch)</option>
+            <option value="rgbwd">RGBW + Dimmer (5ch)</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" id="btnBuildMultiCell" type="button">Build Channels</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tMultiCellHint"></div>
+      </div>
+      <div class="form-group" id="tDuplicateGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+        <label>Duplicate Channel Pattern</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Repeat the channels above N times. Names auto-number (e.g. Red 1, Green 1, Blue 1, Red 2, Green 2...)</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Repeat:</label>
+          <input type="number" id="tDuplicateCount" value="1" min="1" max="512" style="width:80px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">times</label>
+          <button class="btn btn-secondary btn-sm" id="btnDuplicateChannels" type="button">Duplicate</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tDuplicateHint"></div>
       </div>
     </div>
-    <div class="form-group">
-      <label>Channels <span id="chCountLabel" style="font-size:11px;color:var(--text-dim)"></span></label>
-      <div class="channels-editor" id="channelsEditor"></div>
-      <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
-    </div>
-    <div class="form-group" id="tMultiCellGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
-      <label>Multi-Cell Builder</label>
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Quickly build a multi-cell fixture: define master channels above, then set the per-cell pattern and count below.</div>
-      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
-        <label style="font-size:12px;color:var(--text-dim);margin:0">Cells:</label>
-        <input type="number" id="tMultiCellCount" value="4" min="1" max="64" style="width:60px">
-        <label style="font-size:12px;color:var(--text-dim);margin:0">Pattern:</label>
-        <select id="tMultiCellPattern" style="width:auto">
-          <option value="rgb">RGB (3ch)</option>
-          <option value="rgbw">RGBW (4ch)</option>
-          <option value="rgbwa">RGBWA (5ch)</option>
-          <option value="rgbd">RGB + Dimmer (4ch)</option>
-          <option value="rgbwd">RGBW + Dimmer (5ch)</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" id="btnBuildMultiCell" type="button">Build Channels</button>
+
+    <!-- ─── Color Wheels Tab ─── -->
+    <div class="type-tab-pane" id="typeTabColorWheels" data-tab="colorwheels">
+      <div class="form-group" id="colorWheelGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+        <label>Color Wheel Map</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Map DMX values to physical color wheel positions. Used by the sequence generator to match RGB palette colors to the nearest available wheel slot.</div>
+        <div class="cw-editor-rows" id="cwEditorRows"></div>
+        <button class="btn btn-secondary btn-sm" id="btnAddCwColor" type="button">+ Add Color</button>
       </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tMultiCellHint"></div>
-    </div>
-    <div class="form-group" id="tDuplicateGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
-      <label>Duplicate Channel Pattern</label>
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Repeat the channels above N times. Names auto-number (e.g. Red 1, Green 1, Blue 1, Red 2, Green 2...)</div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="font-size:12px;color:var(--text-dim);margin:0">Repeat:</label>
-        <input type="number" id="tDuplicateCount" value="1" min="1" max="512" style="width:80px">
-        <label style="font-size:12px;color:var(--text-dim);margin:0">times</label>
-        <button class="btn btn-secondary btn-sm" id="btnDuplicateChannels" type="button">Duplicate</button>
+      <div id="colorWheelEmpty" class="tab-empty-msg" style="display:none">
+        <p>No color wheel channels detected.</p>
+        <p style="font-size:11px;color:var(--text-dim)">Add a <b>color_wheel</b> channel type in the Channels tab to enable color wheel mapping.</p>
       </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="tDuplicateHint"></div>
     </div>
-    <div class="form-group" id="colorWheelGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
-      <label>Color Wheel Map</label>
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Map DMX values to physical color wheel positions. Used by the sequence generator to match RGB palette colors to the nearest available wheel slot.</div>
-      <div class="cw-editor-rows" id="cwEditorRows"></div>
-      <button class="btn btn-secondary btn-sm" id="btnAddCwColor" type="button">+ Add Color</button>
+
+    <!-- ─── Gobos Tab ─── -->
+    <div class="type-tab-pane" id="typeTabGobos" data-tab="gobos">
+      <div class="form-group" id="goboWheelGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+        <label>Gobo Wheel Map</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Map DMX values to physical gobo wheel positions. Define the DMX range and label for each gobo slot.</div>
+        <div class="gobo-editor-rows" id="goboEditorRows"></div>
+        <button class="btn btn-secondary btn-sm" id="btnAddGoboSlot" type="button">+ Add Gobo</button>
+      </div>
+      <div id="goboWheelEmpty" class="tab-empty-msg" style="display:none">
+        <p>No gobo channels detected.</p>
+        <p style="font-size:11px;color:var(--text-dim)">Add a <b>gobo</b> channel type in the Channels tab to enable gobo wheel mapping.</p>
+      </div>
     </div>
+
     <div class="form-error" id="typeError"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('typeModal')">Cancel</button>
@@ -5885,8 +5936,8 @@ function renderChannelsEditor() {
       renderChannelsEditor();
     });
   });
-  // Update color wheel section visibility when channels change
-  updateColorWheelVisibility();
+  // Update color wheel + gobo section visibility when channels change
+  updateTabVisibility();
 }
 
 window.removeChannel = (i) => { typeChannels.splice(i, 1); renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs(); };
@@ -5958,11 +6009,11 @@ document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
 let cwColors = []; // current color wheel map entries [{dmx_start, dmx_end, color_hex, label}]
 
 function updateColorWheelVisibility() {
-  // Show the color wheel editor section if ANY mode has a color_wheel channel
-  // Check typeChannels (current mode being edited) and other modes in typeModes
   const currentHas = typeChannels.some(ch => ch.type === 'color_wheel');
   const othersHave = typeModes.some((m, i) => i !== activeMode && (m.channels || []).some(ch => ch.type === 'color_wheel'));
-  document.getElementById('colorWheelGroup').style.display = (currentHas || othersHave) ? '' : 'none';
+  const hasCW = currentHas || othersHave;
+  document.getElementById('colorWheelGroup').style.display = hasCW ? '' : 'none';
+  document.getElementById('colorWheelEmpty').style.display = hasCW ? 'none' : '';
 }
 
 function renderCwEditor() {
@@ -5981,37 +6032,19 @@ function renderCwEditor() {
       <button type="button" class="cw-remove" data-idx="${i}">&times;</button>`;
     container.appendChild(row);
   });
-
-  // Bind field changes
   container.querySelectorAll('input').forEach(el => {
     el.addEventListener('change', () => {
       const idx = +el.dataset.idx;
       const field = el.dataset.field;
-      if (field === 'dmx_start') {
-        cwColors[idx].dmx_start = Math.max(0, Math.min(255, +el.value));
-      } else if (field === 'dmx_end') {
-        cwColors[idx].dmx_end = Math.max(0, Math.min(255, +el.value));
-      } else if (field === 'color_hex_picker') {
-        cwColors[idx].color_hex = el.value;
-        renderCwEditor(); // sync hex text input
-      } else if (field === 'color_hex') {
-        const v = el.value.trim();
-        if (/^#[0-9a-fA-F]{6}$/.test(v)) {
-          cwColors[idx].color_hex = v;
-          renderCwEditor(); // sync color picker
-        }
-      } else if (field === 'label') {
-        cwColors[idx].label = el.value;
-      }
+      if (field === 'dmx_start') cwColors[idx].dmx_start = Math.max(0, Math.min(255, +el.value));
+      else if (field === 'dmx_end') cwColors[idx].dmx_end = Math.max(0, Math.min(255, +el.value));
+      else if (field === 'color_hex_picker') { cwColors[idx].color_hex = el.value; renderCwEditor(); }
+      else if (field === 'color_hex') { const v = el.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) { cwColors[idx].color_hex = v; renderCwEditor(); } }
+      else if (field === 'label') cwColors[idx].label = el.value;
     });
   });
-
-  // Bind remove buttons
   container.querySelectorAll('.cw-remove').forEach(btn => {
-    btn.addEventListener('click', () => {
-      cwColors.splice(+btn.dataset.idx, 1);
-      renderCwEditor();
-    });
+    btn.addEventListener('click', () => { cwColors.splice(+btn.dataset.idx, 1); renderCwEditor(); });
   });
 }
 
@@ -6021,8 +6054,71 @@ document.getElementById('btnAddCwColor').addEventListener('click', () => {
   renderCwEditor();
 });
 
+/* ── Gobo Wheel Map Editor ── */
+let goboSlots = [];
+
+function updateGoboVisibility() {
+  const currentHas = typeChannels.some(ch => ch.type === 'gobo');
+  const othersHave = typeModes.some((m, i) => i !== activeMode && (m.channels || []).some(ch => ch.type === 'gobo'));
+  const hasGobo = currentHas || othersHave;
+  document.getElementById('goboWheelGroup').style.display = hasGobo ? '' : 'none';
+  document.getElementById('goboWheelEmpty').style.display = hasGobo ? 'none' : '';
+}
+
+function renderGoboEditor() {
+  const container = document.getElementById('goboEditorRows');
+  container.innerHTML = '';
+  goboSlots.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'gobo-row';
+    row.innerHTML = `
+      <span style="font-size:11px;color:var(--text-dim);width:16px;padding-top:2px">${i+1}</span>
+      <input type="number" value="${s.dmx_start}" min="0" max="255" title="DMX start value" data-idx="${i}" data-field="dmx_start">
+      <input type="number" value="${s.dmx_end}" min="0" max="255" title="DMX end value" data-idx="${i}" data-field="dmx_end">
+      <input type="text" value="${esc(s.label || '')}" data-idx="${i}" data-field="label" placeholder="Gobo name (e.g. Open, Circle, Star)">
+      <button type="button" class="gobo-remove" data-idx="${i}">&times;</button>`;
+    container.appendChild(row);
+  });
+  container.querySelectorAll('input').forEach(el => {
+    el.addEventListener('change', () => {
+      const idx = +el.dataset.idx, field = el.dataset.field;
+      if (field === 'dmx_start') goboSlots[idx].dmx_start = Math.max(0, Math.min(255, +el.value));
+      else if (field === 'dmx_end') goboSlots[idx].dmx_end = Math.max(0, Math.min(255, +el.value));
+      else if (field === 'label') goboSlots[idx].label = el.value;
+    });
+  });
+  container.querySelectorAll('.gobo-remove').forEach(btn => {
+    btn.addEventListener('click', () => { goboSlots.splice(+btn.dataset.idx, 1); renderGoboEditor(); });
+  });
+}
+
+document.getElementById('btnAddGoboSlot').addEventListener('click', () => {
+  const lastEnd = goboSlots.length > 0 ? goboSlots[goboSlots.length - 1].dmx_end + 1 : 0;
+  goboSlots.push({ dmx_start: Math.min(lastEnd, 255), dmx_end: Math.min(lastEnd + 9, 255), label: '' });
+  renderGoboEditor();
+});
+
+/* ── Type Modal Tab Switching ── */
+(function initTypeModalTabs() {
+  const tabBar = document.getElementById('typeModalTabs');
+  if (!tabBar) return;
+  tabBar.addEventListener('click', (e) => {
+    const btn = e.target.closest('.type-modal-tab');
+    if (!btn) return;
+    const tabName = btn.dataset.tab;
+    tabBar.querySelectorAll('.type-modal-tab').forEach(t => t.classList.toggle('active', t === btn));
+    document.querySelectorAll('#typeModal .type-tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === tabName));
+  });
+})();
+
+function updateTabVisibility() {
+  updateColorWheelVisibility();
+  updateGoboVisibility();
+}
+
 async function openTypeModal(typeId) {
-  cwColors = []; // reset color wheel map
+  cwColors = [];
+  goboSlots = [];
   if (typeId) {
     const t = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json());
     document.getElementById('typeModalTitle').textContent = 'Edit Fixture Type';
@@ -6030,7 +6126,6 @@ async function openTypeModal(typeId) {
     document.getElementById('tName').value = t.name;
     document.getElementById('tManufacturer').value = t.manufacturer || '';
     document.getElementById('tCategory').value = t.category;
-    // Load modes
     if (t.modes && t.modes.length > 0) {
       typeModes = t.modes.map(m => ({
         name: m.name,
@@ -6040,11 +6135,14 @@ async function openTypeModal(typeId) {
     } else {
       typeModes = [{ name: 'Default', short_name: '', channels: t.channels ? t.channels.map(c => ({...c})) : [] }];
     }
-    // Load color wheel map
     try {
       const cwData = await fetch(`/api/fixture-types/${typeId}/color-wheel`).then(r=>r.json());
       if (Array.isArray(cwData)) cwColors = cwData.map(c => ({ dmx_start: c.dmx_start, dmx_end: c.dmx_end, color_hex: c.color_hex, label: c.label || '' }));
-    } catch(e) { /* no color wheel map */ }
+    } catch(e) {}
+    try {
+      const goboData = await fetch(`/api/fixture-types/${typeId}/gobos`).then(r=>r.json());
+      if (Array.isArray(goboData)) goboSlots = goboData.map(s => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label || '', image_url: s.image_url || '' }));
+    } catch(e) {}
   } else {
     document.getElementById('typeModalTitle').textContent = 'Add Fixture Type';
     document.getElementById('typeEditId').value = '';
@@ -6060,9 +6158,15 @@ async function openTypeModal(typeId) {
   renderModeTabs();
   renderChannelsEditor();
   updateMultiCellVisibility();
-  updateColorWheelVisibility();
+  updateTabVisibility();
   renderCwEditor();
-  // Reset duplicate section
+  renderGoboEditor();
+  // Reset to Channels tab
+  const tabBar = document.getElementById('typeModalTabs');
+  if (tabBar) {
+    tabBar.querySelectorAll('.type-modal-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'channels'));
+    document.querySelectorAll('#typeModal .type-tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === 'channels'));
+  }
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('tDuplicateHint').textContent = '';
   updateDuplicateHint();
@@ -6082,10 +6186,8 @@ window.deleteType = async (id, name) => {
 
 document.getElementById('btnSaveType').addEventListener('click', async () => {
   const editId = document.getElementById('typeEditId').value;
-  // Save current mode's channels
   saveModeChannels();
 
-  // Build modes array
   const modes = typeModes.map(m => {
     const channels = (m.channels || []).map((ch, i) => {
       const clean = { ...ch, channel_number: i + 1 };
@@ -6114,7 +6216,6 @@ document.getElementById('btnSaveType').addEventListener('click', async () => {
   const data = await res.json();
   if (data.error) return showError('typeError', data.error);
 
-  // Save color wheel map if applicable
   const savedId = editId || data.id;
   const hasColorWheel = modes.some(m => m.channels.some(ch => ch.type === 'color_wheel'));
   if (savedId && hasColorWheel && cwColors.length > 0) {
@@ -6125,8 +6226,18 @@ document.getElementById('btnSaveType').addEventListener('click', async () => {
       body: JSON.stringify({ colors: sorted })
     });
   } else if (savedId && !hasColorWheel) {
-    // Remove color wheel map if no color_wheel channel anymore
     await fetch(`/api/fixture-types/${savedId}/color-wheel`, { method: 'DELETE' });
+  }
+  const hasGobo = modes.some(m => m.channels.some(ch => ch.type === 'gobo'));
+  if (savedId && hasGobo && goboSlots.length > 0) {
+    const sorted = goboSlots.map((s, i) => ({ dmx_start: s.dmx_start, dmx_end: s.dmx_end, label: s.label, image_url: s.image_url || '', sort_order: i + 1 }));
+    await fetch(`/api/fixture-types/${savedId}/gobos`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ slots: sorted })
+    });
+  } else if (savedId && !hasGobo) {
+    await fetch(`/api/fixture-types/${savedId}/gobos`, { method: 'DELETE' });
   }
 
   closeModal('typeModal');

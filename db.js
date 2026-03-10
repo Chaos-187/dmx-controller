@@ -214,6 +214,7 @@ function init() {
       dmx_start       INTEGER NOT NULL DEFAULT 0,
       dmx_end         INTEGER NOT NULL DEFAULT 0,
       label           TEXT    DEFAULT '',
+      image_url       TEXT    DEFAULT '',
       sort_order      INTEGER DEFAULT 0
     );
 
@@ -2325,41 +2326,53 @@ function deleteColorWheelMap(fixtureTypeId) {
   db.prepare('DELETE FROM color_wheel_colors WHERE fixture_type_id = ?').run(fixtureTypeId);
 }
 
-// ─── Gobo Wheel Map ──────────────────────────────────────────────────────────
+// ─── Gobo Wheel Maps ─────────────────────────────────────────────────────────
 
+/**
+ * Get the gobo wheel map for a fixture type.
+ */
 function getGoboWheelMap(fixtureTypeId) {
   return db.prepare(
-    'SELECT id, dmx_start, dmx_end, label FROM gobo_wheel_slots WHERE fixture_type_id = ? ORDER BY sort_order, dmx_start'
+    'SELECT id, dmx_start, dmx_end, label, image_url FROM gobo_wheel_slots WHERE fixture_type_id = ? ORDER BY sort_order, dmx_start'
   ).all(fixtureTypeId);
 }
 
+/**
+ * Get all gobo wheel maps, keyed by fixture_type_id.
+ */
 function getAllGoboWheelMaps() {
   const rows = db.prepare(
-    'SELECT fixture_type_id, dmx_start, dmx_end, label FROM gobo_wheel_slots ORDER BY fixture_type_id, sort_order, dmx_start'
+    'SELECT fixture_type_id, dmx_start, dmx_end, label, image_url FROM gobo_wheel_slots ORDER BY fixture_type_id, sort_order, dmx_start'
   ).all();
   const maps = {};
   for (const r of rows) {
     if (!maps[r.fixture_type_id]) maps[r.fixture_type_id] = [];
-    maps[r.fixture_type_id].push({ dmx_start: r.dmx_start, dmx_end: r.dmx_end, label: r.label });
+    maps[r.fixture_type_id].push({ dmx_start: r.dmx_start, dmx_end: r.dmx_end, label: r.label, image_url: r.image_url });
   }
   return maps;
 }
 
+/**
+ * Set the full gobo wheel map for a fixture type (replaces existing).
+ */
 function setGoboWheelMap(fixtureTypeId, slots) {
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM gobo_wheel_slots WHERE fixture_type_id = ?').run(fixtureTypeId);
     const ins = db.prepare(
-      'INSERT INTO gobo_wheel_slots (fixture_type_id, dmx_start, dmx_end, label, sort_order) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO gobo_wheel_slots (fixture_type_id, dmx_start, dmx_end, label, image_url, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
     );
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
-      ins.run(fixtureTypeId, s.dmx_start, s.dmx_end, s.label || '', i);
+      ins.run(fixtureTypeId, s.dmx_start, s.dmx_end, s.label || '', s.image_url || '', i);
     }
   });
   tx();
   return getGoboWheelMap(fixtureTypeId);
 }
 
+/**
+ * Delete the gobo wheel map for a fixture type.
+ */
 function deleteGoboWheelMap(fixtureTypeId) {
   db.prepare('DELETE FROM gobo_wheel_slots WHERE fixture_type_id = ?').run(fixtureTypeId);
 }

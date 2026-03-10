@@ -1300,15 +1300,11 @@
   <div class="pp-content" id="ppContent"></div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════════
-     MODAL — Add/Edit Fixture Type
-     ══════════════════════════════════════════════════════════════ -->
+<!-- ══════ Fixture Type Modal (Add/Edit) ══════ -->
 <div class="modal-overlay" id="typeModal">
-  <div class="modal">
-    <h2 id="typeModalTitle">Add Fixture Type</h2>
+  <div class="modal" style="max-width:740px">
+    <h3 id="typeModalTitle">Add Fixture Type</h3>
     <input type="hidden" id="typeEditId">
-
-    <!-- ── Header fields (always visible) ── -->
     <div class="form-group">
       <label>Name</label>
       <input type="text" id="tName" placeholder="e.g. Chauvet SlimPAR 56">
@@ -1337,21 +1333,21 @@
       </div>
     </div>
 
-    <!-- ── Section Tabs ── -->
+    <!-- ─── Type Modal Tabs ─── -->
     <div class="type-modal-tabs" id="typeModalTabs">
-      <button type="button" class="type-modal-tab active" data-tmtab="channels">&#9776; Channels</button>
-      <button type="button" class="type-modal-tab" data-tmtab="colorwheel">&#127912; Color Wheel</button>
-      <button type="button" class="type-modal-tab" data-tmtab="gobos">&#9678; Gobos</button>
+      <button class="type-modal-tab active" data-tab="channels">Channels</button>
+      <button class="type-modal-tab" data-tab="colorwheels">Color Wheels</button>
+      <button class="type-modal-tab" data-tab="gobos">Gobos</button>
     </div>
 
-    <!-- ── Tab: Channels ── -->
-    <div class="type-modal-panel active" id="tmPanelChannels" data-tmtab-content="channels">
-      <div class="form-group" style="margin-bottom:8px">
+    <!-- ─── Channels Tab ─── -->
+    <div class="type-tab-pane active" id="typeTabChannels" data-tab="channels">
+      <div class="form-group">
         <label>Modes</label>
         <div class="mode-tabs" id="modeTabs"></div>
         <div class="mode-header-fields" id="modeHeaderFields">
-          <input type="text" id="tModeName" placeholder="Mode name (e.g. 16-bit)">
-          <input type="text" id="tModeShortName" placeholder="Short name (e.g. 16b)" style="width:100px">
+          <input type="text" id="tModeName" placeholder="Mode name (e.g. 16-bit)" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
+          <input type="text" id="tModeShortName" placeholder="Short name (e.g. 16b)" style="width:100px;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px">
         </div>
       </div>
       <div class="form-group">
@@ -1390,18 +1386,32 @@
       </div>
     </div>
 
-    <!-- ── Tab: Color Wheel ── -->
-    <div class="type-modal-panel" id="tmPanelColorwheel" data-tmtab-content="colorwheel">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">Map DMX values to physical color wheel positions. Used by the sequence generator to match RGB palette colors to the nearest available wheel slot.</div>
-      <div class="cw-editor-rows" id="cwEditorRows"></div>
-      <button class="btn btn-secondary btn-sm" id="btnAddCwColor" type="button">+ Add Color</button>
+    <!-- ─── Color Wheels Tab ─── -->
+    <div class="type-tab-pane" id="typeTabColorWheels" data-tab="colorwheels">
+      <div class="form-group" id="colorWheelGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+        <label>Color Wheel Map</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Map DMX values to physical color wheel positions. Used by the sequence generator to match RGB palette colors to the nearest available wheel slot.</div>
+        <div class="cw-editor-rows" id="cwEditorRows"></div>
+        <button class="btn btn-secondary btn-sm" id="btnAddCwColor" type="button">+ Add Color</button>
+      </div>
+      <div id="colorWheelEmpty" class="tab-empty-msg" style="display:none">
+        <p>No color wheel channels detected.</p>
+        <p style="font-size:11px;color:var(--text-dim)">Add a <b>color_wheel</b> channel type in the Channels tab to enable color wheel mapping.</p>
+      </div>
     </div>
 
-    <!-- ── Tab: Gobos ── -->
-    <div class="type-modal-panel" id="tmPanelGobos" data-tmtab-content="gobos">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">Map DMX values to gobo wheel positions. Define each gobo slot with its DMX range and label.</div>
-      <div class="cw-editor-rows" id="goboEditorRows"></div>
-      <button class="btn btn-secondary btn-sm" id="btnAddGoboSlot" type="button">+ Add Gobo</button>
+    <!-- ─── Gobos Tab ─── -->
+    <div class="type-tab-pane" id="typeTabGobos" data-tab="gobos">
+      <div class="form-group" id="goboWheelGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border)">
+        <label>Gobo Wheel Map</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Map DMX values to physical gobo wheel positions. Define the DMX range and label for each gobo slot.</div>
+        <div class="gobo-editor-rows" id="goboEditorRows"></div>
+        <button class="btn btn-secondary btn-sm" id="btnAddGoboSlot" type="button">+ Add Gobo</button>
+      </div>
+      <div id="goboWheelEmpty" class="tab-empty-msg" style="display:none">
+        <p>No gobo channels detected.</p>
+        <p style="font-size:11px;color:var(--text-dim)">Add a <b>gobo</b> channel type in the Channels tab to enable gobo wheel mapping.</p>
+      </div>
     </div>
 
     <div class="form-error" id="typeError"></div>
