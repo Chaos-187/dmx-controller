@@ -1,0 +1,116 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GitLab CI/CD — DMX Controller
+#
+# Creates a release with a standalone Windows exe whenever a version tag
+# is pushed.  The build uses @yao-pkg/pkg to bundle Node.js + all JS into
+# dmx-controller.exe, then packages the exe plus native addons into a zip.
+#
+# Prerequisites (on the Windows runner):
+#   • Node.js 24+  (matching pkg target in package.json)
+#   • npm
+#   • Git
+#   • ffmpeg/ffprobe/ffplay binaries in the project root (copied into dist)
+#
+# Trigger a release:
+#   git tag v1.2.0
+#   git push origin v1.2.0
+#
+# Runner requirements:
+#   The build targets node24-win-x64 and copies Windows-specific native addons
+#   (.node files), so the runner MUST be Windows with the "windows" tag.
+#   If your runner uses a different tag, update the `tags:` arrays below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+stages:
+  - validate
+  - build
+  - release
+
+variables:
+  PACKAGE_NAME: dmx-controller
+
+# ── Validate ─────────────────────────────────────────────────────────────────
+# Quick smoke-test on MRs and default branch pushes — just verifies that
+# dependencies install cleanly.
+
+validate:
+  stage: validate
+  tags:
+    - windows
+  script:
+    - node --version
+    - npm --version
+    - npm ci
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never                          # tags go straight to build
+    - if: $CI_MERGE_REQUEST_IID            # merge requests
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # pushes to main/master
+
+# ── Build ────────────────────────────────────────────────────────────────────
+# Installs dependencies, runs `npm run build` (pkg + native addon copy),
+# zips the dist/ folder, and uploads the zip to the GitLab generic package
+# registry so the release job can link to it as a downloadable asset.
+
+build:
+  stage: build
+  tags:
+    - windows
+  before_script:
+    - node --version
+    - npm --version
+  script:
+    # Install dependencies (including devDependencies for @yao-pkg/pkg)
+    - npm ci
+
+    # Run the build — produces dist/dmx-controller.exe + supporting files
+    - npm run build
+
+    # Create a release zip from everything in dist/
+    - $zipFile = "${PACKAGE_NAME}-${CI_COMMIT_TAG}.zip"
+    - Compress-Archive -Path dist\* -DestinationPath $zipFile -Force
+    - Write-Host "Created $zipFile — $((Get-Item $zipFile).Length / 1MB) MB"
+
+    # Upload to GitLab generic package registry
+    - >-
+        $headers = @{ "JOB-TOKEN" = $env:CI_JOB_TOKEN }
+    - >-
+        $uri = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/packages/generic/${PACKAGE_NAME}/$env:CI_COMMIT_TAG/$zipFile"
+    - >-
+        Invoke-RestMethod -Uri $uri
+        -Method Put
+        -Headers $headers
+        -InFile $zipFile
+        -ContentType "application/octet-stream"
+    - Write-Host "Uploaded $zipFile to package registry"
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+/
+
+# ── Release ──────────────────────────────────────────────────────────────────
+# Creates a GitLab release object tied to the tag and attaches the zip
+# from the package registry as a downloadable link.
+
+release:
+  stage: release
+  tags:
+    - windows
+  needs:
+    - job: build
+      artifacts: false                     # zip lives in the package registry
+  script:
+    - Write-Host "Creating release for $env:CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "$PACKAGE_NAME $CI_COMMIT_TAG"
+    description: "DMX Controller release $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "${PACKAGE_NAME}-${CI_COMMIT_TAG}.zip"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${CI_COMMIT_TAG}/${PACKAGE_NAME}-${CI_COMMIT_TAG}.zip"
+          link_type: package
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+/

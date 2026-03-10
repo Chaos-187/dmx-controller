@@ -1539,13 +1539,6 @@ textarea.gen-raw-editor {
   border-bottom-color: var(--accent);
   font-weight: 600;
 }
-.type-modal-panel {
-  display: none;
-  padding-top: 16px;
-}
-.type-modal-panel.active {
-  display: block;
-}
 
 /* ── Channels Editor ── */
 .channels-editor { margin-top: 8px; }

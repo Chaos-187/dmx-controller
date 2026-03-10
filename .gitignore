@@ -30,8 +30,10 @@ Desktop.ini
 # Build / Native addons
 build/
 prebuilds/
+dist/
 
 # Misc
 *.tgz
 *.exe
+*.zip
 package-lock.json
