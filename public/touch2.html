@@ -134,6 +134,13 @@ body{
   color:#fff;letter-spacing:.03em;
 }
 
+/* Effect tile */
+.color-tile.effect-tile{
+  display:flex;align-items:center;justify-content:center;
+  min-height:56px;cursor:pointer;
+}
+.color-tile.effect-tile.active{border-color:#fff !important;box-shadow:0 0 0 2px #fff}
+
 /* ═══════════════════════════════════════════════════════════════
    iOS SLIDER (big, fat, round)
    ═══════════════════════════════════════════════════════════════ */
@@ -290,14 +297,14 @@ input[type=range]::-moz-range-thumb{
 /* ═══════════════════════════════════════════════════════════════
    ACTIONS TAB (full-screen grid)
    ═══════════════════════════════════════════════════════════════ */
-.page-actions{display:none !important;padding:0 !important;overflow:hidden !important}
-.page-actions.active{display:block !important}
+.page-actions{display:none !important;padding:0 !important;overflow:hidden !important;flex-direction:column}
+.page-actions.active{display:flex !important}
 .actions-grid{
   display:grid;
   grid-template-columns:repeat(var(--ag-cols,4),1fr);
   grid-auto-rows:minmax(72px,1fr);
   gap:4px;padding:4px;
-  width:100%;height:100%;overflow-y:auto;
+  width:100%;flex:1;min-height:0;overflow-y:auto;
   -webkit-overflow-scrolling:touch;
 }
 .action-btn{
@@ -505,30 +512,40 @@ input[type=range]::-moz-range-thumb{
 
   <!-- ─── ACTIONS (full-screen grid) ──────────────── -->
   <div class="page-actions active" id="page-actions">
+    <div style="padding:6px 10px 2px;flex-shrink:0">
+      <div class="slider-wrap">
+        <span class="slider-label">Master</span>
+        <input type="range" id="masterDim" min="0" max="255" value="255">
+        <span class="slider-val" id="masterDimVal">255</span>
+      </div>
+    </div>
     <div class="actions-grid" id="actionsGrid"></div>
   </div>
 
-  <!-- ─── COLORS (dashboard — no scroll) ────────── -->
-  <div class="page-dash" id="page-colors">
-
-    <div class="groups-row">
-      <button class="clear-btn-sm" onclick="clearColorOverride()">Clear</button>
-      <div class="chip-row" id="colorTargetGroups" style="flex:1"></div>
+  <!-- ─── EFFECTS ────────────────────────────────── -->
+  <div class="page" id="page-effects">
+    <div class="slider-wrap" style="margin-bottom:8px">
+      <span class="slider-label">Speed</span>
+      <input type="range" id="effectSpeedSlider" min="10" max="300" value="100">
+      <span class="slider-val" id="effectSpeedVal">1.0x</span>
     </div>
 
-    <div class="color-grid" id="colorGrid"></div>
+    <div class="section-label">Color Effects</div>
+    <div class="color-grid" id="effectGridColor" style="margin-bottom:12px"></div>
 
-    <div class="slider-pair">
-      <div class="slider-wrap"><span class="slider-label">Intensity</span><input type="range" id="colorIntensity" min="0" max="255" value="255"><span class="slider-val" id="colorIntVal">255</span></div>
-      <div class="slider-wrap"><span class="slider-label">Master</span><input type="range" id="masterDim" min="0" max="255" value="255"><span class="slider-val" id="masterDimVal">255</span></div>
-    </div>
-    <div class="fx-row">
-      <button class="fx-btn" id="btnStrobe">&#9889; Strobe</button>
-      <button class="fx-btn" id="btnSmoke">&#9729;&#xFE0E; Smoke</button>
-      <button class="fx-btn" id="btnHaze">&#9729;&#xFE0E; Haze</button>
-      <span class="slider-label">Speed</span><input type="range" id="strobeSpeed" min="1" max="255" value="200" style="flex:1;min-width:60px"><span class="slider-val" id="strobeSpeedVal">200</span>
-    </div>
+    <div class="section-label">Rig Effects</div>
+    <div class="color-grid" id="effectGridRig" style="margin-bottom:12px"></div>
 
+    <div class="section-label">Movement Effects</div>
+    <div class="color-grid" id="effectGridMotion" style="margin-bottom:12px"></div>
+
+    <div class="section-label">Multi-Cell Effects</div>
+    <div class="color-grid" id="effectGridMulticell" style="margin-bottom:12px"></div>
+
+    <div class="section-label">Sound Reactive</div>
+    <div class="color-grid" id="effectGridSound" style="margin-bottom:12px"></div>
+
+    <button class="fx-btn" id="btnStopAllFx" style="margin-top:8px;width:100%;justify-content:center;background:rgba(255,59,48,.15);border-color:var(--danger);color:var(--danger)">&#9632; Stop All Effects</button>
   </div>
 
   <!-- ─── GROUPS ─────────────────────────────────── -->
@@ -573,7 +590,7 @@ input[type=range]::-moz-range-thumb{
      ═══════════════════════════════════════════════════════════════ -->
 <div class="tab-bar">
   <button class="active" data-page="actions"><span class="tab-icon">&#9654;</span>Actions</button>
-  <button data-page="colors"><span class="tab-icon">&#127912;</span>Colors</button>
+  <button data-page="effects"><span class="tab-icon">&#10024;</span>Effects</button>
   <button data-page="groups"><span class="tab-icon">&#9783;</span>Groups</button>
   <button data-page="fixtures"><span class="tab-icon">&#128161;</span>Fixtures</button>
   <button data-page="movers"><span class="tab-icon">&#10146;</span>Movers</button>
@@ -710,14 +727,17 @@ document.getElementById('pinPad').addEventListener('click', (e) => {
 });
 
 /* ─── State ────────────────────────────────────────────────── */
-let fixtures = [], groups = [], moverPresets = [], scenes = [], touchActions = [];
+let fixtures = [], groups = [], moverPresets = [], scenes = [], touchActions = [], effects = [];
 let selectedColor = null, colorIntensity = 255, selectedGroups = new Set();
 let outputEnabled = false, blackoutActive = false;
 let strobeActive = false, smokeActive = false, hazeActive = false;
 let fixtureEnabled = {}, fixtureDimmer = {}, groupDimmer = {};
+let masterDimValue = 255;
+let lastRgbOnlyValues = {}; // fixtureId → { chAddr: baseVal, ... } for RGB-only fixtures
 let holdMode = true;
 let activeSceneId = null;
 let actionActiveStates = {}; // track toggle state per action button
+let activeEffectSlots = {}; // track running effect per slot
 let ws = null;
 
 const COLORS = [
@@ -745,9 +765,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSliderBindings();
   initFxButtons();
   initActionCards();
-  await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState(), fetchTouchState(), fetchScenes(), fetchTouchActions()]);
+  await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState(), fetchTouchState(), fetchScenes(), fetchTouchActions(), fetchEffects()]);
   renderAll();
   renderActionsGrid();
+  renderEffectsGrid();
   connectWebSocket();
 });
 
@@ -779,12 +800,27 @@ function initModeSwitch() {
 
 /* ─── Slider bindings ──────────────────────────────────────── */
 function initSliderBindings() {
-  bindSlider('colorIntensity', 'colorIntVal', v => { colorIntensity = v; if (selectedColor !== null) sendColorOverride(); });
-  bindSlider('masterDim', 'masterDimVal', v => sendMasterDimmer(v));
-  bindSlider('strobeSpeed', 'strobeSpeedVal');
+  bindSlider('masterDim', 'masterDimVal', v => {
+    sendMasterDimmer(v);
+    fetch('/api/touch/master-dimmer', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ value: v })
+    });
+  });
   bindSlider('manualPan', 'panVal', sendManualPosition);
   bindSlider('manualTilt', 'tiltVal', sendManualPosition);
   bindSlider('manualSpeed', 'speedVal', sendManualPosition);
+  // Effect speed slider (10-300 maps to 0.1x–3.0x)
+  const esSlider = document.getElementById('effectSpeedSlider');
+  const esVal = document.getElementById('effectSpeedVal');
+  esSlider.addEventListener('input', () => {
+    const v = (+esSlider.value / 100).toFixed(1);
+    esVal.textContent = v + 'x';
+    fetch('/api/touch/effect-speed', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ value: +v })
+    });
+  });
 }
 
 function bindSlider(sliderId, valId, onChange) {
@@ -798,12 +834,13 @@ function bindSlider(sliderId, valId, onChange) {
 
 /* ─── FX Buttons ───────────────────────────────────────────── */
 function initFxButtons() {
-  bindHoldToggle(document.getElementById('btnStrobe'), strobeOn, strobeOff);
-  bindHoldToggle(document.getElementById('btnSmoke'), () => setSmokeHaze('smoke', true), () => setSmokeHaze('smoke', false));
-  bindHoldToggle(document.getElementById('btnHaze'), () => setSmokeHaze('haze', true), () => setSmokeHaze('haze', false));
-
   document.getElementById('btnOutput').addEventListener('click', toggleOutput);
   document.getElementById('btnBlackout').addEventListener('click', doBlackout);
+  document.getElementById('btnStopAllFx').addEventListener('click', () => {
+    fetch('/api/effects/stop', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    document.querySelectorAll('.effect-tile.active').forEach(el => el.classList.remove('active'));
+    activeEffectSlots = {};
+  });
 }
 
 /* ─── Action Cards ─────────────────────────────────────────── */
@@ -881,6 +918,16 @@ async function fetchTouchState() {
     const s = await fetch('/api/touch/state').then(r => r.json());
     if (s.disabledFixtures) s.disabledFixtures.forEach(id => { fixtureEnabled[id] = false; });
     blackoutActive = !!s.blackoutHold;
+    if (s.masterDimmer !== undefined) {
+      masterDimValue = s.masterDimmer;
+      document.getElementById('masterDim').value = s.masterDimmer;
+      document.getElementById('masterDimVal').textContent = s.masterDimmer;
+    }
+    if (s.effectSpeed !== undefined) {
+      const pct = Math.round(s.effectSpeed * 100);
+      document.getElementById('effectSpeedSlider').value = pct;
+      document.getElementById('effectSpeedVal').textContent = s.effectSpeed.toFixed(1) + 'x';
+    }
   } catch (e) {}
 }
 
@@ -961,8 +1008,6 @@ function updateDeckStrip(decks) {
    RENDER
    ═══════════════════════════════════════════════════════════════ */
 function renderAll() {
-  renderColors();
-  renderColorTargetGroups();
   renderGroupDimmers();
   renderFixtureList();
   renderMoverPresets();
@@ -1135,6 +1180,97 @@ function renderFixtureList() {
   });
 }
 
+/* ─── Effects ──────────────────────────────────────────────── */
+const EFFECT_SLOT_MAP = {
+  pan_sweep:'motion',tilt_sweep:'motion',circle:'motion',figure_eight:'motion',random_move:'motion',fan:'motion',nod:'motion',
+  chase:'multicell',comet:'multicell',scanner:'multicell',buildup:'multicell',segments:'multicell',ripple:'multicell',cell_strobe:'multicell',gradient:'multicell',
+  rig_chase:'rig',rig_color_wave:'rig',rig_sweep:'rig',rig_alternate:'rig',rig_converge:'rig',rig_rainbow:'rig',
+  sound_pulse:'sound',sound_strobe:'sound',sound_chase:'sound',sound_wave:'sound',sound_flash:'sound',sound_vu:'sound',
+};
+const EFFECT_CATEGORY_MAP = {
+  pulse:'color',rainbow:'color',strobe:'color',color_fade:'color',sparkle:'color',color_wave:'color',fire:'color',
+  pan_sweep:'motion',tilt_sweep:'motion',circle:'motion',figure_eight:'motion',random_move:'motion',fan:'motion',nod:'motion',
+  chase:'multicell',comet:'multicell',scanner:'multicell',buildup:'multicell',segments:'multicell',ripple:'multicell',cell_strobe:'multicell',gradient:'multicell',
+  rig_chase:'rig',rig_color_wave:'rig',rig_sweep:'rig',rig_alternate:'rig',rig_converge:'rig',rig_rainbow:'rig',
+  sound_pulse:'sound',sound_strobe:'sound',sound_chase:'sound',sound_wave:'sound',sound_flash:'sound',sound_vu:'sound',
+};
+const EFFECT_CATEGORY_COLORS = {
+  color:  { bg:'rgba(10,132,255,.2)', border:'rgba(10,132,255,.5)' },
+  rig:    { bg:'rgba(48,209,88,.2)',  border:'rgba(48,209,88,.5)' },
+  motion: { bg:'rgba(255,159,10,.2)', border:'rgba(255,159,10,.5)' },
+  multicell:{ bg:'rgba(191,90,242,.2)', border:'rgba(191,90,242,.5)' },
+  sound:  { bg:'rgba(255,59,48,.2)',  border:'rgba(255,59,48,.5)' },
+};
+
+async function fetchEffects() {
+  try { effects = await fetch('/api/effects').then(r => r.json()); }
+  catch (e) { console.error('fetch effects', e); }
+}
+
+function getEffectSlotClient(type) {
+  return EFFECT_SLOT_MAP[type] || 'color';
+}
+
+function renderEffectsGrid() {
+  const categories = { color:[], rig:[], motion:[], multicell:[], sound:[] };
+  for (const fx of effects) {
+    const cat = EFFECT_CATEGORY_MAP[fx.type] || 'color';
+    categories[cat].push(fx);
+  }
+
+  const grids = {
+    color: document.getElementById('effectGridColor'),
+    rig: document.getElementById('effectGridRig'),
+    motion: document.getElementById('effectGridMotion'),
+    multicell: document.getElementById('effectGridMulticell'),
+    sound: document.getElementById('effectGridSound'),
+  };
+
+  for (const [cat, list] of Object.entries(categories)) {
+    const grid = grids[cat];
+    if (!grid) continue;
+    const colors = EFFECT_CATEGORY_COLORS[cat];
+    if (!list.length) {
+      grid.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:4px 0">None</div>';
+      grid.previousElementSibling.style.display = 'none';
+      grid.style.display = 'none';
+      continue;
+    }
+    grid.previousElementSibling.style.display = '';
+    grid.style.display = '';
+    grid.innerHTML = list.map(fx => {
+      const isActive = activeEffectSlots[getEffectSlotClient(fx.type)] === fx.id;
+      return '<div class="color-tile effect-tile' + (isActive ? ' active' : '') + '" data-eid="' + fx.id + '" data-type="' + fx.type + '" style="background:' + colors.bg + ';border-color:' + (isActive ? '#fff' : colors.border) + '">' +
+        '<span class="color-label" style="background:none;position:static;font-size:11px;font-weight:700">' + esc(fx.name) + '</span></div>';
+    }).join('');
+
+    grid.querySelectorAll('.effect-tile').forEach(el => {
+      el.addEventListener('click', () => toggleEffect(+el.dataset.eid, el.dataset.type));
+    });
+  }
+}
+
+function toggleEffect(effectId, effectType) {
+  const slot = getEffectSlotClient(effectType);
+  if (activeEffectSlots[slot] === effectId) {
+    // Stop this slot
+    fetch('/api/effects/stop', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ slot })
+    });
+    delete activeEffectSlots[slot];
+  } else {
+    // Run this effect on all enabled fixtures
+    const fixtureIds = getEnabledFixtures().map(f => f.id);
+    fetch('/api/effects/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ effectId, fixtureIds })
+    });
+    activeEffectSlots[slot] = effectId;
+  }
+  renderEffectsGrid();
+}
+
 /* ─── Mover Presets ────────────────────────────────────────── */
 function renderMoverPresets() {
   // Movers tab grid
@@ -1148,8 +1284,6 @@ function renderMoverPresets() {
       el.addEventListener('click', () => sendMoverPreset(moverPresets[+el.dataset.idx]));
     });
   }
-  // Dashboard tiles are rendered inside renderColors()
-  renderColors();
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1172,12 +1306,19 @@ function buildChannelUpdates(targetFixtures, channelFilter, valueFn) {
     if (fixtureEnabled[f.id] === false) continue;
     const u = f.universe || 1;
     if (!byUniverse[u]) byUniverse[u] = [];
+    const hasDimmer = f.channels.some(c => c.type === 'dimmer');
     for (const ch of f.channels) {
       if (channelFilter(ch, f)) {
         let val = valueFn(ch, f);
         if (['red','green','blue','white','amber','uv','dimmer'].includes(ch.type)) {
           const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
           val = Math.round(val * (fDim / 255));
+          // For RGB-only fixtures, record base value and scale by master dimmer
+          if (!hasDimmer && ch.type !== 'dimmer') {
+            if (!lastRgbOnlyValues[f.id]) lastRgbOnlyValues[f.id] = {};
+            lastRgbOnlyValues[f.id][ch.dmx_address] = val; // base value before master dim
+            val = Math.round(val * (masterDimValue / 255));
+          }
         }
         byUniverse[u].push({ ch: ch.dmx_address, val: Math.max(0, Math.min(255, val)) });
       }
@@ -1321,14 +1462,24 @@ function setSmokeHaze(type, on) {
 /* ─── Master Dimmer ────────────────────────────────────────── */
 function sendMasterDimmer(val) {
   const v = +val;
+  masterDimValue = v;
   const byUniverse = {};
   for (const f of getEnabledFixtures()) {
     const u = f.universe || 1;
     if (!byUniverse[u]) byUniverse[u] = [];
-    for (const ch of f.channels) {
-      if (ch.type === 'dimmer') {
-        const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
-        byUniverse[u].push({ ch: ch.dmx_address, val: Math.round(v * (fDim / 255)) });
+    const hasDimmer = f.channels.some(ch => ch.type === 'dimmer');
+    if (hasDimmer) {
+      // Fixture with hardware dimmer: scale dimmer channel
+      const fDim = fixtureDimmer[f.id] !== undefined ? fixtureDimmer[f.id] : 255;
+      for (const ch of f.channels) {
+        if (ch.type === 'dimmer') {
+          byUniverse[u].push({ ch: ch.dmx_address, val: Math.round(v * (fDim / 255)) });
+        }
+      }
+    } else if (lastRgbOnlyValues[f.id]) {
+      // RGB-only fixture: re-send last known colour values scaled by new master
+      for (const [addr, baseVal] of Object.entries(lastRgbOnlyValues[f.id])) {
+        byUniverse[u].push({ ch: +addr, val: Math.max(0, Math.min(255, Math.round(baseVal * (v / 255)))) });
       }
     }
   }
