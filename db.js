@@ -689,6 +689,7 @@ function init() {
   seedNewEffectsV2();
   seedNewEffectsV3();
   seedNewEffectsV4();
+  seedNewEffectsV5();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -700,6 +701,8 @@ function init() {
   db.exec("UPDATE effects SET fixture_target = 'moving_head' WHERE fixture_target = 'all' AND type IN ('pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod')");
   // Rig-wide spatial effects target all fixtures with color channels
   db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow')");
+  // Sound-reactive effects
+  db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu')");
 
   // Seed default generator config if missing
   seedDefaultGeneratorConfig();
@@ -968,6 +971,57 @@ function seedNewEffectsV4() {
   });
   tx();
   if (added > 0) console.log(`[DB] Added ${added} new effects (v4 migration — rig-wide spatial)`);
+}
+
+// ─── Seed V5: Sound-Reactive Effects ────────────────────────────────────────
+
+function seedNewEffectsV5() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // ── Sound Pulse: brightness follows a frequency band ────────────────
+    ['Sound Pulse (Bass)',    'sound_pulse',  'sound', 'sound', J({ band:'bass',   sensitivity:1.2 }), 4],
+    ['Sound Pulse (Mid)',     'sound_pulse',  'sound', 'sound', J({ band:'mid',    sensitivity:1.0 }), 4],
+    ['Sound Pulse (Treble)',  'sound_pulse',  'sound', 'sound', J({ band:'treble', sensitivity:1.5 }), 4],
+    ['Sound Pulse (Energy)',  'sound_pulse',  'sound', 'sound', J({ band:'energy', sensitivity:1.0 }), 4],
+
+    // ── Sound Strobe: flash when energy exceeds threshold ───────────────
+    ['Sound Strobe',          'sound_strobe', 'sound', 'sound', J({ band:'energy',   threshold:0.6 }), 2],
+    ['Sound Strobe (Bass)',   'sound_strobe', 'sound', 'sound', J({ band:'bass',     threshold:0.5 }), 2],
+    ['Sound Strobe (Hard)',   'sound_strobe', 'sound', 'sound', J({ band:'energy',   threshold:0.8 }), 2],
+
+    // ── Sound Chase: chase across rig driven by bass ────────────────────
+    ['Sound Chase',           'sound_chase',  'sound', 'sound', J({ band:'bass',  speed:1,   width:0.3 }), 8],
+    ['Sound Chase (Fast)',    'sound_chase',  'sound', 'sound', J({ band:'bass',  speed:3,   width:0.2 }), 4],
+    ['Sound Chase (Wide)',    'sound_chase',  'sound', 'sound', J({ band:'energy', speed:0.5, width:0.5 }), 8],
+
+    // ── Sound Wave: color wave speed modulated by energy level ──────────
+    ['Sound Color Wave',      'sound_wave',   'sound', 'sound', J({ speed:0.5, sensitivity:1.5 }), 8],
+    ['Sound Color Wave (Fast)','sound_wave',  'sound', 'sound', J({ speed:2, sensitivity:1.0 }), 4],
+
+    // ── Sound Flash: beat-triggered flash with decay ────────────────────
+    ['Sound Flash',           'sound_flash',  'sound', 'sound', J({ decay:0.85 }), 4],
+    ['Sound Flash (Hard)',    'sound_flash',  'sound', 'sound', J({ decay:0.95 }), 2],
+    ['Sound Flash (Soft)',    'sound_flash',  'sound', 'sound', J({ decay:0.7 }), 4],
+
+    // ── Sound VU: frequency-band VU meter across rig ────────────────────
+    ['Sound VU Meter',        'sound_vu',     'sound', 'sound', J({}), 8],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v5 — sound-reactive)`);
 }
 
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
@@ -1719,6 +1773,61 @@ function createFixture({ name, fixture_type_id, mode_id, universe, address, outp
   return getFixture(r.lastInsertRowid);
 }
 
+function createFixtureBatch(baseFixture, quantity) {
+  const { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt } = baseFixture;
+
+  // Validate type
+  const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
+  if (!type) return { error: 'Fixture type not found' };
+
+  // Resolve mode
+  let resolvedModeId = mode_id;
+  if (!resolvedModeId) {
+    const firstMode = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order LIMIT 1').get(fixture_type_id);
+    if (firstMode) resolvedModeId = firstMode.id;
+  }
+  const mode = resolvedModeId ? db.prepare('SELECT * FROM fixture_type_modes WHERE id = ?').get(resolvedModeId) : null;
+  const channelCount = mode ? mode.channel_count : type.channel_count;
+
+  const univ = universe || 1;
+  const baseName = name || 'Fixture';
+  const otype = output_type || 'artnet';
+
+  // Calculate addresses for each fixture sequentially from start address
+  const startAddr = address || 1;
+  const created = [];
+
+  const txn = db.transaction(() => {
+    for (let i = 0; i < quantity; i++) {
+      const addr = startAddr + (i * channelCount);
+      if (addr < 1 || addr + channelCount - 1 > 512) {
+        throw new Error(`Fixture ${i + 1} would exceed DMX range (address ${addr}, ${channelCount}ch)`);
+      }
+
+      // Check overlap (exclude already-created batch fixtures by passing null — they're not committed yet but we check existing DB fixtures)
+      const overlap = checkAddressOverlap(univ, addr, channelCount, null);
+      if (overlap) throw new Error(`Fixture ${i + 1} (addr ${addr}): ${overlap}`);
+
+      const rigOrder = db.prepare('SELECT COALESCE(MAX(rig_order), -1) + 1 as next FROM fixtures').get().next;
+      const fixName = `${baseName} ${i + 1}`;
+
+      const r = db.prepare(
+        `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(fixName, fixture_type_id, resolvedModeId, univ, addr, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, 0.5, 0.5, rigOrder);
+
+      created.push(r.lastInsertRowid);
+    }
+  });
+
+  try {
+    txn();
+  } catch (e) {
+    return { error: e.message };
+  }
+
+  return { created: created.length, fixtures: created.map(id => getFixture(id)) };
+}
+
 function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
@@ -1946,6 +2055,30 @@ function checkAddressOverlap(universe, address, channelCount, excludeFixtureId) 
     }
   }
   return null;
+}
+
+// ─── Next Available Address ──────────────────────────────────────────────────
+
+function getNextAvailableAddress(universe, channelCount, excludeFixtureId) {
+  const fixtures = db.prepare(
+    `SELECT f.address, COALESCE(ftm.channel_count, ft.channel_count) as channel_count
+     FROM fixtures f
+     JOIN fixture_types ft ON f.fixture_type_id = ft.id
+     LEFT JOIN fixture_type_modes ftm ON f.mode_id = ftm.id
+     WHERE f.universe = ? ${excludeFixtureId ? 'AND f.id != ?' : ''}
+     ORDER BY f.address`
+  ).all(...[universe, ...(excludeFixtureId ? [excludeFixtureId] : [])]);
+
+  // Build occupied ranges
+  const occupied = fixtures.map(f => ({ start: f.address, end: f.address + f.channel_count - 1 }));
+
+  // Find first gap that fits channelCount
+  let candidate = 1;
+  for (const range of occupied) {
+    if (candidate + channelCount - 1 < range.start) return candidate;
+    candidate = Math.max(candidate, range.end + 1);
+  }
+  return candidate + channelCount - 1 <= 512 ? candidate : null;
 }
 
 // ─── Universe Map ───────────────────────────────────────────────────────────
@@ -3074,7 +3207,7 @@ function createCue(sequenceId, cue) {
     cue.start_ms || 0,
     cue.duration_ms || 1000,
     cue.cue_type || 'static',
-    cue.fixture_id || null,
+    cue.fixture_id ?? null,
     cue.group_id || null,
     channelJson,
     endChannelJson,
@@ -3166,7 +3299,7 @@ function bulkUpdateCues(sequenceId, cues) {
       const effectParamsJson = typeof cue.effect_params === 'string' ? cue.effect_params : JSON.stringify(cue.effect_params || {});
       ins.run(
         sequenceId, cue.lane || 0, cue.start_ms || 0, cue.duration_ms || 1000,
-        cue.cue_type || 'static', cue.fixture_id || null, cue.group_id || null,
+        cue.cue_type || 'static', cue.fixture_id ?? null, cue.group_id || null,
         channelJson, endChannelJson, cue.effect_id || null, effectParamsJson,
         cue.color || '#e94560', cue.label || '', cue.sort_order || 0, cue.cell || null,
         cue.track || 'color'
@@ -3676,10 +3809,10 @@ module.exports = {
   createMultiCellFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
   getGoboWheelMap, getAllGoboWheelMaps, setGoboWheelMap, deleteGoboWheelMap,
-  getFixtures, getFixture, createFixture, updateFixture, deleteFixture, updateFixtureRigPositions,
+  getFixtures, getFixture, createFixture, createFixtureBatch, updateFixture, deleteFixture, updateFixtureRigPositions,
   getRigElements, createRigElement, updateRigElement, deleteRigElement, bulkUpdateRigElements,
   getRigLayouts, getRigLayout, createRigLayout, updateRigLayout, loadRigLayout, deleteRigLayout, setActiveRigLayout, getActiveRigLayout,
-  getUniverseMap,
+  getUniverseMap, getNextAvailableAddress,
   getFixtureChannelMap,
   getGroups, getGroup, createGroup, updateGroup, deleteGroup, setGroupFixtures,
   getArtNetUniverses, getArtNetUniverse, createArtNetUniverse, updateArtNetUniverse, deleteArtNetUniverse, toggleArtNetUniverse,

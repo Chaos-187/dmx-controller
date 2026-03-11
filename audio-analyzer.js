@@ -17,9 +17,9 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 12;
+const ANALYSIS_VERSION = 14;
 const DEFAULTS = {
-  TARGET_PEAKS:         2000,     // waveform overview points (up from 1000)
+  TARGET_PEAKS:         8000,     // minimum waveform points (overridden by dynamic 100/sec calc)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
   DECODE_SAMPLE_RATE:   22050,    // downsample for analysis (mono)
   SECTION_MIN_BARS:     4,        // minimum section length in bars
@@ -550,6 +550,7 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   const SECTION_SENSITIVITY = cfg.SECTION_SENSITIVITY || DEFAULTS.SECTION_SENSITIVITY;
   const MAX_SECTION_BARS    = 32;   // force-split any section longer than this
   const MAX_INTRO_BARS     = 16;   // intro/outro can't exceed this many bars
+  const MAX_BREAKDOWN_BARS = 12;   // breakdowns are transitional; longer sections are likely verses
 
   if (!energySegments.length || !beats.length || bpm <= 0) return [];
 
@@ -1377,15 +1378,16 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
       sectionLabels[s] = 'buildup';
     }
     // Breakdown: very low energy + sparse rhythm after a high-energy section
-    else if (f.energy <= p25 && f.prevEnergy > p75) {
+    // Must be short — longer low-energy sections after choruses are verses
+    else if (f.energy <= p25 && f.prevEnergy > p75 && f.numBars <= MAX_BREAKDOWN_BARS) {
       sectionLabels[s] = 'breakdown';
     }
     // Breakdown: very low energy with falling gradient (not intro/outro)
-    else if (f.energy <= p25 && normGrad < -0.15 && s > 0 && s < numSections - 1) {
+    else if (f.energy <= p25 && normGrad < -0.15 && f.numBars <= MAX_BREAKDOWN_BARS && s > 0 && s < numSections - 1) {
       sectionLabels[s] = 'breakdown';
     }
     // Breakdown: sparse onset density + low energy mid-track
-    else if (f.onsetDensity <= odP25 && f.energy <= p25 && s > 0 && s < numSections - 1
+    else if (f.onsetDensity <= odP25 && f.energy <= p25 && f.numBars <= MAX_BREAKDOWN_BARS && s > 0 && s < numSections - 1
              && (f.prevEnergy > p50 || f.nextEnergy > p50)) {
       sectionLabels[s] = 'breakdown';
     }
@@ -1404,17 +1406,17 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
         sectionLabels[i + 1] = 'chorus';
       }
     }
-    // After drop → dramatic dip = breakdown
+    // After drop → dramatic dip = breakdown (only if short — long sections are verses)
     if (sectionLabels[i] === 'drop' && i + 1 < numSections) {
       const nf = sectionFeats[i + 1];
-      if (nf.energy <= p25 && sectionLabels[i + 1] !== 'outro') {
+      if (nf.energy <= p25 && nf.numBars <= MAX_BREAKDOWN_BARS && sectionLabels[i + 1] !== 'outro') {
         sectionLabels[i + 1] = 'breakdown';
       }
     }
-    // Chorus → dramatic energy dip = breakdown
+    // Chorus → dramatic energy dip = breakdown (only if short)
     if (sectionLabels[i] === 'chorus' && i + 1 < numSections) {
       const nf = sectionFeats[i + 1];
-      if (nf.energy <= p25 && nf.energy < sectionFeats[i].energy * 0.5 &&
+      if (nf.energy <= p25 && nf.numBars <= MAX_BREAKDOWN_BARS && nf.energy < sectionFeats[i].energy * 0.5 &&
           sectionLabels[i + 1] !== 'outro' && sectionLabels[i + 1] !== 'buildup') {
         sectionLabels[i + 1] = 'breakdown';
       }
@@ -1561,7 +1563,9 @@ function analyzeTrack(filePath, opts = {}) {
     });
 
     const totalSamples = Math.ceil(durationSec * DECODE_SAMPLE_RATE);
-    const samplesPerPeak = Math.max(1, Math.floor(totalSamples / TARGET_PEAKS));
+    // Dynamic peak count: 150 peaks/sec for smooth waveforms at high zoom
+    const dynamicPeaks = Math.max(TARGET_PEAKS, Math.round(durationSec * 150));
+    const samplesPerPeak = Math.max(1, Math.floor(totalSamples / dynamicPeaks));
     const samplesPerEnergy = Math.max(1, Math.floor((ENERGY_SEGMENT_MS / 1000) * DECODE_SAMPLE_RATE));
 
     // ─── IIR filter setup for 3-band split ──────────────────────────────
@@ -1728,13 +1732,11 @@ function analyzeTrack(filePath, opts = {}) {
       const normRef = peakVals[pctIdx] || 1;
 
       const waveformPeaks = peaks.map((p) => ({
-        peak:   parseFloat(Math.min(1, p.peak   / normRef).toFixed(4)),
-        rms:    parseFloat(Math.min(1, p.rms    / normRef).toFixed(4)),
-        bass:   parseFloat(Math.min(1, p.bass   / normRef).toFixed(4)),
-        mid:    parseFloat(Math.min(1, p.mid    / normRef).toFixed(4)),
-        treble: parseFloat(Math.min(1, p.treble / normRef).toFixed(4)),
-        sub_bass:  parseFloat(Math.min(1, (p.sub_bass || 0)  / normRef).toFixed(4)),
-        upper_mid: parseFloat(Math.min(1, (p.upper_mid || 0) / normRef).toFixed(4)),
+        peak:   parseFloat(Math.min(1, p.peak   / normRef).toFixed(3)),
+        rms:    parseFloat(Math.min(1, p.rms    / normRef).toFixed(3)),
+        bass:   parseFloat(Math.min(1, p.bass   / normRef).toFixed(3)),
+        mid:    parseFloat(Math.min(1, p.mid    / normRef).toFixed(3)),
+        treble: parseFloat(Math.min(1, p.treble / normRef).toFixed(3)),
       }));
 
       // Generate fluid beat grid from audio energy + BPM guide

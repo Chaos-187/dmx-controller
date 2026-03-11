@@ -436,7 +436,8 @@ function handleOs2lSubscribed(data) {
               // Use the OS2L filepath (value) for file access since the DB may have a stale drive letter
               const actualFilePath = value;
               const fileExists = actualFilePath ? require('fs').existsSync(actualFilePath) : false;
-              if (!analysis && actualFilePath && fileExists) {
+              const needsAnalysis = !analysis || (analysis.analysis_version || 0) < audioAnalyzer.ANALYSIS_VERSION;
+              if (needsAnalysis && actualFilePath && fileExists) {
                 try {
                   const ffmpegOk = await audioAnalyzer.checkFfmpeg();
                   if (ffmpegOk) {
@@ -942,6 +943,14 @@ app.get('/api/gobo-wheel-maps', (req, res) => {
 
 // ─── Fixture API ────────────────────────────────────────────────────────────
 
+app.get('/api/fixtures/next-address', (req, res) => {
+  const universe = +req.query.universe || 1;
+  const channels = +req.query.channels || 1;
+  const exclude = req.query.exclude ? +req.query.exclude : null;
+  const address = db.getNextAvailableAddress(universe, channels, exclude);
+  res.json({ address });
+});
+
 app.get('/api/fixtures', (req, res) => {
   res.json(db.getFixtures());
 });
@@ -957,6 +966,19 @@ app.post('/api/fixtures', (req, res) => {
     if (result.error) return res.status(400).json(result);
     invalidateFixtureChannelMapCache();
     res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/fixtures/batch', (req, res) => {
+  try {
+    const { quantity, ...baseFixture } = req.body;
+    const qty = Math.min(Math.max(+quantity || 1, 1), 64);
+    const results = db.createFixtureBatch(baseFixture, qty);
+    if (results.error) return res.status(400).json(results);
+    invalidateFixtureChannelMapCache();
+    res.status(201).json(results);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -2352,12 +2374,96 @@ app.delete('/api/effects/:id', (req, res) => {
   res.json({ deleted: true });
 });
 
+// ─── Sound-Reactive Audio Data Provider ─────────────────────────────────────
+// Reads energy levels from the currently-playing track's analysis data.
+// Cached in memory so the 40fps render loop doesn't hit the DB every frame.
+
+let _audioEnergyCache = { trackId: null, levels: null, beats: null };
+let _lastAudioData = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper_mid: 0, beat: 0 };
+let _lastBeatTime = 0;
+
+function getCurrentAudioData() {
+  // Find the playing deck with highest crossfader weight
+  let bestDeck = null, bestLevel = 0;
+  for (let d = 1; d <= 4; d++) {
+    const ds = state.decks[d];
+    if (!ds || !ds.play) continue;
+    const cf = parseFloat(state.crossfader) || 0;
+    const level = (d === 1) ? (1 - cf) : (d === 2) ? cf : 0.5;
+    if (level > bestLevel) { bestLevel = level; bestDeck = d; }
+  }
+  if (!bestDeck) return _lastAudioData;
+
+  const ds = state.decks[bestDeck];
+  const trackId = ds.track_id;
+  if (!trackId) return _lastAudioData;
+
+  // Load/cache energy levels for the current track
+  if (_audioEnergyCache.trackId !== trackId) {
+    try {
+      const analysis = db.getTrackAnalysis(trackId);
+      if (analysis && analysis.energy_levels) {
+        _audioEnergyCache = {
+          trackId,
+          levels: typeof analysis.energy_levels === 'string' ? JSON.parse(analysis.energy_levels) : analysis.energy_levels,
+          beats: analysis.beats ? (typeof analysis.beats === 'string' ? JSON.parse(analysis.beats) : analysis.beats) : [],
+        };
+      } else {
+        _audioEnergyCache = { trackId, levels: null, beats: null };
+      }
+    } catch {
+      _audioEnergyCache = { trackId, levels: null, beats: null };
+    }
+  }
+
+  if (!_audioEnergyCache.levels || _audioEnergyCache.levels.length === 0) return _lastAudioData;
+
+  const timeMs = ds.time || 0;
+  const levels = _audioEnergyCache.levels;
+
+  // Binary search for the energy sample closest to current time
+  // Energy levels are sampled every 50ms with a time_ms field
+  let lo = 0, hi = levels.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((levels[mid].time_ms || mid * 50) < timeMs) lo = mid + 1;
+    else hi = mid;
+  }
+  const sample = levels[lo] || {};
+
+  // Beat detection: check if we're near a beat
+  let beat = 0;
+  if (_audioEnergyCache.beats && _audioEnergyCache.beats.length > 0) {
+    const beats = _audioEnergyCache.beats;
+    // Find nearest beat
+    let nearest = Infinity;
+    for (let i = Math.max(0, lo - 5); i < Math.min(beats.length, lo + 5); i++) {
+      const beatMs = typeof beats[i] === 'number' ? beats[i] : (beats[i] && beats[i].time_ms) || 0;
+      const dist = Math.abs(timeMs - beatMs);
+      if (dist < nearest) nearest = dist;
+    }
+    // Decay: 1.0 at beat, decays over ~100ms
+    if (nearest < 100) beat = Math.max(0, 1 - nearest / 100);
+  }
+
+  _lastAudioData = {
+    bass: sample.bass || 0,
+    mid: sample.mid || 0,
+    treble: sample.treble || 0,
+    energy: sample.energy || 0,
+    sub_bass: sample.sub_bass || 0,
+    upper_mid: sample.upper_mid || 0,
+    beat,
+  };
+  return _lastAudioData;
+}
+
 // ─── Quick Action Effects Runner ────────────────────────────────────────────
-// Supports concurrent effects in different categories (color, motion, multicell).
+// Supports concurrent effects in different categories (color, motion, multicell, rig, sound).
 // Each category slot can run one effect at a time; starting a new effect in the
 // same category replaces the previous one without affecting other categories.
 
-const runningQaEffects = {}; // { color: { timer, effectId, fixtureIds }, motion: ..., multicell: ... }
+const runningQaEffects = {}; // { color: { timer, effectId, fixtureIds }, motion: ..., multicell: ..., rig: ..., sound: ... }
 
 /**
  * Determine which slot category an effect belongs to.
@@ -2365,6 +2471,8 @@ const runningQaEffects = {}; // { color: { timer, effectId, fixtureIds }, motion
 function getEffectSlot(effectType) {
   if (MOVING_HEAD_EFFECT_TYPES.has(effectType)) return 'motion';
   if (MULTICELL_EFFECT_TYPES.has(effectType)) return 'multicell';
+  if (RIG_EFFECT_TYPES.has(effectType)) return 'rig';
+  if (SOUND_EFFECT_TYPES.has(effectType)) return 'sound';
   return 'color';
 }
 
@@ -2454,7 +2562,8 @@ app.post('/api/effects/run', (req, res) => {
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
         channelCtx._rigFixtureCount = allFixtures.length;
-        let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
+        const effectParams = SOUND_EFFECT_TYPES.has(effect.type) ? { audio: getCurrentAudioData() } : {};
+        let value = computeEffectValue(effect, ch.type, progress, baseValues, effectParams, channelCtx);
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
@@ -2925,7 +3034,9 @@ function processSceneEffects(scene, startTime) {
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
         channelCtx._rigFixtureCount = fixMap.length;
-        let value = computeEffectValue(effect, ch.type, progress, baseValues, entry.effect_params || {}, channelCtx);
+        const seqEffectParams = entry.effect_params || {};
+        if (SOUND_EFFECT_TYPES.has(effect.type) && !seqEffectParams.audio) seqEffectParams.audio = getCurrentAudioData();
+        let value = computeEffectValue(effect, ch.type, progress, baseValues, seqEffectParams, channelCtx);
 
         // If the effect doesn't control this channel (e.g. motion effect → color channels),
         // fall back to the base value so colours/dimmer still get sent.
@@ -3746,7 +3857,9 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
               }
             }
           }
-          value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, cue.effect_params || {}, channelCtx);
+          const touchEffectParams = cue.effect_params || {};
+          if (SOUND_EFFECT_TYPES.has(effect.type) && !touchEffectParams.audio) touchEffectParams.audio = getCurrentAudioData();
+          value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, touchEffectParams, channelCtx);
           // If the effect doesn't control this channel (e.g. motion effect → color channels),
           // fall back to the resolved base channel value so colours/dimmer still get sent.
           if (value === null || value === undefined) {
@@ -3879,7 +3992,9 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           }
         }
 
-        let value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, rigCue.effect_params || {}, channelCtx);
+        const rigEffectParams = rigCue.effect_params || {};
+        if (SOUND_EFFECT_TYPES.has(effect.type) && !rigEffectParams.audio) rigEffectParams.audio = getCurrentAudioData();
+        let value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, rigEffectParams, channelCtx);
         if (value === null || value === undefined) {
           value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
                 : (ch.type === 'dimmer' ? 255 : null);
@@ -3926,6 +4041,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 const {
   pseudoRandom, hslToRgb, computeEffectValue, isFixtureCompatibleWithEffect,
   MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES,
+  RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
   PAN_TILT, COLOR_CHANNELS,
 } = require('./effects-engine');
 

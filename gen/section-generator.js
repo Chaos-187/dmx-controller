@@ -5,7 +5,7 @@
  * song sections (verse, chorus, drop, etc.) with beat-grid snapping.
  */
 
-const { applyIntensity, rgbToHex, CUE_COLORS, getFixtureIntensity, hasVocals, getDrumDensity, getStemEnergy } = require('./helpers');
+const { applyIntensity, rgbToHex, CUE_COLORS, getFixtureIntensity, hasVocals, getDrumDensity, getStemEnergy, walkBeats } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
 const { getFixtureGroup, pickCoordMode, getColorOffset } = require('./group-coordination');
 
@@ -75,6 +75,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       const adjustedCuePerBars = Math.max(0.25, rawCueBars < 1 ? rawCueBars : Math.round(rawCueBars));
       const subBar = adjustedCuePerBars < 1;
       const cueBarMs = adjustedCuePerBars * barMs;
+      const cueBeats = adjustedCuePerBars * 4; // beats per cue (4 beats/bar)
       const numCues = Math.max(1, Math.floor(secDurMs / cueBarMs));
 
       // How many cues pass before we change palette color
@@ -88,10 +89,11 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       const totalFlatColors = flatColors.length;
 
       for (let ci = 0; ci < numCues; ci++) {
-        const rawCueStart = secStartMs + ci * cueBarMs;
+        // Walk actual beats from section start to avoid accumulation drift
+        const rawCueStart = walkBeats(secStartMs, ci * cueBeats, ctx.beats, beatMs);
         const snap = subBar ? snapBeat : snapBar;
         const cueStart = ci === 0 ? secStartMs : snap(rawCueStart);
-        const rawNextStart = rawCueStart + cueBarMs;
+        const rawNextStart = walkBeats(secStartMs, (ci + 1) * cueBeats, ctx.beats, beatMs);
         const nextCueStart = ci < numCues - 1 ? snap(rawNextStart) : secEndMs;
         let cueDur = nextCueStart - cueStart;
         const minCueDur = subBar ? beatMs * 0.5 : barMs * 0.5;

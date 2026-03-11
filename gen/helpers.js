@@ -124,11 +124,17 @@ function snapToBeat(timeMs, beats) {
 
 /**
  * Snap a time value to the nearest bar boundary (every 4th beat).
+ * @param {number} timeMs
+ * @param {number[]} beats – sorted beat timestamps
+ * @param {number} [downbeatIdx=0] – index into beats[] of the first musical downbeat
  */
-function snapToBar(timeMs, beats) {
+function snapToBar(timeMs, beats, downbeatIdx = 0) {
   if (!beats || beats.length < 4) return snapToBeat(timeMs, beats);
   let bestDist = Infinity, bestTime = timeMs;
-  for (let i = 0; i < beats.length; i += 4) {
+  // Step from the downbeat index so bar boundaries land on actual downbeats
+  // Also walk backwards from downbeatIdx for any pre-phase bars
+  const start = downbeatIdx % 4;
+  for (let i = start; i < beats.length; i += 4) {
     const dist = Math.abs(beats[i] - timeMs);
     if (dist < bestDist) {
       bestDist = dist;
@@ -138,6 +144,71 @@ function snapToBar(timeMs, beats) {
     }
   }
   return bestTime;
+}
+
+/**
+ * Find the index of the first musical downbeat in the beats array.
+ * Pre-beats (before firstBeatMs) shift the array so beats[0] isn't always
+ * beat 1.  This returns the index to start 4-beat bar stepping from.
+ * @param {number[]} beats
+ * @param {number} firstBeatMs
+ * @returns {number}
+ */
+function computeDownbeatPhase(beats, firstBeatMs) {
+  if (!beats || beats.length === 0 || firstBeatMs <= 0) return 0;
+  let bestIdx = 0, bestDist = Infinity;
+  for (let i = 0; i < Math.min(beats.length, 32); i++) {
+    const dist = Math.abs(beats[i] - firstBeatMs);
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    if (beats[i] > firstBeatMs + bestDist) break;
+  }
+  return bestIdx % 4;
+}
+
+/**
+ * Find the beat index closest to a given timestamp.
+ * @param {number} timeMs
+ * @param {number[]} beats
+ * @returns {number} index into beats[]
+ */
+function beatIndexAt(timeMs, beats) {
+  if (!beats || beats.length === 0) return 0;
+  let lo = 0, hi = beats.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (beats[mid] < timeMs) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo === 0) return 0;
+  if (lo >= beats.length) return beats.length - 1;
+  return Math.abs(timeMs - beats[lo - 1]) <= Math.abs(timeMs - beats[lo]) ? lo - 1 : lo;
+}
+
+/**
+ * Walk N beats forward from a starting time using the actual beats array.
+ * Returns the beat timestamp, avoiding accumulation drift.
+ * @param {number} startMs - starting timestamp
+ * @param {number} nBeats  - number of beats to advance (can be fractional: 4 = 1 bar, 2 = half bar)
+ * @param {number[]} beats
+ * @param {number} beatMs  - fallback beat duration if beats array is exhausted
+ * @returns {number}
+ */
+function walkBeats(startMs, nBeats, beats, beatMs) {
+  if (!beats || beats.length === 0) return startMs + nBeats * beatMs;
+  const startIdx = beatIndexAt(startMs, beats);
+  const whole = Math.floor(nBeats);
+  const frac = nBeats - whole;
+  const targetIdx = startIdx + whole;
+  if (targetIdx >= beats.length) {
+    // Past end of beats array — extrapolate from last beat
+    const overshoot = targetIdx - beats.length + 1;
+    return beats[beats.length - 1] + (overshoot + frac) * beatMs;
+  }
+  const baseTime = beats[targetIdx];
+  if (frac > 0 && targetIdx + 1 < beats.length) {
+    return baseTime + (beats[targetIdx + 1] - baseTime) * frac;
+  }
+  return baseTime + frac * beatMs;
 }
 
 /** Seeded pseudo-random for deterministic results per track */
@@ -251,6 +322,9 @@ module.exports = {
   findSplitWheelPosition,
   snapToBeat,
   snapToBar,
+  computeDownbeatPhase,
+  beatIndexAt,
+  walkBeats,
   seededRandom,
   getFixtureIntensity,
   getStemEnergy,

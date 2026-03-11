@@ -7,7 +7,7 @@
  */
 
 const { getSectionPalettes } = require('./palettes');
-const { hasVocals } = require('./helpers');
+const { hasVocals, walkBeats, snapToBeat } = require('./helpers');
 
 const SECTION_EFFECT_TYPES = {
   intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'],                                   rigWide: ['rig_color_wave', 'rig_rainbow'] },
@@ -234,7 +234,9 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
         effectStart = sectionStart;
       } else {
         const offsetBars = Math.floor(rand() * 2) + 1;
-        effectStart = Math.min(sectionStart + barMs * offsetBars, sectionEnd - effectDur);
+        // Walk actual beats to avoid drift from theoretical barMs
+        const rawOffset = walkBeats(sectionStart, offsetBars * 4, ctx.beats, beatMs);
+        effectStart = Math.min(snapToBeat(rawOffset, ctx.beats), sectionEnd - effectDur);
         if (effectStart < sectionStart) effectStart = sectionStart;
       }
 

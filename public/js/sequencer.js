@@ -655,6 +655,13 @@ const SEQ = (() => {
     updatePlayhead();
   }
 
+  // Sort order for fixture categories — groups similar types together
+  const CATEGORY_ORDER = {
+    par: 0, dimmer: 1, led_bar: 2, multi_cell: 3,
+    moving_head: 4, moving_head_wash: 5, moving_head_spot: 6,
+    strobe: 7, effect: 8, laser: 9, fog: 10, other: 11,
+  };
+
   function buildLaneList() {
     const list = [];
     const laneMap = new Map();
@@ -662,6 +669,13 @@ const SEQ = (() => {
     const sorted = [...laneMap.entries()].sort((a, b) => a[1] - b[1]);
     for (const [fid] of sorted) { const f = fixtures.find(x => x.id === fid); if (f) list.push(f); }
     for (const fid of activeLanes) { if (!list.some(f => f.id === fid)) { const f = fixtures.find(x => x.id === fid); if (f) list.push(f); } }
+    // Sort by fixture category/type, then by name within each type
+    list.sort((a, b) => {
+      const oa = CATEGORY_ORDER[a.category] ?? 99;
+      const ob = CATEGORY_ORDER[b.category] ?? 99;
+      if (oa !== ob) return oa - ob;
+      return a.name.localeCompare(b.name);
+    });
     return list;
   }
 
@@ -930,65 +944,108 @@ const SEQ = (() => {
     const durMs = wfAnalysis.duration_ms || currentSeq.duration_ms || 1;
     const totalW = Math.round((durMs / 1000) * zoomPxPerSec);
     const H = canvas.parentElement.clientHeight || 80;
+
+    // Canvas at 1:1 CSS pixels — waveform doesn't need HiDPI scaling
+    // and putImageData bypasses canvas transforms, so keep it simple.
     canvas.width = totalW; canvas.height = H;
     canvas.style.width = totalW + 'px'; canvas.style.height = H + 'px';
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, totalW, H);
+
     const sections = wfAnalysis.sections || [];
     const labelH = 14, waveH = H - labelH, midY = waveH / 2;
 
-    // Section backgrounds
+    // Section backgrounds (subtle tint behind waveform)
     for (const sec of sections) {
       const x1 = (sec.start_ms / durMs) * totalW, x2 = (sec.end_ms / durMs) * totalW;
-      ctx.fillStyle = hexRGBA(sec.color || '#555', 0.1);
+      ctx.fillStyle = hexRGBA(sec.color || '#555', 0.08);
       ctx.fillRect(x1, 0, x2 - x1, waveH);
     }
 
     const hasBands = wfRawPeaks && wfRawPeaks.length > 0 && wfRawPeaks[0].bass !== undefined;
     if (hasBands) {
+      // Resample raw peaks to match pixel width (use max for crisp transients)
       const rawLen = wfRawPeaks.length;
-      let dp, xs;
+      let dp;
       if (totalW <= rawLen) {
-        const bs = rawLen / totalW; dp = [];
+        const bs = rawLen / totalW; dp = new Array(totalW);
         for (let px = 0; px < totalW; px++) {
-          const s = Math.floor(px * bs), e = Math.min(Math.floor((px+1)*bs), rawLen);
-          let pM=0,bM=0,mM=0,tM=0,rS=0,cnt=0;
-          for (let j=s;j<e;j++){const p=wfRawPeaks[j];if(p.peak>pM)pM=p.peak;if(p.bass>bM)bM=p.bass;if(p.mid>mM)mM=p.mid;if(p.treble>tM)tM=p.treble;rS+=p.rms;cnt++;}
-          dp.push({peak:pM,bass:bM,mid:mM,treble:tM,rms:cnt?rS/cnt:0});
+          const s = Math.floor(px * bs), e = Math.min(Math.floor((px + 1) * bs), rawLen);
+          let pM = 0, bM = 0, mM = 0, tM = 0;
+          for (let j = s; j < e; j++) {
+            const p = wfRawPeaks[j];
+            if (p.peak > pM) pM = p.peak;
+            if (p.bass > bM) bM = p.bass;
+            if (p.mid > mM) mM = p.mid;
+            if (p.treble > tM) tM = p.treble;
+          }
+          dp[px] = { peak: pM, bass: bM, mid: mM, treble: tM };
         }
-        xs = 1;
-      } else { dp = wfRawPeaks; xs = totalW / rawLen; }
-      const dl = dp.length, hH = midY;
-      const bands = [['rgba(40,120,255,.55)','bass'],['rgba(0,200,100,.50)','mid'],['rgba(233,69,96,.50)','treble']];
-      for (const [col,key] of bands) {
-        ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, midY);
-        for (let i=0;i<dl;i++) ctx.lineTo(i*xs, midY - dp[i][key]*hH);
-        for (let i=dl-1;i>=0;i--) ctx.lineTo(i*xs, midY + dp[i][key]*hH);
-        ctx.closePath(); ctx.fill();
+      } else { dp = wfRawPeaks; }
+      const dl = dp.length, xs = totalW / dl;
+      const hH = midY * 0.92;
+
+      // VDJ-style layered smooth paths: bands stacked center-outward.
+      // Uses lineTo paths for smooth contours instead of blocky rect bars.
+
+      // Helper: draw a symmetric filled path for a band
+      function drawBandPath(color, heightFn) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(0, midY);
+        // Top contour (left to right)
+        for (let i = 0; i < dl; i++) ctx.lineTo(i * xs, midY - heightFn(i));
+        ctx.lineTo(dl * xs, midY);
+        // Bottom contour (right to left, mirrored)
+        for (let i = dl - 1; i >= 0; i--) ctx.lineTo(i * xs, midY + heightFn(i));
+        ctx.closePath();
+        ctx.fill();
       }
+
+      // Treble — outermost layer = full peak envelope
+      drawBandPath('#80DEEA', i => dp[i].peak * hH);
+
+      // Mid — middle layer = (bass + mid) proportion of peak
+      drawBandPath('#2598B5', i => {
+        const d = dp[i], sum = d.bass + d.mid + d.treble;
+        return sum > 0.001 ? ((d.bass + d.mid) / sum) * d.peak * hH : 0;
+      });
+
+      // Bass — center core = bass proportion of peak
+      drawBandPath('#1565C0', i => {
+        const d = dp[i], sum = d.bass + d.mid + d.treble;
+        return sum > 0.001 ? (d.bass / sum) * d.peak * hH : 0;
+      });
+
     } else {
-      // Legacy single-colour
+      // Legacy single-colour smooth path
       let minA, maxA, dl, xs;
       if (totalW <= wfData.length) {
-        const r = wfData.resample({width:totalW}), ch = r.channel(0);
-        minA=ch.min_array(); maxA=ch.max_array(); dl=maxA.length; xs=1;
+        const r = wfData.resample({ width: totalW }), ch = r.channel(0);
+        minA = ch.min_array(); maxA = ch.max_array(); dl = maxA.length; xs = 1;
       } else {
-        const ch=wfData.channel(0); minA=ch.min_array(); maxA=ch.max_array(); dl=maxA.length; xs=totalW/dl;
+        const ch = wfData.channel(0); minA = ch.min_array(); maxA = ch.max_array(); dl = maxA.length; xs = totalW / dl;
       }
       const sc = waveH / 256;
-      ctx.fillStyle = 'rgba(233,69,96,.55)'; ctx.beginPath(); ctx.moveTo(0, midY);
-      for (let i=0;i<dl;i++) ctx.lineTo(i*xs, midY-maxA[i]*sc);
-      for (let i=dl-1;i>=0;i--) ctx.lineTo(i*xs, midY-minA[i]*sc);
-      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#26C6DA';
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      for (let i = 0; i < dl; i++) ctx.lineTo(i * xs, midY - maxA[i] * sc);
+      ctx.lineTo(dl * xs, midY);
+      for (let i = dl - 1; i >= 0; i--) ctx.lineTo(i * xs, midY - minA[i] * sc);
+      ctx.closePath();
+      ctx.fill();
     }
+
     // Center line
-    ctx.strokeStyle='rgba(255,255,255,.06)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(0,midY); ctx.lineTo(totalW,midY); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(totalW, midY); ctx.stroke();
+
     // Section labels
     for (const sec of sections) {
-      const x1=(sec.start_ms/durMs)*totalW, w=((sec.end_ms-sec.start_ms)/durMs)*totalW;
-      ctx.fillStyle=hexRGBA(sec.color||'#555',.55); ctx.fillRect(x1,waveH,w,labelH);
-      if(w>20){ctx.fillStyle='#fff';ctx.font='bold 8px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(sec.label.toUpperCase(),x1+w/2,waveH+labelH/2);}
+      const x1 = (sec.start_ms / durMs) * totalW, w = ((sec.end_ms - sec.start_ms) / durMs) * totalW;
+      ctx.fillStyle = hexRGBA(sec.color || '#555', .55); ctx.fillRect(x1, waveH, w, labelH);
+      if (w > 20) { ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(sec.label.toUpperCase(), x1 + w / 2, waveH + labelH / 2); }
     }
   }
 

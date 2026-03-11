@@ -19,7 +19,7 @@ const {
   sectionStyles, defaultStyle, getSectionPalettes,
 } = require('./gen/palettes');
 
-const { seededRandom, snapToBeat, snapToBar } = require('./gen/helpers');
+const { seededRandom, snapToBeat, snapToBar, computeDownbeatPhase } = require('./gen/helpers');
 
 const { generateSectionBased, resolveMultiCellConflicts } = require('./gen/section-generator');
 const { generateBarBased }         = require('./gen/bar-generator');
@@ -30,6 +30,42 @@ const { CELL_PATTERN_MAP, generateMultiCellPatterns } = require('./gen/multi-cel
 const { buildGroupMap } = require('./gen/group-coordination');
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
+
+/**
+/**
+ * Remove individual color and per-fixture FX cues whose start falls inside
+ * a rig-wide effect window.  The rig effect drives all fixtures, so stacking
+ * individual cues on top just creates visual clutter.
+ */
+function suppressCuesDuringRigEffects(cues) {
+  // Collect rig effect intervals
+  const rigIntervals = [];
+  for (const c of cues) {
+    if (c.track === 'fx-rig') {
+      rigIntervals.push({ start: c.start_ms, end: c.start_ms + c.duration_ms });
+    }
+  }
+  if (rigIntervals.length === 0) return;
+
+  function insideRig(startMs) {
+    for (const iv of rigIntervals) {
+      if (startMs >= iv.start && startMs < iv.end) return true;
+    }
+    return false;
+  }
+
+  // Walk backwards so splice doesn't shift indices
+  for (let i = cues.length - 1; i >= 0; i--) {
+    const c = cues[i];
+    if (c.track === 'fx-rig') continue;
+    if (c.fixture_id === 0) continue;
+    if (!insideRig(c.start_ms)) continue;
+
+    if (c.track === 'fx' || c.track === 'color') {
+      cues.splice(i, 1);
+    }
+  }
+}
 
 /**
  * Generate a sequence of cues for a track.
@@ -151,8 +187,9 @@ function generateSequence(opts) {
   }
 
   const cues = [];
+  const downbeatPhase = computeDownbeatPhase(beats, firstBeatMs);
   const snapBeat = (t) => snapToBeat(t, beats);
-  const snapBar  = (t) => snapToBar(t, beats);
+  const snapBar  = (t) => snapToBar(t, beats, downbeatPhase);
 
   // ── Build fixture-group map for coordinated generation ──────────────
   const groupMap = buildGroupMap(fixtures);
@@ -209,6 +246,13 @@ function generateSequence(opts) {
   if (multiCellFixtures.length > 0) {
     resolveMultiCellConflicts(cues, multiCellFixtures);
   }
+
+  // ── Suppress individual cues during rig-wide effects ──────────────────
+  //   When a rig effect is active it drives all fixtures — individual color
+  //   cues and per-fixture FX that start inside the rig effect window just
+  //   pile up and create visual noise.  Remove them so the rig effect is a
+  //   clean, unified moment.
+  suppressCuesDuringRigEffects(cues);
 
   return { cues, bpm, durationMs, palette: paletteKey, genrePreset: genreKey };
 }

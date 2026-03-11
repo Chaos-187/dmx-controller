@@ -53,6 +53,7 @@ const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','fig
 const MULTICELL_EFFECT_TYPES   = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
 const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow']);
+const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu']);
 const PAN_TILT = new Set(['pan','tilt']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
 
@@ -83,6 +84,9 @@ function isFixtureCompatibleWithEffect(effect, fix) {
     return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
   }
   if (target === 'rig') {
+    return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
+  }
+  if (target === 'sound') {
     return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
   }
   return true;
@@ -118,6 +122,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
   if (COLOR_EFFECT_TYPES.has(type) && !COLOR_CHANNELS.has(channelType)) return null;
   // Rig-wide effects only affect color/intensity channels
   if (RIG_EFFECT_TYPES.has(type) && !COLOR_CHANNELS.has(channelType)) return null;
+  // Sound-reactive effects only affect color/intensity channels
+  if (SOUND_EFFECT_TYPES.has(type) && !COLOR_CHANNELS.has(channelType)) return null;
 
   // Helper: resolve channels-per-cell (legacy heuristic)
   const getCpp = () => params.channels_per_cell || data.channels_per_cell || 3;
@@ -667,6 +673,120 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       return null;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Sound-Reactive Effects
+    //  params.audio = { bass, mid, treble, energy, beat }  (all 0–1)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Sound Pulse: brightness follows bass energy ──────────────────────
+    case 'sound_pulse': {
+      const audio = params.audio || {};
+      const band = params.band || data.band || 'bass';
+      const sensitivity = params.sensitivity || data.sensitivity || 1.0;
+      const level = Math.min(1, (audio[band] || 0) * sensitivity);
+      // Smooth envelope: square root for punchier response
+      const envelope = Math.sqrt(level);
+      if (channelType === 'dimmer') return Math.round(envelope * 255);
+      if (channelType === 'red') return Math.round((baseValues.red ?? 255) * envelope);
+      if (channelType === 'green') return Math.round((baseValues.green ?? 255) * envelope);
+      if (channelType === 'blue') return Math.round((baseValues.blue ?? 255) * envelope);
+      if (channelType === 'white') return Math.round((baseValues.white ?? 0) * envelope);
+      return null;
+    }
+
+    // ── Sound Strobe: strobes when energy exceeds threshold ──────────────
+    case 'sound_strobe': {
+      const audio = params.audio || {};
+      const band = params.band || data.band || 'energy';
+      const threshold = params.threshold || data.threshold || 0.6;
+      const level = audio[band] || 0;
+      const on = level >= threshold;
+      if (channelType === 'dimmer') return on ? 255 : 0;
+      if (channelType === 'red') return on ? (baseValues.red ?? 255) : 0;
+      if (channelType === 'green') return on ? (baseValues.green ?? 255) : 0;
+      if (channelType === 'blue') return on ? (baseValues.blue ?? 255) : 0;
+      if (channelType === 'white') return on ? (baseValues.white ?? 0) : 0;
+      return null;
+    }
+
+    // ── Sound Chase: chase position driven by bass energy ────────────────
+    case 'sound_chase': {
+      const audio = params.audio || {};
+      const band = params.band || data.band || 'bass';
+      const width = params.width || data.width || 0.3;
+      const level = audio[band] || 0;
+      const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
+      const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
+      // Chase head position sweeps based on accumulated progress, speed modulated by energy
+      const speed = params.speed || data.speed || 1.0;
+      const headPos = (progress * speed) % 1;
+      // Distance from chase head
+      let dist = Math.abs(pos - headPos);
+      if (dist > 0.5) dist = 1 - dist; // wrap around
+      const brightness = Math.max(0, 1 - dist / width) * Math.sqrt(level);
+      if (channelType === 'dimmer') return Math.round(brightness * 255);
+      if (channelType === 'red') return Math.round((baseValues.red ?? 255) * brightness);
+      if (channelType === 'green') return Math.round((baseValues.green ?? 255) * brightness);
+      if (channelType === 'blue') return Math.round((baseValues.blue ?? 255) * brightness);
+      if (channelType === 'white') return Math.round((baseValues.white ?? 0) * brightness);
+      return null;
+    }
+
+    // ── Sound Wave: color wave speed modulated by energy ─────────────────
+    case 'sound_wave': {
+      const audio = params.audio || {};
+      const sensitivity = params.sensitivity || data.sensitivity || 1.5;
+      const energy = Math.min(1, (audio.energy || 0) * sensitivity);
+      const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
+      const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
+      const speed = params.speed || data.speed || 0.5;
+      // Hue shifts across rig + time, wavelength compressed by energy
+      const wavelength = 1.0 - (energy * 0.6); // higher energy = tighter wave
+      const hue = ((pos / Math.max(0.1, wavelength) + progress * speed) * 360) % 360;
+      const sat = 0.8 + energy * 0.2;
+      const [r, g, b] = hslToRgb(hue / 360, sat, 0.3 + energy * 0.2);
+      if (channelType === 'red') return r;
+      if (channelType === 'green') return g;
+      if (channelType === 'blue') return b;
+      if (channelType === 'dimmer') return Math.round(128 + energy * 127);
+      return null;
+    }
+
+    // ── Sound Flash: full-brightness flash on beat, fast decay ───────────
+    case 'sound_flash': {
+      const audio = params.audio || {};
+      const beat = audio.beat || 0; // 1 = on beat, decays toward 0
+      const decay = params.decay || data.decay || 0.85;
+      // Beat is a raw 0-1 value — high on onset, decays
+      const brightness = Math.pow(beat, 1 - decay);
+      if (channelType === 'dimmer') return Math.round(brightness * 255);
+      if (channelType === 'red') return Math.round((baseValues.red ?? 255) * brightness);
+      if (channelType === 'green') return Math.round((baseValues.green ?? 255) * brightness);
+      if (channelType === 'blue') return Math.round((baseValues.blue ?? 255) * brightness);
+      if (channelType === 'white') return Math.round((baseValues.white ?? 0) * brightness);
+      return null;
+    }
+
+    // ── Sound VU: fixture position maps to frequency band (VU meter) ─────
+    case 'sound_vu': {
+      const audio = params.audio || {};
+      const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
+      const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
+      // Map position across 5 bands: sub_bass → bass → mid → upper_mid → treble
+      const bands = ['sub_bass', 'bass', 'mid', 'upper_mid', 'treble'];
+      const bandIdx = Math.min(bands.length - 1, Math.floor(pos * bands.length));
+      const level = audio[bands[bandIdx]] || 0;
+      // Color: green (low) → yellow (mid) → red (high)
+      const hue = (1 - pos) * 120; // 120=green → 0=red
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const brightness = Math.sqrt(level);
+      if (channelType === 'red') return Math.round(r * brightness);
+      if (channelType === 'green') return Math.round(g * brightness);
+      if (channelType === 'blue') return Math.round(b * brightness);
+      if (channelType === 'dimmer') return Math.round(brightness * 255);
+      return null;
+    }
+
     // ── Default: pass through base value ───────────────────────────────
     default:
       return baseValues[channelType] !== undefined ? baseValues[channelType] : null;
@@ -684,6 +804,7 @@ module.exports = {
   MULTICELL_EFFECT_TYPES,
   COLOR_EFFECT_TYPES,
   RIG_EFFECT_TYPES,
+  SOUND_EFFECT_TYPES,
   PAN_TILT,
   COLOR_CHANNELS,
 };

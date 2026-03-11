@@ -7,7 +7,7 @@
  * random physical wheel colours.
  */
 
-const { applyIntensity, findNearestWheelColor, findSplitWheelPosition, getFixtureIntensity } = require('./helpers');
+const { applyIntensity, findNearestWheelColor, findSplitWheelPosition, getFixtureIntensity, walkBeats } = require('./helpers');
 const { sectionStyles, getSectionPalettes } = require('./palettes');
 const { getFixtureGroup, pickCoordMode, getColorOffset } = require('./group-coordination');
 
@@ -52,12 +52,13 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
         const bpmDensityScale = 0.7 + 0.6 * bpmFactor;
         const adjustedCuePerBars = Math.max(1, Math.round((style.cuePerBars || 4) / (preset.cueDensityMult * bpmDensityScale)));
         const cueBarMs = adjustedCuePerBars * barMs;
+        const cueBeats = adjustedCuePerBars * 4;
         const numCues = Math.max(1, Math.floor(secDurMs / cueBarMs));
 
         for (let ci = 0; ci < numCues; ci++) {
-          const rawCueStart = secStartMs + ci * cueBarMs;
+          const rawCueStart = walkBeats(secStartMs, ci * cueBeats, ctx.beats, beatMs);
           const cueStart = ci === 0 ? secStartMs : snapBar(rawCueStart);
-          const rawNextStart = rawCueStart + cueBarMs;
+          const rawNextStart = walkBeats(secStartMs, (ci + 1) * cueBeats, ctx.beats, beatMs);
           const nextCueStart = ci < numCues - 1 ? snapBar(rawNextStart) : secEndMs;
           let cueDur = nextCueStart - cueStart;
           if (cueDur < barMs * 0.5) cueDur = Math.min(barMs, secEndMs - cueStart);
@@ -225,8 +226,8 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
       for (let bar = 0; bar < totalBars; bar += sectionBars) {
         const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
         const palette = allPalettes[(paletteIdx + fiIdx) % allPalettes.length];
-        const startMs = snapBar(bar * barMs);
-        const endMs = snapBar((bar + sectionBars) * barMs);
+        const startMs = snapBar(walkBeats(0, bar * 4, ctx.beats, beatMs));
+        const endMs = snapBar(walkBeats(0, (bar + sectionBars) * 4, ctx.beats, beatMs));
         const durMs = Math.min(endMs - startMs, durationMs - startMs);
         if (durMs <= 0) break;
 

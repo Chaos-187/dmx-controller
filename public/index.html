@@ -473,44 +473,50 @@
     }
     .btn-clear-filters:hover { border-color: var(--accent); color: var(--text); }
 
-    .fixtures-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px;
-      margin-bottom: 16px;
+    .fixtures-table-wrap {
+      overflow-x: auto; margin-bottom: 16px;
     }
+    .fixtures-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+    }
+    .fixtures-table th {
+      text-align: left; padding: 6px 10px; font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim);
+      border-bottom: 2px solid var(--panel-border); position: sticky; top: 0;
+      background: var(--bg); z-index: 1; white-space: nowrap;
+    }
+    .fixtures-table td {
+      padding: 5px 10px; border-bottom: 1px solid var(--panel-border);
+      vertical-align: middle; white-space: nowrap;
+    }
+    .fixtures-table tr { transition: background .1s; }
+    .fixtures-table tr:hover td { background: rgba(255,255,255,.03); }
+    .fixtures-table tr[draggable="true"] { cursor: grab; }
+    .fixtures-table tr.dragging td { opacity: 0.4; background: rgba(0,229,255,.04); }
+    .fixtures-table .ft-name { font-weight: 600; color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+    .fixtures-table .ft-type { color: var(--cyan); font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+    .fixtures-table .ft-addr { font-family: monospace; font-size: 11px; }
+    .fixtures-table .ft-channels { display: flex; gap: 2px; flex-wrap: wrap; }
+    .fixtures-table .ft-groups { display: flex; gap: 3px; flex-wrap: wrap; }
+    .fixtures-table .ft-actions { display: flex; gap: 4px; }
+    .fixtures-table .ft-actions .btn-sm { font-size: 10px; padding: 2px 8px; }
     .fixtures-grid-empty {
-      grid-column: 1 / -1; text-align: center; padding: 30px 20px;
+      text-align: center; padding: 30px 20px;
       color: var(--text-dim); font-size: 13px;
     }
-    .fixture-card {
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius);
-      padding: 14px 16px; transition: border-color .15s, box-shadow .15s;
-      display: flex; flex-direction: column;
-    }
-    .fixture-card:hover { border-color: var(--accent); box-shadow: 0 0 12px rgba(233,69,96,.08); }
-    .fixture-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; gap: 8px; }
-    .fixture-card-name { font-size: 14px; font-weight: 600; word-break: break-word; }
-    .fixture-card-type { font-size: 11px; color: var(--cyan); white-space: nowrap; flex-shrink: 0; }
-    .fixture-card-meta { font-size: 11px; color: var(--text-dim); display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-    .fixture-card-meta span { white-space: nowrap; }
     .fixture-meta-badge {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-size: 10px; padding: 2px 7px; border-radius: 3px;
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 9px; padding: 1px 5px; border-radius: 3px;
       font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
     }
     .fixture-meta-badge.artnet { background: rgba(68,138,255,.15); color: var(--blue); }
     .fixture-meta-badge.dmx-usb { background: rgba(255,234,0,.12); color: var(--yellow); }
-    .fixture-card-groups {
-      display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px;
-    }
     .fixture-group-tag {
-      font-size: 9px; padding: 1px 6px; border-radius: 10px;
-      border: 1px solid; font-weight: 500;
-    }
-    .fixture-card-channels {
-      display: flex; gap: 3px; flex-wrap: wrap; margin-top: auto; padding-top: 8px;
+      font-size: 8px; padding: 0 5px; border-radius: 8px;
+      border: 1px solid; font-weight: 500; line-height: 16px;
     }
     .ch-badge {
-      font-size: 9px; padding: 2px 5px; border-radius: 3px;
+      font-size: 8px; padding: 1px 4px; border-radius: 2px;
       background: #222; color: var(--text-dim); text-transform: uppercase;
     }
     .ch-badge.red { background: #3a1515; color: #f66; }
@@ -521,7 +527,6 @@
     .ch-badge.pan, .ch-badge.tilt, .ch-badge.pan_fine, .ch-badge.tilt_fine { background: #1a2a2a; color: var(--cyan); }
     .ch-badge.strobe { background: #2a1a2a; color: #f6f; }
     .ch-badge.gobo, .ch-badge.gobo_rotation { background: #1a2a1a; color: #6fa; }
-    .fixture-card-actions { display: flex; gap: 6px; margin-top: 10px; }
 
     /* ═══════════════════════════════════════════════════════════════
        Fixture Library Tab (tab 3)
@@ -590,26 +595,8 @@
        Integrated Universe Map (inside Fixtures tab)
        ═══════════════════════════════════════════════════════════════ */
     .universe-section {
-      margin-top: 8px; margin-bottom: 20px; padding: 14px 16px;
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      margin-bottom: 20px;
     }
-    .universe-section-header {
-      display: flex; align-items: center; gap: 12px; margin-bottom: 10px; cursor: pointer; user-select: none;
-    }
-    .universe-section-header h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
-    .universe-collapse-btn {
-      background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer;
-      transition: transform .2s; padding: 0 4px; line-height: 1;
-    }
-    .universe-section.collapsed .universe-collapse-btn { transform: rotate(-90deg); }
-    .universe-section-body {
-      overflow: hidden; transition: max-height .3s ease, opacity .2s ease;
-      max-height: 2000px; opacity: 1;
-    }
-    .universe-section.collapsed .universe-section-body {
-      max-height: 0; opacity: 0; padding-top: 0;
-    }
-    .universe-section.collapsed .universe-section-header { margin-bottom: 0; }
     .universe-bar {
       display: flex; flex-wrap: wrap; gap: 0; margin-top: 4px;
       position: relative;
@@ -637,9 +624,9 @@
     }
     .universe-info { font-size: 12px; color: var(--text-dim); }
 
-    /* Fixture card drag styles */
-    .fixture-card[draggable="true"] { cursor: grab; }
-    .fixture-card.dragging { opacity: 0.4; border-color: var(--cyan); box-shadow: 0 0 12px rgba(0,229,255,.3); }
+    /* Fixture row drag styles */
+    .fixtures-table tr[draggable="true"] { cursor: grab; }
+    .fixtures-table tr.dragging td { opacity: 0.4; background: rgba(0,229,255,.04); }
 
     /* Universe fixture colour palette */
     .ufix-color-0 { background: #7b2d3b; border-color: #e94560; }
@@ -663,24 +650,8 @@
        Rig Layout (2D Canvas)
        ═══════════════════════════════════════════════════════════════ */
     .rig-section {
-      margin-top: 8px; margin-bottom: 20px; padding: 14px 16px;
-      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+      margin-bottom: 20px;
     }
-    .rig-section-header {
-      display: flex; align-items: center; gap: 12px; margin-bottom: 10px; cursor: pointer; user-select: none;
-    }
-    .rig-section-header h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
-    .rig-collapse-btn {
-      background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer;
-      transition: transform .2s; padding: 0 4px; line-height: 1;
-    }
-    .rig-section.collapsed .rig-collapse-btn { transform: rotate(-90deg); }
-    .rig-section-body {
-      overflow: hidden; transition: max-height .3s ease, opacity .2s ease;
-      max-height: 2000px; opacity: 1;
-    }
-    .rig-section.collapsed .rig-section-body { max-height: 0; opacity: 0; padding-top: 0; }
-    .rig-section.collapsed .rig-section-header { margin-bottom: 0; }
 
     .rig-toolbar {
       display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
@@ -865,6 +836,19 @@
     }
     .config-sub-page { display: none; }
     .config-sub-page.active { display: block; }
+    /* Fixture sub-tabs */
+    .fixture-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 16px; }
+    .fixture-tab-btn {
+      padding: 8px 22px; cursor: pointer; border: none; background: none;
+      color: var(--text-dim); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      border-bottom: 2px solid transparent; transition: all .15s; font-family: var(--font);
+    }
+    .fixture-tab-btn:hover { color: var(--text); background: rgba(255,255,255,.02); }
+    .fixture-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .fixture-tab-panel { display: none; }
+    .fixture-tab-panel.active { display: block; }
+
     /* Device sub-tabs */
     .device-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--panel-border); margin-bottom: 18px; }
     .device-tab-btn {
@@ -1719,82 +1703,83 @@
      TAB 2 — FIXTURES
      ══════════════════════════════════════════════════════════════ -->
 <div class="tab-page" id="page-fixtures">
-  <!-- Top actions -->
-  <div class="fixtures-toolbar">
-    <button class="btn btn-primary" id="btnAddFixture">+ Add Fixture</button>
-    <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
-    <span style="flex:1"></span>
-    <span style="font-size:12px;color:var(--text-dim)" id="fixtureCount"></span>
+  <!-- Sub-tabs -->
+  <div class="fixture-tabs">
+    <button class="fixture-tab-btn active" data-fixtab="fixtures">&#9881; Fixtures</button>
+    <button class="fixture-tab-btn" data-fixtab="rig">&#9638; Rig Layout</button>
+    <button class="fixture-tab-btn" data-fixtab="universe">&#9783; Universe</button>
   </div>
 
-  <!-- Filter bar -->
-  <div class="fixtures-filter-bar">
-    <label>⚲ Filter</label>
-    <input type="text" class="filter-input" id="filterFixtureName" placeholder="Search by name…" style="width:160px">
-    <div class="filter-sep"></div>
-    <select class="filter-input" id="filterFixtureGroup" style="min-width:110px">
-      <option value="">All Groups</option>
-    </select>
-    <select class="filter-input" id="filterFixtureType" style="min-width:130px">
-      <option value="">All Types</option>
-    </select>
-    <select class="filter-input" id="filterFixtureOutput" style="min-width:110px">
-      <option value="">All Outputs</option>
-      <option value="artnet">Art-Net</option>
-      <option value="dmx_usb">DMX USB</option>
-    </select>
-    <select class="filter-input" id="filterFixtureUniverse" style="min-width:100px">
-      <option value="">All Universes</option>
-      <option value="1">Universe 1</option>
-      <option value="2">Universe 2</option>
-      <option value="3">Universe 3</option>
-      <option value="4">Universe 4</option>
-    </select>
-    <button class="btn-clear-filters" id="btnClearFixtureFilters" title="Clear all filters">✕ Clear</button>
-    <span class="filter-count" id="filterFixtureCount"></span>
-  </div>
-
-  <!-- Groups chips -->
-  <div class="groups-list" id="groupsList">
-    <span style="font-size:11px;color:var(--text-dim)">No groups yet.</span>
-  </div>
-
-  <!-- Fixture cards grid -->
-  <div class="fixtures-grid" id="fixturesGrid"></div>
-
-  <!-- Rig Layout (2D positioning) -->
-  <div class="rig-section" id="rigSection">
-    <div class="rig-section-header" id="rigSectionToggle">
-      <button class="rig-collapse-btn" title="Collapse/Expand">▼</button>
-      <h3>Rig Layout</h3>
+  <!-- ─── Fixtures Panel ─── -->
+  <div class="fixture-tab-panel active" id="fixtab-fixtures">
+    <div class="fixtures-toolbar">
+      <button class="btn btn-primary" id="btnAddFixture">+ Add Fixture</button>
+      <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
       <span style="flex:1"></span>
-      <span class="rig-info" id="rigInfo"></span>
+      <span style="font-size:12px;color:var(--text-dim)" id="fixtureCount"></span>
     </div>
-    <div class="rig-section-body">
+
+    <div class="fixtures-filter-bar">
+      <label>⚲ Filter</label>
+      <input type="text" class="filter-input" id="filterFixtureName" placeholder="Search by name…" style="width:160px">
+      <div class="filter-sep"></div>
+      <select class="filter-input" id="filterFixtureGroup" style="min-width:110px">
+        <option value="">All Groups</option>
+      </select>
+      <select class="filter-input" id="filterFixtureType" style="min-width:130px">
+        <option value="">All Types</option>
+      </select>
+      <select class="filter-input" id="filterFixtureOutput" style="min-width:110px">
+        <option value="">All Outputs</option>
+        <option value="artnet">Art-Net</option>
+        <option value="dmx_usb">DMX USB</option>
+      </select>
+      <select class="filter-input" id="filterFixtureUniverse" style="min-width:100px">
+        <option value="">All Universes</option>
+        <option value="1">Universe 1</option>
+        <option value="2">Universe 2</option>
+        <option value="3">Universe 3</option>
+        <option value="4">Universe 4</option>
+      </select>
+      <button class="btn-clear-filters" id="btnClearFixtureFilters" title="Clear all filters">✕ Clear</button>
+      <span class="filter-count" id="filterFixtureCount"></span>
+    </div>
+
+    <div class="groups-list" id="groupsList">
+      <span style="font-size:11px;color:var(--text-dim)">No groups yet.</span>
+    </div>
+
+    <div id="fixturesGrid"></div>
+  </div>
+
+  <!-- ─── Rig Layout Panel ─── -->
+  <div class="fixture-tab-panel" id="fixtab-rig">
+    <div class="rig-section" id="rigSection">
       <div class="rig-toolbar">
-        <button class="btn btn-secondary" id="btnRigAddTrussH" onclick="event.stopPropagation()" title="Add horizontal truss">+ Truss (H)</button>
-        <button class="btn btn-secondary" id="btnRigAddTrussV" onclick="event.stopPropagation()" title="Add vertical truss">+ Truss (V)</button>
-        <button class="btn btn-secondary" id="btnRigAddStand" onclick="event.stopPropagation()" title="Add lighting stand">+ Stand</button>
-        <button class="btn btn-secondary" id="btnRigAddTBar" onclick="event.stopPropagation()" title="Add T-bar">+ T-Bar</button>
+        <button class="btn btn-secondary" id="btnRigAddTrussH" title="Add horizontal truss">+ Truss (H)</button>
+        <button class="btn btn-secondary" id="btnRigAddTrussV" title="Add vertical truss">+ Truss (V)</button>
+        <button class="btn btn-secondary" id="btnRigAddStand" title="Add lighting stand">+ Stand</button>
+        <button class="btn btn-secondary" id="btnRigAddTBar" title="Add T-bar">+ T-Bar</button>
         <div class="rig-toolbar-sep"></div>
-        <button class="btn btn-secondary" id="btnRigArrangeLine" onclick="event.stopPropagation()">Arrange in Line</button>
-        <button class="btn btn-secondary" id="btnRigArrangeGrid" onclick="event.stopPropagation()">Arrange in Grid</button>
-        <button class="btn btn-secondary" id="btnRigArrangeCircle" onclick="event.stopPropagation()">Arrange in Circle</button>
-        <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;margin-left:8px" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary" id="btnRigArrangeLine">Arrange in Line</button>
+        <button class="btn btn-secondary" id="btnRigArrangeGrid">Arrange in Grid</button>
+        <button class="btn btn-secondary" id="btnRigArrangeCircle">Arrange in Circle</button>
+        <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;margin-left:8px">
           <input type="checkbox" id="rigSnapEnabled" checked style="accent-color:var(--cyan);margin:0"> Snap
         </label>
         <span style="flex:1"></span>
         <div class="rig-toolbar-sep"></div>
-        <select id="rigLayoutSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:11px;min-width:130px" onclick="event.stopPropagation()">
+        <select id="rigLayoutSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:11px;min-width:130px">
           <option value="">— Saved Layouts —</option>
         </select>
-        <button class="btn btn-secondary" id="btnRigLoadLayout" onclick="event.stopPropagation()" title="Load selected layout">Load</button>
-        <button class="btn btn-secondary" id="btnRigSaveAsLayout" onclick="event.stopPropagation()" title="Save current layout as new preset">Save As…</button>
-        <button class="btn btn-secondary" id="btnRigOverwriteLayout" onclick="event.stopPropagation()" title="Overwrite selected layout with current state" style="display:none">Overwrite</button>
-        <button class="btn btn-danger btn-sm" id="btnRigDeleteLayout" onclick="event.stopPropagation()" title="Delete selected layout" style="display:none;padding:4px 8px;font-size:11px">✕</button>
-        <span id="rigActiveLabel" style="font-size:10px;color:var(--cyan);margin-left:4px;white-space:nowrap" onclick="event.stopPropagation()"></span>
+        <button class="btn btn-secondary" id="btnRigLoadLayout" title="Load selected layout">Load</button>
+        <button class="btn btn-secondary" id="btnRigSaveAsLayout" title="Save current layout as new preset">Save As…</button>
+        <button class="btn btn-secondary" id="btnRigOverwriteLayout" title="Overwrite selected layout with current state" style="display:none">Overwrite</button>
+        <button class="btn btn-danger btn-sm" id="btnRigDeleteLayout" title="Delete selected layout" style="display:none;padding:4px 8px;font-size:11px">✕</button>
+        <span id="rigActiveLabel" style="font-size:10px;color:var(--cyan);margin-left:4px;white-space:nowrap"></span>
         <div class="rig-toolbar-sep"></div>
         <button class="btn btn-primary" id="btnRigSaveLayout">Save Layout</button>
+        <span class="rig-info" id="rigInfo" style="font-size:11px;color:var(--text-dim);margin-left:8px"></span>
       </div>
       <div class="rig-canvas-wrap" id="rigCanvas"></div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
@@ -1803,19 +1788,17 @@
     </div>
   </div>
 
-  <!-- Integrated Universe Map -->
-  <div class="universe-section">
-    <div class="universe-section-header" id="universeSectionToggle">
-      <button class="universe-collapse-btn" title="Collapse/Expand">▼</button>
-      <h3>Universe Map</h3>
-      <label style="font-size:12px;color:var(--text-dim)" onclick="event.stopPropagation()">Universe:</label>
-      <select id="universeSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;" onclick="event.stopPropagation()">
-        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
-      </select>
-      <span style="flex:1"></span>
-      <span class="universe-info" id="universeInfo"></span>
-    </div>
-    <div class="universe-section-body">
+  <!-- ─── Universe Panel ─── -->
+  <div class="fixture-tab-panel" id="fixtab-universe">
+    <div class="universe-section">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-dim)">Universe:</label>
+        <select id="universeSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:12px;">
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+        </select>
+        <span style="flex:1"></span>
+        <span class="universe-info" id="universeInfo"></span>
+      </div>
       <div class="universe-bar" id="universeBar"></div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:6px">Drag fixtures from above and drop onto the universe map to assign their DMX address.</div>
     </div>
@@ -2003,13 +1986,17 @@
       <h3>Effects Library</h3>
       <div class="effects-lib-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--panel-border);margin-bottom:8px">
         <button class="efx-lib-tab active" data-efxtab="color" style="margin-bottom:-2px">🎨 Color</button>
+        <button class="efx-lib-tab" data-efxtab="rig" style="margin-bottom:-2px">🎪 Rig</button>
         <button class="efx-lib-tab" data-efxtab="motion" style="margin-bottom:-2px">🔦 Motion</button>
         <button class="efx-lib-tab" data-efxtab="multicell" style="margin-bottom:-2px">▓ Multicell</button>
+        <button class="efx-lib-tab" data-efxtab="sound" style="margin-bottom:-2px">🔊 Sound</button>
         <button class="efx-lib-tab" data-efxtab="all" style="margin-bottom:-2px">🎛️ All</button>
       </div>
       <div class="qa-grid effects-lib-page active" id="efxTabColor" data-efxtab="color"></div>
+      <div class="qa-grid effects-lib-page" id="efxTabRig" data-efxtab="rig" style="display:none"></div>
       <div class="qa-grid effects-lib-page" id="efxTabMotion" data-efxtab="motion" style="display:none"></div>
       <div class="qa-grid effects-lib-page" id="efxTabMulticell" data-efxtab="multicell" style="display:none"></div>
+      <div class="qa-grid effects-lib-page" id="efxTabSound" data-efxtab="sound" style="display:none"></div>
       <div class="qa-grid effects-lib-page" id="efxTabAll" data-efxtab="all" style="display:none"></div>
     </div>
     <div class="qa-section">
@@ -3734,27 +3721,54 @@
      MODAL — Add/Edit Fixture
      ══════════════════════════════════════════════════════════════ -->
 <div class="modal-overlay" id="fixtureModal">
-  <div class="modal">
+  <div class="modal" style="max-width:640px">
     <h2 id="fixtureModalTitle">Add Fixture</h2>
     <input type="hidden" id="fixtureEditId">
+    <input type="hidden" id="fTypeId" value="">
     <div class="form-group">
       <label>Name</label>
       <input type="text" id="fName" placeholder="e.g. Stage Left Par 1">
     </div>
     <div class="form-group">
       <label>Fixture Type</label>
-      <select id="fTypeId"></select>
+      <div id="fTypePickerSelected" style="display:none;padding:8px 10px;background:var(--input-bg);border:1px solid var(--green);border-radius:var(--radius-sm);margin-bottom:8px;cursor:pointer;position:relative" title="Click to change">
+        <span id="fTypePickerLabel" style="color:var(--text);font-size:13px;font-weight:600"></span>
+        <span id="fTypePickerMeta" style="color:var(--text-dim);font-size:11px;margin-left:8px"></span>
+        <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:11px">&#x270E; change</span>
+      </div>
+      <div id="fTypePickerSearch" style="display:flex;flex-direction:column;gap:6px">
+        <input type="text" id="fTypeSearch" placeholder="Search fixtures by name or manufacturer..." autocomplete="off" style="width:100%;padding:8px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--radius-sm);color:var(--text);font-size:13px">
+        <div style="display:flex;gap:6px">
+          <select id="fTypeFilterMfr" style="flex:1;padding:6px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--radius-sm);color:var(--text);font-size:12px">
+            <option value="">All Manufacturers</option>
+          </select>
+          <select id="fTypeFilterCat" style="flex:1;padding:6px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--radius-sm);color:var(--text);font-size:12px">
+            <option value="">All Categories</option>
+          </select>
+          <select id="fTypeFilterCh" style="width:100px;padding:6px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--radius-sm);color:var(--text);font-size:12px">
+            <option value="">Channels</option>
+          </select>
+        </div>
+        <div id="fTypeResults" style="max-height:180px;overflow-y:auto;border:1px solid var(--input-border);border-radius:var(--radius-sm);background:var(--input-bg)"></div>
+        <div id="fTypeResultsInfo" style="font-size:11px;color:var(--text-dim);text-align:right"></div>
+      </div>
     </div>
-    <div class="form-group">
+    <div class="form-group" id="fModeGroup">
       <label>Mode</label>
       <select id="fModeId"></select>
     </div>
-    <div class="form-group">
-      <label>Output Type</label>
-      <select id="fOutputType">
-        <option value="artnet">Art-Net</option>
-        <option value="dmx_usb">DMX USB</option>
-      </select>
+    <div class="form-row" id="fQuantityRow">
+      <div class="form-group">
+        <label>Output Type</label>
+        <select id="fOutputType">
+          <option value="artnet">Art-Net</option>
+          <option value="dmx_usb">DMX USB</option>
+        </select>
+      </div>
+      <div class="form-group" id="fQuantityGroup">
+        <label>Quantity</label>
+        <input type="number" id="fQuantity" value="1" min="1" max="64">
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -3762,10 +3776,11 @@
         <input type="number" id="fUniverse" value="1" min="1" max="16">
       </div>
       <div class="form-group">
-        <label>DMX Address</label>
+        <label>DMX Address <span id="fAddressHint" style="color:var(--green);font-size:10px;text-transform:none;letter-spacing:0"></span></label>
         <input type="number" id="fAddress" value="1" min="1" max="512">
       </div>
     </div>
+    <div id="fBatchPreview" style="display:none;margin-bottom:14px;padding:8px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--radius-sm);font-size:11px;color:var(--text-dim);max-height:90px;overflow-y:auto"></div>
     <div class="form-group">
       <label>Notes</label>
       <textarea id="fNotes" rows="2" placeholder="Optional notes..."></textarea>
@@ -4469,10 +4484,31 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('page-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'fixtures') { loadFixtures(); loadGroups(); loadUniverseMap(); }
+    if (btn.dataset.tab === 'fixtures') {
+      const activeFixTab = document.querySelector('.fixture-tab-btn.active');
+      const ft = activeFixTab ? activeFixTab.dataset.fixtab : 'fixtures';
+      if (ft === 'fixtures') { loadFixtures(); loadGroups(); }
+      else if (ft === 'rig') { loadRigElements(); renderRigLayout(); }
+      else if (ft === 'universe') loadUniverseMap();
+    }
     if (btn.dataset.tab === 'scenes') loadScenes();
     if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
     if (btn.dataset.tab === 'config') loadConfigPage();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Fixtures — Sub-tab Switching (Fixtures / Rig Layout / Universe)
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.fixture-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.fixture-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.fixture-tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('fixtab-' + btn.dataset.fixtab).classList.add('active');
+    if (btn.dataset.fixtab === 'fixtures') { loadFixtures(); loadGroups(); }
+    if (btn.dataset.fixtab === 'rig') { loadRigElements(); renderRigLayout(); }
+    if (btn.dataset.fixtab === 'universe') loadUniverseMap();
   });
 });
 
@@ -5195,15 +5231,15 @@ function renderFilteredFixtures() {
 }
 
 function renderFixtureCards(fixtures) {
-  const grid = document.getElementById('fixturesGrid');
-  grid.innerHTML = '';
+  const container = document.getElementById('fixturesGrid');
+  container.innerHTML = '';
 
   if (_allFixtures.length === 0) {
-    grid.innerHTML = '<div class="fixtures-grid-empty">No fixtures configured. Click "+ Add Fixture" to get started.</div>';
+    container.innerHTML = '<div class="fixtures-grid-empty">No fixtures configured. Click "+ Add Fixture" to get started.</div>';
     return;
   }
   if (fixtures.length === 0) {
-    grid.innerHTML = '<div class="fixtures-grid-empty">No fixtures match the current filters.</div>';
+    container.innerHTML = '<div class="fixtures-grid-empty">No fixtures match the current filters.</div>';
     return;
   }
 
@@ -5216,31 +5252,35 @@ function renderFixtureCards(fixtures) {
     }
   }
 
-  for (const f of fixtures) {
-    const card = document.createElement('div');
-    card.className = 'fixture-card';
+  const wrap = document.createElement('div');
+  wrap.className = 'fixtures-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'fixtures-table';
+  table.innerHTML = `<thead><tr>
+    <th>Name</th><th>Type</th><th>Uni</th><th>Address</th><th>Ch</th>
+    <th>Output</th><th>Groups</th><th>Channels</th><th></th>
+  </tr></thead>`;
+  const tbody = document.createElement('tbody');
 
-    // Make card draggable for universe map drag-and-drop
-    card.draggable = true;
-    card.dataset.fixtureId = f.id;
-    card.dataset.channelCount = f.channel_count;
-    card.dataset.fixtureUniverse = f.universe;
-    card.addEventListener('dragstart', (e) => {
+  for (const f of fixtures) {
+    const tr = document.createElement('tr');
+    tr.draggable = true;
+    tr.dataset.fixtureId = f.id;
+    tr.dataset.channelCount = f.channel_count;
+    tr.dataset.fixtureUniverse = f.universe;
+    tr.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/x-fixture-id', String(f.id));
       e.dataTransfer.setData('text/x-channel-count', String(f.channel_count));
       e.dataTransfer.setData('text/x-fixture-universe', String(f.universe));
       e.dataTransfer.effectAllowed = 'move';
       _dragFixtureChannels = f.channel_count;
       _dragFixtureId = f.id;
-      card.classList.add('dragging');
-      // Auto-expand universe section when dragging starts
-      const section = document.querySelector('.universe-section');
-      if (section && section.classList.contains('collapsed')) {
-        section.classList.remove('collapsed');
-      }
+      tr.classList.add('dragging');
+      const univTab = document.querySelector('.fixture-tab-btn[data-fixtab="universe"]');
+      if (univTab && !univTab.classList.contains('active')) univTab.click();
     });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('dragging');
+    tr.addEventListener('dragend', () => {
+      tr.classList.remove('dragging');
       _dragFixtureChannels = 0;
       _dragFixtureId = 0;
       _dragBarCounter = 0;
@@ -5250,8 +5290,6 @@ function renderFixtureCards(fixtures) {
     });
 
     const channels = f.channels || [];
-
-    // Build channel type summary instead of listing every channel
     const typeCounts = {};
     for (const c of channels) {
       const t = c.type || 'other';
@@ -5262,90 +5300,248 @@ function renderFixtureCards(fixtures) {
       return `<span class="ch-badge ${t}">${label}</span>`;
     }).join('');
 
-    // Group tags
     const groups = fixtureGroupMap[f.id] || [];
     const groupTags = groups.map(g =>
       `<span class="fixture-group-tag" style="color:${g.color};border-color:${g.color}">${esc(g.name)}</span>`
     ).join('');
 
     const outputBadge = f.output_type === 'dmx_usb'
-      ? '<span class="fixture-meta-badge dmx-usb">DMX USB</span>'
+      ? '<span class="fixture-meta-badge dmx-usb">USB</span>'
       : '<span class="fixture-meta-badge artnet">Art-Net</span>';
 
-    card.innerHTML = `
-      <div class="fixture-card-header">
-        <span class="fixture-card-name">${esc(f.name)}</span>
-        <span class="fixture-card-type">${esc(f.type_name)}${f.mode_name ? ' <span style="color:var(--cyan);font-size:10px">[' + esc(f.mode_name) + ']</span>' : ''}</span>
-      </div>
-      <div class="fixture-card-meta">
-        <span>U${f.universe} &middot; Ch ${f.address}&ndash;${f.address + f.channel_count - 1}</span>
-        <span>${f.channel_count}ch</span>
-        <span>${CATEGORY_LABELS[f.category]||f.category}</span>
-        ${outputBadge}
-      </div>
-      ${groupTags ? `<div class="fixture-card-groups">${groupTags}</div>` : ''}
-      ${f.notes ? `<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">${esc(f.notes)}</div>` : ''}
-      <div class="fixture-card-channels">${chSummary}</div>
-      <div class="fixture-card-actions">
+    const addrEnd = f.address + f.channel_count - 1;
+
+    tr.innerHTML = `
+      <td class="ft-name" title="${esc(f.name)}">${esc(f.name)}</td>
+      <td class="ft-type" title="${esc(f.type_name)}">${esc(f.type_name)}${f.mode_name ? ' <span style="color:var(--text-dim);font-size:10px">[' + esc(f.mode_name) + ']</span>' : ''}</td>
+      <td>${f.universe}</td>
+      <td class="ft-addr">${f.address}–${addrEnd}</td>
+      <td>${f.channel_count}</td>
+      <td>${outputBadge}</td>
+      <td><div class="ft-groups">${groupTags || '<span style="color:var(--text-dim)">—</span>'}</div></td>
+      <td><div class="ft-channels">${chSummary}</div></td>
+      <td><div class="ft-actions">
         <button class="btn btn-secondary btn-sm" onclick="editFixture(${f.id})">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteFixture(${f.id},'${esc(f.name).replace(/'/g,"\\'")}')">Delete</button>
-      </div>`;
-    grid.appendChild(card);
+        <button class="btn btn-danger btn-sm" onclick="deleteFixture(${f.id},'${esc(f.name).replace(/'/g,"\\'")}')">Del</button>
+      </div></td>`;
+    tbody.appendChild(tr);
   }
+
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  container.appendChild(wrap);
 }
 
 document.getElementById('btnAddFixture').addEventListener('click', () => openFixtureModal());
 
-async function openFixtureModal(fixtureId) {
-  if (fixtureTypesCache.length === 0) {
-    fixtureTypesCache = await fetch('/api/fixture-types/summaries').then(r=>r.json());
-  }
-  const sel = document.getElementById('fTypeId');
-  sel.innerHTML = fixtureTypesCache.map(t =>
-    `<option value="${t.id}">${esc(t.name)} (${(t.modes && t.modes.length > 0 ? t.modes[0].channel_count : t.channel_count) || '?'}ch)</option>`
-  ).join('');
+// ── Fixture Type Picker (searchable, server-side) ──
+let _ftPickerMeta = { manufacturers: [], categories: [], channelCounts: [], loaded: false };
+let _ftPickerDebounce = null;
 
-  function updateModeDropdown() {
-    const typeId = +document.getElementById('fTypeId').value;
-    const ft = fixtureTypesCache.find(t => t.id === typeId);
-    const modeSel = document.getElementById('fModeId');
-    if (ft && ft.modes && ft.modes.length > 0) {
-      modeSel.innerHTML = ft.modes.map(m =>
-        `<option value="${m.id}">${esc(m.name || 'Default')} (${m.channel_count}ch)</option>`
-      ).join('');
-      modeSel.parentElement.style.display = ft.modes.length > 1 ? '' : 'none';
+async function _loadFixturePickerMeta() {
+  if (_ftPickerMeta.loaded) return;
+  // Fetch just the first page to get filter dropdown metadata
+  const data = await fetch('/api/fixture-types/search?limit=1').then(r => r.json());
+  _ftPickerMeta.manufacturers = data.manufacturers || [];
+  _ftPickerMeta.categories = data.categories || [];
+  _ftPickerMeta.channelCounts = data.channelCounts || [];
+  _ftPickerMeta.loaded = true;
+}
+
+function _invalidateFixturePickerCache() {
+  _ftPickerMeta.loaded = false;
+}
+
+function _renderTypePickerFilters() {
+  const mfrSel = document.getElementById('fTypeFilterMfr');
+  const catSel = document.getElementById('fTypeFilterCat');
+  const chSel = document.getElementById('fTypeFilterCh');
+  mfrSel.innerHTML = '<option value="">All Manufacturers</option>';
+  _ftPickerMeta.manufacturers.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; mfrSel.appendChild(o); });
+  catSel.innerHTML = '<option value="">All Categories</option>' +
+    _ftPickerMeta.categories.map(c => `<option value="${c}">${CATEGORY_LABELS[c] || c}</option>`).join('');
+  chSel.innerHTML = '<option value="">Channels</option>' +
+    _ftPickerMeta.channelCounts.map(n => `<option value="${n}">${n}ch</option>`).join('');
+}
+
+async function _searchPickerTypes() {
+  const q = (document.getElementById('fTypeSearch').value || '').trim();
+  const mfr = document.getElementById('fTypeFilterMfr').value;
+  const cat = document.getElementById('fTypeFilterCat').value;
+  const ch = document.getElementById('fTypeFilterCh').value;
+  const params = new URLSearchParams({ limit: 80 });
+  if (q) params.set('q', q);
+  if (mfr) params.set('manufacturer', mfr);
+  if (cat) params.set('category', cat);
+  if (ch) params.set('channels', ch);
+  const data = await fetch('/api/fixture-types/search?' + params).then(r => r.json());
+  return { types: data.types || [], total: data.total || 0 };
+}
+
+async function _renderPickerResults(selectedId) {
+  const container = document.getElementById('fTypeResults');
+  const info = document.getElementById('fTypeResultsInfo');
+  container.innerHTML = '<div style="padding:10px;color:var(--text-dim);font-size:12px;text-align:center">Searching...</div>';
+
+  const { types, total } = await _searchPickerTypes();
+  info.textContent = types.length < total ? `Showing ${types.length} of ${total} fixtures` : `${total} fixture${total !== 1 ? 's' : ''}`;
+
+  if (!types.length) {
+    container.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:12px;text-align:center">No fixtures match your search. Try importing from the Fixture Library tab.</div>';
+    return;
+  }
+
+  container.innerHTML = types.map(t => {
+    const chCount = (t.modes && t.modes.length > 0 ? t.modes[0].channel_count : t.channel_count) || '?';
+    const modeCount = (t.modes && t.modes.length > 1) ? ` \u00b7 ${t.modes.length} modes` : '';
+    const isSelected = t.id === selectedId;
+    return `<div class="ft-picker-item${isSelected ? ' ft-picker-selected' : ''}" data-id="${t.id}" style="padding:7px 10px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);display:flex;align-items:center;justify-content:space-between;transition:background .1s${isSelected ? ';background:rgba(233,69,96,.15)' : ''}">
+      <div style="min-width:0;flex:1">
+        <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name)}</div>
+        <div style="font-size:11px;color:var(--text-dim)">${esc(t.manufacturer || 'Unknown')} \u00b7 ${CATEGORY_LABELS[t.category] || t.category}${modeCount}</div>
+      </div>
+      <span style="font-size:12px;color:var(--cyan);font-weight:600;flex-shrink:0;margin-left:8px">${chCount}ch</span>
+    </div>`;
+  }).join('');
+
+  // Click handler
+  container.querySelectorAll('.ft-picker-item').forEach(el => {
+    el.addEventListener('click', () => _selectFixtureType(+el.dataset.id));
+    el.addEventListener('mouseenter', () => { if (!el.classList.contains('ft-picker-selected')) el.style.background = 'rgba(255,255,255,.05)'; });
+    el.addEventListener('mouseleave', () => { if (!el.classList.contains('ft-picker-selected')) el.style.background = ''; });
+  });
+}
+
+function _triggerPickerSearch() {
+  clearTimeout(_ftPickerDebounce);
+  _ftPickerDebounce = setTimeout(() => _renderPickerResults(+document.getElementById('fTypeId').value), 200);
+}
+
+async function _selectFixtureType(typeId) {
+  document.getElementById('fTypeId').value = typeId;
+  // Fetch the type summary if not in fixtureTypesCache
+  let ft = fixtureTypesCache.find(t => t.id === typeId);
+  if (!ft) {
+    try {
+      ft = await fetch(`/api/fixture-types/${typeId}`).then(r => r.json());
+      if (ft) fixtureTypesCache.push(ft);
+    } catch(e) {}
+  }
+  if (!ft) return;
+
+  // Show selected, hide search
+  const label = document.getElementById('fTypePickerLabel');
+  const meta = document.getElementById('fTypePickerMeta');
+  const chCount = (ft.modes && ft.modes.length > 0 ? ft.modes[0].channel_count : ft.channel_count) || '?';
+  label.textContent = ft.name;
+  meta.textContent = `${ft.manufacturer || 'Unknown'} \u00b7 ${chCount}ch`;
+  document.getElementById('fTypePickerSelected').style.display = '';
+  document.getElementById('fTypePickerSearch').style.display = 'none';
+
+  _updateModeDropdown();
+  _updateInvertVisibility();
+  await _updateNextAddress();
+}
+
+// Allow clicking selected bar to re-open search
+document.getElementById('fTypePickerSelected').addEventListener('click', () => {
+  document.getElementById('fTypePickerSelected').style.display = 'none';
+  document.getElementById('fTypePickerSearch').style.display = 'flex';
+  document.getElementById('fTypeSearch').focus();
+});
+
+// Wire up picker search/filter events (debounced server-side search)
+document.getElementById('fTypeSearch').addEventListener('input', _triggerPickerSearch);
+['fTypeFilterMfr','fTypeFilterCat','fTypeFilterCh'].forEach(id => document.getElementById(id).addEventListener('change', _triggerPickerSearch));
+
+function _updateModeDropdown() {
+  const typeId = +document.getElementById('fTypeId').value;
+  const ft = fixtureTypesCache.find(t => t.id === typeId);
+  const modeSel = document.getElementById('fModeId');
+  if (ft && ft.modes && ft.modes.length > 0) {
+    modeSel.innerHTML = ft.modes.map(m =>
+      `<option value="${m.id}">${esc(m.name || 'Default')} (${m.channel_count}ch)</option>`
+    ).join('');
+    document.getElementById('fModeGroup').style.display = ft.modes.length > 1 ? '' : 'none';
+  } else {
+    modeSel.innerHTML = '<option value="">Default</option>';
+    document.getElementById('fModeGroup').style.display = 'none';
+  }
+}
+
+// Cache full fixture type data (with channels) fetched on demand
+let _ftChannelCache = {};
+async function _updateInvertVisibility() {
+  const typeId = +document.getElementById('fTypeId').value;
+  if (!typeId) {
+    document.getElementById('fInvertRow').style.display = 'none';
+    document.getElementById('fHomeRow').style.display = 'none';
+    return;
+  }
+  const modeId = +document.getElementById('fModeId').value;
+  if (!_ftChannelCache[typeId]) {
+    try { _ftChannelCache[typeId] = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json()); }
+    catch(e) { _ftChannelCache[typeId] = null; }
+  }
+  const ft = _ftChannelCache[typeId];
+  let channels = [];
+  if (ft && ft.modes) {
+    const mode = ft.modes.find(m => m.id === modeId) || ft.modes[0];
+    channels = mode ? mode.channels || [] : [];
+  } else if (ft) {
+    channels = ft.channels || [];
+  }
+  const hasPanTilt = channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
+  document.getElementById('fInvertRow').style.display = hasPanTilt ? 'flex' : 'none';
+  document.getElementById('fHomeRow').style.display = hasPanTilt ? 'flex' : 'none';
+}
+
+document.getElementById('fModeId').onchange = () => { _updateInvertVisibility(); _updateNextAddress(); };
+
+// ── Auto-calculate next available DMX address ──
+async function _updateNextAddress() {
+  const typeId = +document.getElementById('fTypeId').value;
+  const editId = document.getElementById('fixtureEditId').value;
+  if (!typeId) return;
+  // Get channel count from selected mode or type
+  const ft = fixtureTypesCache.find(t => t.id === typeId);
+  const modeId = +document.getElementById('fModeId').value;
+  let chCount = 1;
+  if (ft && ft.modes && ft.modes.length > 0) {
+    const mode = ft.modes.find(m => m.id === modeId) || ft.modes[0];
+    chCount = mode ? mode.channel_count : (ft.channel_count || 1);
+  } else if (ft) {
+    chCount = ft.channel_count || 1;
+  }
+  const universe = +document.getElementById('fUniverse').value || 1;
+  const params = new URLSearchParams({ universe, channels: chCount });
+  if (editId) params.set('exclude', editId);
+  try {
+    const data = await fetch('/api/fixtures/next-address?' + params).then(r => r.json());
+    const hint = document.getElementById('fAddressHint');
+    if (data.address) {
+      hint.textContent = `(next available: ${data.address})`;
+      // Auto-set for new fixtures
+      if (!editId) {
+        document.getElementById('fAddress').value = data.address;
+      }
     } else {
-      modeSel.innerHTML = '<option value="">Default</option>';
-      modeSel.parentElement.style.display = 'none';
+      hint.textContent = '(universe full)';
     }
-  }
+  } catch(e) { /* ignore */ }
+}
 
-  // Cache full fixture type data (with channels) fetched on demand, keyed by type id
-  let _ftChannelCache = {};
-  // Helper: show/hide invert row based on selected fixture type
-  async function updateInvertVisibility() {
-    const typeId = +document.getElementById('fTypeId').value;
-    const modeId = +document.getElementById('fModeId').value;
-    // Fetch full type data (with channels) if not cached
-    if (!_ftChannelCache[typeId]) {
-      try {
-        _ftChannelCache[typeId] = await fetch(`/api/fixture-types/${typeId}`).then(r=>r.json());
-      } catch(e) { _ftChannelCache[typeId] = null; }
-    }
-    const ft = _ftChannelCache[typeId];
-    let channels = [];
-    if (ft && ft.modes) {
-      const mode = ft.modes.find(m => m.id === modeId) || ft.modes[0];
-      channels = mode ? mode.channels || [] : [];
-    } else if (ft) {
-      channels = ft.channels || [];
-    }
-    const hasPanTilt = channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
-    document.getElementById('fInvertRow').style.display = hasPanTilt ? 'flex' : 'none';
-    document.getElementById('fHomeRow').style.display = hasPanTilt ? 'flex' : 'none';
-  }
-  sel.onchange = () => { updateModeDropdown(); updateInvertVisibility(); };
-  document.getElementById('fModeId').onchange = updateInvertVisibility;
+document.getElementById('fUniverse').addEventListener('change', _updateNextAddress);
+
+async function openFixtureModal(fixtureId) {
+  await _loadFixturePickerMeta();
+  _renderTypePickerFilters();
+
+  // Reset search state
+  document.getElementById('fTypeSearch').value = '';
+  document.getElementById('fTypeFilterMfr').value = '';
+  document.getElementById('fTypeFilterCat').value = '';
+  document.getElementById('fTypeFilterCh').value = '';
 
   if (fixtureId) {
     const f = await fetch(`/api/fixtures/${fixtureId}`).then(r=>r.json());
@@ -5353,7 +5549,21 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fixtureEditId').value = f.id;
     document.getElementById('fName').value = f.name;
     document.getElementById('fTypeId').value = f.fixture_type_id;
-    updateModeDropdown();
+
+    // Show selected type bar — fetch full type info for edit mode
+    let ft = fixtureTypesCache.find(t => t.id === f.fixture_type_id);
+    if (!ft) {
+      try { ft = await fetch(`/api/fixture-types/${f.fixture_type_id}`).then(r=>r.json()); if (ft) fixtureTypesCache.push(ft); } catch(e) {}
+    }
+    if (ft) {
+      const chCount = (ft.modes && ft.modes.length > 0 ? ft.modes[0].channel_count : ft.channel_count) || '?';
+      document.getElementById('fTypePickerLabel').textContent = ft.name;
+      document.getElementById('fTypePickerMeta').textContent = `${ft.manufacturer || 'Unknown'} \u00b7 ${chCount}ch`;
+      document.getElementById('fTypePickerSelected').style.display = '';
+      document.getElementById('fTypePickerSearch').style.display = 'none';
+    }
+
+    _updateModeDropdown();
     if (f.mode_id) document.getElementById('fModeId').value = f.mode_id;
     document.getElementById('fOutputType').value = f.output_type || 'artnet';
     document.getElementById('fUniverse').value = f.universe;
@@ -5365,13 +5575,20 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fHomePanVal').textContent = f.home_pan ?? 128;
     document.getElementById('fHomeTilt').value = f.home_tilt ?? 128;
     document.getElementById('fHomeTiltVal').textContent = f.home_tilt ?? 128;
+    document.getElementById('fQuantityGroup').style.display = 'none';
+    document.getElementById('fBatchPreview').style.display = 'none';
+    _renderPickerResults(f.fixture_type_id);
   } else {
     document.getElementById('fixtureModalTitle').textContent = 'Add Fixture';
     document.getElementById('fixtureEditId').value = '';
+    document.getElementById('fTypeId').value = '';
     document.getElementById('fName').value = '';
     document.getElementById('fOutputType').value = 'artnet';
     document.getElementById('fUniverse').value = '1';
     document.getElementById('fAddress').value = '1';
+    document.getElementById('fAddressHint').textContent = '';
+    document.getElementById('fQuantity').value = '1';
+    document.getElementById('fBatchPreview').style.display = 'none';
     document.getElementById('fNotes').value = '';
     document.getElementById('fInvertPan').checked = false;
     document.getElementById('fInvertTilt').checked = false;
@@ -5379,11 +5596,19 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fHomePanVal').textContent = '128';
     document.getElementById('fHomeTilt').value = 128;
     document.getElementById('fHomeTiltVal').textContent = '128';
-    updateModeDropdown();
+
+    // Show search picker, hide selected bar
+    document.getElementById('fTypePickerSelected').style.display = 'none';
+    document.getElementById('fTypePickerSearch').style.display = 'flex';
+    document.getElementById('fQuantityGroup').style.display = '';
+
+    _renderPickerResults(0);
+    _updateModeDropdown();
   }
-  updateInvertVisibility();
+  _updateInvertVisibility();
   document.getElementById('fixtureError').textContent = '';
   document.getElementById('fixtureModal').classList.add('open');
+  if (!fixtureId) document.getElementById('fTypeSearch').focus();
 }
 
 window.editFixture = (id) => openFixtureModal(id);
@@ -5426,9 +5651,45 @@ window.deleteFixture = async (id, name) => {
   loadUniverseMap();
 };
 
+// ── Batch preview update ──
+function _updateBatchPreview() {
+  const editId = document.getElementById('fixtureEditId').value;
+  const qty = Math.max(1, +document.getElementById('fQuantity').value || 1);
+  const preview = document.getElementById('fBatchPreview');
+  if (editId || qty <= 1) { preview.style.display = 'none'; return; }
+
+  const baseName = document.getElementById('fName').value.trim() || 'Fixture';
+  const typeId = +document.getElementById('fTypeId').value;
+  const ft = fixtureTypesCache.find(t => t.id === typeId);
+  const modeId = +document.getElementById('fModeId').value;
+  let chCount = 1;
+  if (ft && ft.modes && ft.modes.length > 0) {
+    const mode = ft.modes.find(m => m.id === modeId) || ft.modes[0];
+    chCount = mode ? mode.channel_count : (ft.channel_count || 1);
+  } else if (ft) { chCount = ft.channel_count || 1; }
+
+  const startAddr = +document.getElementById('fAddress').value || 1;
+  const universe = +document.getElementById('fUniverse').value || 1;
+  const lines = [];
+  for (let i = 0; i < qty; i++) {
+    const addr = startAddr + (i * chCount);
+    const end = addr + chCount - 1;
+    const ok = end <= 512;
+    lines.push(`<div style="display:flex;justify-content:space-between;padding:1px 0${!ok ? ';color:var(--danger)' : ''}">`
+      + `<span>${esc(baseName)} ${i + 1}</span>`
+      + `<span>U${universe} · Ch ${addr}–${end}${!ok ? ' ⚠ overflow' : ''}</span></div>`);
+  }
+  preview.innerHTML = `<div style="font-weight:600;margin-bottom:4px;color:var(--text)">Batch Preview (${qty} fixtures, ${chCount}ch each):</div>` + lines.join('');
+  preview.style.display = '';
+}
+document.getElementById('fQuantity').addEventListener('input', () => { _updateBatchPreview(); });
+document.getElementById('fName').addEventListener('input', _updateBatchPreview);
+document.getElementById('fAddress').addEventListener('input', _updateBatchPreview);
+
 document.getElementById('btnSaveFixture').addEventListener('click', async () => {
   const editId = document.getElementById('fixtureEditId').value;
   const modeIdVal = document.getElementById('fModeId').value;
+  const qty = editId ? 1 : Math.max(1, +document.getElementById('fQuantity').value || 1);
   const body = {
     name: document.getElementById('fName').value.trim(),
     fixture_type_id: +document.getElementById('fTypeId').value,
@@ -5443,13 +5704,29 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
     home_tilt: +document.getElementById('fHomeTilt').value,
   };
   if (!body.name) return showError('fixtureError', 'Name is required');
+  if (!body.fixture_type_id) return showError('fixtureError', 'Please select a fixture type');
 
-  const url = editId ? `/api/fixtures/${editId}` : '/api/fixtures';
-  const method = editId ? 'PUT' : 'POST';
-  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (data.error) return showError('fixtureError', data.error);
+  if (editId) {
+    // Single edit
+    const res = await fetch(`/api/fixtures/${editId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.error) return showError('fixtureError', data.error);
+  } else if (qty > 1) {
+    // Batch create
+    const res = await fetch('/api/fixtures/batch', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ ...body, quantity: qty })
+    });
+    const data = await res.json();
+    if (data.error) return showError('fixtureError', data.error);
+  } else {
+    // Single create
+    const res = await fetch('/api/fixtures', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.error) return showError('fixtureError', data.error);
+  }
   closeModal('fixtureModal');
+  _invalidateFixturePickerCache();
   loadFixtures();
   loadUniverseMap();
 });
@@ -6306,15 +6583,7 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
 //  Rig Layout (2D positioning canvas) + Rigging Elements
 // ═══════════════════════════════════════════════════════════════
 
-// Collapsible rig section
-document.getElementById('rigSectionToggle').addEventListener('click', () => {
-  const section = document.getElementById('rigSection');
-  section.classList.toggle('collapsed');
-  localStorage.setItem('dmx_rig_collapsed', section.classList.contains('collapsed') ? '1' : '0');
-});
-if (localStorage.getItem('dmx_rig_collapsed') === '1') {
-  document.getElementById('rigSection').classList.add('collapsed');
-}
+// Rig section (no longer collapsible — now a sub-tab)
 
 // Node colour palette (same as universe map)
 const RIG_NODE_COLORS = [
@@ -7025,18 +7294,6 @@ loadFixtures = async function() {
 //  Integrated Universe Map (drag & drop)
 // ═══════════════════════════════════════════════════════════════
 document.getElementById('universeSelect').addEventListener('change', loadUniverseMap);
-
-// Collapsible universe section
-document.getElementById('universeSectionToggle').addEventListener('click', () => {
-  const section = document.querySelector('.universe-section');
-  section.classList.toggle('collapsed');
-  // Remember state
-  localStorage.setItem('dmx_universe_collapsed', section.classList.contains('collapsed') ? '1' : '0');
-});
-// Restore collapse state
-if (localStorage.getItem('dmx_universe_collapsed') === '1') {
-  document.querySelector('.universe-section').classList.add('collapsed');
-}
 
 // Fixture colour palette for universe map (cycles)
 const UNIV_FIX_COLORS = 8;
@@ -10090,12 +10347,16 @@ function buildQaGrid(gridId, items) {
 // ─── Effects Library Grid for Quick Actions ───────────────────────────
 const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
 const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
+const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow']);
+const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu']);
 function getEffectSlot(type) {
   if (MOTION_TYPES.has(type)) return 'motion';
   if (MULTICELL_TYPES.has(type)) return 'multicell';
+  if (RIG_TYPES.has(type)) return 'rig';
+  if (SOUND_TYPES.has(type)) return 'sound';
   return 'color';
 }
-const qaActiveEffects = {}; // { color: effectId, motion: effectId, multicell: effectId }
+const qaActiveEffects = {}; // { color: effectId, motion: effectId, multicell: effectId, rig: effectId, sound: effectId }
 
 const EFFECT_STYLE = {
   pulse:      { bg: '#7c4dff', fg: '#fff', border: '#b388ff', icon: '💜' },
@@ -10122,6 +10383,20 @@ const EFFECT_STYLE = {
   ripple:       { bg: 'linear-gradient(135deg,#0097a7,#80deea)', fg: '#fff', border: '#0097a7', icon: '◎' },
   cell_strobe:  { bg: 'linear-gradient(135deg,#f9a825,#fff176)', fg: '#000', border: '#f9a825', icon: '⚡' },
   gradient:     { bg: 'linear-gradient(135deg,#d81b60,#7b1fa2,#1565c0)', fg: '#fff', border: '#d81b60', icon: '🌅' },
+  // Rig-wide effects
+  rig_chase:      { bg: 'linear-gradient(135deg,#ff6d00,#ff3d00)', fg: '#fff', border: '#ff6d00', icon: '🏃' },
+  rig_color_wave: { bg: 'linear-gradient(135deg,#00bfa5,#1de9b6)', fg: '#fff', border: '#00bfa5', icon: '🌊' },
+  rig_sweep:      { bg: 'linear-gradient(135deg,#304ffe,#448aff)', fg: '#fff', border: '#304ffe', icon: '➡️' },
+  rig_alternate:  { bg: 'linear-gradient(135deg,#aa00ff,#ea80fc)', fg: '#fff', border: '#aa00ff', icon: '🔄' },
+  rig_converge:   { bg: 'linear-gradient(135deg,#c51162,#ff80ab)', fg: '#fff', border: '#c51162', icon: '🔀' },
+  rig_rainbow:    { bg: 'linear-gradient(135deg,#f44,#ff0,#0f0,#0ff,#00f,#f0f)', fg: '#fff', border: '#fff', icon: '🌈' },
+  // Sound-reactive effects
+  sound_pulse:    { bg: 'linear-gradient(135deg,#00c853,#b2ff59)', fg: '#000', border: '#00c853', icon: '🔊' },
+  sound_strobe:   { bg: 'linear-gradient(135deg,#ffd600,#ffff00)', fg: '#000', border: '#ffd600', icon: '⚡' },
+  sound_chase:    { bg: 'linear-gradient(135deg,#ff6d00,#00e676)', fg: '#fff', border: '#ff6d00', icon: '🏃' },
+  sound_wave:     { bg: 'linear-gradient(135deg,#2979ff,#00e5ff)', fg: '#fff', border: '#2979ff', icon: '🌊' },
+  sound_flash:    { bg: 'linear-gradient(135deg,#d50000,#ff1744)', fg: '#fff', border: '#d50000', icon: '💥' },
+  sound_vu:       { bg: 'linear-gradient(135deg,#00c853,#ffd600,#d50000)', fg: '#fff', border: '#00c853', icon: '📊' },
 };
 
 async function buildEffectsLibraryGrid() {
@@ -10141,7 +10416,7 @@ async function buildEffectsLibraryGrid() {
   }
 
   // Clear all tab grids
-  const tabIds = { color: 'efxTabColor', motion: 'efxTabMotion', multicell: 'efxTabMulticell', all: 'efxTabAll' };
+  const tabIds = { color: 'efxTabColor', rig: 'efxTabRig', motion: 'efxTabMotion', multicell: 'efxTabMulticell', sound: 'efxTabSound', all: 'efxTabAll' };
   for (const id of Object.values(tabIds)) document.getElementById(id).innerHTML = '';
 
   let effects = [];
@@ -10179,6 +10454,8 @@ async function buildEffectsLibraryGrid() {
     if (t === 'color') tabs.push('color');
     else if (t === 'moving_head') tabs.push('motion');
     else if (t === 'multicell') tabs.push('multicell');
+    else if (t === 'rig') tabs.push('rig');
+    else if (t === 'sound') tabs.push('sound');
     return tabs;
   }
 
@@ -10246,7 +10523,7 @@ async function buildEffectsLibraryGrid() {
   }
 
   // Add a "Stop" button to each tab
-  const tabSlotMap = { efxTabColor: 'color', efxTabMotion: 'motion', efxTabMulticell: 'multicell', efxTabAll: null };
+  const tabSlotMap = { efxTabColor: 'color', efxTabRig: 'rig', efxTabMotion: 'motion', efxTabMulticell: 'multicell', efxTabSound: 'sound', efxTabAll: null };
   for (const [id, slot] of Object.entries(tabSlotMap)) {
     const grid = document.getElementById(id);
     if (!grid || grid.querySelectorAll('.qa-effect-lib-btn').length === 0) {
@@ -11245,7 +11522,7 @@ function showError(id, msg) { document.getElementById(id).textContent = msg; }
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 document.querySelectorAll('.modal-overlay').forEach(o => {
-  o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('open'); });
+  o.addEventListener('click', (e) => { if (e.target === o && o.id !== 'fixtureModal') o.classList.remove('open'); });
 });
 
 // ═══════════════════════════════════════════════════════════════

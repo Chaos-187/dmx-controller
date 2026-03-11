@@ -10,6 +10,7 @@
  */
 
 const { getFixtureGroup, pickCoordMode, getPresetOffset, getTimingOffset } = require('./group-coordination');
+const { walkBeats } = require('./helpers');
 
 const MOVEMENT_STYLES = {
   intro:     { barsPerMove: 4,   range: 0.4, speed: 'slow' },
@@ -100,13 +101,14 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
 
         const chunkBars = Math.max(1, Math.round(style.barsPerMove * 2 * slowFactor));
         const chunkMs = chunkBars * barMs;
+        const chunkBeats = chunkBars * 4;
         const numChunks = Math.max(1, Math.floor(secDurMs / chunkMs));
         const baseDensity = MOVE_DENSITY[sec.label] || 0.5;
 
         for (let ci = 0; ci < numChunks; ci++) {
-          const chunkStart = secStartMs + ci * chunkMs;
+          const chunkStart = ci === 0 ? secStartMs : walkBeats(secStartMs, ci * chunkBeats, ctx.beats, beatMs);
           const chunkEnd = ci < numChunks - 1
-            ? chunkStart + chunkMs
+            ? walkBeats(secStartMs, (ci + 1) * chunkBeats, ctx.beats, beatMs)
             : secEndMs;
           const chunkDur = chunkEnd - chunkStart;
           if (chunkDur <= 0) continue;

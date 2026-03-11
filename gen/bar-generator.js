@@ -5,7 +5,7 @@
  * at regular bar intervals across the full track duration.
  */
 
-const { applyIntensity, CUE_COLORS, getFixtureIntensity } = require('./helpers');
+const { applyIntensity, CUE_COLORS, getFixtureIntensity, walkBeats } = require('./helpers');
 const { getSectionPalettes } = require('./palettes');
 
 function generateBarBased(cues, fixtures, ctx) {
@@ -29,8 +29,8 @@ function generateBarBased(cues, fixtures, ctx) {
     for (let bar = 0; bar < totalBars; bar += sectionBars) {
       const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
       const palette = allPalettes[(paletteIdx + fiIdx) % allPalettes.length];
-      const startMs = snapBar(bar * barMs);
-      const endMs = snapBar((bar + sectionBars) * barMs);
+      const startMs = snapBar(walkBeats(0, bar * 4, beats, beatMs));
+      const endMs = snapBar(walkBeats(0, (bar + sectionBars) * 4, beats, beatMs));
       const durMs = Math.min(endMs - startMs, durationMs - startMs);
       if (durMs <= 0) break;
 
