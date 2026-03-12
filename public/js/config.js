@@ -45,7 +45,7 @@ const CHANNEL_TYPES = [
   'dimmer','red','green','blue','white','amber','uv',
   'pan','pan_fine','tilt','tilt_fine',
   'speed','strobe','gobo','gobo_rotation','color_wheel',
-  'prism','focus','zoom','frost','macro','other'
+  'prism','focus','zoom','frost','smoke','macro','other'
 ];
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',

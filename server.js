@@ -513,6 +513,7 @@ function handleOs2lSubscribed(data) {
                 touchOverrides.os2lOverrideFixtures.clear();
                 touchOverrides.colorOverrideFixtures.clear();
                 touchOverrides.movementOverrideFixtures.clear();
+                touchOverrides.smokeOverrideFixtures.clear();
                 deactivateScene(); // Stop any scene effect loop from end-action
                 stopPlaybackTimer(deck);
                 blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
@@ -547,6 +548,7 @@ function handleOs2lSubscribed(data) {
           touchOverrides.os2lOverrideFixtures.clear();
           touchOverrides.colorOverrideFixtures.clear();
           touchOverrides.movementOverrideFixtures.clear();
+          touchOverrides.smokeOverrideFixtures.clear();
           deactivateScene(); // Stop any scene effect loop from end-action
           stopPlaybackTimer(deck);
           blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
@@ -1833,6 +1835,7 @@ const touchOverrides = {
   os2lOverrideFixtures: new Set(), // fixture IDs currently controlled by an OS2L button action
   colorOverrideFixtures: new Set(),    // fixture IDs with color overridden from touch UI
   movementOverrideFixtures: new Set(), // fixture IDs with movement overridden from touch UI
+  smokeOverrideFixtures: new Set(),    // fixture IDs with smoke overridden from touch UI
 };
 
 app.get('/api/dmx/output', (req, res) => {
@@ -1967,6 +1970,17 @@ app.post('/api/touch/movement-override', (req, res) => {
     else touchOverrides.movementOverrideFixtures.delete(id);
   }
   console.log(`[TOUCH] Movement override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.movementOverrideFixtures.size})`);
+  res.json({ ok: true });
+});
+
+app.post('/api/touch/smoke-override', (req, res) => {
+  const { fixtureIds, active } = req.body;
+  if (!Array.isArray(fixtureIds)) return res.status(400).json({ error: 'fixtureIds required' });
+  for (const id of fixtureIds) {
+    if (active) touchOverrides.smokeOverrideFixtures.add(id);
+    else touchOverrides.smokeOverrideFixtures.delete(id);
+  }
+  console.log(`[TOUCH] Smoke override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.smokeOverrideFixtures.size})`);
   res.json({ ok: true });
 });
 
@@ -3763,6 +3777,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
     // Check if this fixture has touch color/movement overrides active
     const hasColorOverride = touchOverrides.colorOverrideFixtures.has(fixtureId);
     const hasMovementOverride = touchOverrides.movementOverrideFixtures.has(fixtureId);
+    const hasSmokeOverride = touchOverrides.smokeOverrideFixtures.has(fixtureId);
 
     // Find the fixture in pre-fetched channel map (cached per tick)
     const fixMap = getFixtureChannelMapByIdCached(fixtureId);
@@ -3780,6 +3795,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
       // Skip channels that are overridden by touch UI
       if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
       if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
+      if (hasSmokeOverride && ch.type === 'smoke') continue;
 
       let value = null;
       let skipRangeMap = false; // true when value is already mapped to a specific range
@@ -3965,10 +3981,12 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
       const hasColorOverride = touchOverrides.colorOverrideFixtures.has(fid);
       const hasMovementOverride = touchOverrides.movementOverrideFixtures.has(fid);
+      const hasSmokeOverride = touchOverrides.smokeOverrideFixtures.has(fid);
 
       for (const ch of fixMap.channels) {
         if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
         if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
+        if (hasSmokeOverride && ch.type === 'smoke') continue;
 
         const channelCtx = buildChannelCtx(ch, fixMap);
         channelCtx._rigFixtureCount = fixtureCount;

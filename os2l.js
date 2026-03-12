@@ -589,6 +589,32 @@ function executeMapAction(map, activate) {
       break;
     }
 
+    case 'smoke':
+    case 'haze': {
+      const channelMap = db.getFixtureChannelMap();
+      const channelUpdates = {};
+      const smokeFixtureIds = [];
+      for (const fix of channelMap) {
+        const u = fix.universe;
+        if (!channelUpdates[u]) channelUpdates[u] = [];
+        for (const ch of fix.channels) {
+          if (ch.type === 'smoke') {
+            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? 255 : 0 });
+            if (!smokeFixtureIds.includes(fix.id)) smokeFixtureIds.push(fix.id);
+          }
+        }
+      }
+      if (dmxOutputEnabled) {
+        for (const [u, channels] of Object.entries(channelUpdates)) {
+          artnetServer.setChannels(+u, channels);
+          dmxUsbServer.setChannels(+u, channels);
+        }
+      }
+      setOs2lOverride(smokeFixtureIds, activate);
+      broadcast({ type: 'os2l_action', action: map.action_type, map: map.name, active: activate });
+      break;
+    }
+
     default:
       console.warn(`[OS2L] Unknown action type: ${map.action_type}`);
   }

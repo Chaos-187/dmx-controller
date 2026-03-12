@@ -1453,10 +1453,12 @@ function strobeOff() {
 function setSmokeHaze(type, on) {
   if (type === 'smoke') { smokeActive = on; document.getElementById('btnSmoke').classList.toggle('active', on); }
   if (type === 'haze') { hazeActive = on; document.getElementById('btnHaze').classList.toggle('active', on); }
-  const updates = buildChannelUpdates(getEnabledFixtures(),
-    ch => ch.type === type || ch.type === 'fog' || ch.type === 'smoke' || ch.type === 'haze',
+  const targets = getEnabledFixtures().filter(f => f.channels.some(ch => ch.type === 'smoke'));
+  const updates = buildChannelUpdates(targets,
+    ch => ch.type === 'smoke',
     () => on ? 255 : 0);
   sendDMX(updates);
+  notifyOverride('smoke', targets.map(f => f.id), on);
 }
 
 /* ─── Master Dimmer ────────────────────────────────────────── */

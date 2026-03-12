@@ -29,8 +29,8 @@ const OFL_TYPE_MAP = {
   'Focus':            'focus',
   'Zoom':             'zoom',
   'Frost':            'frost',
-  'Fog':              'dimmer',
-  'FogOutput':        'dimmer',
+  'Fog':              'smoke',
+  'FogOutput':        'smoke',
   'FogType':          'macro',
   'BeamAngle':        'zoom',
   'BeamPosition':     'other',
@@ -178,6 +178,7 @@ function guessTypeFromName(name) {
   if (/\bzoom\b/.test(n)) return 'zoom';
   if (/\bfrost\b/.test(n)) return 'frost';
   if (/\bspeed\b/.test(n)) return 'speed';
+  if (/\bsmoke\b/.test(n) || /\bfog\b/.test(n) || /\bhaze\b/.test(n)) return 'smoke';
   if (/\bmacro\b/.test(n) || /\bauto\b/.test(n) || /\beffect\b/.test(n)) return 'macro';
   return 'other';
 }
