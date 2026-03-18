@@ -633,6 +633,14 @@ function init() {
     console.log('[DB] Migrated light_sequences: added beat_offset_ms column');
   }
 
+  // Migrate: add exclude_from_sequence column to fixtures if missing
+  try {
+    db.prepare('SELECT exclude_from_sequence FROM fixtures LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN exclude_from_sequence INTEGER NOT NULL DEFAULT 0");
+    console.log('[DB] Migrated fixtures: added exclude_from_sequence column');
+  }
+
   // Migrate: fixture_type_modes — create default modes for existing fixture types
   // and link channels and fixtures to their modes
   migrateToModes();
@@ -1735,7 +1743,7 @@ function getFixture(id) {
   return f;
 }
 
-function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order }) {
+function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence }) {
   // Validate type exists
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
   if (!type) return { error: 'Fixture type not found' };
@@ -1767,14 +1775,14 @@ function createFixture({ name, fixture_type_id, mode_id, universe, address, outp
     resolvedRigOrder = maxOrder;
   }
   const r = db.prepare(
-    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, rig_x ?? 0.5, rig_y ?? 0.5, resolvedRigOrder);
+    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, rig_x ?? 0.5, rig_y ?? 0.5, resolvedRigOrder, exclude_from_sequence ? 1 : 0);
 
   return getFixture(r.lastInsertRowid);
 }
 
 function createFixtureBatch(baseFixture, quantity) {
-  const { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt } = baseFixture;
+  const { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, exclude_from_sequence } = baseFixture;
 
   // Validate type
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
@@ -1812,8 +1820,8 @@ function createFixtureBatch(baseFixture, quantity) {
       const fixName = `${baseName} ${i + 1}`;
 
       const r = db.prepare(
-        `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(fixName, fixture_type_id, resolvedModeId, univ, addr, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, 0.5, 0.5, rigOrder);
+        `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(fixName, fixture_type_id, resolvedModeId, univ, addr, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, 0.5, 0.5, rigOrder, exclude_from_sequence ? 1 : 0);
 
       created.push(r.lastInsertRowid);
     }
@@ -1828,7 +1836,7 @@ function createFixtureBatch(baseFixture, quantity) {
   return { created: created.length, fixtures: created.map(id => getFixture(id)) };
 }
 
-function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order }) {
+function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -1859,8 +1867,8 @@ function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, 
   if (overlap) return { error: overlap };
 
   db.prepare(
-    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_order=?, updated_at=datetime('now') WHERE id=?`
-  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_order ?? existing.rig_order ?? 0, id);
+    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_order=?, exclude_from_sequence=?, updated_at=datetime('now') WHERE id=?`
+  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_order ?? existing.rig_order ?? 0, exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0), id);
 
   return getFixture(id);
 }
@@ -2311,7 +2319,7 @@ function getFixtureChannelMap() {
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
            f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
-           f.rig_x, f.rig_y, f.rig_order,
+           f.rig_x, f.rig_y, f.rig_order, f.exclude_from_sequence,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
            ft.name as type_name, ft.category,
            ftm.name as mode_name

@@ -3785,6 +3785,11 @@
       <label>Notes</label>
       <textarea id="fNotes" rows="2" placeholder="Optional notes..."></textarea>
     </div>
+    <div class="form-row">
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="fExcludeFromSequence"> Exclude from sequences
+      </label>
+    </div>
     <div class="form-row" id="fInvertRow" style="display:none">
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" id="fInvertPan"> Invert Pan
@@ -5311,8 +5316,10 @@ function renderFixtureCards(fixtures) {
 
     const addrEnd = f.address + f.channel_count - 1;
 
+    const excludeBadge = f.exclude_from_sequence ? ' <span class="fixture-meta-badge" style="background:var(--danger);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px" title="Excluded from sequences">NO SEQ</span>' : '';
+
     tr.innerHTML = `
-      <td class="ft-name" title="${esc(f.name)}">${esc(f.name)}</td>
+      <td class="ft-name" title="${esc(f.name)}">${esc(f.name)}${excludeBadge}</td>
       <td class="ft-type" title="${esc(f.type_name)}">${esc(f.type_name)}${f.mode_name ? ' <span style="color:var(--text-dim);font-size:10px">[' + esc(f.mode_name) + ']</span>' : ''}</td>
       <td>${f.universe}</td>
       <td class="ft-addr">${f.address}–${addrEnd}</td>
@@ -5571,6 +5578,7 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fNotes').value = f.notes || '';
     document.getElementById('fInvertPan').checked = !!f.invert_pan;
     document.getElementById('fInvertTilt').checked = !!f.invert_tilt;
+    document.getElementById('fExcludeFromSequence').checked = !!f.exclude_from_sequence;
     document.getElementById('fHomePan').value = f.home_pan ?? 128;
     document.getElementById('fHomePanVal').textContent = f.home_pan ?? 128;
     document.getElementById('fHomeTilt').value = f.home_tilt ?? 128;
@@ -5592,6 +5600,7 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fNotes').value = '';
     document.getElementById('fInvertPan').checked = false;
     document.getElementById('fInvertTilt').checked = false;
+    document.getElementById('fExcludeFromSequence').checked = false;
     document.getElementById('fHomePan').value = 128;
     document.getElementById('fHomePanVal').textContent = '128';
     document.getElementById('fHomeTilt').value = 128;
@@ -5702,6 +5711,7 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
     invert_tilt: document.getElementById('fInvertTilt').checked,
     home_pan: +document.getElementById('fHomePan').value,
     home_tilt: +document.getElementById('fHomeTilt').value,
+    exclude_from_sequence: document.getElementById('fExcludeFromSequence').checked,
   };
   if (!body.name) return showError('fixtureError', 'Name is required');
   if (!body.fixture_type_id) return showError('fixtureError', 'Please select a fixture type');

@@ -131,8 +131,11 @@ function generateSequence(opts) {
     try { stemEnergy = analysis.stem_energy ? JSON.parse(analysis.stem_energy) : null; } catch (e) { stemEnergy = null; }
   }
 
+  // Exclude fixtures marked as "exclude from sequence"
+  const activeFixtures = fixtures.filter(fix => !fix.exclude_from_sequence);
+
   // Filter to RGB fixtures
-  const rgbFixtures = fixtures.filter(fix =>
+  const rgbFixtures = activeFixtures.filter(fix =>
     fix.channels.some(ch => ch.type === 'red') &&
     fix.channels.some(ch => ch.type === 'green') &&
     fix.channels.some(ch => ch.type === 'blue')
@@ -140,7 +143,7 @@ function generateSequence(opts) {
 
   // Color-wheel-only fixtures
   const rgbIds = new Set(rgbFixtures.map(f => f.id));
-  const colorWheelFixtures = fixtures.filter(fix =>
+  const colorWheelFixtures = activeFixtures.filter(fix =>
     !rgbIds.has(fix.id) &&
     fix.channels.some(ch => ch.type === 'color_wheel') &&
     fix.color_wheel_map && fix.color_wheel_map.length > 0
@@ -151,7 +154,7 @@ function generateSequence(opts) {
   }
 
   // Classify fixtures: movers (pan+tilt), LED bars (many cells), regular pars
-  const allMovers = fixtures.filter(fix =>
+  const allMovers = activeFixtures.filter(fix =>
     fix.channels.some(ch => ch.type === 'pan') &&
     fix.channels.some(ch => ch.type === 'tilt')
   );
@@ -192,7 +195,7 @@ function generateSequence(opts) {
   const snapBar  = (t) => snapToBar(t, beats, downbeatPhase);
 
   // ── Build fixture-group map for coordinated generation ──────────────
-  const groupMap = buildGroupMap(fixtures);
+  const groupMap = buildGroupMap(activeFixtures);
 
   const ctx = {
     bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
