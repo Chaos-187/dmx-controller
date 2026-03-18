@@ -178,7 +178,7 @@ input[type=range]::-moz-range-thumb{
   box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.1);
 }
 /* Small variant for inline lists */
-.slider-sm{flex:0 0 100px !important;height:32px !important}
+.slider-sm{flex:1 1 0% !important;min-width:100px;height:32px !important}
 .slider-sm::-webkit-slider-runnable-track{height:22px;border-radius:11px}
 .slider-sm::-webkit-slider-thumb{width:22px;height:22px}
 .slider-sm::-moz-range-track{height:22px;border-radius:11px}
@@ -348,14 +348,77 @@ input[type=range]::-moz-range-thumb{
 .fx-btn.strobe-on{animation:strobe-flash .1s infinite alternate}
 @keyframes strobe-flash{from{opacity:1}to{opacity:.3}}
 
-/* Preset list */
-.preset-pill{
-  height:44px;padding:0 20px;border-radius:22px;border:1.5px solid var(--border);
-  background:var(--surface);font-size:14px;font-weight:600;color:var(--text);
-  cursor:pointer;-webkit-tap-highlight-color:transparent;display:inline-flex;
-  align-items:center;transition:all .12s;
+/* Mover preset grid */
+.mover-preset-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
 }
-.preset-pill:active{transform:scale(.92);background:rgba(255,255,255,.15)}
+.mover-preset-btn{
+  border-radius:12px;border:none;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden;
+  -webkit-tap-highlight-color:transparent;transition:transform .08s,opacity .12s;
+  padding:10px 4px;min-height:52px;
+  background:var(--surface);color:var(--text);font-size:11px;
+}
+.mover-preset-btn:active{transform:scale(.92);background:rgba(255,255,255,.15)}
+.mover-preset-btn .mp-icon{font-size:18px;line-height:1}
+.mover-preset-btn .mp-label{font-size:11px;line-height:1.2;text-align:center;word-break:break-word}
+
+/* Mover manual XY layout */
+.mover-manual{
+  display:flex;gap:8px;align-items:stretch;
+}
+.mover-tilt-col{
+  display:flex;flex-direction:column;align-items:center;gap:4px;width:72px;flex-shrink:0;
+}
+.mover-tilt-col .slider-label{min-width:0;text-align:center}
+.mover-tilt-col input[type=range]{
+  writing-mode:vertical-lr;direction:rtl;
+  -webkit-appearance:none;appearance:none;
+  width:44px;height:100%;min-height:260px;flex:1;
+  touch-action:none;cursor:pointer;background:transparent;
+}
+.mover-tilt-col input[type=range]::-webkit-slider-runnable-track{
+  width:36px;border-radius:18px;background:rgba(255,255,255,.08);
+}
+.mover-tilt-col input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:34px;height:34px;border-radius:50%;
+  background:#fff;border:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.1);
+}
+.mover-tilt-col input[type=range]::-moz-range-track{
+  width:36px;border-radius:18px;border:none;background:rgba(255,255,255,.08);
+}
+.mover-tilt-col input[type=range]::-moz-range-thumb{
+  width:34px;height:34px;border-radius:50%;
+  background:#fff;border:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.1);
+}
+.mover-pan-area{
+  flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;min-width:0;
+}
+.mover-pan-area .slider-wrap{padding:0}
+.mover-pan-area input[type=range]{height:44px}
+.mover-pan-area input[type=range]::-webkit-slider-runnable-track{height:36px;border-radius:18px}
+.mover-pan-area input[type=range]::-webkit-slider-thumb{width:34px;height:34px;border-radius:50%}
+.mover-pan-area input[type=range]::-moz-range-track{height:36px;border-radius:18px}
+.mover-pan-area input[type=range]::-moz-range-thumb{width:34px;height:34px;border-radius:50%}
+
+/* Mover fixture selector grid */
+.mover-select-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
+}
+.mover-select-btn{
+  border-radius:12px;border:none;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden;
+  -webkit-tap-highlight-color:transparent;transition:transform .08s,opacity .12s;
+  padding:10px 4px;min-height:52px;
+  background:var(--surface);color:var(--dim);font-size:11px;
+}
+.mover-select-btn:active{transform:scale(.92)}
+.mover-select-btn.selected{background:rgba(10,132,255,.3);color:#fff;box-shadow:inset 0 0 0 2px var(--blue)}
 
 /* Clear btn (inline) */
 .clear-btn-sm{
@@ -566,14 +629,26 @@ input[type=range]::-moz-range-thumb{
   <div class="page" id="page-movers">
     <div class="page-title">Movers</div>
 
+    <div class="section-label">Target Fixtures</div>
+    <div class="mover-select-grid" id="moverFixtureSelector"></div>
+    <div style="margin-top:4px;display:flex;gap:4px"><button class="clear-btn-sm" onclick="selectAllMovers()">All</button> <button class="clear-btn-sm" onclick="clearMoverSelection()">None</button></div>
+
     <div class="section-label">Presets</div>
-    <div class="chip-row" id="moverPresetGrid"></div>
-    <div style="margin-top:6px"><button class="clear-btn-sm" onclick="clearMovementOverride()">Clear Override</button></div>
+    <div class="mover-preset-grid" id="moverPresetGrid"></div>
+    <div style="margin-top:4px"><button class="clear-btn-sm" onclick="clearMovementOverride()">Clear Override</button></div>
 
     <div class="section-label">Manual</div>
-    <div class="slider-wrap"><span class="slider-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="slider-val" id="panVal">128</span></div>
-    <div class="slider-wrap"><span class="slider-label">Tilt</span><input type="range" id="manualTilt" min="0" max="255" value="128"><span class="slider-val" id="tiltVal">128</span></div>
-    <div class="slider-wrap"><span class="slider-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="slider-val" id="speedVal">128</span></div>
+    <div class="mover-manual">
+      <div class="mover-tilt-col">
+        <span class="slider-label">Tilt</span>
+        <input type="range" id="manualTilt" min="0" max="255" value="128">
+        <span class="slider-val" id="tiltVal">128</span>
+      </div>
+      <div class="mover-pan-area">
+        <div class="slider-wrap"><span class="slider-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="slider-val" id="panVal">128</span></div>
+        <div class="slider-wrap"><span class="slider-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="slider-val" id="speedVal">128</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- ─── SCENES ──────────────────────────────────── -->
@@ -729,6 +804,7 @@ document.getElementById('pinPad').addEventListener('click', (e) => {
 /* ─── State ────────────────────────────────────────────────── */
 let fixtures = [], groups = [], moverPresets = [], scenes = [], touchActions = [], effects = [];
 let selectedColor = null, colorIntensity = 255, selectedGroups = new Set();
+let selectedMovers = new Set(); // empty = all movers
 let outputEnabled = false, blackoutActive = false;
 let strobeActive = false, smokeActive = false, hazeActive = false;
 let fixtureEnabled = {}, fixtureDimmer = {}, groupDimmer = {};
@@ -1011,6 +1087,7 @@ function renderAll() {
   renderGroupDimmers();
   renderFixtureList();
   renderMoverPresets();
+  renderMoverFixtureSelector();
   renderScenes();
   renderOutputBtn();
   renderBlackoutBtn();
@@ -1271,16 +1348,70 @@ function toggleEffect(effectId, effectType) {
   renderEffectsGrid();
 }
 
+/* ─── Mover Fixture Selector ───────────────────────────────── */
+function getMoverFixtures() {
+  return fixtures.filter(f =>
+    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt'));
+}
+
+function renderMoverFixtureSelector() {
+  const container = document.getElementById('moverFixtureSelector');
+  const movers = getMoverFixtures();
+  if (!movers.length) { container.innerHTML = '<div style="color:var(--dim);font-size:13px;grid-column:1/-1">No movers found</div>'; return; }
+  container.innerHTML = movers.map(f => {
+    const sel = selectedMovers.has(f.id) || selectedMovers.size === 0 ? ' selected' : '';
+    return '<button class="mover-select-btn' + sel + '" data-fid="' + f.id + '">'
+      + '<span class="mp-icon">&#10146;</span>'
+      + '<span class="mp-label">' + esc(f.name) + '</span></button>';
+  }).join('');
+  container.querySelectorAll('.mover-select-btn').forEach(el => {
+    el.addEventListener('click', () => toggleMoverSelection(+el.dataset.fid));
+  });
+}
+
+function toggleMoverSelection(fid) {
+  const prevSelected = getSelectedMovers();
+  selectedMovers.delete(-1); // clear sentinel if present
+  if (selectedMovers.has(fid)) selectedMovers.delete(fid);
+  else selectedMovers.add(fid);
+  const newSelected = getSelectedMovers();
+  const newIds = new Set(newSelected.map(f => f.id));
+  const deselected = prevSelected.filter(f => !newIds.has(f.id));
+  if (deselected.length) notifyOverride('movement', deselected.map(f => f.id), false);
+  renderMoverFixtureSelector();
+}
+
+function selectAllMovers() {
+  selectedMovers.clear(); // empty set = all movers
+  renderMoverFixtureSelector();
+}
+
+function clearMoverSelection() {
+  const prevSelected = getSelectedMovers();
+  selectedMovers.clear();
+  selectedMovers.add(-1); // sentinel: no real fixture matches
+  if (prevSelected.length) notifyOverride('movement', prevSelected.map(f => f.id), false);
+  renderMoverFixtureSelector();
+}
+
+function getSelectedMovers() {
+  const movers = getMoverFixtures().filter(f => fixtureEnabled[f.id] !== false);
+  if (selectedMovers.size === 0) return movers;
+  return movers.filter(f => selectedMovers.has(f.id));
+}
+
 /* ─── Mover Presets ────────────────────────────────────────── */
 function renderMoverPresets() {
   // Movers tab grid
   const g = document.getElementById('moverPresetGrid');
-  if (!moverPresets.length) { g.innerHTML = '<div style="color:var(--dim);font-size:13px">No presets</div>'; }
+  if (!moverPresets.length) { g.innerHTML = '<div style="color:var(--dim);font-size:13px;grid-column:1/-1">No presets</div>'; }
   else {
     g.innerHTML = moverPresets.map((p, i) =>
-      '<div class="preset-pill" data-idx="' + i + '">' + esc(p.name) + '</div>'
+      '<button class="mover-preset-btn" data-idx="' + i + '">'
+      + (p.icon ? '<span class="mp-icon">' + p.icon + '</span>' : '<span class="mp-icon">&#9673;</span>')
+      + '<span class="mp-label">' + esc(p.name) + '</span></button>'
     ).join('');
-    g.querySelectorAll('.preset-pill').forEach(el => {
+    g.querySelectorAll('.mover-preset-btn').forEach(el => {
       el.addEventListener('click', () => sendMoverPreset(moverPresets[+el.dataset.idx]));
     });
   }
@@ -1516,11 +1647,14 @@ function blackoutFixture(fixId) {
 /* ─── Mover Presets & Manual Position ──────────────────────── */
 function sendMoverPreset(preset) {
   if (!preset.positions) return;
+  const selected = getSelectedMovers();
+  const selectedIds = new Set(selected.map(f => f.id));
   const byUniverse = {};
   const affectedIds = [];
   for (const pos of preset.positions) {
     const f = fixtures.find(fx => fx.id === pos.fixture_id);
     if (!f || fixtureEnabled[f.id] === false) continue;
+    if (!selectedIds.has(f.id)) continue;
     affectedIds.push(f.id);
     const u = f.universe || 1;
     if (!byUniverse[u]) byUniverse[u] = [];
@@ -1534,8 +1668,7 @@ function sendMoverPreset(preset) {
 }
 
 function clearMovementOverride() {
-  const movers = getEnabledFixtures().filter(f =>
-    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt'));
+  const movers = getSelectedMovers();
   notifyOverride('movement', movers.map(f => f.id), false);
 }
 
@@ -1543,8 +1676,7 @@ function sendManualPosition() {
   const pan = +document.getElementById('manualPan').value;
   const tilt = +document.getElementById('manualTilt').value;
   const speed = +document.getElementById('manualSpeed').value;
-  const movers = getEnabledFixtures().filter(f =>
-    f.channels.some(ch => ch.type === 'pan') && f.channels.some(ch => ch.type === 'tilt'));
+  const movers = getSelectedMovers();
   const updates = buildChannelUpdates(movers,
     ch => ch.type === 'pan' || ch.type === 'tilt' || ch.type === 'speed',
     ch => ch.type === 'pan' ? pan : ch.type === 'tilt' ? tilt : speed);
