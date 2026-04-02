@@ -517,6 +517,22 @@ function init() {
     console.log('[DB] Migrated fixtures: added rig_x, rig_y, rig_order columns');
   }
 
+  // Migrate: add rig_z (depth) column to fixtures if missing
+  try {
+    db.prepare("SELECT rig_z FROM fixtures LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN rig_z REAL DEFAULT 0.5");
+    console.log('[DB] Migrated fixtures: added rig_z column');
+  }
+
+  // Migrate: add z (depth) column to rig_elements if missing
+  try {
+    db.prepare("SELECT z FROM rig_elements LIMIT 1").get();
+  } catch (e) {
+    db.exec("ALTER TABLE rig_elements ADD COLUMN z REAL DEFAULT 0.5");
+    console.log('[DB] Migrated rig_elements: added z column');
+  }
+
   // Migrate: add is_system and icon columns to mover_presets if missing
   try {
     db.prepare("SELECT is_system FROM mover_presets LIMIT 1").get();
@@ -1743,7 +1759,7 @@ function getFixture(id) {
   return f;
 }
 
-function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence }) {
+function createFixture({ name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence }) {
   // Validate type exists
   const type = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(fixture_type_id);
   if (!type) return { error: 'Fixture type not found' };
@@ -1775,8 +1791,8 @@ function createFixture({ name, fixture_type_id, mode_id, universe, address, outp
     resolvedRigOrder = maxOrder;
   }
   const r = db.prepare(
-    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, rig_x ?? 0.5, rig_y ?? 0.5, resolvedRigOrder, exclude_from_sequence ? 1 : 0);
+    `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, rig_x ?? 0.5, rig_y ?? 0.5, rig_z ?? 0.5, resolvedRigOrder, exclude_from_sequence ? 1 : 0);
 
   return getFixture(r.lastInsertRowid);
 }
@@ -1820,8 +1836,8 @@ function createFixtureBatch(baseFixture, quantity) {
       const fixName = `${baseName} ${i + 1}`;
 
       const r = db.prepare(
-        `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(fixName, fixture_type_id, resolvedModeId, univ, addr, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, 0.5, 0.5, rigOrder, exclude_from_sequence ? 1 : 0);
+        `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(fixName, fixture_type_id, resolvedModeId, univ, addr, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, 0.5, 0.5, 0.5, rigOrder, exclude_from_sequence ? 1 : 0);
 
       created.push(r.lastInsertRowid);
     }
@@ -1836,7 +1852,7 @@ function createFixtureBatch(baseFixture, quantity) {
   return { created: created.length, fixtures: created.map(id => getFixture(id)) };
 }
 
-function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_order, exclude_from_sequence }) {
+function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -1867,8 +1883,8 @@ function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, 
   if (overlap) return { error: overlap };
 
   db.prepare(
-    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_order=?, exclude_from_sequence=?, updated_at=datetime('now') WHERE id=?`
-  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_order ?? existing.rig_order ?? 0, exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0), id);
+    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_z=?, rig_order=?, exclude_from_sequence=?, updated_at=datetime('now') WHERE id=?`
+  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_z ?? existing.rig_z ?? 0.5, rig_order ?? existing.rig_order ?? 0, exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0), id);
 
   return getFixture(id);
 }
@@ -1886,11 +1902,11 @@ function deleteFixture(id) {
  * @returns {{ updated: number }}
  */
 function updateFixtureRigPositions(positions) {
-  const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_z = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
   let updated = 0;
   const tx = db.transaction(() => {
     for (const p of positions) {
-      const result = stmt.run(p.rig_x ?? 0.5, p.rig_y ?? 0.5, p.rig_order ?? 0, p.id);
+      const result = stmt.run(p.rig_x ?? 0.5, p.rig_y ?? 0.5, p.rig_z ?? 0.5, p.rig_order ?? 0, p.id);
       if (result.changes > 0) updated++;
     }
   });
@@ -1904,22 +1920,22 @@ function getRigElements() {
   return db.prepare('SELECT * FROM rig_elements ORDER BY sort_order, id').all();
 }
 
-function createRigElement({ type, label, x, y, width, height, rotation }) {
+function createRigElement({ type, label, x, y, z, width, height, rotation }) {
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 as next FROM rig_elements').get().next;
   const result = db.prepare(
-    'INSERT INTO rig_elements (type, label, x, y, width, height, rotation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(type || 'truss_h', label || '', x ?? 0.5, y ?? 0.5, width ?? 0.4, height ?? 0.02, rotation ?? 0, maxOrder);
+    'INSERT INTO rig_elements (type, label, x, y, z, width, height, rotation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(type || 'truss_h', label || '', x ?? 0.5, y ?? 0.5, z ?? 0.5, width ?? 0.4, height ?? 0.02, rotation ?? 0, maxOrder);
   return { id: result.lastInsertRowid };
 }
 
-function updateRigElement(id, { type, label, x, y, width, height, rotation }) {
+function updateRigElement(id, { type, label, x, y, z, width, height, rotation }) {
   const existing = db.prepare('SELECT * FROM rig_elements WHERE id = ?').get(id);
   if (!existing) return null;
   db.prepare(
-    'UPDATE rig_elements SET type = ?, label = ?, x = ?, y = ?, width = ?, height = ?, rotation = ? WHERE id = ?'
+    'UPDATE rig_elements SET type = ?, label = ?, x = ?, y = ?, z = ?, width = ?, height = ?, rotation = ? WHERE id = ?'
   ).run(
     type ?? existing.type, label ?? existing.label,
-    x ?? existing.x, y ?? existing.y,
+    x ?? existing.x, y ?? existing.y, z ?? existing.z ?? 0.5,
     width ?? existing.width, height ?? existing.height,
     rotation ?? existing.rotation, id
   );
@@ -1932,11 +1948,11 @@ function deleteRigElement(id) {
 }
 
 function bulkUpdateRigElements(elements) {
-  const stmt = db.prepare('UPDATE rig_elements SET x = ?, y = ?, width = ?, height = ?, rotation = ?, sort_order = ? WHERE id = ?');
+  const stmt = db.prepare('UPDATE rig_elements SET x = ?, y = ?, z = ?, width = ?, height = ?, rotation = ?, sort_order = ? WHERE id = ?');
   let updated = 0;
   const tx = db.transaction(() => {
     for (const el of elements) {
-      const result = stmt.run(el.x ?? 0.5, el.y ?? 0.5, el.width ?? 0.4, el.height ?? 0.02, el.rotation ?? 0, el.sort_order ?? 0, el.id);
+      const result = stmt.run(el.x ?? 0.5, el.y ?? 0.5, el.z ?? 0.5, el.width ?? 0.4, el.height ?? 0.02, el.rotation ?? 0, el.sort_order ?? 0, el.id);
       if (result.changes > 0) updated++;
     }
   });
@@ -1963,8 +1979,8 @@ function createRigLayout(name, clientData) {
   if (clientData && clientData.fixtures) {
     data = JSON.stringify(clientData);
   } else {
-    const fixtures = db.prepare('SELECT id, rig_x, rig_y, rig_order FROM fixtures ORDER BY rig_order').all();
-    const elements = db.prepare('SELECT type, label, x, y, width, height, rotation, sort_order FROM rig_elements ORDER BY sort_order, id').all();
+    const fixtures = db.prepare('SELECT id, rig_x, rig_y, rig_z, rig_order FROM fixtures ORDER BY rig_order').all();
+    const elements = db.prepare('SELECT type, label, x, y, z, width, height, rotation, sort_order FROM rig_elements ORDER BY sort_order, id').all();
     data = JSON.stringify({ fixtures, elements });
   }
   const result = db.prepare(
@@ -1981,8 +1997,8 @@ function updateRigLayout(id, { name, data: clientData } = {}) {
   if (clientData && clientData.fixtures) {
     data = JSON.stringify(clientData);
   } else {
-    const fixtures = db.prepare('SELECT id, rig_x, rig_y, rig_order FROM fixtures ORDER BY rig_order').all();
-    const elements = db.prepare('SELECT type, label, x, y, width, height, rotation, sort_order FROM rig_elements ORDER BY sort_order, id').all();
+    const fixtures = db.prepare('SELECT id, rig_x, rig_y, rig_z, rig_order FROM fixtures ORDER BY rig_order').all();
+    const elements = db.prepare('SELECT type, label, x, y, z, width, height, rotation, sort_order FROM rig_elements ORDER BY sort_order, id').all();
     data = JSON.stringify({ fixtures, elements });
   }
   db.prepare(
@@ -1999,9 +2015,9 @@ function loadRigLayout(id) {
   const tx = db.transaction(() => {
     // Restore fixture positions
     if (data.fixtures && data.fixtures.length > 0) {
-      const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
+      const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_z = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
       for (const f of data.fixtures) {
-        stmt.run(f.rig_x ?? 0.5, f.rig_y ?? 0.5, f.rig_order ?? 0, f.id);
+        stmt.run(f.rig_x ?? 0.5, f.rig_y ?? 0.5, f.rig_z ?? 0.5, f.rig_order ?? 0, f.id);
       }
     }
 
@@ -2009,10 +2025,10 @@ function loadRigLayout(id) {
     db.prepare('DELETE FROM rig_elements').run();
     if (data.elements && data.elements.length > 0) {
       const ins = db.prepare(
-        'INSERT INTO rig_elements (type, label, x, y, width, height, rotation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO rig_elements (type, label, x, y, z, width, height, rotation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       for (const el of data.elements) {
-        ins.run(el.type || 'truss_h', el.label || '', el.x ?? 0.5, el.y ?? 0.5, el.width ?? 0.4, el.height ?? 0.02, el.rotation ?? 0, el.sort_order ?? 0);
+        ins.run(el.type || 'truss_h', el.label || '', el.x ?? 0.5, el.y ?? 0.5, el.z ?? 0.5, el.width ?? 0.4, el.height ?? 0.02, el.rotation ?? 0, el.sort_order ?? 0);
       }
     }
   });

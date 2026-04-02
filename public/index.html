@@ -647,7 +647,7 @@
     .ufix-label-7 { background: rgba(118,255,3,.7); color: #000; }
 
     /* ═══════════════════════════════════════════════════════════════
-       Rig Layout (2D Canvas)
+       Rig Layout (3D Canvas)
        ═══════════════════════════════════════════════════════════════ */
     .rig-section {
       margin-bottom: 20px;
@@ -660,12 +660,100 @@
 
     .rig-canvas-wrap {
       position: relative;
-      width: 100%; height: 320px;
+      width: 100%; height: 420px;
       background: #0d0d14;
       border: 1px solid var(--panel-border);
       border-radius: 6px;
       overflow: hidden;
       cursor: crosshair;
+      transition: border-color .2s, background .3s;
+    }
+    /* Top view — bird's eye, default dark floor */
+    .rig-canvas-wrap.view-top {
+      border-color: rgba(0,229,255,.25);
+      background: radial-gradient(ellipse at 50% 50%, #0f1020 0%, #0a0a12 100%);
+    }
+    /* Front view — vertical stage backdrop, floor at bottom */
+    .rig-canvas-wrap.view-front {
+      border-color: rgba(68,138,255,.35);
+      background: linear-gradient(180deg, #0a0c18 0%, #0d1020 70%, #111528 100%);
+    }
+    /* Side view — stage from the wing */
+    .rig-canvas-wrap.view-side {
+      border-color: rgba(208,80,255,.3);
+      background: linear-gradient(180deg, #0a0c18 0%, #0d1020 70%, #110e1e 100%);
+    }
+    /* 3D view */
+    .rig-canvas-wrap.view-3d {
+      border-color: rgba(233,69,96,.35);
+      background: radial-gradient(ellipse at 50% 30%, #12101e 0%, #090912 100%);
+      perspective: 900px;
+      perspective-origin: 50% 35%;
+    }
+    /* View badge */
+    .rig-view-badge {
+      position: absolute; top: 8px; right: 10px;
+      font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 3px;
+      pointer-events: none; user-select: none; z-index: 8;
+    }
+    .view-top    .rig-view-badge { background: rgba(0,229,255,.12);  color: rgba(0,229,255,.7);  border: 1px solid rgba(0,229,255,.2); }
+    .view-front  .rig-view-badge { background: rgba(68,138,255,.12); color: rgba(68,138,255,.8); border: 1px solid rgba(68,138,255,.2); }
+    .view-side   .rig-view-badge { background: rgba(208,80,255,.12); color: rgba(208,80,255,.8); border: 1px solid rgba(208,80,255,.2); }
+    .view-3d     .rig-view-badge { background: rgba(233,69,96,.12);  color: rgba(233,69,96,.8);  border: 1px solid rgba(233,69,96,.2); }
+    /* Ground / floor plane line (shown in front, side, 3d views) */
+    .rig-floor-line-h {
+      position: absolute; left: 0; right: 0; height: 1px;
+      pointer-events: none; z-index: 1;
+    }
+    .view-front .rig-floor-line-h,
+    .view-side  .rig-floor-line-h {
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.12) 20%, rgba(255,255,255,.12) 80%, transparent);
+    }
+    .view-3d    .rig-floor-line-h {
+      background: linear-gradient(90deg, transparent, rgba(233,69,96,.2) 20%, rgba(233,69,96,.2) 80%, transparent);
+    }
+    /* Floor gradient wash below the ground line */
+    .rig-floor-wash {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      pointer-events: none; z-index: 0;
+    }
+    .view-front .rig-floor-wash { height: 22%; background: linear-gradient(0deg, rgba(68,138,255,.06) 0%, transparent 100%); }
+    .view-side  .rig-floor-wash { height: 22%; background: linear-gradient(0deg, rgba(208,80,255,.05) 0%, transparent 100%); }
+    .view-3d    .rig-floor-wash { height: 30%; background: linear-gradient(0deg, rgba(233,69,96,.07) 0%, transparent 100%); }
+    /* Depth (Z) indicator on nodes */
+    .rig-node .rig-node-depth {
+      position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+      font-size: 7px; color: rgba(0,229,255,.6); white-space: nowrap;
+    }
+    /* Depth slider tooltip */
+    .rig-depth-handle {
+      position: absolute; left: -18px; top: 50%; transform: translateY(-50%);
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--cyan); border: 2px solid #fff;
+      cursor: ns-resize; z-index: 8; display: none;
+    }
+    .rig-node:hover .rig-depth-handle,
+    .rig-node.dragging .rig-depth-handle { display: block; }
+    .rig-element.selected .rig-depth-handle { display: block; }
+    /* View mode buttons */
+    .rig-view-btns { display: flex; gap: 2px; }
+    .rig-view-btns button {
+      font-size: 10px; padding: 3px 8px;
+      background: var(--input-bg); border: 1px solid var(--input-border);
+      color: var(--text-dim); border-radius: 3px; cursor: pointer;
+    }
+    .rig-view-btns button.active {
+      background: var(--cyan); color: #000; border-color: var(--cyan); font-weight: 600;
+    }
+    /* Depth layer indicators */
+    .rig-depth-ruler {
+      position: absolute; right: 8px; top: 10%; bottom: 10%;
+      width: 20px; z-index: 5; pointer-events: none;
+    }
+    .rig-depth-ruler .ruler-label {
+      position: absolute; font-size: 8px; color: rgba(255,255,255,.3);
+      right: 0; transform: translateY(-50%); text-align: right;
     }
     .rig-canvas-wrap .rig-grid-line {
       position: absolute; background: rgba(255,255,255,.04);
@@ -801,6 +889,19 @@
 
     .rig-toolbar-sep {
       width: 1px; height: 20px; background: var(--panel-border); margin: 0 4px;
+    }
+
+    /* Camera controls hint overlay */
+    .rig-cam-hint {
+      position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+      font-size: 9px; color: rgba(255,255,255,.25); white-space: nowrap;
+      pointer-events: none; user-select: none; z-index: 8;
+      background: rgba(0,0,0,.25); padding: 2px 8px; border-radius: 3px;
+    }
+    /* 3D stage SVG layer */
+    .rig-stage-svg {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0; overflow: visible;
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -1761,12 +1862,21 @@
         <button class="btn btn-secondary" id="btnRigAddStand" title="Add lighting stand">+ Stand</button>
         <button class="btn btn-secondary" id="btnRigAddTBar" title="Add T-bar">+ T-Bar</button>
         <div class="rig-toolbar-sep"></div>
-        <button class="btn btn-secondary" id="btnRigArrangeLine">Arrange in Line</button>
-        <button class="btn btn-secondary" id="btnRigArrangeGrid">Arrange in Grid</button>
-        <button class="btn btn-secondary" id="btnRigArrangeCircle">Arrange in Circle</button>
+        <button class="btn btn-secondary" id="btnRigArrangeLine">Line</button>
+        <button class="btn btn-secondary" id="btnRigArrangeGrid">Grid</button>
+        <button class="btn btn-secondary" id="btnRigArrangeCircle">Circle</button>
+        <button class="btn btn-secondary" id="btnRigArrangeFrontBack" title="Arrange fixtures front-to-back (depth)">Front→Back</button>
         <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;margin-left:8px">
           <input type="checkbox" id="rigSnapEnabled" checked style="accent-color:var(--cyan);margin:0"> Snap
         </label>
+        <div class="rig-toolbar-sep"></div>
+        <div class="rig-view-btns">
+          <button class="active" data-rig-view="top" title="Top-down view (2D)">Top</button>
+          <button data-rig-view="3d" title="3D perspective view">3D</button>
+          <button data-rig-view="front" title="Front view (X vs Height)">Front</button>
+          <button data-rig-view="side" title="Side view (Depth vs Height)">Side</button>
+        </div>
+        <button class="btn btn-secondary" id="btnRigResetCam" title="Reset 3D camera" style="display:none;font-size:10px;padding:3px 8px">⟳ Reset</button>
         <span style="flex:1"></span>
         <div class="rig-toolbar-sep"></div>
         <select id="rigLayoutSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:11px;min-width:130px">
@@ -1783,7 +1893,7 @@
       </div>
       <div class="rig-canvas-wrap" id="rigCanvas"></div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
-        Add rigging (trusses, stands, T-bars) then drag fixtures onto them — they'll snap into place. Order badges show the rig sweep order for cross-fixture effects.
+        Drag fixtures on the X/Y plane. Right-click a fixture or element to adjust depth (Z). Use view buttons to switch between Top, 3D, Front, and Side views. Order badges show rig sweep order.
       </div>
     </div>
   </div>
@@ -6590,7 +6700,7 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
 });
 
 // ═══════════════════════════════════════════════════════════════
-//  Rig Layout (2D positioning canvas) + Rigging Elements
+//  Rig Layout (3D positioning canvas) + Rigging Elements
 // ═══════════════════════════════════════════════════════════════
 
 // Rig section (no longer collapsible — now a sub-tab)
@@ -6605,6 +6715,11 @@ let _rigDragNode = null;
 let _rigElements = [];          // cached rigging elements from DB
 let _rigSelectedElId = null;    // currently selected rigging element
 const SNAP_DIST = 0.03;        // normalised snap distance threshold
+let _rigViewMode = 'top';      // 'top' | '3d' | 'front' | 'side'
+
+// ── 3D Camera state ──
+const RIG_CAM_DEFAULT = { azimuth: -35, elevation: 30, zoom: 1, panX: 0, panY: 0 };
+let _rigCam = { ...RIG_CAM_DEFAULT };
 
 // ── Rigging element defaults per type ──
 const RIG_ELEMENT_DEFAULTS = {
@@ -6613,6 +6728,24 @@ const RIG_ELEMENT_DEFAULTS = {
   stand:   { width: 0.025, height: 0.22,  label: 'Stand' },
   tbar:    { width: 0.14,  height: 0.22,  label: 'T-Bar' },
 };
+
+// ── View mode switching ──
+document.querySelectorAll('.rig-view-btns button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.rig-view-btns button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _rigViewMode = btn.dataset.rigView;
+    // Reset camera when entering 3D view so it always starts in a clean state
+    if (_rigViewMode === '3d') _rigCam = { ...RIG_CAM_DEFAULT };
+    document.getElementById('btnRigResetCam').style.display = _rigViewMode === '3d' ? '' : 'none';
+    renderRigLayout();
+  });
+});
+
+document.getElementById('btnRigResetCam').addEventListener('click', () => {
+  _rigCam = { ...RIG_CAM_DEFAULT };
+  renderRigLayout();
+});
 
 // ── Load rigging elements ──
 async function loadRigElements() {
@@ -6624,46 +6757,158 @@ async function loadRigElements() {
   }
 }
 
+// ── Map normalised 3D coords → 2D screen % ──
+// Coordinate convention throughout the rig system:
+//   x = left/right   (0=left,  1=right)
+//   y = up/down      (0=top,   1=bottom)  — height axis
+//   z = depth        (0=front, 1=rear)    — depth axis
+//
+// In top view:   screen-x=x, screen-y=z  (bird's eye)
+// In front view: screen-x=x, screen-y=y  (audience POV)
+// In side view:  screen-x=z, screen-y=y  (wing POV)
+// In 3D view:    full perspective with navigable camera
+function rigProject(x, y, z) {
+  const rx = x ?? 0.5, ry = y ?? 0.5, rz = z ?? 0.5;
+  switch (_rigViewMode) {
+    case 'top':
+      return { px: rx * 100, py: rz * 100, scale: 1 };
+    case 'front':
+      return { px: rx * 100, py: ry * 100, scale: 1 - (rz - 0.5) * 0.3 };
+    case 'side':
+      return { px: rz * 100, py: ry * 100, scale: 1 - (rx - 0.5) * 0.3 };
+    case '3d': {
+      // Centre in world space
+      const wx = rx - 0.5;
+      const wy = -(ry - 0.5);   // flip y: positive = up in world
+      const wz = rz - 0.5;
+
+      // Rotate around Y axis (azimuth)
+      const azR = _rigCam.azimuth * Math.PI / 180;
+      const rx2 =  wx * Math.cos(azR) + wz * Math.sin(azR);
+      const ry2 =  wy;
+      const rz2 = -wx * Math.sin(azR) + wz * Math.cos(azR);
+
+      // Rotate around X axis (elevation)
+      const elR = _rigCam.elevation * Math.PI / 180;
+      const rx3 = rx2;
+      const ry3 =  ry2 * Math.cos(elR) - rz2 * Math.sin(elR);
+      const rz3 =  ry2 * Math.sin(elR) + rz2 * Math.cos(elR);
+
+      // Simple perspective divide (focal length ~1.8)
+      const focal = 1.8;
+      const depth = focal + rz3;            // avoid division by ≤0
+      const persp = focal / Math.max(depth, 0.1);
+
+      // Map to screen % applying zoom and pan
+      const zoom = _rigCam.zoom;
+      const sx = 0.5 + (rx3 * persp * 0.55 + _rigCam.panX) * zoom;
+      const sy = 0.5 + (-ry3 * persp * 0.55 + _rigCam.panY) * zoom;
+
+      return { px: sx * 100, py: sy * 100, scale: Math.max(0.4, persp * zoom * 0.8), depth: rz3 };
+    }
+    default:
+      return { px: rx * 100, py: rz * 100, scale: 1 };
+  }
+}
+
+// ── Unproject screen % → normalised coords (returns the axes the view controls) ──
+// In 3D mode dragging fixtures is disabled (camera navigation takes the mouse).
+function rigUnproject(screenPctX, screenPctY) {
+  const sx = screenPctX / 100, sy = screenPctY / 100;
+  switch (_rigViewMode) {
+    case 'top':   return { x: sx, z: sy };
+    case 'front': return { x: sx, y: sy };
+    case 'side':  return { z: sx, y: sy };
+    case '3d':    return { x: sx, z: sy };   // not used for fixture drag in 3D
+    default:      return { x: sx, z: sy };
+  }
+}
+
+// ── 3D drag: convert screen-fraction delta to world-space delta ──
+// Uses the camera's right and down vectors derived from the current
+// azimuth / elevation / zoom so dragging always follows the camera orientation.
+// Returns { dx, dy, dz } where dx=d(el.x), dy=d(el.y depth), dz=d(el.z height).
+function rigElement3DDelta(dsx, dsy, el) {
+  const azR   = _rigCam.azimuth   * Math.PI / 180;
+  const elR   = _rigCam.elevation * Math.PI / 180;
+  const cosAz = Math.cos(azR), sinAz = Math.sin(azR);
+  const cosEl = Math.cos(elR), sinEl = Math.sin(elR);
+
+  // Perspective scale at the element's current depth in camera space.
+  // rigProject uses: sx = 0.5 + (rx3*persp*0.55 + panX)*zoom
+  // so the screen-fraction-per-world-unit scale = persp * 0.55 * zoom
+  const proj  = rigProject(el.x, el.z ?? 0.5, el.y ?? 0.5);
+  const focal = 1.8;
+  const persp = focal / Math.max(focal + (proj.depth ?? 0), 0.1);
+  const ss    = persp * 0.55 * _rigCam.zoom;   // screen-fraction per camera unit
+
+  // Camera-unit deltas (removes perspective scale so world units are consistent)
+  const cdx = dsx / ss;   // rightward in camera space
+  const cdy = dsy / ss;   // downward in camera space (screen-Y grows downward)
+
+  // Camera right vector in world (wx,wy,wz):  R = [cos(az), 0, sin(az)]
+  // Camera down  vector in world (wx,wy,wz):  D = [sin(az)*sin(el), -cos(el), -cos(az)*sin(el)]
+  //   (derived from the elevation rotation: D_world = inverse of the up-row in the combined Raz * Rel matrix)
+  const dwx = cdx * cosAz  +  cdy * sinAz * sinEl;   // world left/right
+  const dwy = cdy * (-cosEl);                          // world up/down (wy +ve = up)
+  const dwz = cdx * sinAz  +  cdy * (-cosAz * sinEl); // world front/back
+
+  // Convert (wx,wy,wz) deltas to (el.x, el.y, el.z) deltas:
+  //   wx = el.x - 0.5      → d(el.x) = dwx
+  //   wz = el.y - 0.5      → d(el.y) = dwz   (depth)
+  //   wy = 0.5 - el.z      → d(el.z) = -dwy  (height: el.z=0 is top, wy=+0.5 is top)
+  return { dx: dwx, dy: dwz, dz: -dwy };
+}
+
+// ── Get axis labels for current view ──
+function rigAxisLabels() {
+  switch (_rigViewMode) {
+    case 'top':   return { l: '← L', r: 'R →', t: 'Front', b: 'Back' };
+    case 'front': return { l: '← L', r: 'R →', t: 'Up', b: 'Down' };
+    case 'side':  return { l: 'Front', r: 'Back', t: 'Up', b: 'Down' };
+    case '3d':    return { l: '← L', r: 'R →', t: 'Front', b: 'Back' };
+    default:      return { l: '← L', r: 'R →', t: 'Front', b: 'Back' };
+  }
+}
+
 // ── Snap point calculation ──
-// Returns array of snap points {x, y} along a rigging element's surface
+// Returns array of snap points {x, y, z} along a rigging element's surface
 function getElementSnapPoints(el, count) {
   const pts = [];
   const n = count || 8;
+  const elZ = el.z ?? 0.5;
   if (el.type === 'truss_h') {
-    // Points evenly spaced along the horizontal truss
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      pts.push({ x: el.x + (t - 0.5) * el.width, y: el.y });
+      pts.push({ x: el.x + (t - 0.5) * el.width, y: el.y, z: elZ });
     }
   } else if (el.type === 'truss_v') {
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      pts.push({ x: el.x, y: el.y + (t - 0.5) * el.height });
+      pts.push({ x: el.x, y: el.y + (t - 0.5) * el.height, z: elZ });
     }
   } else if (el.type === 'stand') {
-    // Snap to top of stand
-    pts.push({ x: el.x, y: el.y });
+    pts.push({ x: el.x, y: el.y, z: elZ });
   } else if (el.type === 'tbar') {
-    // Snap along the horizontal crossbar at the top
     const crossY = el.y;
     const crossW = el.width;
     for (let i = 0; i <= 4; i++) {
       const t = i / 4;
-      pts.push({ x: el.x + (t - 0.5) * crossW, y: crossY });
+      pts.push({ x: el.x + (t - 0.5) * crossW, y: crossY, z: elZ });
     }
   }
   return pts;
 }
 
 // Find nearest snap point across all rigging elements
-function findSnapPoint(fx, fy) {
+function findSnapPoint(fx, fy, fz) {
   if (!document.getElementById('rigSnapEnabled').checked) return null;
   let best = null;
   let bestDist = SNAP_DIST;
   for (const el of _rigElements) {
     const pts = getElementSnapPoints(el, 16);
     for (const p of pts) {
-      const d = Math.hypot(p.x - fx, p.y - fy);
+      const d = Math.hypot(p.x - fx, p.y - fy, (p.z ?? 0.5) - (fz ?? 0.5));
       if (d < bestDist) {
         bestDist = d;
         best = p;
@@ -6673,109 +6918,548 @@ function findSnapPoint(fx, fy) {
   return best;
 }
 
+// ── 3D Stage renderer — SVG floor/ceiling/walls drawn via rigProject ──
+// Coordinate convention: p(x, yH, zD)
+//   x  = left/right (0–1)
+//   yH = height    (0=ceiling/top, 1=floor/bottom)  ← rigProject's y param
+//   zD = depth     (0=front/audience, 1=rear/stage)  ← rigProject's z param
+function render3DStage(canvas) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.classList.add('rig-stage-svg');
+
+  // Project a world point to SVG coordinate string "px,py"
+  const pt  = (x, yH, zD) => { const { px, py } = rigProject(x, yH, zD); return `${px},${py}`; };
+  const p   = (x, yH, zD) => { const { px, py } = rigProject(x, yH, zD); return { x: px, y: py }; };
+
+  const mkLine = (x1, y1, x2, y2, stroke, sw = '0.2') => {
+    const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+    l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', stroke); l.setAttribute('stroke-width', sw);
+    return l;
+  };
+  const mkPoly = (pts, fill, stroke, sw = '0.25') => {
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', pts);
+    poly.setAttribute('fill', fill);
+    poly.setAttribute('stroke', stroke);
+    poly.setAttribute('stroke-width', sw);
+    return poly;
+  };
+
+  const FL   = 1.0;   // floor   (yH = 1 → bottom)
+  const CEIL = 0.05;  // ceiling (yH = 0.05 → near top, where trusses hang)
+  const GN   = 6;     // grid divisions
+
+  // ── Floor filled polygon ──
+  svg.appendChild(mkPoly(
+    [pt(0,FL,0), pt(1,FL,0), pt(1,FL,1), pt(0,FL,1)].join(' '),
+    'rgba(18,20,42,0.88)', 'rgba(90,100,200,0.45)', '0.3'
+  ));
+
+  // ── Floor grid ──
+  for (let i = 0; i <= GN; i++) {
+    const t   = i / GN;
+    const edge = (i === 0 || i === GN);
+    const sc  = edge ? 'rgba(90,100,200,0.5)' : 'rgba(60,70,160,0.22)';
+    const sw  = edge ? '0.28' : '0.12';
+    // X-axis lines (along depth)
+    const a = p(t, FL, 0), b = p(t, FL, 1);
+    svg.appendChild(mkLine(a.x, a.y, b.x, b.y, sc, sw));
+    // Z-axis lines (along width)
+    const c = p(0, FL, t), d = p(1, FL, t);
+    svg.appendChild(mkLine(c.x, c.y, d.x, d.y, sc, sw));
+  }
+
+  // ── Ceiling wireframe (rig plane) ──
+  svg.appendChild(mkPoly(
+    [pt(0,CEIL,0), pt(1,CEIL,0), pt(1,CEIL,1), pt(0,CEIL,1)].join(' '),
+    'rgba(233,69,96,0.03)', 'rgba(233,69,96,0.18)', '0.2'
+  ));
+  for (let i = 0; i <= GN; i++) {
+    const t = i / GN;
+    const a = p(t, CEIL, 0), b = p(t, CEIL, 1);
+    svg.appendChild(mkLine(a.x, a.y, b.x, b.y, 'rgba(233,69,96,0.1)', '0.1'));
+    const c = p(0, CEIL, t), d = p(1, CEIL, t);
+    svg.appendChild(mkLine(c.x, c.y, d.x, d.y, 'rgba(233,69,96,0.1)', '0.1'));
+  }
+
+  // ── Back wall ──
+  svg.appendChild(mkPoly(
+    [pt(0,CEIL,1), pt(1,CEIL,1), pt(1,FL,1), pt(0,FL,1)].join(' '),
+    'rgba(14,16,36,0.55)', 'rgba(70,80,170,0.25)', '0.18'
+  ));
+
+  // ── Left wall ──
+  svg.appendChild(mkPoly(
+    [pt(0,CEIL,0), pt(0,CEIL,1), pt(0,FL,1), pt(0,FL,0)].join(' '),
+    'rgba(14,16,36,0.4)', 'rgba(70,80,170,0.2)', '0.15'
+  ));
+
+  // ── Right wall ──
+  svg.appendChild(mkPoly(
+    [pt(1,CEIL,0), pt(1,CEIL,1), pt(1,FL,1), pt(1,FL,0)].join(' '),
+    'rgba(14,16,36,0.4)', 'rgba(70,80,170,0.2)', '0.15'
+  ));
+
+  // ── Vertical corner pillars ──
+  [[0,0],[1,0],[0,1],[1,1]].forEach(([x, zD]) => {
+    const top = p(x, CEIL, zD), bot = p(x, FL, zD);
+    svg.appendChild(mkLine(top.x, top.y, bot.x, bot.y, 'rgba(90,100,200,0.3)', '0.22'));
+  });
+
+  // ── Stage-front edge highlight (audience side, zD=0) ──
+  const fe0 = p(0, FL, 0), fe1 = p(1, FL, 0);
+  svg.appendChild(mkLine(fe0.x, fe0.y, fe1.x, fe1.y, 'rgba(255,210,60,0.6)', '0.55'));
+
+  // ── Labels ──
+  const mkText = (pt, txt, fill, size, anchor = 'middle') => {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    el.setAttribute('x', pt.x); el.setAttribute('y', pt.y);
+    el.setAttribute('text-anchor', anchor);
+    el.setAttribute('font-size', size);
+    el.setAttribute('fill', fill);
+    el.setAttribute('font-family', 'monospace');
+    el.setAttribute('letter-spacing', '0.6');
+    el.textContent = txt;
+    return el;
+  };
+
+  // "▾ STAGE FRONT" along the front edge
+  svg.appendChild(mkText(p(0.5, FL - 0.04, 0.04), '▾ STAGE FRONT', 'rgba(255,210,60,0.55)', '2.0'));
+  // "▴ RIG" near ceiling centre
+  svg.appendChild(mkText(p(0.5, CEIL + 0.03, 0.5), '▴ RIG', 'rgba(233,69,96,0.4)', '1.8'));
+  // L / R corner labels on floor
+  svg.appendChild(mkText(p(0.02, FL - 0.03, 0.5), 'L', 'rgba(255,255,255,0.18)', '2.2', 'start'));
+  svg.appendChild(mkText(p(0.98, FL - 0.03, 0.5), 'R', 'rgba(255,255,255,0.18)', '2.2', 'end'));
+
+  canvas.appendChild(svg);
+}
+
 // ── Render the full rig layout ──
+// ── Render rigging elements as SVG-projected 3D shapes + invisible hit-area divs ──
+function renderRigElementsSVG(canvas) {
+  const is3D = _rigViewMode === '3d';
+  const NS   = 'http://www.w3.org/2000/svg';
+
+  function pt(wx, wy, wz) { return rigProject(wx, wy, wz); }
+
+  // ── SVG helpers — coordinates are in 0-100 space (matching viewBox="0 0 100 100") ──
+  //    polygon 'points' does NOT support % units in SVG, so we use a viewBox instead.
+
+  function addFace(svg, pts, fillDark, fillLight, strokeOverride, opacity, isTopFace) {
+    const poly = document.createElementNS(NS, 'polygon');
+    // No % — coordinates are in viewBox units (0–100)
+    poly.setAttribute('points', pts.map(p => `${p.px.toFixed(3)},${p.py.toFixed(3)}`).join(' '));
+    poly.setAttribute('fill',         isTopFace !== false ? fillLight : fillDark);
+    poly.setAttribute('stroke',       strokeOverride || 'rgba(0,0,0,0.45)');
+    poly.setAttribute('stroke-width', strokeOverride ? '0.25' : '0.15');
+    poly.setAttribute('opacity',      opacity ?? 1);
+    poly.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(poly);
+  }
+
+  function addLine(svg, p1, p2, stroke, width, cap) {
+    const line = document.createElementNS(NS, 'line');
+    // No % — viewBox units
+    line.setAttribute('x1', p1.px.toFixed(3)); line.setAttribute('y1', p1.py.toFixed(3));
+    line.setAttribute('x2', p2.px.toFixed(3)); line.setAttribute('y2', p2.py.toFixed(3));
+    line.setAttribute('stroke', stroke || '#78909c');
+    line.setAttribute('stroke-width', width || '0.4');
+    line.setAttribute('stroke-linecap', cap || 'round');
+    line.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(line);
+  }
+
+  // ── Draw one chord tube (a rectangle with a highlight strip to simulate a cylinder) ──
+  // topY, botY are the top/bottom world-Y edges of the tube; span is in Z or X depending on view
+  // Uses projected world points directly so perspective is correct
+  function addChordTube(svg, ptTL, ptTR, ptBR, ptBL, strokeSel) {
+    // Main body: steel blue-gray
+    addFace(svg, [ptTL, ptTR, ptBR, ptBL], '#6e8490', '#b8c8d0', strokeSel, 1, true);
+    // Highlight strip across the top ~30% — simulates cylindrical specular glint
+    const hlBL = { px: ptTL.px, py: ptTL.py + (ptBL.py - ptTL.py) * 0.32 };
+    const hlBR = { px: ptTR.px, py: ptTR.py + (ptBR.py - ptTR.py) * 0.32 };
+    addFace(svg, [ptTL, ptTR, hlBR, hlBL], '#d0dce3', '#eaf0f4', null, 0.55);
+  }
+
+  // ── Draw web bracing between two chord centre-lines (projected points) ──
+  // tl/tr = top chord left/right centres; bl/br = bottom chord left/right centres
+  function addTrussWeb(svg, tl, tr, br, bl) {
+    // Derive panel count from projected span length so it scales naturally
+    const spanPct = Math.hypot(tr.px - tl.px, tr.py - tl.py);
+    const panels  = Math.max(2, Math.min(8, Math.round(spanPct / 7)));
+
+    // Lerp helpers
+    const tx = (a, b, t) => a.px + (b.px - a.px) * t;
+    const ty = (a, b, t) => a.py + (b.py - a.py) * t;
+    const p  = (a, b, t) => ({ px: tx(a,b,t), py: ty(a,b,t) });
+
+    // End verticals (left and right)
+    addLine(svg, tl, bl, '#78909c', '1.8');
+    addLine(svg, tr, br, '#78909c', '1.8');
+
+    // Alternating diagonal web members (W / Pratt truss pattern)
+    for (let i = 0; i < panels; i++) {
+      const t0 = i / panels, t1 = (i + 1) / panels;
+      const topA = p(tl, tr, t0), topB = p(tl, tr, t1);
+      const botA = p(bl, br, t0), botB = p(bl, br, t1);
+      if (i % 2 === 0) {
+        // top-near → bottom-far
+        addLine(svg, topA, botB, '#90a4ae', '1.2');
+      } else {
+        // bottom-near → top-far
+        addLine(svg, botA, topB, '#90a4ae', '1.2');
+      }
+    }
+  }
+
+  // z-sort elements back-to-front (painter's algorithm)
+  const withDepth = _rigElements.map(el => {
+    const p = rigProject(el.x, el.z ?? 0.5, el.y ?? 0.5);
+    return { el, depth: p.depth ?? 0 };
+  });
+  withDepth.sort((a, b) => b.depth - a.depth);
+
+  // One SVG overlay for all geometry.
+  // viewBox="0 0 100 100" maps the coordinate space so px values (0–100) equal percentages.
+  // preserveAspectRatio="none" stretches to fill the canvas exactly.
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;';
+  canvas.appendChild(svg);
+
+  for (const { el } of withDepth) {
+    const cx = el.x, cy = el.z ?? 0.5, cz = el.y ?? 0.5;
+    const hw = el.width  / 2;
+    const hh = el.height / 2;
+    const selected   = el.id === _rigSelectedElId;
+    const strokeSel  = selected ? '#fff' : null;
+    // Truss chord gap — used for hit-area sizing and label positioning even outside the truss block
+    const _trussSpan   = (el.type === 'truss_h') ? el.width : el.height;
+    const CHORD_HALF   = _trussSpan * 0.10;  // half-gap between chord centres
+
+    // ─────────────────────────────────────────────────
+    // Build view-correct geometry for each element type
+    // ─────────────────────────────────────────────────
+
+    if (el.type === 'truss_h' || el.type === 'truss_v') {
+      // Truss: two parallel chord tubes running along the span axis,
+      // with alternating diagonal web bracing between them.
+      //
+      // truss_h spans the X axis (left↔right),  chords separated in Y (height)
+      // truss_v spans the Z axis (front↔back),  chords separated in Y (height)
+      const isH = el.type === 'truss_h';
+      const span     = isH ? el.width  : el.height; // length of span
+      const xl = isH ? cx - hw : cx;     // span start/end in X
+      const xr = isH ? cx + hw : cx;
+      const zn = isH ? cz      : cz - hh; // span start/end in Z
+      const zf = isH ? cz      : cz + hh;
+
+      // Chord geometry scales with span (CHORD_HALF already defined above)
+      const CHORD_R    = span * 0.024;  // tube visual radius (half-height of chord rect)
+      const CHORD_DEEP = span * 0.020;  // tube depth in the Z axis (for 3D side face)
+
+      const topY = cy - CHORD_HALF;  // top chord Y centre
+      const botY = cy + CHORD_HALF;  // bottom chord Y centre
+
+      if (is3D) {
+        // ─ 3D: draw both chord boxes with top + front faces, then web bracing ─
+        // Top chord – top face
+        addFace(svg, [pt(xl,topY-CHORD_R,zn-CHORD_DEEP), pt(xr,topY-CHORD_R,zf-CHORD_DEEP),
+                      pt(xr,topY-CHORD_R,zf+CHORD_DEEP), pt(xl,topY-CHORD_R,zn+CHORD_DEEP)],
+                '#607d8b','#cfd8dc', strokeSel, 1, true);
+        // Top chord – front face
+        addFace(svg, [pt(xl,topY-CHORD_R,zn-CHORD_DEEP), pt(xr,topY-CHORD_R,zf-CHORD_DEEP),
+                      pt(xr,topY+CHORD_R,zf-CHORD_DEEP), pt(xl,topY+CHORD_R,zn-CHORD_DEEP)],
+                '#455a64','#90a4ae', strokeSel, 1, false);
+        // Bottom chord – top face
+        addFace(svg, [pt(xl,botY-CHORD_R,zn-CHORD_DEEP), pt(xr,botY-CHORD_R,zf-CHORD_DEEP),
+                      pt(xr,botY-CHORD_R,zf+CHORD_DEEP), pt(xl,botY-CHORD_R,zn+CHORD_DEEP)],
+                '#607d8b','#cfd8dc', strokeSel, 1, true);
+        // Bottom chord – front face
+        addFace(svg, [pt(xl,botY-CHORD_R,zn-CHORD_DEEP), pt(xr,botY-CHORD_R,zf-CHORD_DEEP),
+                      pt(xr,botY+CHORD_R,zf-CHORD_DEEP), pt(xl,botY+CHORD_R,zn-CHORD_DEEP)],
+                '#455a64','#90a4ae', strokeSel, 1, false);
+        // End caps (left)
+        addFace(svg, [pt(xl,topY-CHORD_R,zn-CHORD_DEEP),pt(xl,topY-CHORD_R,zn+CHORD_DEEP),
+                      pt(xl,topY+CHORD_R,zn+CHORD_DEEP),pt(xl,topY+CHORD_R,zn-CHORD_DEEP)],
+                '#37474f','#607d8b', strokeSel, 1, false);
+        addFace(svg, [pt(xl,botY-CHORD_R,zn-CHORD_DEEP),pt(xl,botY-CHORD_R,zn+CHORD_DEEP),
+                      pt(xl,botY+CHORD_R,zn+CHORD_DEEP),pt(xl,botY+CHORD_R,zn-CHORD_DEEP)],
+                '#37474f','#607d8b', strokeSel, 1, false);
+        // End caps (right/far end)
+        addFace(svg, [pt(xr,topY-CHORD_R,zf-CHORD_DEEP),pt(xr,topY-CHORD_R,zf+CHORD_DEEP),
+                      pt(xr,topY+CHORD_R,zf+CHORD_DEEP),pt(xr,topY+CHORD_R,zf-CHORD_DEEP)],
+                '#37474f','#607d8b', strokeSel, 1, false);
+        addFace(svg, [pt(xr,botY-CHORD_R,zf-CHORD_DEEP),pt(xr,botY-CHORD_R,zf+CHORD_DEEP),
+                      pt(xr,botY+CHORD_R,zf+CHORD_DEEP),pt(xr,botY+CHORD_R,zf-CHORD_DEEP)],
+                '#37474f','#607d8b', strokeSel, 1, false);
+        // Web bracing on front face plane (z = zn-CHORD_DEEP)
+        const zFront = isH ? cz - CHORD_DEEP : cz - hh - CHORD_DEEP;
+        addTrussWeb(svg, pt(xl, topY, zFront), pt(xr, topY, zFront),
+                         pt(xr, botY, zFront), pt(xl, botY, zFront));
+
+      } else if (_rigViewMode === 'top') {
+        // Top-down: both chords overlap; show as a bar with width=span, thickness=CHORD_HALF*2
+        // Use CHORD_HALF so top-view height matches the front-view chord gap
+        const BAR_R = CHORD_HALF;
+        const tl2 = pt(xl, cy, cz - BAR_R), tr2 = pt(xr, cy, cz - BAR_R);
+        const bl2 = pt(xl, cy, cz + BAR_R), br2 = pt(xr, cy, cz + BAR_R);
+        addChordTube(svg, tl2, tr2, br2, bl2, strokeSel);
+        // Centre dividing line shows dual-chord construction
+        addLine(svg, pt(xl,cy,cz), pt(xr,cy,cz), 'rgba(0,0,0,0.35)', '0.25');
+
+      } else if (_rigViewMode === 'front') {
+        // Front view: two chord tubes stacked vertically with web between them
+        addChordTube(svg, pt(xl,topY-CHORD_R,cz), pt(xr,topY-CHORD_R,cz),
+                          pt(xr,topY+CHORD_R,cz), pt(xl,topY+CHORD_R,cz), strokeSel);
+        addChordTube(svg, pt(xl,botY-CHORD_R,cz), pt(xr,botY-CHORD_R,cz),
+                          pt(xr,botY+CHORD_R,cz), pt(xl,botY+CHORD_R,cz), strokeSel);
+        addTrussWeb(svg, pt(xl,topY,cz), pt(xr,topY,cz), pt(xr,botY,cz), pt(xl,botY,cz));
+
+      } else {
+        // Side view: truss_h appears as two stacked circles; truss_v spans as full truss
+        if (isH) {
+          // Small square pair — truss seen end-on
+          const s = CHORD_R;
+          addChordTube(svg, pt(cx,topY-s,cz-s), pt(cx,topY-s,cz+s),
+                            pt(cx,topY+s,cz+s), pt(cx,topY+s,cz-s), strokeSel);
+          addChordTube(svg, pt(cx,botY-s,cz-s), pt(cx,botY-s,cz+s),
+                            pt(cx,botY+s,cz+s), pt(cx,botY+s,cz-s), strokeSel);
+        } else {
+          // truss_v seen from the side — spans depth → full truss visible
+          addChordTube(svg, pt(cx,topY-CHORD_R,zn), pt(cx,topY-CHORD_R,zf),
+                            pt(cx,topY+CHORD_R,zf), pt(cx,topY+CHORD_R,zn), strokeSel);
+          addChordTube(svg, pt(cx,botY-CHORD_R,zn), pt(cx,botY-CHORD_R,zf),
+                            pt(cx,botY+CHORD_R,zf), pt(cx,botY+CHORD_R,zn), strokeSel);
+          addTrussWeb(svg, pt(cx,topY,zn), pt(cx,topY,zf), pt(cx,botY,zf), pt(cx,botY,zn));
+        }
+      }
+
+    } else if (el.type === 'stand') {
+      // Vertical pole: spans height (Y axis in rigProject) from floor (y=1) down to el.z
+      const POLE_R = 0.008;
+      const BASE_R = 0.04;
+      const BASE_H = 0.01;
+      const yt_top  = cy;          // top of stand (el.z, rig height)
+      const yt_base = 1.0;         // floor
+      const xl3 = cx - POLE_R, xr3 = cx + POLE_R;
+      const zn3 = cz - POLE_R, zf3 = cz + POLE_R;
+
+      if (is3D) {
+        // Pole: vertical box
+        addFace(svg, [pt(xl3,yt_top,zn3),pt(xr3,yt_top,zn3),pt(xr3,yt_base,zn3),pt(xl3,yt_base,zn3)], '#546e7a','#90a4ae', strokeSel, 1);
+        addFace(svg, [pt(xr3,yt_top,zn3),pt(xr3,yt_top,zf3),pt(xr3,yt_base,zf3),pt(xr3,yt_base,zn3)], '#37474f','#607d8b', strokeSel, 1);
+        // Base tripod — flat triangle at floor
+        addFace(svg, [
+          pt(cx-BASE_R, yt_base, cz), pt(cx+BASE_R, yt_base, cz),
+          pt(cx+BASE_R, yt_base+BASE_H, cz+BASE_R), pt(cx-BASE_R, yt_base+BASE_H, cz+BASE_R)
+        ], '#263238','#546e7a', strokeSel, 1);
+        // Top cap
+        addFace(svg, [pt(xl3,yt_top,zn3),pt(xr3,yt_top,zn3),pt(xr3,yt_top,zf3),pt(xl3,yt_top,zf3)], '#78909c','#cfd8dc', strokeSel, 1);
+      } else if (_rigViewMode === 'top') {
+        // Top-down: just a small square dot
+        const s = POLE_R * 3;
+        addFace(svg, [pt(cx-s,cy,cz-s),pt(cx+s,cy,cz-s),pt(cx+s,cy,cz+s),pt(cx-s,cy,cz+s)], '#546e7a','#90a4ae', strokeSel, 1);
+      } else if (_rigViewMode === 'front') {
+        // Front view: vertical bar from floor to top
+        addFace(svg, [pt(cx-POLE_R,yt_top,cz),pt(cx+POLE_R,yt_top,cz),pt(cx+POLE_R,yt_base,cz),pt(cx-POLE_R,yt_base,cz)], '#546e7a','#90a4ae', strokeSel, 1);
+        // Base
+        addFace(svg, [pt(cx-BASE_R,yt_base,cz),pt(cx+BASE_R,yt_base,cz),pt(cx+BASE_R,yt_base+BASE_H,cz),pt(cx-BASE_R,yt_base+BASE_H,cz)], '#263238','#546e7a', strokeSel, 1);
+      } else {
+        // Side view: vertical bar
+        addFace(svg, [pt(cx,yt_top,cz-POLE_R),pt(cx,yt_top,cz+POLE_R),pt(cx,yt_base,cz+POLE_R),pt(cx,yt_base,cz-POLE_R)], '#546e7a','#90a4ae', strokeSel, 1);
+        addFace(svg, [pt(cx,yt_base,cz-BASE_R),pt(cx,yt_base,cz+BASE_R),pt(cx,yt_base+BASE_H,cz+BASE_R),pt(cx,yt_base+BASE_H,cz-BASE_R)], '#263238','#546e7a', strokeSel, 1);
+      }
+
+    } else if (el.type === 'tbar') {
+      // T-bar: horizontal bar at top + vertical pole below
+      const BAR_W = el.width  / 2;
+      const POLE_H = el.height;
+      const BAR_R  = 0.008;
+      const POLE_R = 0.008;
+      const yt_bar  = cy;
+      const yt_base = cy + POLE_H;
+      const xl4 = cx - BAR_W, xr4 = cx + BAR_W;
+      const zn4 = cz - BAR_R, zf4 = cz + BAR_R;
+
+      if (is3D) {
+        // Horizontal bar (like a short truss_h)
+        addFace(svg, [pt(xl4,yt_bar-BAR_R,zn4),pt(xr4,yt_bar-BAR_R,zn4),pt(xr4,yt_bar-BAR_R,zf4),pt(xl4,yt_bar-BAR_R,zf4)], '#607d8b','#b0bec5', strokeSel, 0.9);
+        addFace(svg, [pt(xl4,yt_bar-BAR_R,zn4),pt(xr4,yt_bar-BAR_R,zn4),pt(xr4,yt_bar+BAR_R,zn4),pt(xl4,yt_bar+BAR_R,zn4)], '#455a64','#78909c', strokeSel, 0.9);
+        // Vertical pole
+        addFace(svg, [
+          pt(cx-POLE_R,yt_bar,zn4),pt(cx+POLE_R,yt_bar,zn4),
+          pt(cx+POLE_R,yt_base,zn4),pt(cx-POLE_R,yt_base,zn4)
+        ], '#546e7a','#90a4ae', strokeSel, 1);
+      } else if (_rigViewMode === 'top') {
+        // Top: the horizontal bar plus centre dot for pole
+        addFace(svg, [pt(xl4,cy,zn4),pt(xr4,cy,zn4),pt(xr4,cy,zf4),pt(xl4,cy,zf4)], '#455a64','#607d8b', strokeSel, 1);
+      } else if (_rigViewMode === 'front') {
+        // Front: T-shape — horizontal bar + vertical pole below centre
+        addFace(svg, [pt(xl4,yt_bar-BAR_R,cz),pt(xr4,yt_bar-BAR_R,cz),pt(xr4,yt_bar+BAR_R,cz),pt(xl4,yt_bar+BAR_R,cz)], '#455a64','#78909c', strokeSel, 1);
+        addFace(svg, [pt(cx-POLE_R,yt_bar,cz),pt(cx+POLE_R,yt_bar,cz),pt(cx+POLE_R,yt_base,cz),pt(cx-POLE_R,yt_base,cz)], '#546e7a','#90a4ae', strokeSel, 1);
+      } else {
+        // Side: pole as a vertical bar
+        addFace(svg, [pt(cx,yt_bar,zn4),pt(cx,yt_bar,zf4),pt(cx,yt_base,zf4),pt(cx,yt_base,zn4)], '#546e7a','#90a4ae', strokeSel, 1);
+      }
+    }
+
+    // ── Label overlay ──
+    if (el.label) {
+      const centre = rigProject(cx, cy, cz);
+      const lbl = document.createElementNS(NS, 'text');
+      // No % — viewBox units
+      lbl.setAttribute('x', centre.px.toFixed(3));
+      lbl.setAttribute('y', (centre.py + CHORD_HALF * 100 * 1.4).toFixed(3)); // just below truss
+      lbl.setAttribute('text-anchor', 'middle');
+      lbl.setAttribute('dominant-baseline', 'auto');
+      lbl.setAttribute('font-size', '2.2');
+      lbl.setAttribute('font-family', 'sans-serif');
+      lbl.setAttribute('fill', selected ? '#fff' : '#b0bec5');
+      lbl.setAttribute('pointer-events', 'none');
+      lbl.textContent = el.label;
+      svg.appendChild(lbl);
+    }
+
+    // ── Invisible hit-area div for drag / resize / delete ──
+    const centre = rigProject(cx, cy, cz);
+    const isTruss = el.type === 'truss_h' || el.type === 'truss_v';
+    // Hit W/H in screen-% space — for trusses use the actual chord gap formula
+    const hitW = Math.max(3, el.width  * 100);
+    const hitH = isTruss
+      ? Math.max(3, CHORD_HALF * 2 * 100)   // matches the visual chord gap
+      : Math.max(3, el.height * 100);
+    const div = document.createElement('div');
+    div.className = `rig-element ${el.type}`;
+    div.dataset.rigElId = el.id;
+    if (selected) div.classList.add('selected');
+    div.style.cssText = [
+      `position:absolute`,
+      `left:${(centre.px - hitW / 2).toFixed(1)}%`,
+      `top:${(centre.py - hitH / 2).toFixed(1)}%`,
+      `width:${hitW.toFixed(1)}%`,
+      `height:${hitH.toFixed(1)}%`,
+      `background:transparent`,
+      `border:${selected ? '1px solid rgba(255,255,255,0.4)' : '1px solid transparent'}`,
+      `cursor:move`,
+      `box-sizing:border-box`,
+    ].join(';');
+
+    // Resize handles (only when selected)
+    if (selected) {
+      const rRight  = document.createElement('div'); rRight.className  = 'rig-el-resize r-right';
+      const rBottom = document.createElement('div'); rBottom.className = 'rig-el-resize r-bottom';
+      const rCorner = document.createElement('div'); rCorner.className = 'rig-el-resize r-corner';
+      const delBtn  = document.createElement('div'); delBtn.className  = 'rig-el-delete';
+      delBtn.textContent = '✕';
+      delBtn.title = 'Delete rigging element';
+      div.appendChild(rRight);
+      div.appendChild(rBottom);
+      div.appendChild(rCorner);
+      div.appendChild(delBtn);
+      delBtn.addEventListener('mousedown',  (e) => { e.stopPropagation(); deleteRigElementUI(el.id); });
+      rRight.addEventListener('mousedown',  (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'right');  });
+      rBottom.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'bottom'); });
+      rCorner.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'corner'); });
+    }
+
+    div.addEventListener('mousedown', rigElementMouseDown);
+    canvas.appendChild(div);
+  }
+}
+
+// Coordinate convention (matches rigProject / rigUnproject):
+//   rig_x = left/right (0=left, 1=right)
+//   rig_y = front/back depth (0=front/audience, 1=back/stage rear)  → rigProject z param
+//   rig_z = height/up-down (0=top, 1=bottom)                        → rigProject y param
 function renderRigLayout() {
   const canvas = document.getElementById('rigCanvas');
   canvas.innerHTML = '';
 
-  // Draw grid lines
-  const GRID = 8;
-  for (let i = 1; i < GRID; i++) {
-    const pct = (i / GRID * 100).toFixed(2);
-    const hLine = document.createElement('div');
-    hLine.className = 'rig-grid-line h';
-    hLine.style.top = pct + '%';
-    canvas.appendChild(hLine);
-    const vLine = document.createElement('div');
-    vLine.className = 'rig-grid-line v';
-    vLine.style.left = pct + '%';
-    canvas.appendChild(vLine);
+  // Update CSS class so view-specific styles (background, border, etc.) activate
+  canvas.className = 'rig-canvas-wrap view-' + _rigViewMode;
+
+  // ── View label badge ──
+  const VIEW_LABELS = { top: 'Top View', front: 'Front View', side: 'Side View', '3d': '3D View' };
+  const badge = document.createElement('div');
+  badge.className = 'rig-view-badge';
+  badge.textContent = VIEW_LABELS[_rigViewMode] || 'Top View';
+  canvas.appendChild(badge);
+
+  // ── 3D camera controls hint (shown bottom-left) ──
+  if (_rigViewMode === '3d') {
+    const hint = document.createElement('div');
+    hint.className = 'rig-cam-hint';
+    hint.innerHTML = 'Drag = orbit &nbsp;·&nbsp; Shift+drag = pan &nbsp;·&nbsp; Scroll = zoom';
+    canvas.appendChild(hint);
+    // Draw the 3D stage environment (floor grid, walls, ceiling, labels)
+    render3DStage(canvas);
   }
-  // Axis labels
-  const lblL = document.createElement('div');
-  lblL.className = 'rig-axis-label';
-  lblL.style.cssText = 'left:4px;top:50%;transform:translateY(-50%)';
-  lblL.textContent = '← L';
-  canvas.appendChild(lblL);
-  const lblR = document.createElement('div');
-  lblR.className = 'rig-axis-label';
-  lblR.style.cssText = 'right:4px;top:50%;transform:translateY(-50%)';
-  lblR.textContent = 'R →';
-  canvas.appendChild(lblR);
-  const lblT = document.createElement('div');
-  lblT.className = 'rig-axis-label';
-  lblT.style.cssText = 'top:4px;left:50%;transform:translateX(-50%)';
-  lblT.textContent = 'Top';
-  canvas.appendChild(lblT);
-  const lblB = document.createElement('div');
-  lblB.className = 'rig-axis-label';
-  lblB.style.cssText = 'bottom:4px;left:50%;transform:translateX(-50%)';
-  lblB.textContent = 'Bottom';
-  canvas.appendChild(lblB);
 
-  // ── Draw rigging elements ──
-  for (const el of _rigElements) {
-    const div = document.createElement('div');
-    div.className = `rig-element ${el.type}`;
-    div.dataset.rigElId = el.id;
-    if (el.id === _rigSelectedElId) div.classList.add('selected');
+  // ── Floor / ground plane indicator for front and side views ──
+  if (_rigViewMode === 'front' || _rigViewMode === 'side') {
+    const floorPct = 78;
+    const floorLine = document.createElement('div');
+    floorLine.className = 'rig-floor-line-h';
+    floorLine.style.top = floorPct + '%';
+    canvas.appendChild(floorLine);
+    const floorWash = document.createElement('div');
+    floorWash.className = 'rig-floor-wash';
+    canvas.appendChild(floorWash);
+  }
 
-    const wPct = el.width * 100;
-    const hPct = el.height * 100;
-    const xPct = (el.x - el.width / 2) * 100;
-    const yPct = (el.y - el.height / 2) * 100;
-    div.style.left = xPct + '%';
-    div.style.top = yPct + '%';
-    div.style.width = wPct + '%';
-    div.style.height = hPct + '%';
-
-    // Inner content based on type
-    if (el.type === 'truss_h' || el.type === 'truss_v') {
-      div.innerHTML = '<div class="rig-el-pattern"></div>';
-    } else if (el.type === 'stand') {
-      div.innerHTML = '<div class="stand-top"></div><div class="stand-pole"></div><div class="stand-base"></div>';
-    } else if (el.type === 'tbar') {
-      div.innerHTML = '<div class="tbar-cross"></div><div class="tbar-pole"></div>';
+  // Draw flat grid lines (2D views only — 3D uses the SVG stage grid)
+  if (_rigViewMode !== '3d') {
+    const GRID = 8;
+    for (let i = 1; i < GRID; i++) {
+      const pct = (i / GRID * 100).toFixed(2);
+      const hLine = document.createElement('div');
+      hLine.className = 'rig-grid-line h';
+      hLine.style.top = pct + '%';
+      canvas.appendChild(hLine);
+      const vLine = document.createElement('div');
+      vLine.className = 'rig-grid-line v';
+      vLine.style.left = pct + '%';
+      canvas.appendChild(vLine);
     }
+  }
 
-    // Label
-    if (el.label) {
-      const lbl = document.createElement('span');
-      lbl.className = 'rig-el-label';
-      lbl.textContent = el.label;
-      div.appendChild(lbl);
-    }
+  // Axis labels — update text for current view
+  const labels = rigAxisLabels();
+  [
+    { css: 'left:4px;top:50%;transform:translateY(-50%)',    text: labels.l },
+    { css: 'right:4px;top:50%;transform:translateY(-50%)',   text: labels.r },
+    { css: 'top:4px;left:50%;transform:translateX(-50%)',    text: labels.t },
+    { css: 'bottom:4px;left:50%;transform:translateX(-50%)', text: labels.b },
+  ].forEach(({ css, text }) => {
+    const lbl = document.createElement('div');
+    lbl.className = 'rig-axis-label';
+    lbl.style.cssText = css;
+    lbl.textContent = text;
+    canvas.appendChild(lbl);
+  });
 
-    // Resize handles (visible when selected)
-    const rRight = document.createElement('div');
-    rRight.className = 'rig-el-resize r-right';
-    div.appendChild(rRight);
-    const rBottom = document.createElement('div');
-    rBottom.className = 'rig-el-resize r-bottom';
-    div.appendChild(rBottom);
-    const rCorner = document.createElement('div');
-    rCorner.className = 'rig-el-resize r-corner';
-    div.appendChild(rCorner);
-
-    // Delete button (visible when selected)
-    const delBtn = document.createElement('div');
-    delBtn.className = 'rig-el-delete';
-    delBtn.textContent = '✕';
-    delBtn.title = 'Delete rigging element';
-    div.appendChild(delBtn);
-
-    // Event handlers
-    div.addEventListener('mousedown', rigElementMouseDown);
-    delBtn.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      deleteRigElementUI(el.id);
+  // Depth ruler on right edge (shown for front and side views only)
+  if (_rigViewMode === 'front' || _rigViewMode === 'side') {
+    const ruler = document.createElement('div');
+    ruler.className = 'rig-depth-ruler';
+    [{ label: '0', pct: 0 }, { label: '.5', pct: 50 }, { label: '1', pct: 100 }].forEach(({ label, pct }) => {
+      const rl = document.createElement('div');
+      rl.className = 'ruler-label';
+      rl.style.top = pct + '%';
+      rl.textContent = label;
+      ruler.appendChild(rl);
     });
-    rRight.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'right'); });
-    rBottom.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'bottom'); });
-    rCorner.addEventListener('mousedown', (e) => { e.stopPropagation(); rigElementResizeStart(e, el.id, 'corner'); });
-
-    canvas.appendChild(div);
+    canvas.appendChild(ruler);
   }
+
+  // ── Draw rigging elements (SVG projected geometry + hit-area divs) ──
+  renderRigElementsSVG(canvas);
 
   // ── Draw fixture nodes ──
   const fixtures = _allFixtures;
@@ -6792,30 +7476,48 @@ function renderRigLayout() {
 
   for (let i = 0; i < sorted.length; i++) {
     const f = sorted[i];
-    const x = (f.rig_x != null ? f.rig_x : 0.5) * 100;
-    const y = (f.rig_y != null ? f.rig_y : 0.5) * 100;
+    // Project: rig_x=L/R → x, rig_z=height → y, rig_y=depth → z
+    const { px, py, scale } = rigProject(
+      f.rig_x != null ? f.rig_x : 0.5,
+      f.rig_z != null ? f.rig_z : 0.5,
+      f.rig_y != null ? f.rig_y : 0.5
+    );
+    const nodeSize = Math.max(30, Math.round(52 * scale));
     const colorIdx = i % RIG_NODE_COLORS.length;
     const color = RIG_NODE_COLORS[colorIdx];
 
     const node = document.createElement('div');
     node.className = 'rig-node';
     node.dataset.fixtureId = f.id;
-    node.style.left = x + '%';
-    node.style.top = y + '%';
+    node.style.left       = px + '%';
+    node.style.top        = py + '%';
+    node.style.width      = nodeSize + 'px';
+    node.style.height     = nodeSize + 'px';
     node.style.background = color + '33';
-    node.style.border = '2px solid ' + color;
-    node.title = `${f.name}\nU${f.universe} Ch${f.address}\nRig pos: ${(f.rig_x||0).toFixed(2)}, ${(f.rig_y||0).toFixed(2)}`;
+    node.style.border     = '2px solid ' + color;
+    node.title = `${f.name}\nU${f.universe} Ch${f.address}\nx:${(f.rig_x||0).toFixed(2)} depth:${(f.rig_y||0).toFixed(2)} h:${(f.rig_z||0).toFixed(2)}`;
 
     const isMovingHead = f.category === 'moving_head' || f.category === 'moving_head_wash' || f.category === 'moving_head_spot';
-    const iconText = isMovingHead ? '◎' : f.category === 'led_bar' || f.category === 'multi_cell' ? '▥' : '●';
+    const iconText  = isMovingHead ? '◎' : (f.category === 'led_bar' || f.category === 'multi_cell') ? '▥' : '●';
+    const iconSize  = Math.max(8, Math.round(14 * scale));
     node.innerHTML = `
-      <span style="font-size:14px">${iconText}</span>
+      <span style="font-size:${iconSize}px">${iconText}</span>
       <span class="rig-node-label">${esc(f.name)}</span>
       <span class="rig-node-order">${i + 1}</span>`;
+
+    // Depth indicator shown on non-top views
+    if (_rigViewMode !== 'top') {
+      const depthEl = document.createElement('span');
+      depthEl.className = 'rig-node-depth';
+      depthEl.textContent = 'd:' + (f.rig_y != null ? f.rig_y : 0.5).toFixed(2);
+      node.appendChild(depthEl);
+    }
 
     // Drag handlers
     node.addEventListener('mousedown', rigNodeMouseDown);
     node.addEventListener('touchstart', rigNodeTouchStart, { passive: false });
+    // Right-click / long-press to adjust depth (Z)
+    node.addEventListener('contextmenu', (e) => { e.preventDefault(); rigNodeDepthPopup(e, f); });
 
     canvas.appendChild(node);
   }
@@ -6857,12 +7559,12 @@ function rigNodeMouseDown(e) {
     const py = (ev.clientY - rect.top) / rect.height;
     let cx = Math.max(0, Math.min(1, px));
     let cy = Math.max(0, Math.min(1, py));
-    // Try snap
+    // Try snap (in screen-fraction space)
     const snap = findSnapPoint(cx, cy);
     if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
     else { clearSnapGuides(canvas); }
     node.style.left = (cx * 100) + '%';
-    node.style.top = (cy * 100) + '%';
+    node.style.top  = (cy * 100) + '%';
   }
   function onUp() {
     node.classList.remove('dragging');
@@ -6872,8 +7574,11 @@ function rigNodeMouseDown(e) {
     const fId = +node.dataset.fixtureId;
     const f = _allFixtures.find(fx => fx.id === fId);
     if (f) {
-      f.rig_x = parseFloat(node.style.left) / 100;
-      f.rig_y = parseFloat(node.style.top) / 100;
+      // Map final screen position back to 3D coords for the current view
+      const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
+      if ('x' in coords) f.rig_x = coords.x;
+      if ('z' in coords) f.rig_y = coords.z; // rigProject z = depth = rig_y
+      if ('y' in coords) f.rig_z = coords.y; // rigProject y = height  = rig_z
     }
     recalcRigOrder();
   }
@@ -6898,7 +7603,7 @@ function rigNodeTouchStart(e) {
     if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
     else { clearSnapGuides(canvas); }
     node.style.left = (cx * 100) + '%';
-    node.style.top = (cy * 100) + '%';
+    node.style.top  = (cy * 100) + '%';
   }
   function onEnd() {
     node.classList.remove('dragging');
@@ -6908,13 +7613,63 @@ function rigNodeTouchStart(e) {
     const fId = +node.dataset.fixtureId;
     const f = _allFixtures.find(fx => fx.id === fId);
     if (f) {
-      f.rig_x = parseFloat(node.style.left) / 100;
-      f.rig_y = parseFloat(node.style.top) / 100;
+      // Map final screen position back to 3D coords for the current view
+      const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
+      if ('x' in coords) f.rig_x = coords.x;
+      if ('z' in coords) f.rig_y = coords.z; // rigProject z = depth = rig_y
+      if ('y' in coords) f.rig_z = coords.y; // rigProject y = height  = rig_z
     }
     recalcRigOrder();
   }
   node.addEventListener('touchmove', onMove, { passive: false });
   node.addEventListener('touchend', onEnd);
+}
+
+// ── Right-click depth (rig_y) popup for fixture nodes ──
+function rigNodeDepthPopup(e, fixture) {
+  // Remove any existing depth popup
+  document.querySelectorAll('.rig-depth-popup').forEach(p => p.remove());
+
+  const canvas = document.getElementById('rigCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const popLeft = Math.min(e.clientX - rect.left + 8, rect.width - 140);
+  const popTop  = Math.max(e.clientY - rect.top  - 24, 4);
+
+  const popup = document.createElement('div');
+  popup.className = 'rig-depth-popup';
+  popup.style.cssText = `position:absolute;left:${popLeft}px;top:${popTop}px;z-index:20;` +
+    `background:var(--bg-raised);border:1px solid var(--panel-border);border-radius:6px;` +
+    `padding:8px 10px;font-size:11px;min-width:130px;box-shadow:0 4px 16px rgba(0,0,0,.5)`;
+
+  const curDepth = fixture.rig_y != null ? fixture.rig_y : 0.5;
+  popup.innerHTML =
+    `<div style="margin-bottom:5px;font-weight:600;color:var(--text)">${esc(fixture.name)}</div>` +
+    `<div style="margin-bottom:4px;color:var(--text-dim)">Depth (front→back)</div>` +
+    `<div style="display:flex;align-items:center;gap:6px">` +
+      `<input type="range" min="0" max="1" step="0.01" value="${curDepth}" style="flex:1;accent-color:var(--cyan)">` +
+      `<span style="min-width:30px;color:var(--cyan);font-family:var(--mono)" class="rdp-val">${curDepth.toFixed(2)}</span>` +
+    `</div>` +
+    `<div style="font-size:9px;color:var(--text-dim);margin-top:4px">0 = front/audience · 1 = rear</div>`;
+
+  const rangeEl = popup.querySelector('input[type=range]');
+  const valEl   = popup.querySelector('.rdp-val');
+  rangeEl.addEventListener('input', () => {
+    fixture.rig_y = parseFloat(rangeEl.value);
+    valEl.textContent = fixture.rig_y.toFixed(2);
+    renderRigLayout();
+  });
+  rangeEl.addEventListener('change', () => recalcRigOrder());
+
+  // Close when clicking outside
+  function closePopup(ev) {
+    if (!popup.contains(ev.target)) {
+      popup.remove();
+      document.removeEventListener('mousedown', closePopup);
+    }
+  }
+  setTimeout(() => document.addEventListener('mousedown', closePopup), 0);
+
+  canvas.appendChild(popup);
 }
 
 // ── Rigging element drag ──
@@ -6930,16 +7685,41 @@ function rigElementMouseDown(e) {
 
   const canvas = document.getElementById('rigCanvas');
   const rect = canvas.getBoundingClientRect();
-  const startX = (e.clientX - rect.left) / rect.width;
-  const startY = (e.clientY - rect.top) / rect.height;
-  const origX = el.x, origY = el.y;
+
+  // Record start mouse position in screen-fraction space AND original 3D fields
+  const startSx = (e.clientX - rect.left) / rect.width * 100;
+  const startSy = (e.clientY - rect.top)  / rect.height * 100;
+  const origX = el.x, origY = el.y, origZ = el.z ?? 0.5;
   div.classList.add('dragging');
 
   function onMove(ev) {
-    const mx = (ev.clientX - rect.left) / rect.width;
-    const my = (ev.clientY - rect.top) / rect.height;
-    el.x = Math.max(el.width / 2, Math.min(1 - el.width / 2, origX + (mx - startX)));
-    el.y = Math.max(el.height / 2, Math.min(1 - el.height / 2, origY + (my - startY)));
+    const mx = (ev.clientX - rect.left) / rect.width * 100;
+    const my = (ev.clientY - rect.top)  / rect.height * 100;
+
+    if (_rigViewMode === '3d') {
+      // In 3D mode: use proper camera-inverse so dragging follows the camera orientation.
+      // Compute screen-fraction delta (0–1 space) from the start position.
+      const dsx = (mx - startSx) / 100;
+      const dsy = (my - startSy) / 100;
+      const d = rigElement3DDelta(dsx, dsy, { x: origX, y: origY, z: origZ });
+      el.x = Math.max(el.width  / 2, Math.min(1 - el.width  / 2, origX + d.dx));
+      el.y = Math.max(0,             Math.min(1,                  origY + d.dy));
+      el.z = Math.max(0,             Math.min(1,                  origZ + d.dz));
+    } else {
+      // 2D views: use axis-aligned unproject
+      const startC = rigUnproject(startSx, startSy);
+      const currC  = rigUnproject(mx, my);
+      if ('x' in startC) {
+        el.x = Math.max(el.width  / 2, Math.min(1 - el.width  / 2, origX + (currC.x - startC.x)));
+      }
+      if ('z' in startC) {
+        el.y = Math.max(el.height / 2, Math.min(1 - el.height / 2, origY + (currC.z - startC.z)));
+      }
+      if ('y' in startC) {
+        el.z = Math.max(0, Math.min(1, origZ + (currC.y - startC.y)));
+      }
+    }
+
     renderRigLayout();
   }
   function onUp() {
@@ -7005,7 +7785,7 @@ async function saveRigElementToServer(el) {
     await fetch(`/api/rig-elements/${el.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ x: el.x, y: el.y, width: el.width, height: el.height, rotation: el.rotation })
+      body: JSON.stringify({ x: el.x, y: el.y, z: el.z ?? 0.5, width: el.width, height: el.height, rotation: el.rotation })
     });
   } catch (e) { console.warn('Failed to save rig element', e); }
 }
@@ -7033,10 +7813,83 @@ document.getElementById('btnRigAddTBar').addEventListener('click', () => addRigE
 
 // Deselect rigging when clicking empty canvas area
 document.getElementById('rigCanvas').addEventListener('mousedown', (e) => {
+  // ── 3D camera navigation (orbit / pan) on canvas background ──
+  if (_rigViewMode === '3d') {
+    const isBg = e.target.id === 'rigCanvas' ||
+                 e.target.classList.contains('rig-grid-line') ||
+                 e.target.classList.contains('rig-axis-label') ||
+                 e.target.classList.contains('rig-view-badge') ||
+                 e.target.classList.contains('rig-floor-line-h') ||
+                 e.target.classList.contains('rig-floor-wash') ||
+                 e.target.classList.contains('rig-cam-hint');
+    if (!isBg) return;  // let fixture/element handlers take it
+
+    e.preventDefault();
+    const isPan  = e.button === 1 || (e.button === 0 && e.shiftKey);
+    const isOrbit = e.button === 0 && !e.shiftKey;
+
+    const startX = e.clientX, startY = e.clientY;
+    const origAz = _rigCam.azimuth, origEl = _rigCam.elevation;
+    const origPX = _rigCam.panX,   origPY = _rigCam.panY;
+
+    function onMove3D(ev) {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (isOrbit) {
+        _rigCam.azimuth   = origAz + dx * 0.4;
+        _rigCam.elevation = Math.max(-85, Math.min(85, origEl - dy * 0.3));
+      } else if (isPan) {
+        _rigCam.panX = origPX + dx / 600;
+        _rigCam.panY = origPY + dy / 600;
+      }
+      renderRigLayout();
+    }
+    function onUp3D() {
+      document.removeEventListener('mousemove', onMove3D);
+      document.removeEventListener('mouseup',   onUp3D);
+    }
+    document.addEventListener('mousemove', onMove3D);
+    document.addEventListener('mouseup',   onUp3D);
+    return;
+  }
+
+  // ── Non-3D: deselect rigging on background click ──
   if (e.target.id === 'rigCanvas' || e.target.classList.contains('rig-grid-line') || e.target.classList.contains('rig-axis-label')) {
     if (_rigSelectedElId) { _rigSelectedElId = null; renderRigLayout(); }
   }
 });
+
+// ── 3D zoom via scroll wheel ──
+document.getElementById('rigCanvas').addEventListener('wheel', (e) => {
+  if (_rigViewMode !== '3d') return;
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.92 : 1.09;
+  _rigCam.zoom = Math.max(0.2, Math.min(5, _rigCam.zoom * delta));
+  renderRigLayout();
+}, { passive: false });
+
+// ── 3D touch orbit ──
+document.getElementById('rigCanvas').addEventListener('touchstart', (e) => {
+  if (_rigViewMode !== '3d') return;
+  if (e.touches.length !== 1) return;
+  const t0 = e.touches[0];
+  const startX = t0.clientX, startY = t0.clientY;
+  const origAz = _rigCam.azimuth, origEl = _rigCam.elevation;
+
+  function onTouchMove(ev) {
+    if (ev.touches.length !== 1) return;
+    const dx = ev.touches[0].clientX - startX;
+    const dy = ev.touches[0].clientY - startY;
+    _rigCam.azimuth   = origAz + dx * 0.4;
+    _rigCam.elevation = Math.max(-85, Math.min(85, origEl - dy * 0.3));
+    renderRigLayout();
+  }
+  function onTouchEnd() {
+    document.removeEventListener('touchmove', onTouchMove);
+    document.removeEventListener('touchend',  onTouchEnd);
+  }
+  document.addEventListener('touchmove', onTouchMove, { passive: true });
+  document.addEventListener('touchend',  onTouchEnd);
+}, { passive: true });
 
 function recalcRigOrder() {
   // Recalculate rig_order based on left-to-right X position
@@ -7122,6 +7975,18 @@ document.getElementById('btnRigArrangeCircle').addEventListener('click', () => {
   recalcRigOrder();
 });
 
+document.getElementById('btnRigArrangeFrontBack').addEventListener('click', () => {
+  if (!_allFixtures.length) return;
+  // Distribute fixtures evenly front-to-back by varying rig_y (depth: 0=front, 1=rear)
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0) || a.address - b.address);
+  const n = sorted.length;
+  const pad = 0.1;
+  sorted.forEach((f, i) => {
+    f.rig_y = n > 1 ? pad + i * (1 - 2 * pad) / (n - 1) : 0.5;
+  });
+  recalcRigOrder();
+});
+
 // ── Rig Layout presets (save/load named snapshots) ──
 let _rigLayouts = [];
 
@@ -7132,6 +7997,7 @@ function _buildRigSnapshot() {
       id: f.id,
       rig_x: f.rig_x != null ? f.rig_x : 0.5,
       rig_y: f.rig_y != null ? f.rig_y : 0.5,
+      rig_z: f.rig_z != null ? f.rig_z : 0.5,
       rig_order: f.rig_order != null ? f.rig_order : 0
     })),
     elements: _rigElements.map(el => ({
@@ -7148,6 +8014,7 @@ async function _saveCurrentRigToDB() {
     id: f.id,
     rig_x: f.rig_x != null ? f.rig_x : 0.5,
     rig_y: f.rig_y != null ? f.rig_y : 0.5,
+    rig_z: f.rig_z != null ? f.rig_z : 0.5,
     rig_order: f.rig_order != null ? f.rig_order : 0
   }));
   await fetch('/api/fixtures/rig-layout', {
@@ -7273,6 +8140,7 @@ document.getElementById('btnRigSaveLayout').addEventListener('click', async () =
     id: f.id,
     rig_x: f.rig_x != null ? f.rig_x : 0.5,
     rig_y: f.rig_y != null ? f.rig_y : 0.5,
+    rig_z: f.rig_z != null ? f.rig_z : 0.5,
     rig_order: f.rig_order != null ? f.rig_order : 0
   }));
   const btn = document.getElementById('btnRigSaveLayout');
