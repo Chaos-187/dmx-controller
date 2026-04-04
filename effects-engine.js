@@ -52,7 +52,7 @@ function hslToRgb(h, s, l) {
 const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
 const MULTICELL_EFFECT_TYPES   = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
-const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow']);
+const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu']);
 const PAN_TILT = new Set(['pan','tilt']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
@@ -671,6 +671,88 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (channelType === 'blue') return b;
       if (channelType === 'dimmer') return 255;
       return null;
+    }
+
+    // ── Rig Depth Chase: chase sweeps front-to-back using rig_y (depth) ─
+    case 'rig_depth_chase': {
+      if (channelType === 'dimmer') return baseValues[channelType] ?? 255;
+      const speed  = params.speed || data.speed || 1;
+      const width  = params.width || data.width || 0.3;
+      const tail   = params.tail  || data.tail  || 0.2;
+      const dir    = params.direction || data.direction || 'front_back';
+      const val    = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+      const depth  = channelCtx._rigPositionY ?? 0.5;  // rig_y: 0=front/audience, 1=back/stage
+
+      const cycle = (progress * speed) % 1;
+      let headPos;
+      if      (dir === 'back_front') headPos = 1 - cycle;
+      else if (dir === 'bounce')     headPos = cycle < 0.5 ? cycle * 2 : (1 - cycle) * 2;
+      else                            headPos = cycle; // front_back
+
+      const halfW = width / 2;
+      const dist  = Math.abs(depth - headPos);
+      if (dist <= halfW) return val;
+      if (tail > 0 && dist <= halfW + tail) return val * (1 - (dist - halfW) / tail);
+      return 0;
+    }
+
+    // ── Rig Depth Wave: color/intensity wave rolling front-to-back ──────
+    case 'rig_depth_wave': {
+      const speed      = params.speed      || data.speed      || 1;
+      const wavelength = params.wavelength || data.wavelength || 1.0;
+      const dir        = params.direction  || data.direction  || 'front_back';
+      let depth = channelCtx._rigPositionY ?? 0.5;
+      if (dir === 'back_front') depth = 1 - depth;
+
+      const hue = ((depth / wavelength + progress * speed) * 360) % 360;
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      if (channelType === 'red')    return r;
+      if (channelType === 'green')  return g;
+      if (channelType === 'blue')   return b;
+      if (channelType === 'dimmer') return 255;
+      return null;
+    }
+
+    // ── Rig Round Robin: fixtures light one-by-one in rig-order sequence ─
+    case 'rig_round_robin': {
+      const speed  = params.speed  || data.speed  || 1;
+      const window = params.window || data.window || 1;  // # fixtures on simultaneously
+      const tail   = params.tail   || data.tail   || 0;  // extra fade-out fixtures
+      const dir    = params.direction || data.direction || 'forward'; // forward | reverse | ping_pong
+      const val    = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+
+      const N         = channelCtx._rigFixtureCount || 1;
+      let   rigOrder  = channelCtx._rigOrder ?? 0;
+      if (dir === 'reverse') rigOrder = N - 1 - rigOrder;
+      else if (dir === 'ping_pong') {
+        const half = N - 1;
+        const raw  = (progress * speed * N * 2) % (N * 2);
+        // Handled via headPos below — no change to rigOrder needed here
+      }
+
+      let headPos;
+      if (dir === 'ping_pong') {
+        const raw = (progress * speed * N * 2) % (N * 2);
+        headPos = raw < N ? raw : N * 2 - raw;
+      } else {
+        headPos = (progress * speed * N) % N;
+        if (dir === 'reverse') headPos = (N - headPos) % N;
+      }
+
+      const orderToUse = dir === 'reverse' ? (N - 1 - (channelCtx._rigOrder ?? 0)) : (channelCtx._rigOrder ?? 0);
+      // Distance in circular rig order space
+      let dist = Math.abs(orderToUse - headPos);
+      if (dist > N / 2) dist = N - dist; // wrap around for circular feel
+
+      const halfW = window / 2;
+      if (channelType === 'dimmer') {
+        if (dist <= halfW) return 255;
+        if (tail > 0 && dist <= halfW + tail) return Math.round(255 * (1 - (dist - halfW) / tail));
+        return 0;
+      }
+      if (dist <= halfW) return val;
+      if (tail > 0 && dist <= halfW + tail) return Math.round(val * (1 - (dist - halfW) / tail));
+      return 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

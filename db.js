@@ -714,6 +714,7 @@ function init() {
   seedNewEffectsV3();
   seedNewEffectsV4();
   seedNewEffectsV5();
+  seedNewEffectsV6();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -724,7 +725,7 @@ function init() {
   db.exec("UPDATE effects SET fixture_target = 'multicell' WHERE fixture_target = 'all' AND type IN ('segments','ripple','cell_strobe','gradient')");
   db.exec("UPDATE effects SET fixture_target = 'moving_head' WHERE fixture_target = 'all' AND type IN ('pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod')");
   // Rig-wide spatial effects target all fixtures with color channels
-  db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow')");
+  db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin')");
   // Sound-reactive effects
   db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu')");
 
@@ -1046,6 +1047,43 @@ function seedNewEffectsV5() {
   });
   tx();
   if (added > 0) console.log(`[DB] Added ${added} new effects (v5 — sound-reactive)`);
+}
+
+function seedNewEffectsV6() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // ── Rig Depth Chase: sweep front-to-back using rig_y ────────────────
+    ['Depth Chase (F→B)',       'rig_depth_chase', 'color', 'rig', J({ direction:'front_back', speed:1,   width:0.3, tail:0.2 }), 8],
+    ['Depth Chase (B→F)',       'rig_depth_chase', 'color', 'rig', J({ direction:'back_front', speed:1,   width:0.3, tail:0.2 }), 8],
+    ['Depth Chase Bounce',      'rig_depth_chase', 'color', 'rig', J({ direction:'bounce',     speed:0.8, width:0.35, tail:0.2 }), 8],
+
+    // ── Rig Depth Wave: rolling colour wave front-to-back ───────────────
+    ['Depth Color Wave (F→B)',  'rig_depth_wave',  'color', 'rig', J({ direction:'front_back', speed:0.5, wavelength:1 }), 8],
+    ['Depth Color Wave (B→F)',  'rig_depth_wave',  'color', 'rig', J({ direction:'back_front', speed:0.5, wavelength:1 }), 8],
+
+    // ── Rig Round Robin: sequential one-by-one fixture firing ───────────
+    ['Round Robin',             'rig_round_robin', 'color', 'rig', J({ direction:'forward',   speed:1, window:1, tail:1 }), 8],
+    ['Round Robin (Fast)',      'rig_round_robin', 'color', 'rig', J({ direction:'forward',   speed:3, window:1, tail:0 }), 4],
+    ['Round Robin (Reverse)',   'rig_round_robin', 'color', 'rig', J({ direction:'reverse',   speed:1, window:1, tail:1 }), 8],
+    ['Round Robin (Ping Pong)', 'rig_round_robin', 'color', 'rig', J({ direction:'ping_pong', speed:1, window:1, tail:2 }), 8],
+    ['Round Robin (Wide)',      'rig_round_robin', 'color', 'rig', J({ direction:'forward',   speed:0.7, window:3, tail:2 }), 8],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v6 — depth chase, depth wave, round robin)`);
 }
 
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────

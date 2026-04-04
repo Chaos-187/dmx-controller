@@ -3094,6 +3094,17 @@
                     <option value="cell_strobe">Cell Strobe</option>
                     <option value="gradient">Gradient</option>
                   </optgroup>
+                  <optgroup label="Rig-wide Spatial">
+                    <option value="rig_chase">Rig Chase (L/R)</option>
+                    <option value="rig_sweep">Rig Sweep (L/R)</option>
+                    <option value="rig_color_wave">Rig Color Wave (L/R)</option>
+                    <option value="rig_alternate">Rig Alternate</option>
+                    <option value="rig_converge">Rig Converge / Diverge</option>
+                    <option value="rig_rainbow">Rig Rainbow</option>
+                    <option value="rig_depth_chase">Rig Depth Chase (Front/Back)</option>
+                    <option value="rig_depth_wave">Rig Depth Wave (Front/Back)</option>
+                    <option value="rig_round_robin">Rig Round Robin</option>
+                  </optgroup>
                   <optgroup label="Moving Head">
                     <option value="pan_sweep">Pan Sweep</option>
                     <option value="tilt_sweep">Tilt Sweep</option>
@@ -6724,7 +6735,7 @@ let _rigCam = { ...RIG_CAM_DEFAULT };
 // ── Rigging element defaults per type ──
 const RIG_ELEMENT_DEFAULTS = {
   truss_h: { width: 0.5,  height: 0.015, label: 'Truss' },
-  truss_v: { width: 0.015, height: 0.35,  label: 'Truss' },
+  truss_v: { width: 0.07, height: 0.35,  label: 'Truss' },
   stand:   { width: 0.025, height: 0.22,  label: 'Stand' },
   tbar:    { width: 0.14,  height: 0.22,  label: 'T-Bar' },
 };
@@ -6883,9 +6894,11 @@ function getElementSnapPoints(el, count) {
       pts.push({ x: el.x + (t - 0.5) * el.width, y: el.y, z: elZ });
     }
   } else if (el.type === 'truss_v') {
+    // Vertical tower: span in the height axis (el.z ± el.height/2)
+    const elZ = el.z ?? 0.5;
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      pts.push({ x: el.x, y: el.y + (t - 0.5) * el.height, z: elZ });
+      pts.push({ x: el.x, y: el.y, z: elZ - el.height / 2 + t * el.height });
     }
   } else if (el.type === 'stand') {
     pts.push({ x: el.x, y: el.y, z: elZ });
@@ -7140,7 +7153,9 @@ function renderRigElementsSVG(canvas) {
     const strokeSel  = selected ? '#fff' : null;
     // Truss chord gap — used for hit-area sizing and label positioning even outside the truss block
     const _trussSpan   = (el.type === 'truss_h') ? el.width : el.height;
-    const CHORD_HALF   = _trussSpan * 0.10;  // half-gap between chord centres
+    // truss_h: chord gap is proportional to span (10%)
+    // truss_v: el.width IS the tower width; chord half-gap = el.width / 2
+    const CHORD_HALF   = el.type === 'truss_v' ? el.width / 2 : _trussSpan * 0.10;
 
     // ─────────────────────────────────────────────────
     // Build view-correct geometry for each element type
@@ -7154,89 +7169,140 @@ function renderRigElementsSVG(canvas) {
       // truss_v spans the Z axis (front↔back),  chords separated in Y (height)
       const isH = el.type === 'truss_h';
       const span     = isH ? el.width  : el.height; // length of span
-      const xl = isH ? cx - hw : cx;     // span start/end in X
+      const xl = isH ? cx - hw : cx;     // span start/end in X (truss_h only)
       const xr = isH ? cx + hw : cx;
-      const zn = isH ? cz      : cz - hh; // span start/end in Z
-      const zf = isH ? cz      : cz + hh;
 
       // Chord geometry scales with span (CHORD_HALF already defined above)
-      const CHORD_R    = span * 0.024;  // tube visual radius (half-height of chord rect)
-      const CHORD_DEEP = span * 0.020;  // tube depth in the Z axis (for 3D side face)
+      const CHORD_R    = span * 0.024;  // tube visual radius
+      const CHORD_DEEP = span * 0.020;  // tube cross-section depth
 
+      // truss_h: two chords stacked in Y (topY / botY), spanning X (xl → xr)
       const topY = cy - CHORD_HALF;  // top chord Y centre
       const botY = cy + CHORD_HALF;  // bottom chord Y centre
+      // truss_v: two chords separated in X (vLx / vRx), spanning Y (vTop → vBot)
+      const vTop = cy - hh;            // top    of tower in Y
+      const vBot = cy + hh;            // bottom of tower in Y
+      const vLx  = cx - CHORD_HALF;   // left  chord X centre
+      const vRx  = cx + CHORD_HALF;   // right chord X centre
+      const vCR  = Math.max(CHORD_R, 0.015); // minimum visible radius
 
       if (is3D) {
-        // ─ 3D: draw both chord boxes with top + front faces, then web bracing ─
-        // Top chord – top face
-        addFace(svg, [pt(xl,topY-CHORD_R,zn-CHORD_DEEP), pt(xr,topY-CHORD_R,zf-CHORD_DEEP),
-                      pt(xr,topY-CHORD_R,zf+CHORD_DEEP), pt(xl,topY-CHORD_R,zn+CHORD_DEEP)],
-                '#607d8b','#cfd8dc', strokeSel, 1, true);
-        // Top chord – front face
-        addFace(svg, [pt(xl,topY-CHORD_R,zn-CHORD_DEEP), pt(xr,topY-CHORD_R,zf-CHORD_DEEP),
-                      pt(xr,topY+CHORD_R,zf-CHORD_DEEP), pt(xl,topY+CHORD_R,zn-CHORD_DEEP)],
-                '#455a64','#90a4ae', strokeSel, 1, false);
-        // Bottom chord – top face
-        addFace(svg, [pt(xl,botY-CHORD_R,zn-CHORD_DEEP), pt(xr,botY-CHORD_R,zf-CHORD_DEEP),
-                      pt(xr,botY-CHORD_R,zf+CHORD_DEEP), pt(xl,botY-CHORD_R,zn+CHORD_DEEP)],
-                '#607d8b','#cfd8dc', strokeSel, 1, true);
-        // Bottom chord – front face
-        addFace(svg, [pt(xl,botY-CHORD_R,zn-CHORD_DEEP), pt(xr,botY-CHORD_R,zf-CHORD_DEEP),
-                      pt(xr,botY+CHORD_R,zf-CHORD_DEEP), pt(xl,botY+CHORD_R,zn-CHORD_DEEP)],
-                '#455a64','#90a4ae', strokeSel, 1, false);
-        // End caps (left)
-        addFace(svg, [pt(xl,topY-CHORD_R,zn-CHORD_DEEP),pt(xl,topY-CHORD_R,zn+CHORD_DEEP),
-                      pt(xl,topY+CHORD_R,zn+CHORD_DEEP),pt(xl,topY+CHORD_R,zn-CHORD_DEEP)],
-                '#37474f','#607d8b', strokeSel, 1, false);
-        addFace(svg, [pt(xl,botY-CHORD_R,zn-CHORD_DEEP),pt(xl,botY-CHORD_R,zn+CHORD_DEEP),
-                      pt(xl,botY+CHORD_R,zn+CHORD_DEEP),pt(xl,botY+CHORD_R,zn-CHORD_DEEP)],
-                '#37474f','#607d8b', strokeSel, 1, false);
-        // End caps (right/far end)
-        addFace(svg, [pt(xr,topY-CHORD_R,zf-CHORD_DEEP),pt(xr,topY-CHORD_R,zf+CHORD_DEEP),
-                      pt(xr,topY+CHORD_R,zf+CHORD_DEEP),pt(xr,topY+CHORD_R,zf-CHORD_DEEP)],
-                '#37474f','#607d8b', strokeSel, 1, false);
-        addFace(svg, [pt(xr,botY-CHORD_R,zf-CHORD_DEEP),pt(xr,botY-CHORD_R,zf+CHORD_DEEP),
-                      pt(xr,botY+CHORD_R,zf+CHORD_DEEP),pt(xr,botY+CHORD_R,zf-CHORD_DEEP)],
-                '#37474f','#607d8b', strokeSel, 1, false);
-        // Web bracing on front face plane (z = zn-CHORD_DEEP)
-        const zFront = isH ? cz - CHORD_DEEP : cz - hh - CHORD_DEEP;
-        addTrussWeb(svg, pt(xl, topY, zFront), pt(xr, topY, zFront),
-                         pt(xr, botY, zFront), pt(xl, botY, zFront));
+        if (isH) {
+          // ─ truss_h 3D: tube runs along X, cross-section depth offset in Z ─
+          addFace(svg, [pt(xl,topY-CHORD_R,cz-CHORD_DEEP), pt(xr,topY-CHORD_R,cz-CHORD_DEEP),
+                        pt(xr,topY-CHORD_R,cz+CHORD_DEEP), pt(xl,topY-CHORD_R,cz+CHORD_DEEP)],
+                  '#607d8b','#cfd8dc', strokeSel, 1, true);
+          addFace(svg, [pt(xl,topY-CHORD_R,cz-CHORD_DEEP), pt(xr,topY-CHORD_R,cz-CHORD_DEEP),
+                        pt(xr,topY+CHORD_R,cz-CHORD_DEEP), pt(xl,topY+CHORD_R,cz-CHORD_DEEP)],
+                  '#455a64','#90a4ae', strokeSel, 1, false);
+          addFace(svg, [pt(xl,botY-CHORD_R,cz-CHORD_DEEP), pt(xr,botY-CHORD_R,cz-CHORD_DEEP),
+                        pt(xr,botY-CHORD_R,cz+CHORD_DEEP), pt(xl,botY-CHORD_R,cz+CHORD_DEEP)],
+                  '#607d8b','#cfd8dc', strokeSel, 1, true);
+          addFace(svg, [pt(xl,botY-CHORD_R,cz-CHORD_DEEP), pt(xr,botY-CHORD_R,cz-CHORD_DEEP),
+                        pt(xr,botY+CHORD_R,cz-CHORD_DEEP), pt(xl,botY+CHORD_R,cz-CHORD_DEEP)],
+                  '#455a64','#90a4ae', strokeSel, 1, false);
+          addFace(svg, [pt(xl,topY-CHORD_R,cz-CHORD_DEEP),pt(xl,topY-CHORD_R,cz+CHORD_DEEP),
+                        pt(xl,topY+CHORD_R,cz+CHORD_DEEP),pt(xl,topY+CHORD_R,cz-CHORD_DEEP)],
+                  '#37474f','#607d8b', strokeSel, 1, false);
+          addFace(svg, [pt(xl,botY-CHORD_R,cz-CHORD_DEEP),pt(xl,botY-CHORD_R,cz+CHORD_DEEP),
+                        pt(xl,botY+CHORD_R,cz+CHORD_DEEP),pt(xl,botY+CHORD_R,cz-CHORD_DEEP)],
+                  '#37474f','#607d8b', strokeSel, 1, false);
+          addFace(svg, [pt(xr,topY-CHORD_R,cz-CHORD_DEEP),pt(xr,topY-CHORD_R,cz+CHORD_DEEP),
+                        pt(xr,topY+CHORD_R,cz+CHORD_DEEP),pt(xr,topY+CHORD_R,cz-CHORD_DEEP)],
+                  '#37474f','#607d8b', strokeSel, 1, false);
+          addFace(svg, [pt(xr,botY-CHORD_R,cz-CHORD_DEEP),pt(xr,botY-CHORD_R,cz+CHORD_DEEP),
+                        pt(xr,botY+CHORD_R,cz+CHORD_DEEP),pt(xr,botY+CHORD_R,cz-CHORD_DEEP)],
+                  '#37474f','#607d8b', strokeSel, 1, false);
+          addTrussWeb(svg, pt(xl,topY,cz-CHORD_DEEP), pt(xr,topY,cz-CHORD_DEEP),
+                           pt(xr,botY,cz-CHORD_DEEP), pt(xl,botY,cz-CHORD_DEEP));
+        } else {
+          // ─ truss_v 3D: vertical tower — two chord tubes separated in X, running in Y ─
+          // Front faces
+          addFace(svg, [pt(vLx-vCR,vTop,cz-CHORD_DEEP), pt(vLx+vCR,vTop,cz-CHORD_DEEP),
+                        pt(vLx+vCR,vBot,cz-CHORD_DEEP), pt(vLx-vCR,vBot,cz-CHORD_DEEP)],
+                  '#455a64','#90a4ae', strokeSel, 1, false);
+          addFace(svg, [pt(vRx-vCR,vTop,cz-CHORD_DEEP), pt(vRx+vCR,vTop,cz-CHORD_DEEP),
+                        pt(vRx+vCR,vBot,cz-CHORD_DEEP), pt(vRx-vCR,vBot,cz-CHORD_DEEP)],
+                  '#455a64','#90a4ae', strokeSel, 1, false);
+          // Inner faces (facing each other) — lighter to indicate the inward-facing side
+          addFace(svg, [pt(vLx+vCR,vTop,cz-CHORD_DEEP), pt(vLx+vCR,vTop,cz+CHORD_DEEP),
+                        pt(vLx+vCR,vBot,cz+CHORD_DEEP), pt(vLx+vCR,vBot,cz-CHORD_DEEP)],
+                  '#78909c','#cfd8dc', strokeSel, 1, false);
+          addFace(svg, [pt(vRx-vCR,vTop,cz-CHORD_DEEP), pt(vRx-vCR,vTop,cz+CHORD_DEEP),
+                        pt(vRx-vCR,vBot,cz+CHORD_DEEP), pt(vRx-vCR,vBot,cz-CHORD_DEEP)],
+                  '#78909c','#cfd8dc', strokeSel, 1, false);
+          // Top + bottom caps
+          addFace(svg, [pt(vLx-vCR,vTop,cz-CHORD_DEEP), pt(vLx+vCR,vTop,cz-CHORD_DEEP),
+                        pt(vLx+vCR,vTop,cz+CHORD_DEEP), pt(vLx-vCR,vTop,cz+CHORD_DEEP)],
+                  '#607d8b','#cfd8dc', strokeSel, 1, true);
+          addFace(svg, [pt(vLx-vCR,vBot,cz-CHORD_DEEP), pt(vLx+vCR,vBot,cz-CHORD_DEEP),
+                        pt(vLx+vCR,vBot,cz+CHORD_DEEP), pt(vLx-vCR,vBot,cz+CHORD_DEEP)],
+                  '#607d8b','#cfd8dc', strokeSel, 1, true);
+          addFace(svg, [pt(vRx-vCR,vTop,cz-CHORD_DEEP), pt(vRx+vCR,vTop,cz-CHORD_DEEP),
+                        pt(vRx+vCR,vTop,cz+CHORD_DEEP), pt(vRx-vCR,vTop,cz+CHORD_DEEP)],
+                  '#607d8b','#cfd8dc', strokeSel, 1, true);
+          addFace(svg, [pt(vRx-vCR,vBot,cz-CHORD_DEEP), pt(vRx+vCR,vBot,cz-CHORD_DEEP),
+                        pt(vRx+vCR,vBot,cz+CHORD_DEEP), pt(vRx-vCR,vBot,cz+CHORD_DEEP)],
+                  '#607d8b','#cfd8dc', strokeSel, 1, true);
+          // Web bracing: tl=leftTop, tr=leftBot, br=rightBot, bl=rightTop
+          // → spanPct = tower height so diagonals run horizontally between chords (sideways zig)
+          addTrussWeb(svg, pt(vLx,vTop,cz-CHORD_DEEP), pt(vLx,vBot,cz-CHORD_DEEP),
+                           pt(vRx,vBot,cz-CHORD_DEEP), pt(vRx,vTop,cz-CHORD_DEEP));
+        }
 
       } else if (_rigViewMode === 'top') {
-        // Top-down: both chords overlap; show as a bar with width=span, thickness=CHORD_HALF*2
-        // Use CHORD_HALF so top-view height matches the front-view chord gap
-        const BAR_R = CHORD_HALF;
-        const tl2 = pt(xl, cy, cz - BAR_R), tr2 = pt(xr, cy, cz - BAR_R);
-        const bl2 = pt(xl, cy, cz + BAR_R), br2 = pt(xr, cy, cz + BAR_R);
-        addChordTube(svg, tl2, tr2, br2, bl2, strokeSel);
-        // Centre dividing line shows dual-chord construction
-        addLine(svg, pt(xl,cy,cz), pt(xr,cy,cz), 'rgba(0,0,0,0.35)', '0.25');
+        if (isH) {
+          // truss_h spans X → show as horizontal bar with Z-thickness
+          addChordTube(svg, pt(xl,cy,cz-CHORD_HALF), pt(xr,cy,cz-CHORD_HALF),
+                            pt(xr,cy,cz+CHORD_HALF), pt(xl,cy,cz+CHORD_HALF), strokeSel);
+          addLine(svg, pt(xl,cy,cz), pt(xr,cy,cz), 'rgba(0,0,0,0.35)', '0.25');
+        } else {
+          // truss_v = vertical tower: seen from above it’s two small chord footprints side-by-side in X
+          const r = vCR;
+          addChordTube(svg, pt(vLx-r,cy,cz-r), pt(vLx+r,cy,cz-r),
+                            pt(vLx+r,cy,cz+r), pt(vLx-r,cy,cz+r), strokeSel);
+          addChordTube(svg, pt(vRx-r,cy,cz-r), pt(vRx+r,cy,cz-r),
+                            pt(vRx+r,cy,cz+r), pt(vRx-r,cy,cz+r), strokeSel);
+          addLine(svg, pt(vLx,cy,cz), pt(vRx,cy,cz), 'rgba(0,0,0,0.35)', '0.3');
+        }
 
       } else if (_rigViewMode === 'front') {
-        // Front view: two chord tubes stacked vertically with web between them
-        addChordTube(svg, pt(xl,topY-CHORD_R,cz), pt(xr,topY-CHORD_R,cz),
-                          pt(xr,topY+CHORD_R,cz), pt(xl,topY+CHORD_R,cz), strokeSel);
-        addChordTube(svg, pt(xl,botY-CHORD_R,cz), pt(xr,botY-CHORD_R,cz),
-                          pt(xr,botY+CHORD_R,cz), pt(xl,botY+CHORD_R,cz), strokeSel);
-        addTrussWeb(svg, pt(xl,topY,cz), pt(xr,topY,cz), pt(xr,botY,cz), pt(xl,botY,cz));
+        if (isH) {
+          // truss_h: full face — two horizontal chord tubes + web
+          addChordTube(svg, pt(xl,topY-CHORD_R,cz), pt(xr,topY-CHORD_R,cz),
+                            pt(xr,topY+CHORD_R,cz), pt(xl,topY+CHORD_R,cz), strokeSel);
+          addChordTube(svg, pt(xl,botY-CHORD_R,cz), pt(xr,botY-CHORD_R,cz),
+                            pt(xr,botY+CHORD_R,cz), pt(xl,botY+CHORD_R,cz), strokeSel);
+          addTrussWeb(svg, pt(xl,topY,cz), pt(xr,topY,cz), pt(xr,botY,cz), pt(xl,botY,cz));
+        } else {
+          // truss_v front face: two vertical chord rects with inner-facing highlight strips
+          // Main chord body
+          addFace(svg, [pt(vLx-vCR,vTop,cz), pt(vLx+vCR,vTop,cz),
+                        pt(vLx+vCR,vBot,cz), pt(vLx-vCR,vBot,cz)], '#6e8490','#b8c8d0', strokeSel, 1, true);
+          addFace(svg, [pt(vRx-vCR,vTop,cz), pt(vRx+vCR,vTop,cz),
+                        pt(vRx+vCR,vBot,cz), pt(vRx-vCR,vBot,cz)], '#6e8490','#b8c8d0', strokeSel, 1, true);
+          // Inner specular highlight strip (inner 30% of each tube width, facing the centre)
+          addFace(svg, [pt(vLx+vCR*0.4,vTop,cz), pt(vLx+vCR,vTop,cz),
+                        pt(vLx+vCR,vBot,cz), pt(vLx+vCR*0.4,vBot,cz)], '#d0dce3','#eaf0f4', null, 0.55);
+          addFace(svg, [pt(vRx-vCR,vTop,cz), pt(vRx-vCR*0.4,vTop,cz),
+                        pt(vRx-vCR*0.4,vBot,cz), pt(vRx-vCR,vBot,cz)], '#d0dce3','#eaf0f4', null, 0.55);
+          // Web: tl=leftTop tr=leftBot br=rightBot bl=rightTop → sideways horizontal zig between chords
+          addTrussWeb(svg, pt(vLx,vTop,cz), pt(vLx,vBot,cz), pt(vRx,vBot,cz), pt(vRx,vTop,cz));
+        }
 
       } else {
-        // Side view: truss_h appears as two stacked circles; truss_v spans as full truss
+        // Side view
         if (isH) {
-          // Small square pair — truss seen end-on
+          // truss_h end-on: two small squares
           const s = CHORD_R;
           addChordTube(svg, pt(cx,topY-s,cz-s), pt(cx,topY-s,cz+s),
                             pt(cx,topY+s,cz+s), pt(cx,topY+s,cz-s), strokeSel);
           addChordTube(svg, pt(cx,botY-s,cz-s), pt(cx,botY-s,cz+s),
                             pt(cx,botY+s,cz+s), pt(cx,botY+s,cz-s), strokeSel);
         } else {
-          // truss_v seen from the side — spans depth → full truss visible
-          addChordTube(svg, pt(cx,topY-CHORD_R,zn), pt(cx,topY-CHORD_R,zf),
-                            pt(cx,topY+CHORD_R,zf), pt(cx,topY+CHORD_R,zn), strokeSel);
-          addChordTube(svg, pt(cx,botY-CHORD_R,zn), pt(cx,botY-CHORD_R,zf),
-                            pt(cx,botY+CHORD_R,zf), pt(cx,botY+CHORD_R,zn), strokeSel);
-          addTrussWeb(svg, pt(cx,topY,zn), pt(cx,topY,zf), pt(cx,botY,zf), pt(cx,botY,zn));
+          // truss_v side view: tower seen from the side — single vertical bar (chords overlap in Z)
+          addChordTube(svg, pt(cx,vTop,cz-vCR), pt(cx,vTop,cz+vCR),
+                            pt(cx,vBot,cz+vCR), pt(cx,vBot,cz-vCR), strokeSel);
         }
       }
 
@@ -7329,11 +7395,20 @@ function renderRigElementsSVG(canvas) {
     // ── Invisible hit-area div for drag / resize / delete ──
     const centre = rigProject(cx, cy, cz);
     const isTruss = el.type === 'truss_h' || el.type === 'truss_v';
-    // Hit W/H in screen-% space — for trusses use the actual chord gap formula
-    const hitW = Math.max(3, el.width  * 100);
-    const hitH = isTruss
-      ? Math.max(3, CHORD_HALF * 2 * 100)   // matches the visual chord gap
-      : Math.max(3, el.height * 100);
+    // Hit W/H in screen-% space — must match the projected visual extent.
+    // truss_h: spans X (width) × chord-gap in Z   (top view: wide horizontal bar)
+    // truss_v: chord-gap in X × spans Z (height)  (top view: narrow vertical bar)
+    let hitW, hitH;
+    if (el.type === 'truss_h') {
+      hitW = Math.max(4, el.width  * 100);
+      hitH = Math.max(4, CHORD_HALF * 2 * 100);
+    } else if (el.type === 'truss_v') {
+      hitW = Math.max(4, CHORD_HALF * 2 * 100);  // chord gap = visual width in top view
+      hitH = Math.max(4, el.height * 100);         // span     = visual height in top view
+    } else {
+      hitW = Math.max(3, el.width  * 100);
+      hitH = Math.max(3, el.height * 100);
+    }
     const div = document.createElement('div');
     div.className = `rig-element ${el.type}`;
     div.dataset.rigElId = el.id;
@@ -7553,37 +7628,96 @@ function rigNodeMouseDown(e) {
   const canvas = document.getElementById('rigCanvas');
   const rect = canvas.getBoundingClientRect();
   node.classList.add('dragging');
+  const fId = +node.dataset.fixtureId;
+  const f = _allFixtures.find(fx => fx.id === fId);
 
-  function onMove(ev) {
-    const px = (ev.clientX - rect.left) / rect.width;
-    const py = (ev.clientY - rect.top) / rect.height;
-    let cx = Math.max(0, Math.min(1, px));
-    let cy = Math.max(0, Math.min(1, py));
-    // Try snap (in screen-fraction space)
-    const snap = findSnapPoint(cx, cy);
-    if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
-    else { clearSnapGuides(canvas); }
-    node.style.left = (cx * 100) + '%';
-    node.style.top  = (cy * 100) + '%';
-  }
-  function onUp() {
-    node.classList.remove('dragging');
-    clearSnapGuides(canvas);
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    const fId = +node.dataset.fixtureId;
-    const f = _allFixtures.find(fx => fx.id === fId);
-    if (f) {
-      // Map final screen position back to 3D coords for the current view
-      const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
-      if ('x' in coords) f.rig_x = coords.x;
-      if ('z' in coords) f.rig_y = coords.z; // rigProject z = depth = rig_y
-      if ('y' in coords) f.rig_z = coords.y; // rigProject y = height  = rig_z
+  if (_rigViewMode === '3d' && f) {
+    // ── 3D mode: track in world space, project back to screen for node position ──
+    // Drag uses camera-inverse math so movement follows the camera orientation.
+    // Snap compares projected snap points in screen-fraction space.
+    const startSx = (e.clientX - rect.left) / rect.width;
+    const startSy = (e.clientY - rect.top)  / rect.height;
+    const origX = f.rig_x ?? 0.5;  // L/R
+    const origY = f.rig_y ?? 0.5;  // depth
+    const origZ = f.rig_z ?? 0.5;  // height
+
+    function onMove(ev) {
+      const mx01 = (ev.clientX - rect.left) / rect.width;
+      const my01 = (ev.clientY - rect.top)  / rect.height;
+      const dsx  = mx01 - startSx;
+      const dsy  = my01 - startSy;
+      const d = rigElement3DDelta(dsx, dsy, { x: origX, y: origY, z: origZ });
+      let wx = Math.max(0, Math.min(1, origX + d.dx));
+      let wy = Math.max(0, Math.min(1, origY + d.dy));
+      let wz = Math.max(0, Math.min(1, origZ + d.dz));
+
+      // Snap: project each snap point to screen, compare in screen-fraction space
+      if (document.getElementById('rigSnapEnabled').checked) {
+        let bestDist = SNAP_DIST;  // SNAP_DIST is normalised (0-1 screen fraction)
+        let snapPt = null;
+        for (const el of _rigElements) {
+          for (const p of getElementSnapPoints(el, 16)) {
+            // Project snap point: p.x=L/R, p.z=height, p.y=depth
+            const { px, py } = rigProject(p.x, p.z ?? 0.5, p.y ?? 0.5);
+            const dist = Math.hypot(px / 100 - mx01, py / 100 - my01);
+            if (dist < bestDist) { bestDist = dist; snapPt = p; }
+          }
+        }
+        if (snapPt) {
+          wx = snapPt.x; wy = snapPt.y ?? 0.5; wz = snapPt.z ?? 0.5;
+          const { px: spx, py: spy } = rigProject(wx, wz, wy);
+          showSnapGuide(canvas, { x: spx / 100, y: spy / 100 });
+        } else { clearSnapGuides(canvas); }
+      }
+
+      f.rig_x = wx; f.rig_y = wy; f.rig_z = wz;
+      // Re-project world position back to screen so the node sits on the fixture
+      const { px, py } = rigProject(f.rig_x, f.rig_z, f.rig_y);
+      node.style.left = px + '%';
+      node.style.top  = py + '%';
     }
-    recalcRigOrder();
+    function onUp() {
+      node.classList.remove('dragging');
+      clearSnapGuides(canvas);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      recalcRigOrder();
+      if (f) saveFixtureRigPosition(f);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+
+  } else {
+    // ── 2D views: screen-fraction drag, rigUnproject on save ──
+    function onMove(ev) {
+      const px = (ev.clientX - rect.left) / rect.width;
+      const py = (ev.clientY - rect.top)  / rect.height;
+      let cx = Math.max(0, Math.min(1, px));
+      let cy = Math.max(0, Math.min(1, py));
+      // Try snap (snap points and screen fractions are aligned in 2D views)
+      const snap = findSnapPoint(cx, cy);
+      if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
+      else { clearSnapGuides(canvas); }
+      node.style.left = (cx * 100) + '%';
+      node.style.top  = (cy * 100) + '%';
+    }
+    function onUp() {
+      node.classList.remove('dragging');
+      clearSnapGuides(canvas);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (f) {
+        const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
+        if ('x' in coords) f.rig_x = coords.x;
+        if ('z' in coords) f.rig_y = coords.z;
+        if ('y' in coords) f.rig_z = coords.y;
+        saveFixtureRigPosition(f);
+      }
+      recalcRigOrder();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
 }
 
 function rigNodeTouchStart(e) {
@@ -7592,37 +7726,89 @@ function rigNodeTouchStart(e) {
   const canvas = document.getElementById('rigCanvas');
   const rect = canvas.getBoundingClientRect();
   node.classList.add('dragging');
+  const fId = +node.dataset.fixtureId;
+  const f = _allFixtures.find(fx => fx.id === fId);
 
-  function onMove(ev) {
-    const touch = ev.touches[0];
-    const px = (touch.clientX - rect.left) / rect.width;
-    const py = (touch.clientY - rect.top) / rect.height;
-    let cx = Math.max(0, Math.min(1, px));
-    let cy = Math.max(0, Math.min(1, py));
-    const snap = findSnapPoint(cx, cy);
-    if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
-    else { clearSnapGuides(canvas); }
-    node.style.left = (cx * 100) + '%';
-    node.style.top  = (cy * 100) + '%';
-  }
-  function onEnd() {
-    node.classList.remove('dragging');
-    clearSnapGuides(canvas);
-    node.removeEventListener('touchmove', onMove);
-    node.removeEventListener('touchend', onEnd);
-    const fId = +node.dataset.fixtureId;
-    const f = _allFixtures.find(fx => fx.id === fId);
-    if (f) {
-      // Map final screen position back to 3D coords for the current view
-      const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
-      if ('x' in coords) f.rig_x = coords.x;
-      if ('z' in coords) f.rig_y = coords.z; // rigProject z = depth = rig_y
-      if ('y' in coords) f.rig_z = coords.y; // rigProject y = height  = rig_z
+  if (_rigViewMode === '3d' && f) {
+    const touch0 = e.touches[0];
+    const startSx = (touch0.clientX - rect.left) / rect.width;
+    const startSy = (touch0.clientY - rect.top)  / rect.height;
+    const origX = f.rig_x ?? 0.5;
+    const origY = f.rig_y ?? 0.5;
+    const origZ = f.rig_z ?? 0.5;
+
+    function onMove(ev) {
+      const t = ev.touches[0];
+      const mx01 = (t.clientX - rect.left) / rect.width;
+      const my01 = (t.clientY - rect.top)  / rect.height;
+      const d = rigElement3DDelta(mx01 - startSx, my01 - startSy, { x: origX, y: origY, z: origZ });
+      let wx = Math.max(0, Math.min(1, origX + d.dx));
+      let wy = Math.max(0, Math.min(1, origY + d.dy));
+      let wz = Math.max(0, Math.min(1, origZ + d.dz));
+
+      if (document.getElementById('rigSnapEnabled').checked) {
+        let bestDist = SNAP_DIST;
+        let snapPt = null;
+        for (const el of _rigElements) {
+          for (const p of getElementSnapPoints(el, 16)) {
+            const { px, py } = rigProject(p.x, p.z ?? 0.5, p.y ?? 0.5);
+            const dist = Math.hypot(px / 100 - mx01, py / 100 - my01);
+            if (dist < bestDist) { bestDist = dist; snapPt = p; }
+          }
+        }
+        if (snapPt) {
+          wx = snapPt.x; wy = snapPt.y ?? 0.5; wz = snapPt.z ?? 0.5;
+          const { px: spx, py: spy } = rigProject(wx, wz, wy);
+          showSnapGuide(canvas, { x: spx / 100, y: spy / 100 });
+        } else { clearSnapGuides(canvas); }
+      }
+
+      f.rig_x = wx; f.rig_y = wy; f.rig_z = wz;
+      const { px, py } = rigProject(f.rig_x, f.rig_z, f.rig_y);
+      node.style.left = px + '%';
+      node.style.top  = py + '%';
     }
-    recalcRigOrder();
+    function onEnd() {
+      node.classList.remove('dragging');
+      clearSnapGuides(canvas);
+      node.removeEventListener('touchmove', onMove);
+      node.removeEventListener('touchend', onEnd);
+      recalcRigOrder();
+      if (f) saveFixtureRigPosition(f);
+    }
+    node.addEventListener('touchmove', onMove, { passive: false });
+    node.addEventListener('touchend', onEnd);
+
+  } else {
+    function onMove(ev) {
+      const touch = ev.touches[0];
+      const px = (touch.clientX - rect.left) / rect.width;
+      const py = (touch.clientY - rect.top)  / rect.height;
+      let cx = Math.max(0, Math.min(1, px));
+      let cy = Math.max(0, Math.min(1, py));
+      const snap = findSnapPoint(cx, cy);
+      if (snap) { cx = snap.x; cy = snap.y; showSnapGuide(canvas, snap); }
+      else { clearSnapGuides(canvas); }
+      node.style.left = (cx * 100) + '%';
+      node.style.top  = (cy * 100) + '%';
+    }
+    function onEnd() {
+      node.classList.remove('dragging');
+      clearSnapGuides(canvas);
+      node.removeEventListener('touchmove', onMove);
+      node.removeEventListener('touchend', onEnd);
+      if (f) {
+        const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
+        if ('x' in coords) f.rig_x = coords.x;
+        if ('z' in coords) f.rig_y = coords.z;
+        if ('y' in coords) f.rig_z = coords.y;
+        saveFixtureRigPosition(f);
+      }
+      recalcRigOrder();
+    }
+    node.addEventListener('touchmove', onMove, { passive: false });
+    node.addEventListener('touchend', onEnd);
   }
-  node.addEventListener('touchmove', onMove, { passive: false });
-  node.addEventListener('touchend', onEnd);
 }
 
 // ── Right-click depth (rig_y) popup for fixture nodes ──
@@ -7780,6 +7966,16 @@ async function deleteRigElementUI(elId) {
 }
 
 // ── Save a single rigging element back to server ──
+async function saveFixtureRigPosition(f) {
+  try {
+    await fetch('/api/fixtures/rig-layout', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ positions: [{ id: f.id, rig_x: f.rig_x ?? 0.5, rig_y: f.rig_y ?? 0.5, rig_z: f.rig_z ?? 0.5, rig_order: f.rig_order ?? 0 }] })
+    });
+  } catch (e) { console.warn('Failed to save fixture rig position', e); }
+}
+
 async function saveRigElementToServer(el) {
   try {
     await fetch(`/api/rig-elements/${el.id}`, {
@@ -8136,27 +8332,20 @@ document.getElementById('btnRigDeleteLayout').addEventListener('click', async ()
 
 // Save layout (fixtures + rigging)
 document.getElementById('btnRigSaveLayout').addEventListener('click', async () => {
-  const positions = _allFixtures.map(f => ({
-    id: f.id,
-    rig_x: f.rig_x != null ? f.rig_x : 0.5,
-    rig_y: f.rig_y != null ? f.rig_y : 0.5,
-    rig_z: f.rig_z != null ? f.rig_z : 0.5,
-    rig_order: f.rig_order != null ? f.rig_order : 0
-  }));
   const btn = document.getElementById('btnRigSaveLayout');
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/fixtures/rig-layout', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ positions })
-    });
-    const data = await res.json();
-    if (data.error) { alert('Save failed: ' + data.error); }
-    else { btn.textContent = '✓ Saved'; setTimeout(() => { btn.textContent = 'Save Layout'; }, 1500); }
-  } catch(e) { alert('Save failed: ' + e.message); }
-  finally { btn.disabled = false; }
+    // _saveCurrentRigToDB saves both fixture positions AND rig element positions
+    await _saveCurrentRigToDB();
+    btn.textContent = '✓ Saved';
+    setTimeout(() => { btn.textContent = 'Save Layout'; }, 1500);
+  } catch(e) {
+    alert('Save failed: ' + e.message);
+    btn.textContent = 'Save Layout';
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // Hook into loadFixtures to refresh rig layout
@@ -9347,6 +9536,28 @@ function cfgRenderEffectParams(type, data) {
     html = `<div class="form-row"><div class="form-group"><label>Direction</label><select id="effParamDir">` +
       `<option value="left" ${data.direction==='left'?'selected':''}>Left → Right</option><option value="right" ${data.direction==='right'?'selected':''}>Right → Left</option>` +
       `<option value="center" ${data.direction==='center'?'selected':''}>Center Out</option></select></div>${cellRow(data)}</div>`;
+  } else if (type === 'rig_depth_chase') {
+    html = `<div class="form-row"><div class="form-group"><label>Direction</label><select id="effParamDir">` +
+      `<option value="front_back" ${(data.direction||'front_back')==='front_back'?'selected':''}>Front → Back</option>` +
+      `<option value="back_front" ${data.direction==='back_front'?'selected':''}>Back → Front</option>` +
+      `<option value="bounce" ${data.direction==='bounce'?'selected':''}>Bounce</option></select></div>` +
+      `<div class="form-group"><label>Speed (cycles)</label><input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row"><div class="form-group"><label>Width (0-1)</label><input type="number" id="effParamWidth" value="${data.width||0.3}" min="0.05" max="1" step="0.05"></div>` +
+      `<div class="form-group"><label>Tail (0-1)</label><input type="number" id="effParamTail" value="${data.tail||0.2}" min="0" max="1" step="0.05"></div></div>`;
+  } else if (type === 'rig_depth_wave') {
+    html = `<div class="form-row"><div class="form-group"><label>Direction</label><select id="effParamDir">` +
+      `<option value="front_back" ${(data.direction||'front_back')==='front_back'?'selected':''}>Front → Back</option>` +
+      `<option value="back_front" ${data.direction==='back_front'?'selected':''}>Back → Front</option></select></div>` +
+      `<div class="form-group"><label>Speed (cycles)</label><input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row"><div class="form-group"><label>Wavelength (0–4)</label><input type="number" id="effParamWavelength" value="${data.wavelength||1}" min="0.25" max="4" step="0.25"></div></div>`;
+  } else if (type === 'rig_round_robin') {
+    html = `<div class="form-row"><div class="form-group"><label>Direction</label><select id="effParamDir">` +
+      `<option value="forward" ${(data.direction||'forward')==='forward'?'selected':''}>Forward</option>` +
+      `<option value="reverse" ${data.direction==='reverse'?'selected':''}>Reverse</option>` +
+      `<option value="ping_pong" ${data.direction==='ping_pong'?'selected':''}>Ping Pong</option></select></div>` +
+      `<div class="form-group"><label>Speed (cycles)</label><input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div></div>` +
+      `<div class="form-row"><div class="form-group"><label>Window (fixtures on)</label><input type="number" id="effParamWindow" value="${data.window||1}" min="1" max="20" step="1"></div>` +
+      `<div class="form-group"><label>Tail (fade-out fixtures)</label><input type="number" id="effParamTail" value="${data.tail||0}" min="0" max="20" step="1"></div></div>`;
   } else if (type === 'pan_sweep' || type === 'tilt_sweep') {
     html = `<div class="form-row"><div class="form-group"><label>Speed (cycles)</label><input type="number" id="effParamSpeed" value="${data.speed||1}" min="0.1" max="20" step="0.1"></div>` +
       `<div class="form-group"><label>Range (0-1)</label><input type="number" id="effParamRange" value="${data.range||1}" min="0.05" max="1" step="0.05"></div></div>`;
@@ -9403,6 +9614,9 @@ function cfgGetEffectDataFromForm(type) {
   if (type === 'color_wave') return { wavelength: +(document.getElementById('effParamWavelength')?.value || 20), speed: +(document.getElementById('effParamSpeed')?.value || 1), channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3) };
   if (type === 'fire') return { intensity: +(document.getElementById('effParamIntensity')?.value || 0.8), cooling: +(document.getElementById('effParamCooling')?.value || 0.3), channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3) };
   if (type === 'buildup') return { direction: document.getElementById('effParamDir')?.value || 'left', channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3) };
+  if (type === 'rig_depth_chase') return { direction: document.getElementById('effParamDir')?.value || 'front_back', speed: +(document.getElementById('effParamSpeed')?.value || 1), width: +(document.getElementById('effParamWidth')?.value || 0.3), tail: +(document.getElementById('effParamTail')?.value || 0.2) };
+  if (type === 'rig_depth_wave')  return { direction: document.getElementById('effParamDir')?.value || 'front_back', speed: +(document.getElementById('effParamSpeed')?.value || 1), wavelength: +(document.getElementById('effParamWavelength')?.value || 1) };
+  if (type === 'rig_round_robin') return { direction: document.getElementById('effParamDir')?.value || 'forward', speed: +(document.getElementById('effParamSpeed')?.value || 1), window: +(document.getElementById('effParamWindow')?.value || 1), tail: +(document.getElementById('effParamTail')?.value || 0) };
   if (type === 'pan_sweep' || type === 'tilt_sweep') return { speed: +(document.getElementById('effParamSpeed')?.value || 1), range: +(document.getElementById('effParamRange')?.value || 1) };
   if (type === 'circle' || type === 'figure_eight') return { speed: +(document.getElementById('effParamSpeed')?.value || 1), size: +(document.getElementById('effParamSize')?.value || 0.5) };
   if (type === 'random_move') return { speed: +(document.getElementById('effParamSpeed')?.value || 1), range: +(document.getElementById('effParamRange')?.value || 0.5), smoothing: +(document.getElementById('effParamSmoothing')?.value || 0.3) };
@@ -11225,7 +11439,7 @@ function buildQaGrid(gridId, items) {
 // ─── Effects Library Grid for Quick Actions ───────────────────────────
 const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
 const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
-const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow']);
+const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu']);
 function getEffectSlot(type) {
   if (MOTION_TYPES.has(type)) return 'motion';
@@ -11262,12 +11476,15 @@ const EFFECT_STYLE = {
   cell_strobe:  { bg: 'linear-gradient(135deg,#f9a825,#fff176)', fg: '#000', border: '#f9a825', icon: '⚡' },
   gradient:     { bg: 'linear-gradient(135deg,#d81b60,#7b1fa2,#1565c0)', fg: '#fff', border: '#d81b60', icon: '🌅' },
   // Rig-wide effects
-  rig_chase:      { bg: 'linear-gradient(135deg,#ff6d00,#ff3d00)', fg: '#fff', border: '#ff6d00', icon: '🏃' },
-  rig_color_wave: { bg: 'linear-gradient(135deg,#00bfa5,#1de9b6)', fg: '#fff', border: '#00bfa5', icon: '🌊' },
-  rig_sweep:      { bg: 'linear-gradient(135deg,#304ffe,#448aff)', fg: '#fff', border: '#304ffe', icon: '➡️' },
-  rig_alternate:  { bg: 'linear-gradient(135deg,#aa00ff,#ea80fc)', fg: '#fff', border: '#aa00ff', icon: '🔄' },
-  rig_converge:   { bg: 'linear-gradient(135deg,#c51162,#ff80ab)', fg: '#fff', border: '#c51162', icon: '🔀' },
-  rig_rainbow:    { bg: 'linear-gradient(135deg,#f44,#ff0,#0f0,#0ff,#00f,#f0f)', fg: '#fff', border: '#fff', icon: '🌈' },
+  rig_chase:       { bg: 'linear-gradient(135deg,#ff6d00,#ff3d00)', fg: '#fff', border: '#ff6d00', icon: '🏃' },
+  rig_color_wave:  { bg: 'linear-gradient(135deg,#00bfa5,#1de9b6)', fg: '#fff', border: '#00bfa5', icon: '🌊' },
+  rig_sweep:       { bg: 'linear-gradient(135deg,#304ffe,#448aff)', fg: '#fff', border: '#304ffe', icon: '➡️' },
+  rig_alternate:   { bg: 'linear-gradient(135deg,#aa00ff,#ea80fc)', fg: '#fff', border: '#aa00ff', icon: '🔄' },
+  rig_converge:    { bg: 'linear-gradient(135deg,#c51162,#ff80ab)', fg: '#fff', border: '#c51162', icon: '🔀' },
+  rig_rainbow:     { bg: 'linear-gradient(135deg,#f44,#ff0,#0f0,#0ff,#00f,#f0f)', fg: '#fff', border: '#fff', icon: '🌈' },
+  rig_depth_chase: { bg: 'linear-gradient(135deg,#00897b,#00e5ff)', fg: '#fff', border: '#00897b', icon: '🎯' },
+  rig_depth_wave:  { bg: 'linear-gradient(135deg,#0077b6,#00b4d8)', fg: '#fff', border: '#0077b6', icon: '🌀' },
+  rig_round_robin: { bg: 'linear-gradient(135deg,#f9a825,#e65100)', fg: '#fff', border: '#f9a825', icon: '🔁' },
   // Sound-reactive effects
   sound_pulse:    { bg: 'linear-gradient(135deg,#00c853,#b2ff59)', fg: '#000', border: '#00c853', icon: '🔊' },
   sound_strobe:   { bg: 'linear-gradient(135deg,#ffd600,#ffff00)', fg: '#000', border: '#ffd600', icon: '⚡' },

@@ -2820,17 +2820,25 @@ app.post('/api/touch-actions/auto-populate', (req, res) => {
   ];
 
   const QUICK_ACTIONS = [
-    { label:'Full White', icon:'\u2600\uFE0E', action:'fullWhite', color:'#ffffff', text:'#000000' },
-    { label:'Dim Warm',   icon:'\uD83D\uDD6F\uFE0E', action:'dimWarm',   color:'#b47832', text:'#ffffff' },
-    { label:'UV Mode',    icon:'\uD83D\uDD2E', action:'uvMode',    color:'#7b2ff2', text:'#ffffff' },
-    { label:'All Off',    icon:'\u26D4',       action:'allOff',    color:'#333333', text:'#ffffff' },
+    { label:'Full White', icon:'\u2600\uFE0F',  action:'fullWhite', color:'#ffffff', text:'#000000' },
+    { label:'Full Color', icon:'\uD83C\uDF08',  action:'fullColor', color:'#7c4dff', text:'#ffffff' },
+    { label:'Dim Warm',   icon:'\uD83D\uDD6F\uFE0F', action:'dimWarm',   color:'#b47832', text:'#ffffff' },
+    { label:'UV Mode',    icon:'\uD83D\uDD2E',  action:'uvMode',    color:'#7b2ff2', text:'#ffffff' },
+    { label:'All Off',    icon:'\u26D4',        action:'allOff',    color:'#333333', text:'#ffffff' },
   ];
 
   const EFFECTS = [
     { label:'Strobe',   icon:'\u26A1', type:'strobe',   color:'#ffcc00', text:'#000000' },
-    { label:'Smoke',    icon:'\u2601\uFE0E', type:'smoke',    color:'#556677', text:'#ffffff' },
-    { label:'Haze',     icon:'\u2601\uFE0E', type:'haze',     color:'#445566', text:'#ffffff' },
+    { label:'Smoke',    icon:'\u2601\uFE0F', type:'smoke',    color:'#556677', text:'#ffffff' },
+    { label:'Haze',     icon:'\u2601\uFE0F', type:'haze',     color:'#445566', text:'#ffffff' },
     { label:'Blackout', icon:'\u26AB',       type:'blackout', color:'#cc0000', text:'#ffffff' },
+  ];
+
+  const DIMMERS = [
+    { label:'Full',  value:255, color:'#ffffff', text:'#000000' },
+    { label:'75%',   value:191, color:'#aaaaaa', text:'#000000' },
+    { label:'50%',   value:128, color:'#777777', text:'#ffffff' },
+    { label:'25%',   value:64,  color:'#444444', text:'#ffffff' },
   ];
 
   const clearFirst = req.body.clear !== false;
@@ -2886,6 +2894,19 @@ app.post('/api/touch-actions/auto-populate', (req, res) => {
         label: fx.label, icon: fx.icon, action_type: fx.type,
         action_data: {},
         color: fx.color, text_color: fx.text,
+        grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
+        sort_order: created.length, enabled: true,
+      }));
+    }
+
+    // Master dimmer presets
+    startNewRow();
+    for (const d of DIMMERS) {
+      const pos = nextPos();
+      created.push(db.createTouchAction({
+        label: d.label, icon: '\uD83C\uDF1F', action_type: 'master_dimmer',
+        action_data: { value: d.value },
+        color: d.color, text_color: d.text,
         grid_row: pos.row, grid_col: pos.col, grid_w: 1, grid_h: 1,
         sort_order: created.length, enabled: true,
       }));
@@ -3612,8 +3633,9 @@ function buildChannelCtx(ch, fix) {
     home_pan: fix.home_pan ?? 128,
     home_tilt: fix.home_tilt ?? 128,
     // Rig position data for rig-wide effects
-    _rigPosition: fix.rig_x ?? 0.5,
-    _rigPositionY: fix.rig_y ?? 0.5,
+    _rigPosition:  fix.rig_x ?? 0.5,
+    _rigPositionY: fix.rig_y ?? 0.5,   // depth: 0=front/audience, 1=back/stage
+    _rigPositionZ: fix.rig_z ?? 0.5,   // height: 0=top, 1=floor
     _rigOrder: fix.rig_order ?? 0,
   };
   if (fix.cell_count > 0) {

@@ -1708,7 +1708,7 @@ function renderTouchActionsTable() {
   const typeLabels = {
     color: 'Color', quick_action: 'Quick Action', scene: 'Scene',
     mover_preset: 'Mover Preset', strobe: 'Strobe', smoke: 'Smoke',
-    haze: 'Haze', blackout: 'Blackout', master_dimmer: 'Master Dimmer',
+    haze: 'Haze', blackout: 'Blackout', master_dimmer: 'Master Dimmer 🌟',
   };
   tbody.innerHTML = _touchActionsList.map(a => {
     return '<tr>' +
@@ -1734,7 +1734,7 @@ document.getElementById('btnAutoPopulate').addEventListener('click', async () =>
   const hasExisting = _touchActionsList.length > 0;
   const msg = hasExisting
     ? 'This will DELETE all existing actions and replace them with auto-generated ones.\n\nContinue?'
-    : 'Auto-populate the Actions grid with colors, quick actions, effects, scenes, and mover presets?';
+    : 'Auto-populate the Actions grid with colors, quick actions, effects, dimmer presets, scenes, and mover presets?';
   if (!confirm(msg)) return;
   try {
     const resp = await fetch('/api/touch-actions/auto-populate', {
