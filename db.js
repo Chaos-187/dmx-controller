@@ -657,6 +657,14 @@ function init() {
     console.log('[DB] Migrated fixtures: added exclude_from_sequence column');
   }
 
+  // Migrate: add cell_path column to fixtures (JSON waypoints for multicell/pixel strip routing)
+  try {
+    db.prepare('SELECT cell_path FROM fixtures LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixtures ADD COLUMN cell_path TEXT DEFAULT NULL");
+    console.log('[DB] Migrated fixtures: added cell_path column');
+  }
+
   // Migrate: fixture_type_modes — create default modes for existing fixture types
   // and link channels and fixtures to their modes
   migrateToModes();
@@ -727,7 +735,7 @@ function init() {
   // Rig-wide spatial effects target all fixtures with color channels
   db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin')");
   // Sound-reactive effects
-  db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu')");
+  db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr')");
 
   // Seed default generator config if missing
   seedDefaultGeneratorConfig();
@@ -1033,7 +1041,9 @@ function seedNewEffectsV5() {
     ['Sound Flash (Soft)',    'sound_flash',  'sound', 'sound', J({ decay:0.7 }), 4],
 
     // ── Sound VU: frequency-band VU meter across rig ────────────────────
-    ['Sound VU Meter',        'sound_vu',     'sound', 'sound', J({}), 8],
+    ['Sound VU Meter',           'sound_vu',    'sound', 'sound', J({}), 8],
+    ['Sound VU Meter (Top→Bot)', 'sound_vu_tb', 'sound', 'sound', J({}), 8],
+    ['Sound VU Meter (L→R)',     'sound_vu_lr', 'sound', 'sound', J({}), 8],
   ];
 
   let added = 0;
@@ -1940,11 +1950,19 @@ function deleteFixture(id) {
  * @returns {{ updated: number }}
  */
 function updateFixtureRigPositions(positions) {
-  const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_z = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_z = ?, rig_order = ?, cell_path = ?, updated_at = datetime(\'now\') WHERE id = ?');
   let updated = 0;
   const tx = db.transaction(() => {
     for (const p of positions) {
-      const result = stmt.run(p.rig_x ?? 0.5, p.rig_y ?? 0.5, p.rig_z ?? 0.5, p.rig_order ?? 0, p.id);
+      const cellPath = p.cell_path !== undefined ? (p.cell_path ? JSON.stringify(p.cell_path) : null) : undefined;
+      const result = stmt.run(
+        p.rig_x ?? 0.5,
+        p.rig_y ?? 0.5,
+        p.rig_z ?? 0.5,
+        p.rig_order ?? 0,
+        cellPath !== undefined ? cellPath : null,
+        p.id
+      );
       if (result.changes > 0) updated++;
     }
   });
@@ -2373,7 +2391,7 @@ function getFixtureChannelMap() {
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
            f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
-           f.rig_x, f.rig_y, f.rig_order, f.exclude_from_sequence,
+           f.rig_x, f.rig_y, f.rig_order, f.exclude_from_sequence, f.cell_path,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
            ft.name as type_name, ft.category,
            ftm.name as mode_name
@@ -2401,10 +2419,12 @@ function getFixtureChannelMap() {
     const cellNums = channels.filter(ch => ch.cell != null).map(ch => ch.cell);
     const cell_count = cellNums.length > 0 ? Math.max(...cellNums) : 0;
     const color_wheel_map = cwMaps[f.fixture_type_id] || null;
+    const cell_path = f.cell_path ? JSON.parse(f.cell_path) : null;
     return {
       ...f,
       group_ids,
       cell_count,
+      cell_path,
       color_wheel_map,
       channels: channels.map(ch => {
         // Derive per-channel invert from fixture-level pan/tilt invert settings

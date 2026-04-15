@@ -113,6 +113,7 @@
         <button class="device-tab-btn active" data-devtab="usb">&#9783; DMX USB</button>
         <button class="device-tab-btn" data-devtab="artnet">&#9729; Art-Net</button>
         <button class="device-tab-btn" data-devtab="network">&#127760; Network</button>
+        <button class="device-tab-btn" data-devtab="audio">&#127908; Audio Input</button>
       </div>
 
       <!-- USB DMX Tab -->
@@ -207,6 +208,121 @@
             <div class="config-row"><label>Web Port</label><span id="mdnsStatusWebPort" style="font-size:12px;color:var(--text-dim)">—</span></div>
             <div class="config-row"><label>OS2L Port</label><span id="mdnsStatusOs2lPort" style="font-size:12px;color:var(--text-dim)">—</span></div>
           </div>
+        </div>
+      </div>
+
+      <!-- Audio Input Tab -->
+      <div class="device-tab-panel" id="devtab-audio">
+        <div class="config-section">
+          <h3><span class="section-icon">&#127908;</span> Audio Input</h3>
+          <p class="config-desc">
+            Configure a live audio source for sound-reactive lighting effects
+            (<em>Sound Pulse, Sound Strobe, Sound Chase</em>, etc.).
+            The server captures audio in real-time via ffmpeg and computes bass, mid,
+            and treble energy levels. When enabled this takes priority over track-analysis data.
+          </p>
+
+          <!-- ── Outgoing / Loopback hint ───────────────────────────────── -->
+          <div class="config-card" style="border-color:var(--cyan);background:rgba(0,229,255,.04)">
+            <h4 style="color:var(--cyan)">&#127783; ASIO &amp; Outgoing Audio</h4>
+            <p class="config-desc" style="margin-bottom:8px">
+              <strong style="color:var(--text)">ASIO devices</strong> — ffmpeg has no native ASIO driver,
+              but every ASIO interface also installs a WDM driver that appears in the scan as a regular device
+              (e.g. <em>"Line (Focusrite USB)"</em>, <em>"Line (MG-XU)"</em>). Select
+              <strong>OpenAL</strong> format for the most complete device list.
+              If your interface still doesn't appear, install
+              <a href="https://github.com/dechamps/FlexASIO" target="_blank" rel="noopener" style="color:var(--cyan)">FlexASIO</a>
+              or route through VoiceMeeter to bridge ASIO &rarr; WDM.
+            </p>
+            <p class="config-desc" style="margin-bottom:8px">
+              <strong style="color:var(--text)">Outgoing / system audio (Windows)</strong> — Enable
+              <strong>Stereo Mix</strong> in Windows Sound settings:
+            </p>
+            <ol style="font-size:12px;color:var(--text-dim);line-height:1.8;padding-left:18px;margin-bottom:8px">
+              <li>Right-click the <strong>speaker icon</strong> in the system tray &rarr; <strong>Sounds</strong></li>
+              <li>Open the <strong>Recording</strong> tab &rarr; right-click in the list &rarr; tick <strong>Show Disabled Devices</strong></li>
+              <li>Enable <strong>Stereo Mix</strong> (or <em>Wave Out Mix / What U Hear</em>)</li>
+              <li>Select <strong>OpenAL</strong> format above and click <strong>Scan</strong> — Stereo Mix will appear</li>
+            </ol>
+            <p class="config-desc" style="color:var(--text-dim)">
+              <strong>macOS:</strong> use <strong>BlackHole</strong> or <strong>Loopback</strong> &middot;
+              <strong>Linux:</strong> PulseAudio exposes a <code>.monitor</code> source for every output sink automatically.
+            </p>
+          </div>
+
+          <div class="config-card" style="margin-top:16px">
+            <h4>Enable Live Audio Capture</h4>
+            <div class="config-row">
+              <label>Enable</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgAudioEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Use live audio capture for sound-reactive effects (overrides track analysis)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="config-card">
+            <h4>Device</h4>
+            <div class="config-row">
+              <label>Input Format</label>
+              <select id="cfgAudioFormat" style="width:240px">
+                <option value="dshow">DirectShow (Windows)</option>
+                <option value="openal">OpenAL (Windows — includes loopback)</option>
+                <option value="pulse">PulseAudio (Linux)</option>
+                <option value="avfoundation">AVFoundation (macOS)</option>
+              </select>
+              <span class="config-hint" style="margin-left:8px">Use <em>OpenAL</em> to see Stereo&nbsp;Mix &amp; ASIO WDM devices</span>
+            </div>
+            <div class="config-row">
+              <label>Device</label>
+              <div style="display:flex;gap:8px;align-items:center;flex:1">
+                <select id="cfgAudioDevice" style="flex:1;min-width:0">
+                  <option value="">— click Scan to list devices —</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" id="btnScanAudioDevices">&#128269; Scan</button>
+              </div>
+            </div>
+            <div class="config-row">
+              <label>Gain / Sensitivity</label>
+              <div style="display:flex;align-items:center;gap:10px;flex:1">
+                <input type="range" id="cfgAudioGain" min="0.5" max="10" step="0.1" value="1" style="flex:1">
+                <span id="cfgAudioGainVal" style="width:36px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;color:var(--text-dim)">&times;1.0</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin:12px 0">
+            <button class="btn btn-primary btn-sm" id="btnSaveAudioConfig">Save &amp; Apply</button>
+            <button class="btn btn-secondary btn-sm" id="btnStopAudioCapture">Stop</button>
+          </div>
+
+          <div class="config-card">
+            <h4>Capture Status</h4>
+            <div class="config-row">
+              <label>State</label>
+              <div style="display:flex;align-items:center;gap:9px">
+                <div id="audioStatusDot" style="width:10px;height:10px;border-radius:50%;background:#555;flex-shrink:0"></div>
+                <span id="audioStatusLabel" style="font-size:13px;color:var(--text-dim)">Inactive</span>
+              </div>
+            </div>
+            <div class="config-row" id="audioDeviceRow" style="display:none">
+              <label>Capturing from</label>
+              <span id="audioDeviceDisplay" style="font-size:12px;color:var(--cyan)"></span>
+            </div>
+            <div class="config-row" id="audioErrorRow" style="display:none">
+              <label>Error</label>
+              <span id="audioErrorMsg" style="font-size:12px;color:var(--danger)"></span>
+            </div>
+          </div>
+
+          <div class="config-card" id="audioMeterCard">
+            <h4>Live Level Meter</h4>
+            <p class="config-desc" style="margin-bottom:10px">Real-time frequency band activity — updates only while capturing.</p>
+            <div id="audioMeter" style="display:flex;flex-direction:column;gap:7px">
+              <!-- rendered by JS -->
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

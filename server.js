@@ -45,8 +45,9 @@ const mdns = require('multicast-dns');
 const db = require('./db');
 const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
-const audioAnalyzer = require('./audio-analyzer');
-const stemSeparator = require('./stem-separator');
+const audioAnalyzer  = require('./audio-analyzer');
+const audioInput     = require('./audio-input');
+const stemSeparator  = require('./stem-separator');
 const os2l = require('./os2l');
 const midiController = require('./midi-controller');
 const fixtureLibrary = require('./fixture-library');
@@ -741,6 +742,7 @@ const configProtectedPrefixes = [
   '/api/mdns',
   '/api/usb-devices',
   '/api/artnet',
+  '/api/audio-input',
   '/api/fixture-types',
   '/api/fixture-library',
 ];
@@ -1821,6 +1823,94 @@ app.post('/api/artnet/channel', (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Audio Input API ─────────────────────────────────────────────────────────
+
+/** List audio input devices available on this machine via ffmpeg. */
+app.get('/api/audio-input/devices', async (req, res) => {
+  try {
+    const devices = await audioInput.listAudioDevices();
+    res.json({ devices, platform_format: audioInput.getPlatformFormat() });
+  } catch (e) {
+    res.json({ devices: [], platform_format: audioInput.getPlatformFormat() });
+  }
+});
+
+/** Get current audio input configuration. */
+app.get('/api/audio-input/config', (req, res) => {
+  const cfg = db.getAllConfig();
+  res.json({
+    enabled:     cfg.audio_input_enabled === '1',
+    device_name: cfg.audio_input_device  || '',
+    format:      cfg.audio_input_format  || audioInput.getPlatformFormat(),
+    gain:        parseFloat(cfg.audio_input_gain || '1.0'),
+  });
+});
+
+/** Save audio input configuration. Restarts capture if enabled. */
+app.post('/api/audio-input/config', (req, res) => {
+  const { enabled, device_name, format, gain } = req.body;
+
+  db.setConfig('audio_input_enabled', enabled ? '1' : '0');
+  if (device_name !== undefined) db.setConfig('audio_input_device', String(device_name));
+  if (format      !== undefined) db.setConfig('audio_input_format',  String(format));
+  if (gain        !== undefined) db.setConfig('audio_input_gain',    String(parseFloat(gain) || 1.0));
+
+  _applyAudioInputConfig();
+  res.json({ ok: true });
+});
+
+/** Current capture status and live levels. */
+app.get('/api/audio-input/status', (req, res) => {
+  res.json({
+    running:     audioInput.capture.running,
+    device_name: audioInput.capture.deviceName,
+    format:      audioInput.capture.format,
+    error:       audioInput.capture.error,
+    levels:      audioInput.capture.getLevels(),
+  });
+});
+
+/** Manually start capture (uses saved config). */
+app.post('/api/audio-input/start', (req, res) => {
+  _applyAudioInputConfig(true);
+  res.json({ ok: true, running: audioInput.capture.running });
+});
+
+/** Stop capture without changing saved config. */
+app.post('/api/audio-input/stop', (req, res) => {
+  audioInput.capture.stop();
+  res.json({ ok: true });
+});
+
+// ── Helper: read config and (re)start or stop capture accordingly ─────────────
+function _applyAudioInputConfig(forceStart = false) {
+  const cfg         = db.getAllConfig();
+  const enabled     = cfg.audio_input_enabled === '1';
+  const device_name = cfg.audio_input_device  || '';
+  const format      = cfg.audio_input_format  || audioInput.getPlatformFormat();
+  const gain        = parseFloat(cfg.audio_input_gain || '1.0');
+
+  if ((enabled || forceStart) && device_name) {
+    audioInput.capture.start(device_name, format, gain);
+  } else {
+    audioInput.capture.stop();
+  }
+}
+
+// Broadcast live audio levels to all WebSocket clients so the config page
+// level meters can update in real-time.
+audioInput.capture.on('levels', (levels) => {
+  broadcast({ type: 'audio_input_level', levels });
+});
+
+audioInput.capture.on('stopped', ({ error }) => {
+  broadcast({ type: 'audio_input_status', running: false, error: error || null });
+});
+
+audioInput.capture.on('started', ({ deviceName, format }) => {
+  broadcast({ type: 'audio_input_status', running: true, device_name: deviceName, format });
+});
+
 // ─── DMX Output Control API ─────────────────────────────────────────────────
 
 let dmxOutputEnabled = false;
@@ -2397,6 +2487,12 @@ let _lastAudioData = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper
 let _lastBeatTime = 0;
 
 function getCurrentAudioData() {
+  // Live audio input takes priority when it is running.
+  // Use the heavily-smoothed DMX levels to avoid flickering lights.
+  if (audioInput.capture.running) {
+    return audioInput.capture.getDmxLevels();
+  }
+
   // Find the playing deck with highest crossfader weight
   let bestDeck = null, bestLevel = 0;
   for (let d = 1; d <= 4; d++) {
@@ -2602,7 +2698,7 @@ app.post('/api/effects/run', (req, res) => {
         dmxUsbServer.setChannels(+u, channels);
       }
     }
-  }, 25);
+  }, 10);
 
   runningQaEffects[slot] = { timer, effectId, fixtureIds };
   console.log(`[QA] Started ${slot} effect "${effect.name}" (type=${effect.type}) on ${fixtureIds.length} fixture(s): [${fixtureIds.join(',')}]`);
@@ -2987,7 +3083,7 @@ function activateScene(sceneId) {
       if (!dmxOutputEnabled || !activeStaticScene) return;
       if (touchOverrides.blackoutHold) return;
       processSceneEffects(activeStaticScene, startTime);
-    }, 25); // ~40 Hz
+    }, 10); // ~100 Hz
     console.log(`[SCENE] Started effect loop for scene "${scene.name}"`);
   }
 
@@ -3323,7 +3419,7 @@ function startPlaybackTimer(deck) {
   deckSeq.startWall = Date.now();
   deckSeq.startOffset = deckSeq.currentTimeMs || 0;
 
-  const TICK_MS = 25; // ~40 Hz for DMX processing
+  const TICK_MS = 10; // ~100 Hz for DMX processing (audio-reactive needs fast updates)
   let _lastSeqTimeBroadcast = 0;
   playbackTimers[deck] = setInterval(() => {
     const ds = activeSequences[deck];
@@ -3622,6 +3718,39 @@ function applyMasterDimmer(value, channelType) {
  * @param {number} timeMs - Current playback position in milliseconds
  */
 /**
+ * Interpolate a position along an ordered array of {x,y,z} waypoints.
+ * t = 0 → first waypoint, t = 1 → last waypoint.
+ * Uses arc-length parameterisation so cells are evenly spaced physically.
+ */
+function interpolateAlongPath(waypoints, t) {
+  if (!waypoints || waypoints.length === 0) return null;
+  if (waypoints.length === 1) return waypoints[0];
+  // Accumulate segment lengths
+  const lens = [0];
+  for (let i = 1; i < waypoints.length; i++) {
+    const dx = waypoints[i].x - waypoints[i-1].x;
+    const dy = waypoints[i].y - waypoints[i-1].y;
+    const dz = (waypoints[i].z || 0) - (waypoints[i-1].z || 0);
+    lens.push(lens[i-1] + Math.sqrt(dx*dx + dy*dy + dz*dz));
+  }
+  const total = lens[lens.length - 1];
+  if (total === 0) return waypoints[0];
+  const target = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 1; i < waypoints.length; i++) {
+    if (target <= lens[i]) {
+      const frac = (target - lens[i-1]) / (lens[i] - lens[i-1]);
+      const a = waypoints[i-1], b = waypoints[i];
+      return {
+        x: a.x + (b.x - a.x) * frac,
+        y: a.y + (b.y - a.y) * frac,
+        z: (a.z || 0) + ((b.z || 0) - (a.z || 0)) * frac,
+      };
+    }
+  }
+  return waypoints[waypoints.length - 1];
+}
+
+/**
  * Build a channel context object for effect computation.
  * Includes explicit cell metadata when available so effects can
  * correctly resolve cell index and count rather than guessing via stride.
@@ -3632,7 +3761,7 @@ function buildChannelCtx(ch, fix) {
     total_channels: fix.channels.length,
     home_pan: fix.home_pan ?? 128,
     home_tilt: fix.home_tilt ?? 128,
-    // Rig position data for rig-wide effects
+    // Rig position data for rig-wide effects (fixture-level defaults)
     _rigPosition:  fix.rig_x ?? 0.5,
     _rigPositionY: fix.rig_y ?? 0.5,   // depth: 0=front/audience, 1=back/stage
     _rigPositionZ: fix.rig_z ?? 0.5,   // height: 0=top, 1=floor
@@ -3647,6 +3776,22 @@ function buildChannelCtx(ch, fix) {
       ctx.cell_channel_index = cellChannels.indexOf(ch);
       if (ctx.cell_channel_index === -1) {
         ctx.cell_channel_index = cellChannels.findIndex(c => c.channel_number === ch.channel_number);
+      }
+
+      // If this fixture has a cell_path, derive each cell's real-world position
+      // from its location along the path.  The first waypoint is the fixture's
+      // rig_x/y/z; additional waypoints in cell_path define the strip's route.
+      if (fix.cell_path && fix.cell_path.length > 0) {
+        const startPt  = { x: fix.rig_x ?? 0.5, y: fix.rig_y ?? 0.5, z: fix.rig_z ?? 0.5 };
+        const waypoints = [startPt, ...fix.cell_path];
+        const cellIdx = ch.cell - 1; // ch.cell is 1-based
+        const t = fix.cell_count > 1 ? cellIdx / (fix.cell_count - 1) : 0;
+        const pos = interpolateAlongPath(waypoints, t);
+        if (pos) {
+          ctx._rigPosition  = pos.x;
+          ctx._rigPositionY = pos.y;
+          ctx._rigPositionZ = pos.z;
+        }
       }
     }
   }
@@ -4333,6 +4478,9 @@ httpServer.listen(WEB_PORT, () => {
   console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT}`);
 });
 
+// Auto-start live audio input capture if it was enabled on last run
+_applyAudioInputConfig();
+
 const bonjour = registerBonjour();
 startMdnsResponder();
 
@@ -4341,6 +4489,7 @@ process.on('SIGINT', async () => {
   console.log('\nShutting down...');
   artnetServer.shutdown();
   await dmxUsbServer.shutdownAll();
+  audioInput.capture.stop();
   if (mdnsResponder) mdnsResponder.destroy();
   if (bonjour) bonjour.destroy();
   midiController.stop();

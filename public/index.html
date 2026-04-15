@@ -5210,7 +5210,12 @@ eventLogEl.querySelectorAll('.filter-btn').forEach(btn => {
 
 // Pretty-print on double-click
 ppOverlay.addEventListener('click', (e) => { if (e.target === ppOverlay) ppOverlay.classList.remove('open'); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ppOverlay.classList.remove('open'); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    ppOverlay.classList.remove('open');
+    if (_pathEditFixture) exitPathEdit(false); // cancel path edit on Escape
+  }
+});
 
 function logEvent(info) {
   if (!logCapturing) return;
@@ -7536,6 +7541,9 @@ function renderRigLayout() {
   // ── Draw rigging elements (SVG projected geometry + hit-area divs) ──
   renderRigElementsSVG(canvas);
 
+  // ── Draw pixel strip paths for multicell fixtures ──
+  renderCellPaths(canvas);
+
   // ── Draw fixture nodes ──
   const fixtures = _allFixtures;
   if (!fixtures || fixtures.length === 0) {
@@ -7593,6 +7601,11 @@ function renderRigLayout() {
     node.addEventListener('touchstart', rigNodeTouchStart, { passive: false });
     // Right-click / long-press to adjust depth (Z)
     node.addEventListener('contextmenu', (e) => { e.preventDefault(); rigNodeDepthPopup(e, f); });
+    // Double-click multicell fixtures to open the strip path editor
+    if (f.cell_count > 0) {
+      node.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); startPathEdit(f); });
+      node.title += '\n\nDouble-click to edit pixel strip path';
+    }
 
     canvas.appendChild(node);
   }
@@ -7971,9 +7984,220 @@ async function saveFixtureRigPosition(f) {
     await fetch('/api/fixtures/rig-layout', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ positions: [{ id: f.id, rig_x: f.rig_x ?? 0.5, rig_y: f.rig_y ?? 0.5, rig_z: f.rig_z ?? 0.5, rig_order: f.rig_order ?? 0 }] })
+      body: JSON.stringify({ positions: [{ id: f.id, rig_x: f.rig_x ?? 0.5, rig_y: f.rig_y ?? 0.5, rig_z: f.rig_z ?? 0.5, rig_order: f.rig_order ?? 0, cell_path: f.cell_path || null }] })
     });
   } catch (e) { console.warn('Failed to save fixture rig position', e); }
+}
+
+// ════════════════════════════════════════════════════════════
+//  Pixel Strip Path Editor
+//
+//  Activated by double-clicking a multicell (WLED/pixel) fixture.
+//  Draws an SVG polyline overlay; each waypoint is a draggable handle.
+//  Click anywhere on the canvas to add a new waypoint.
+//  Press Esc or click "Done" to exit.
+// ════════════════════════════════════════════════════════════
+
+let _pathEditFixture = null;   // fixture currently being path-edited
+let _pathEditWaypoints = [];   // working copy of waypoints (excludes start pt which = rig_x/y)
+
+function startPathEdit(fixture) {
+  _pathEditFixture  = fixture;
+  // Deep-copy existing path (or start empty — first click will add a point)
+  _pathEditWaypoints = fixture.cell_path ? fixture.cell_path.map(p => ({...p})) : [];
+  renderRigLayout();
+  _showPathEditBanner(fixture);
+}
+
+function exitPathEdit(save) {
+  if (!_pathEditFixture) return;
+  if (save) {
+    _pathEditFixture.cell_path = _pathEditWaypoints.length > 0 ? _pathEditWaypoints : null;
+    saveFixtureRigPosition(_pathEditFixture);
+  }
+  _pathEditFixture  = null;
+  _pathEditWaypoints = [];
+  // Remove banner
+  document.querySelectorAll('.rig-path-banner').forEach(b => b.remove());
+  renderRigLayout();
+}
+
+function _showPathEditBanner(fixture) {
+  document.querySelectorAll('.rig-path-banner').forEach(b => b.remove());
+  const canvas = document.getElementById('rigCanvas');
+  const banner = document.createElement('div');
+  banner.className = 'rig-path-banner';
+  banner.style.cssText =
+    'position:absolute;top:6px;left:50%;transform:translateX(-50%);z-index:30;' +
+    'background:rgba(0,200,150,0.18);border:1px solid #00c896;border-radius:8px;' +
+    'padding:6px 14px;display:flex;align-items:center;gap:10px;font-size:12px;' +
+    'color:#00ffc8;pointer-events:all;white-space:nowrap;backdrop-filter:blur(4px)';
+  banner.innerHTML =
+    `<span>✏️ Editing path: <b>${esc(fixture.name)}</b> &nbsp;·&nbsp; Click canvas to add waypoints &nbsp;·&nbsp; Drag handles to move</span>` +
+    `<button onclick="exitPathEdit(false)" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px">Cancel</button>` +
+    `<button onclick="exitPathEdit(true)"  style="background:#00c896;border:none;color:#000;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;font-weight:600">Done ✓</button>`;
+  if (fixture.cell_path) {
+    const clrBtn = document.createElement('button');
+    clrBtn.textContent = 'Clear Path';
+    clrBtn.style.cssText = 'background:rgba(255,80,80,0.2);border:1px solid #ff5050;color:#ff8080;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;margin-left:-6px';
+    clrBtn.onclick = () => { _pathEditWaypoints = []; renderRigLayout(); };
+    banner.insertBefore(clrBtn, banner.lastElementChild);
+  }
+  canvas.appendChild(banner);
+}
+
+/** Render the cell path SVG overlay on the rig canvas. */
+function renderCellPaths(canvas) {
+  if (!_allFixtures) return;
+  const NS = 'http://www.w3.org/2000/svg';
+
+  for (const f of _allFixtures) {
+    const isEditing = _pathEditFixture && _pathEditFixture.id === f.id;
+    const waypoints = isEditing ? _pathEditWaypoints : (f.cell_path || null);
+    if (!waypoints && !isEditing) continue;
+
+    // Build full waypoint list including the start (fixture rig position)
+    const startPt = { x: f.rig_x ?? 0.5, y: f.rig_y ?? 0.5, z: f.rig_z ?? 0.5 };
+    const allPts = [startPt, ...(waypoints || [])];
+
+    // Create SVG overlay
+    const svg = document.createElementNS(NS, 'svg');
+    svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:5';
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    canvas.appendChild(svg);
+
+    // Draw the polyline
+    if (allPts.length >= 2) {
+      const polyline = document.createElementNS(NS, 'polyline');
+      polyline.setAttribute('points', allPts.map(p => {
+        const { px, py } = rigProject(p.x, p.z ?? 0.5, p.y);
+        return `${px.toFixed(2)},${py.toFixed(2)}`;
+      }).join(' '));
+      polyline.setAttribute('fill', 'none');
+      polyline.setAttribute('stroke', isEditing ? '#00ffc8' : 'rgba(0,200,150,0.5)');
+      polyline.setAttribute('stroke-width', isEditing ? '0.7' : '0.4');
+      polyline.setAttribute('stroke-dasharray', isEditing ? '2,1' : '1.5,1.5');
+      polyline.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(polyline);
+
+      // Draw evenly-spaced cell dots along the path (show strip density)
+      const cellCount = f.cell_count || 1;
+      for (let ci = 0; ci < cellCount; ci++) {
+        const t = cellCount > 1 ? ci / (cellCount - 1) : 0;
+        const pos = _interpolatePathClient(allPts, t);
+        const { px, py } = rigProject(pos.x, pos.z ?? 0.5, pos.y);
+        const dot = document.createElementNS(NS, 'circle');
+        dot.setAttribute('cx', px.toFixed(2));
+        dot.setAttribute('cy', py.toFixed(2));
+        dot.setAttribute('r', '0.5');
+        dot.setAttribute('fill', isEditing ? '#00ffc8' : 'rgba(0,200,150,0.4)');
+        svg.appendChild(dot);
+      }
+    }
+
+    // In edit mode, draw draggable waypoint handles (skip index 0 = fixture start)
+    if (isEditing) {
+      for (let wi = 0; wi < allPts.length; wi++) {
+        const pt = allPts[wi];
+        const { px, py } = rigProject(pt.x, pt.z ?? 0.5, pt.y);
+        const g = document.createElement('div');
+        g.className = 'rig-path-handle';
+        g.style.cssText =
+          `position:absolute;width:14px;height:14px;border-radius:50%;cursor:move;z-index:15;` +
+          `left:${px}%;top:${py}%;transform:translate(-50%,-50%);` +
+          `background:${wi === 0 ? '#ff9800' : '#00ffc8'};` +
+          `border:2px solid ${wi === 0 ? '#ff6600' : '#00a876'};` +
+          `box-shadow:0 0 6px rgba(0,0,0,0.8);pointer-events:all`;
+        g.title = wi === 0 ? 'Strip start (move fixture to reposition)' : `Waypoint ${wi} — drag to move, right-click to delete`;
+        if (wi > 0) {
+          const wpIdx = wi - 1; // index into _pathEditWaypoints
+          g.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); _pathHandleDrag(e, wpIdx); });
+          g.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); _pathHandleDelete(wpIdx); });
+        }
+        canvas.appendChild(g);
+      }
+    }
+  }
+}
+
+/** Client-side arc-length path interpolation (mirrors server logic). */
+function _interpolatePathClient(pts, t) {
+  if (pts.length === 1) return pts[0];
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+    lens.push(lens[i-1] + Math.sqrt(dx*dx + dy*dy));
+  }
+  const total = lens[lens.length-1];
+  if (total === 0) return pts[0];
+  const target = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 1; i < pts.length; i++) {
+    if (target <= lens[i]) {
+      const frac = (target - lens[i-1]) / (lens[i] - lens[i-1]);
+      const a = pts[i-1], b = pts[i];
+      return { x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac, z: (a.z||0.5) + ((b.z||0.5) - (a.z||0.5)) * frac };
+    }
+  }
+  return pts[pts.length-1];
+}
+
+/** Drag a specific waypoint handle. */
+function _pathHandleDrag(e, wpIdx) {
+  const canvas = document.getElementById('rigCanvas');
+  const rect   = canvas.getBoundingClientRect();
+
+  function onMove(ev) {
+    const mx = (ev.clientX - rect.left) / rect.width;
+    const my = (ev.clientY - rect.top)  / rect.height;
+    const pos = rigUnproject(mx, my); // canvas fraction → world coords
+    _pathEditWaypoints[wpIdx] = { x: pos.wx, y: pos.wy, z: _pathEditWaypoints[wpIdx].z ?? 0.5 };
+    renderRigLayout();
+    _showPathEditBanner(_pathEditFixture);
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+/** Delete a waypoint by index. */
+function _pathHandleDelete(wpIdx) {
+  _pathEditWaypoints.splice(wpIdx, 1);
+  renderRigLayout();
+  _showPathEditBanner(_pathEditFixture);
+}
+
+/** Click on empty canvas area while in path-edit mode → add new waypoint. */
+function _pathCanvasClick(e) {
+  if (!_pathEditFixture) return;
+  // Ignore clicks on handles/banner/nodes
+  if (e.target.closest('.rig-path-handle,.rig-path-banner,.rig-node,.rig-element-hit')) return;
+  const canvas = document.getElementById('rigCanvas');
+  const rect   = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top)  / rect.height;
+  const pos = rigUnproject(mx, my);
+  _pathEditWaypoints.push({ x: pos.wx, y: pos.wy, z: 0.5 });
+  renderRigLayout();
+  _showPathEditBanner(_pathEditFixture);
+}
+
+/**
+ * Unproject a canvas fraction (0-1) back to world coords.
+ * Only valid in top view (x=rig_x, y=rig_y) — falls back gracefully in other views.
+ */
+function rigUnproject(sx, sy) {
+  // In top view: px% = rig_x * 100, py% = rig_y * 100
+  if (_rigViewMode === 'top') return { wx: sx, wy: sy };
+  // Front view: px% = rig_x*100, py = (1-rig_z)*100
+  if (_rigViewMode === 'front') return { wx: sx, wy: 0.5 };
+  // Side view: px% = rig_y*100
+  if (_rigViewMode === 'side') return { wx: 0.5, wy: sx };
+  // 3D: approximate by top-view coords (good-enough for path editing)
+  return { wx: sx, wy: sy };
 }
 
 async function saveRigElementToServer(el) {
@@ -8006,6 +8230,9 @@ document.getElementById('btnRigAddTrussH').addEventListener('click', () => addRi
 document.getElementById('btnRigAddTrussV').addEventListener('click', () => addRigElement('truss_v'));
 document.getElementById('btnRigAddStand').addEventListener('click', () => addRigElement('stand'));
 document.getElementById('btnRigAddTBar').addEventListener('click', () => addRigElement('tbar'));
+
+// Canvas click: add path waypoint when in path-edit mode
+document.getElementById('rigCanvas').addEventListener('click', _pathCanvasClick);
 
 // Deselect rigging when clicking empty canvas area
 document.getElementById('rigCanvas').addEventListener('mousedown', (e) => {
@@ -8211,7 +8438,8 @@ async function _saveCurrentRigToDB() {
     rig_x: f.rig_x != null ? f.rig_x : 0.5,
     rig_y: f.rig_y != null ? f.rig_y : 0.5,
     rig_z: f.rig_z != null ? f.rig_z : 0.5,
-    rig_order: f.rig_order != null ? f.rig_order : 0
+    rig_order: f.rig_order != null ? f.rig_order : 0,
+    cell_path: f.cell_path || null,
   }));
   await fetch('/api/fixtures/rig-layout', {
     method: 'PUT',
@@ -11440,7 +11668,7 @@ function buildQaGrid(gridId, items) {
 const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
 const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
 const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
-const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu']);
+const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
 function getEffectSlot(type) {
   if (MOTION_TYPES.has(type)) return 'motion';
   if (MULTICELL_TYPES.has(type)) return 'multicell';
@@ -11492,6 +11720,8 @@ const EFFECT_STYLE = {
   sound_wave:     { bg: 'linear-gradient(135deg,#2979ff,#00e5ff)', fg: '#fff', border: '#2979ff', icon: '🌊' },
   sound_flash:    { bg: 'linear-gradient(135deg,#d50000,#ff1744)', fg: '#fff', border: '#d50000', icon: '💥' },
   sound_vu:       { bg: 'linear-gradient(135deg,#00c853,#ffd600,#d50000)', fg: '#fff', border: '#00c853', icon: '📊' },
+  sound_vu_tb:    { bg: 'linear-gradient(135deg,#d50000,#ffd600,#00c853)', fg: '#fff', border: '#d50000', icon: '📊' },
+  sound_vu_lr:    { bg: 'linear-gradient(135deg,#00c853,#ffd600,#d50000)', fg: '#fff', border: '#00c853', icon: '📊' },
 };
 
 async function buildEffectsLibraryGrid() {

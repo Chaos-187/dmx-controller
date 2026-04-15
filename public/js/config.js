@@ -237,6 +237,12 @@ function connect() {
     else if (msg.type === 'os2l_button_map_created') {
       if (typeof loadButtonMaps === 'function') loadButtonMaps();
     }
+    else if (msg.type === 'audio_input_level') {
+      updateAudioMeter(msg.levels);
+    }
+    else if (msg.type === 'audio_input_status') {
+      updateAudioStatus(msg);
+    }
     else if (msg.type === 'server_log') {
       logEvent({ evtType: 'server', raw: { level: msg.level, message: msg.message }, ts: msg.ts });
     }
@@ -416,9 +422,10 @@ document.querySelectorAll('.device-tab-btn').forEach(btn => {
     document.querySelectorAll('.device-tab-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('devtab-' + btn.dataset.devtab).classList.add('active');
-    if (btn.dataset.devtab === 'usb') loadUsbDevices();
-    if (btn.dataset.devtab === 'artnet') loadArtnetNodes();
+    if (btn.dataset.devtab === 'usb')     loadUsbDevices();
+    if (btn.dataset.devtab === 'artnet')  loadArtnetNodes();
     if (btn.dataset.devtab === 'network') loadNetworkConfig();
+    if (btn.dataset.devtab === 'audio')   loadAudioInputConfig();
   });
 });
 
@@ -486,9 +493,10 @@ function loadActiveTabData() {
   const loaders = {
     devices: () => {
       const dt = document.querySelector('.device-tab-btn.active');
-      if (!dt || dt.dataset.devtab === 'usb') loadUsbDevices();
-      if (dt && dt.dataset.devtab === 'artnet') loadArtnetNodes();
-      if (dt && dt.dataset.devtab === 'network') loadNetworkConfig();
+      if (!dt || dt.dataset.devtab === 'usb')     loadUsbDevices();
+      if (dt && dt.dataset.devtab === 'artnet')   loadArtnetNodes();
+      if (dt && dt.dataset.devtab === 'network')  loadNetworkConfig();
+      if (dt && dt.dataset.devtab === 'audio')    loadAudioInputConfig();
     },
     os2l:            () => { loadSubscriptions(); loadButtonMaps(); },
     lighting:        () => loadLightingConfig(),
@@ -1860,6 +1868,201 @@ function updateMdnsStatus(s) {
   document.getElementById('mdnsStatusWebPort').textContent = s.web_port || '\u2014';
   document.getElementById('mdnsStatusOs2lPort').textContent = s.os2l_port || '\u2014';
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  Audio Input Config
+// ═══════════════════════════════════════════════════════════════
+
+async function loadAudioInputConfig() {
+  try {
+    const [cfg, status] = await Promise.all([
+      fetch('/api/audio-input/config').then(r => r.json()),
+      fetch('/api/audio-input/status').then(r => r.json()),
+    ]);
+    document.getElementById('cfgAudioEnabled').checked = !!cfg.enabled;
+    document.getElementById('cfgAudioFormat').value    = cfg.format || 'dshow';
+    document.getElementById('cfgAudioGain').value      = cfg.gain || 1.0;
+    document.getElementById('cfgAudioGainVal').textContent = '\u00D7' + parseFloat(cfg.gain || 1).toFixed(1);
+    // Populate device dropdown with saved value if no scan done yet
+    const sel = document.getElementById('cfgAudioDevice');
+    if (cfg.device_name) {
+      const existing = Array.from(sel.options).find(o => o.value === cfg.device_name);
+      if (!existing) {
+        const opt = document.createElement('option');
+        opt.value = cfg.device_name;
+        opt.textContent = cfg.device_name;
+        sel.innerHTML = '';
+        sel.appendChild(opt);
+      }
+      sel.value = cfg.device_name;
+    }
+    updateAudioStatus(status);
+    if (status.running && status.levels) updateAudioMeter(status.levels);
+  } catch(e) {
+    console.error('Failed to load audio input config', e);
+  }
+}
+
+async function scanAudioDevices() {
+  const btn = document.getElementById('btnScanAudioDevices');
+  btn.disabled = true;
+  btn.innerHTML = 'Scanning\u2026';
+  try {
+    const data = await fetch('/api/audio-input/devices').then(r => r.json());
+    const sel = document.getElementById('cfgAudioDevice');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    if (!data.devices || data.devices.length === 0) {
+      sel.innerHTML = '<option value="">\u2014 no devices found \u2014</option>';
+    } else {
+      for (const d of data.devices) {
+        const opt = document.createElement('option');
+        opt.value = d.name;
+        opt.textContent = d.name;
+        sel.appendChild(opt);
+      }
+      if (prev && Array.from(sel.options).find(o => o.value === prev)) sel.value = prev;
+      if (data.platform_format) document.getElementById('cfgAudioFormat').value = data.platform_format;
+    }
+  } catch(e) {
+    console.error('Audio device scan failed', e);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '&#128269; Scan';
+  }
+}
+
+function updateAudioStatus(s) {
+  const dot     = document.getElementById('audioStatusDot');
+  const label   = document.getElementById('audioStatusLabel');
+  const devRow  = document.getElementById('audioDeviceRow');
+  const devDisp = document.getElementById('audioDeviceDisplay');
+  const errRow  = document.getElementById('audioErrorRow');
+  const errMsg  = document.getElementById('audioErrorMsg');
+  if (!dot) return;
+
+  if (s.running) {
+    dot.style.background = 'var(--green)';
+    dot.style.boxShadow  = '0 0 6px var(--green)';
+    label.style.color    = 'var(--green)';
+    label.textContent    = 'Capturing';
+    devRow.style.display = '';
+    devDisp.textContent  = s.device_name || '\u2014';
+  } else {
+    dot.style.background = '#555';
+    dot.style.boxShadow  = 'none';
+    label.style.color    = 'var(--text-dim)';
+    label.textContent    = 'Inactive';
+    devRow.style.display = 'none';
+  }
+
+  if (s.error) {
+    errRow.style.display = '';
+    errMsg.textContent   = s.error;
+  } else {
+    errRow.style.display = 'none';
+  }
+}
+
+// Bands shown in the live level meter (display order)
+const AUDIO_METER_BANDS = [
+  { key: 'sub_bass',  label: 'Sub Bass',  color: '#d050ff' },
+  { key: 'bass',      label: 'Bass',      color: '#ff5400' },
+  { key: 'mid',       label: 'Mid',       color: '#00e676' },
+  { key: 'upper_mid', label: 'Upper Mid', color: '#448aff' },
+  { key: 'treble',    label: 'Treble',    color: '#e94560' },
+  { key: 'energy',    label: 'Energy',    color: '#ffd600' },
+];
+
+function ensureAudioMeterDom() {
+  const container = document.getElementById('audioMeter');
+  if (!container || container.querySelector('.audio-meter-row')) return;
+  container.innerHTML = '';
+  for (const band of AUDIO_METER_BANDS) {
+    const row = document.createElement('div');
+    row.className = 'audio-meter-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px';
+    row.innerHTML =
+      `<span style="width:72px;font-size:11px;color:var(--text-dim);text-align:right;flex-shrink:0">${band.label}</span>` +
+      `<div style="flex:1;height:10px;background:#1a1a1a;border-radius:4px;overflow:hidden">` +
+        `<div data-band="${band.key}" style="height:100%;width:0%;background:${band.color};border-radius:4px"></div>` +
+      `</div>`;
+    container.appendChild(row);
+  }
+}
+
+// Buffer latest levels and flush on animation frame to keep DOM updates
+// in sync with the browser's paint cycle (avoids ~60fps WebSocket jank).
+let _audioMeterPending = null;
+let _audioMeterRafId   = null;
+
+function _flushAudioMeter() {
+  _audioMeterRafId = null;
+  const levels = _audioMeterPending;
+  _audioMeterPending = null;
+  if (!levels) return;
+  ensureAudioMeterDom();
+  const container = document.getElementById('audioMeter');
+  if (!container) return;
+  for (const bar of container.querySelectorAll('[data-band]')) {
+    const val = levels[bar.dataset.band] || 0;
+    bar.style.width = Math.min(100, Math.round(val * 100)) + '%';
+  }
+}
+
+function updateAudioMeter(levels) {
+  if (!levels) return;
+  _audioMeterPending = levels;
+  if (!_audioMeterRafId) {
+    _audioMeterRafId = requestAnimationFrame(_flushAudioMeter);
+  }
+}
+
+document.getElementById('cfgAudioGain').addEventListener('input', function() {
+  document.getElementById('cfgAudioGainVal').textContent = '\u00D7' + parseFloat(this.value).toFixed(1);
+});
+
+document.getElementById('btnScanAudioDevices').addEventListener('click', scanAudioDevices);
+
+document.getElementById('btnSaveAudioConfig').addEventListener('click', async () => {
+  const btn = document.getElementById('btnSaveAudioConfig');
+  btn.disabled = true;
+  btn.textContent = 'Saving\u2026';
+  try {
+    await authFetch('/api/audio-input/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled:     document.getElementById('cfgAudioEnabled').checked,
+        device_name: document.getElementById('cfgAudioDevice').value,
+        format:      document.getElementById('cfgAudioFormat').value,
+        gain:        parseFloat(document.getElementById('cfgAudioGain').value) || 1.0,
+      }),
+    });
+    btn.textContent       = 'Saved \u2713';
+    btn.style.borderColor = 'var(--green)';
+    btn.style.color       = 'var(--green)';
+    setTimeout(() => {
+      btn.textContent       = 'Save & Apply';
+      btn.style.borderColor = '';
+      btn.style.color       = '';
+    }, 2000);
+    const status = await fetch('/api/audio-input/status').then(r => r.json());
+    updateAudioStatus(status);
+  } catch(e) {
+    btn.textContent   = 'Error';
+    btn.style.color   = 'var(--danger)';
+    setTimeout(() => { btn.textContent = 'Save & Apply'; btn.style.color = ''; }, 2500);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('btnStopAudioCapture').addEventListener('click', async () => {
+  await authFetch('/api/audio-input/stop', { method: 'POST' });
+  const status = await fetch('/api/audio-input/status').then(r => r.json());
+  updateAudioStatus(status);
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  About

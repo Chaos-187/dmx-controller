@@ -53,7 +53,7 @@ const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','fig
 const MULTICELL_EFFECT_TYPES   = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
 const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
-const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu']);
+const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
 const PAN_TILT = new Set(['pan','tilt']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
 
@@ -849,23 +849,106 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       return null;
     }
 
-    // ── Sound VU: fixture position maps to frequency band (VU meter) ─────
+    // ── Sound VU: bar-graph VU meter driven by audio energy ──────────────
+    // Each cell (or rig fixture) represents a threshold on the bar.
+    // A cell lights up if the audio energy is above its threshold position,
+    // producing a proper rising/falling VU bar.  Color: green → yellow → red.
     case 'sound_vu': {
       const audio = params.audio || {};
-      const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
-      const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
-      // Map position across 5 bands: sub_bass → bass → mid → upper_mid → treble
-      const bands = ['sub_bass', 'bass', 'mid', 'upper_mid', 'treble'];
-      const bandIdx = Math.min(bands.length - 1, Math.floor(pos * bands.length));
-      const level = audio[bands[bandIdx]] || 0;
-      // Color: green (low) → yellow (mid) → red (high)
-      const hue = (1 - pos) * 120; // 120=green → 0=red
+      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+
+      // Master channel of a multicell fixture: use overall energy for dimmer
+      if (isMaster) {
+        if (channelType === 'dimmer') return Math.round(Math.sqrt(audio.energy || 0) * 255);
+        return null;
+      }
+
+      // pos: 0 = bottom of bar (easiest to light), 1 = top (hardest)
+      let pos, count;
+      if (cellCount > 1) {
+        // Multicell fixture — cells form the whole bar themselves
+        pos   = cellIndex / Math.max(1, cellCount - 1);
+        count = cellCount;
+      } else {
+        // Single-cell fixtures — rig position forms the bar
+        const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
+        pos   = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
+        count = fixtureCount;
+      }
+
+      // Audio energy (0–1) drives the bar height.
+      // Apply sqrt to give better visual ballistics at low levels.
+      const energy = Math.sqrt(audio.energy || 0);
+
+      // Hard on/off segment: lit if bar height exceeds this cell's threshold
+      if (energy < pos) return 0;
+
+      // Color gradient: green (bottom) → yellow (mid) → red (top)
+      const hue = (1 - pos) * 120; // 120=green, 60=yellow, 0=red
       const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
-      const brightness = Math.sqrt(level);
-      if (channelType === 'red') return Math.round(r * brightness);
-      if (channelType === 'green') return Math.round(g * brightness);
-      if (channelType === 'blue') return Math.round(b * brightness);
-      if (channelType === 'dimmer') return Math.round(brightness * 255);
+
+      // Top lit cell gets a brightness boost so the leading edge is bright
+      const cellThreshold = 1 / Math.max(1, count - 1);
+      const isTop = (energy - pos) < cellThreshold;
+      const bright = isTop ? 1.0 : 0.75;
+
+      if (channelType === 'red')    return Math.round(r * bright);
+      if (channelType === 'green')  return Math.round(g * bright);
+      if (channelType === 'blue')   return Math.round(b * bright);
+      if (channelType === 'dimmer') return Math.round(bright * 255);
+      if (channelType === 'white')  return 0;
+      return null;
+    }
+
+    // ── Rig VU Top→Bottom: bar fills downward from the top of the rig ────
+    // Uses _rigPositionY: 0 = top, 1 = bottom.
+    // Fixtures at the top light first; bar grows downward as energy rises.
+    case 'sound_vu_tb': {
+      const audio  = params.audio || {};
+      const energy = Math.sqrt(audio.energy || 0);
+      const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
+      // pos: 0 = top of rig, 1 = bottom
+      const pos = channelCtx._rigPositionY ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
+      // A fixture lights when energy exceeds (1 - pos), i.e. top fixtures
+      // light first (threshold near 1) and lower fixtures need more energy.
+      const threshold = 1 - pos;
+      if (energy < threshold) return 0;
+      // Color: red at top (just lit threshold) → green at bottom (always on)
+      const hue = pos * 120; // 0=red (top), 120=green (bottom)
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const cellThreshold = 1 / Math.max(1, fixtureCount - 1);
+      const isEdge = (energy - threshold) < cellThreshold;
+      const bright = isEdge ? 1.0 : 0.75;
+      if (channelType === 'red')    return Math.round(r * bright);
+      if (channelType === 'green')  return Math.round(g * bright);
+      if (channelType === 'blue')   return Math.round(b * bright);
+      if (channelType === 'dimmer') return Math.round(bright * 255);
+      if (channelType === 'white')  return 0;
+      return null;
+    }
+
+    // ── Rig VU Left→Right: bar fills from left to right across the rig ───
+    // Uses _rigPosition (X axis): 0 = left edge, 1 = right edge.
+    // Fixtures on the left light first; bar grows rightward as energy rises.
+    case 'sound_vu_lr': {
+      const audio  = params.audio || {};
+      const energy = Math.sqrt(audio.energy || 0);
+      const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
+      // pos: 0 = left, 1 = right
+      const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
+      // Fixture lights when energy exceeds its position threshold
+      if (energy < pos) return 0;
+      // Color: green (left) → yellow → red (right)
+      const hue = (1 - pos) * 120;
+      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const cellThreshold = 1 / Math.max(1, fixtureCount - 1);
+      const isEdge = (energy - pos) < cellThreshold;
+      const bright = isEdge ? 1.0 : 0.75;
+      if (channelType === 'red')    return Math.round(r * bright);
+      if (channelType === 'green')  return Math.round(g * bright);
+      if (channelType === 'blue')   return Math.round(b * bright);
+      if (channelType === 'dimmer') return Math.round(bright * 255);
+      if (channelType === 'white')  return 0;
       return null;
     }
 
