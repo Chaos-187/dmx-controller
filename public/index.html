@@ -898,6 +898,43 @@
       pointer-events: none; user-select: none; z-index: 8;
       background: rgba(0,0,0,.25); padding: 2px 8px; border-radius: 3px;
     }
+
+    /* ── LED Strip rendering on rig canvas ── */
+    .rig-strip-label {
+      position: absolute; transform: translate(-50%, -100%);
+      font-size: 9px; font-weight: 600; color: rgba(255,255,255,.8);
+      white-space: nowrap; pointer-events: none; z-index: 7;
+      text-shadow: 0 1px 4px rgba(0,0,0,.9);
+      padding: 1px 4px; border-radius: 3px;
+      background: rgba(0,0,0,.5);
+    }
+    .rig-strip-order {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      font-size: 8px; font-weight: 700;
+      border: 2px solid var(--panel);
+      margin-right: 3px; vertical-align: middle;
+    }
+    .rig-strip-hitarea {
+      position: absolute; z-index: 4; cursor: grab; pointer-events: all;
+      transform: translate(-50%, -50%);
+    }
+    .rig-strip-hitarea:hover ~ svg .strip-housing { stroke-opacity: 1 !important; }
+
+    /* Shape preset buttons in path editor */
+    .rig-path-presets {
+      display: flex; gap: 3px; margin-left: 4px;
+    }
+    .rig-path-presets button {
+      font-size: 10px; padding: 2px 7px; cursor: pointer;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2);
+      color: #ccc; border-radius: 3px; white-space: nowrap;
+      transition: all .15s;
+    }
+    .rig-path-presets button:hover {
+      background: rgba(0,200,150,.2); border-color: #00c896; color: #00ffc8;
+    }
     /* 3D stage SVG layer */
     .rig-stage-svg {
       position: absolute; inset: 0; width: 100%; height: 100%;
@@ -1893,7 +1930,7 @@
       </div>
       <div class="rig-canvas-wrap" id="rigCanvas"></div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
-        Drag fixtures on the X/Y plane. Right-click a fixture or element to adjust depth (Z). Use view buttons to switch between Top, 3D, Front, and Side views. Order badges show rig sweep order.
+        Drag fixtures on the X/Y plane. Right-click to adjust depth (Z). Double-click multicell fixtures to edit strip path with corners and wrapping. Use view buttons for Top, 3D, Front, and Side views.
       </div>
     </div>
   </div>
@@ -7559,6 +7596,12 @@ function renderRigLayout() {
 
   for (let i = 0; i < sorted.length; i++) {
     const f = sorted[i];
+
+    // Multicell fixtures with a defined cell_path are rendered as strips
+    // (handled by renderCellPaths). Skip the blob node for them.
+    const isPathEditing = _pathEditFixture && _pathEditFixture.id === f.id;
+    if (f.cell_path && f.cell_path.length > 0 && !isPathEditing) continue;
+
     // Project: rig_x=L/R → x, rig_z=height → y, rig_y=depth → z
     const { px, py, scale } = rigProject(
       f.rig_x != null ? f.rig_x : 0.5,
@@ -7601,11 +7644,9 @@ function renderRigLayout() {
     node.addEventListener('touchstart', rigNodeTouchStart, { passive: false });
     // Right-click / long-press to adjust depth (Z)
     node.addEventListener('contextmenu', (e) => { e.preventDefault(); rigNodeDepthPopup(e, f); });
-    // Double-click multicell fixtures to open the strip path editor
-    if (f.cell_count > 0) {
-      node.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); startPathEdit(f); });
-      node.title += '\n\nDouble-click to edit pixel strip path';
-    }
+    // Double-click to open the strip path editor
+    node.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); startPathEdit(f); });
+    node.title += '\n\nDouble-click to edit strip path';
 
     canvas.appendChild(node);
   }
@@ -7644,6 +7685,11 @@ function rigNodeMouseDown(e) {
   const fId = +node.dataset.fixtureId;
   const f = _allFixtures.find(fx => fx.id === fId);
 
+  // Capture original position for cell_path delta shift
+  const origRigX = f ? (f.rig_x ?? 0.5) : 0.5;
+  const origRigY = f ? (f.rig_y ?? 0.5) : 0.5;
+  const origRigZ = f ? (f.rig_z ?? 0.5) : 0.5;
+
   if (_rigViewMode === '3d' && f) {
     // ── 3D mode: track in world space, project back to screen for node position ──
     // Drag uses camera-inverse math so movement follows the camera orientation.
@@ -7653,8 +7699,10 @@ function rigNodeMouseDown(e) {
     const origX = f.rig_x ?? 0.5;  // L/R
     const origY = f.rig_y ?? 0.5;  // depth
     const origZ = f.rig_z ?? 0.5;  // height
+    let didDrag = false;
 
     function onMove(ev) {
+      didDrag = true;
       const mx01 = (ev.clientX - rect.left) / rect.width;
       const my01 = (ev.clientY - rect.top)  / rect.height;
       const dsx  = mx01 - startSx;
@@ -7694,15 +7742,20 @@ function rigNodeMouseDown(e) {
       clearSnapGuides(canvas);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      recalcRigOrder();
-      if (f) saveFixtureRigPosition(f);
+      if (didDrag && f) {
+        _shiftCellPath(f, origRigX, origRigY, origRigZ);
+        saveFixtureRigPosition(f);
+        recalcRigOrder();
+      }
     }
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
 
   } else {
     // ── 2D views: screen-fraction drag, rigUnproject on save ──
+    let didDrag = false;
     function onMove(ev) {
+      didDrag = true;
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top)  / rect.height;
       let cx = Math.max(0, Math.min(1, px));
@@ -7719,14 +7772,15 @@ function rigNodeMouseDown(e) {
       clearSnapGuides(canvas);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      if (f) {
+      if (didDrag && f) {
         const coords = rigUnproject(parseFloat(node.style.left), parseFloat(node.style.top));
         if ('x' in coords) f.rig_x = coords.x;
         if ('z' in coords) f.rig_y = coords.z;
         if ('y' in coords) f.rig_z = coords.y;
+        _shiftCellPath(f, origRigX, origRigY, origRigZ);
         saveFixtureRigPosition(f);
+        recalcRigOrder();
       }
-      recalcRigOrder();
     }
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -7741,6 +7795,11 @@ function rigNodeTouchStart(e) {
   node.classList.add('dragging');
   const fId = +node.dataset.fixtureId;
   const f = _allFixtures.find(fx => fx.id === fId);
+
+  // Capture original position for cell_path delta shift
+  const origRigX = f ? (f.rig_x ?? 0.5) : 0.5;
+  const origRigY = f ? (f.rig_y ?? 0.5) : 0.5;
+  const origRigZ = f ? (f.rig_z ?? 0.5) : 0.5;
 
   if (_rigViewMode === '3d' && f) {
     const touch0 = e.touches[0];
@@ -7787,7 +7846,10 @@ function rigNodeTouchStart(e) {
       node.removeEventListener('touchmove', onMove);
       node.removeEventListener('touchend', onEnd);
       recalcRigOrder();
-      if (f) saveFixtureRigPosition(f);
+      if (f) {
+        _shiftCellPath(f, origRigX, origRigY, origRigZ);
+        saveFixtureRigPosition(f);
+      }
     }
     node.addEventListener('touchmove', onMove, { passive: false });
     node.addEventListener('touchend', onEnd);
@@ -7815,6 +7877,7 @@ function rigNodeTouchStart(e) {
         if ('x' in coords) f.rig_x = coords.x;
         if ('z' in coords) f.rig_y = coords.z;
         if ('y' in coords) f.rig_z = coords.y;
+        _shiftCellPath(f, origRigX, origRigY, origRigZ);
         saveFixtureRigPosition(f);
       }
       recalcRigOrder();
@@ -7858,6 +7921,21 @@ function rigNodeDepthPopup(e, fixture) {
     renderRigLayout();
   });
   rangeEl.addEventListener('change', () => recalcRigOrder());
+
+  // "Edit Strip Path" button — any fixture can be laid out as a strip
+  {
+    const editBtn = document.createElement('button');
+    editBtn.textContent = '✏️ Edit Strip Path';
+    editBtn.style.cssText = 'display:block;width:100%;margin-top:8px;padding:5px 8px;' +
+      'background:rgba(0,200,150,0.15);border:1px solid #00c896;color:#00ffc8;' +
+      'border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;text-align:center';
+    editBtn.addEventListener('click', () => {
+      popup.remove();
+      document.removeEventListener('mousedown', closePopup);
+      startPathEdit(fixture);
+    });
+    popup.appendChild(editBtn);
+  }
 
   // Close when clicking outside
   function closePopup(ev) {
@@ -7989,6 +8067,20 @@ async function saveFixtureRigPosition(f) {
   } catch (e) { console.warn('Failed to save fixture rig position', e); }
 }
 
+/** Shift all cell_path waypoints by the delta between old and new fixture position. */
+function _shiftCellPath(f, origX, origY, origZ) {
+  if (!f.cell_path || f.cell_path.length === 0) return;
+  const dx = (f.rig_x ?? 0.5) - origX;
+  const dy = (f.rig_y ?? 0.5) - origY;
+  const dz = (f.rig_z ?? 0.5) - origZ;
+  if (dx === 0 && dy === 0 && dz === 0) return;
+  f.cell_path = f.cell_path.map(p => ({
+    x: p.x + dx,
+    y: p.y + dy,
+    z: (p.z ?? 0.5) + dz,
+  }));
+}
+
 // ════════════════════════════════════════════════════════════
 //  Pixel Strip Path Editor
 //
@@ -8031,27 +8123,116 @@ function _showPathEditBanner(fixture) {
     'position:absolute;top:6px;left:50%;transform:translateX(-50%);z-index:30;' +
     'background:rgba(0,200,150,0.18);border:1px solid #00c896;border-radius:8px;' +
     'padding:6px 14px;display:flex;align-items:center;gap:10px;font-size:12px;' +
-    'color:#00ffc8;pointer-events:all;white-space:nowrap;backdrop-filter:blur(4px)';
+    'color:#00ffc8;pointer-events:all;white-space:nowrap;backdrop-filter:blur(4px);flex-wrap:wrap';
   banner.innerHTML =
     `<span>✏️ Editing path: <b>${esc(fixture.name)}</b> &nbsp;·&nbsp; Click canvas to add waypoints &nbsp;·&nbsp; Drag handles to move</span>` +
     `<button onclick="exitPathEdit(false)" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px">Cancel</button>` +
     `<button onclick="exitPathEdit(true)"  style="background:#00c896;border:none;color:#000;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;font-weight:600">Done ✓</button>`;
-  if (fixture.cell_path) {
+
+  // Shape preset buttons
+  const presets = document.createElement('div');
+  presets.className = 'rig-path-presets';
+  presets.innerHTML =
+    `<span style="font-size:10px;color:rgba(255,255,255,.5);margin-right:2px">Shapes:</span>` +
+    `<button data-shape="straight" title="Straight horizontal line">― Straight</button>` +
+    `<button data-shape="straight-v" title="Straight vertical line">│ Vertical</button>` +
+    `<button data-shape="l-shape" title="L-shaped corner">⌐ L-Shape</button>` +
+    `<button data-shape="u-shape" title="U-shaped (two corners)">∪ U-Shape</button>` +
+    `<button data-shape="zigzag" title="Zigzag / serpentine pattern">⩘ Zigzag</button>` +
+    `<button data-shape="square" title="Square / rectangular loop">□ Square</button>` +
+    `<button data-shape="spiral" title="Spiral inward">◌ Spiral</button>`;
+  presets.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => _applyPathPreset(btn.dataset.shape, fixture));
+  });
+  banner.insertBefore(presets, banner.querySelector('button'));
+
+  if (fixture.cell_path || _pathEditWaypoints.length > 0) {
     const clrBtn = document.createElement('button');
     clrBtn.textContent = 'Clear Path';
     clrBtn.style.cssText = 'background:rgba(255,80,80,0.2);border:1px solid #ff5050;color:#ff8080;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;margin-left:-6px';
-    clrBtn.onclick = () => { _pathEditWaypoints = []; renderRigLayout(); };
+    clrBtn.onclick = () => { _pathEditWaypoints = []; renderRigLayout(); _showPathEditBanner(_pathEditFixture); };
     banner.insertBefore(clrBtn, banner.lastElementChild);
   }
   canvas.appendChild(banner);
+}
+
+/** Apply a shape preset to the current path being edited. */
+function _applyPathPreset(shape, fixture) {
+  const sx = fixture.rig_x ?? 0.5;
+  const sy = fixture.rig_y ?? 0.5;
+  const sz = fixture.rig_z ?? 0.5;
+  const len = 0.2;  // default segment length in normalised coords
+
+  switch (shape) {
+    case 'straight':
+      _pathEditWaypoints = [{ x: sx + len, y: sy, z: sz }];
+      break;
+    case 'straight-v':
+      _pathEditWaypoints = [{ x: sx, y: sy + len, z: sz }];
+      break;
+    case 'l-shape':
+      _pathEditWaypoints = [
+        { x: sx + len, y: sy, z: sz },
+        { x: sx + len, y: sy + len, z: sz },
+      ];
+      break;
+    case 'u-shape':
+      _pathEditWaypoints = [
+        { x: sx + len, y: sy, z: sz },
+        { x: sx + len, y: sy + len * 0.8, z: sz },
+        { x: sx, y: sy + len * 0.8, z: sz },
+      ];
+      break;
+    case 'zigzag': {
+      const rows = 4;
+      const rowH = len / rows;
+      const pts = [];
+      for (let r = 0; r < rows; r++) {
+        const dir = r % 2 === 0 ? 1 : -1;
+        const yOff = sy + (r + 1) * rowH;
+        if (r === 0) {
+          pts.push({ x: sx + len * dir, y: sy, z: sz });
+        }
+        pts.push({ x: sx + (dir > 0 ? len : 0), y: yOff, z: sz });
+        pts.push({ x: sx + (dir > 0 ? 0 : len), y: yOff, z: sz });
+      }
+      _pathEditWaypoints = pts;
+      break;
+    }
+    case 'square':
+      _pathEditWaypoints = [
+        { x: sx + len, y: sy, z: sz },
+        { x: sx + len, y: sy + len, z: sz },
+        { x: sx, y: sy + len, z: sz },
+        { x: sx, y: sy, z: sz },
+      ];
+      break;
+    case 'spiral': {
+      const pts = [];
+      const steps = 20;
+      const maxR = len * 0.5;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const angle = t * Math.PI * 4; // two full rotations
+        const r = maxR * (1 - t * 0.7);  // shrink inward
+        pts.push({ x: sx + Math.cos(angle) * r, y: sy + Math.sin(angle) * r, z: sz });
+      }
+      _pathEditWaypoints = pts;
+      break;
+    }
+  }
+  renderRigLayout();
+  _showPathEditBanner(fixture);
 }
 
 /** Render the cell path SVG overlay on the rig canvas. */
 function renderCellPaths(canvas) {
   if (!_allFixtures) return;
   const NS = 'http://www.w3.org/2000/svg';
+  const sorted = [..._allFixtures].sort((a, b) => (a.rig_order || 0) - (b.rig_order || 0));
 
-  for (const f of _allFixtures) {
+  for (let fi = 0; fi < sorted.length; fi++) {
+    const f = sorted[fi];
     const isEditing = _pathEditFixture && _pathEditFixture.id === f.id;
     const waypoints = isEditing ? _pathEditWaypoints : (f.cell_path || null);
     if (!waypoints && !isEditing) continue;
@@ -8059,45 +8240,170 @@ function renderCellPaths(canvas) {
     // Build full waypoint list including the start (fixture rig position)
     const startPt = { x: f.rig_x ?? 0.5, y: f.rig_y ?? 0.5, z: f.rig_z ?? 0.5 };
     const allPts = [startPt, ...(waypoints || [])];
+    const colorIdx = fi % RIG_NODE_COLORS.length;
+    const stripColor = RIG_NODE_COLORS[colorIdx];
+    const cellCount = f.cell_count || 1;
 
-    // Create SVG overlay
+    // Create SVG overlay for strip housing + cells
     const svg = document.createElementNS(NS, 'svg');
     svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:5';
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.setAttribute('preserveAspectRatio', 'none');
     canvas.appendChild(svg);
 
-    // Draw the polyline
-    if (allPts.length >= 2) {
-      const polyline = document.createElementNS(NS, 'polyline');
-      polyline.setAttribute('points', allPts.map(p => {
-        const { px, py } = rigProject(p.x, p.z ?? 0.5, p.y);
-        return `${px.toFixed(2)},${py.toFixed(2)}`;
-      }).join(' '));
-      polyline.setAttribute('fill', 'none');
-      polyline.setAttribute('stroke', isEditing ? '#00ffc8' : 'rgba(0,200,150,0.5)');
-      polyline.setAttribute('stroke-width', isEditing ? '0.7' : '0.4');
-      polyline.setAttribute('stroke-dasharray', isEditing ? '2,1' : '1.5,1.5');
-      polyline.setAttribute('vector-effect', 'non-scaling-stroke');
-      svg.appendChild(polyline);
+    // Project all points
+    const projected = allPts.map(p => rigProject(p.x, p.z ?? 0.5, p.y));
+    const pointsStr = projected.map(p => `${p.px.toFixed(2)},${p.py.toFixed(2)}`).join(' ');
 
-      // Draw evenly-spaced cell dots along the path (show strip density)
-      const cellCount = f.cell_count || 1;
+    if (allPts.length >= 2 && !isEditing) {
+      // ── STRIP HOUSING — thick line representing the physical strip ──
+      const housing = document.createElementNS(NS, 'polyline');
+      housing.classList.add('strip-housing');
+      housing.setAttribute('points', pointsStr);
+      housing.setAttribute('fill', 'none');
+      housing.setAttribute('stroke', stripColor);
+      housing.setAttribute('stroke-opacity', '0.3');
+      housing.setAttribute('stroke-width', '6');
+      housing.setAttribute('stroke-linecap', 'round');
+      housing.setAttribute('stroke-linejoin', 'round');
+      housing.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(housing);
+
+      // ── STRIP OUTLINE — thin border on the housing ──
+      const outline = document.createElementNS(NS, 'polyline');
+      outline.setAttribute('points', pointsStr);
+      outline.setAttribute('fill', 'none');
+      outline.setAttribute('stroke', stripColor);
+      outline.setAttribute('stroke-opacity', '0.6');
+      outline.setAttribute('stroke-width', '8');
+      outline.setAttribute('stroke-linecap', 'round');
+      outline.setAttribute('stroke-linejoin', 'round');
+      outline.setAttribute('vector-effect', 'non-scaling-stroke');
+      outline.setAttribute('stroke-dasharray', 'none');
+      // Use a wider transparent stroke as the outer border
+      svg.insertBefore(outline, housing);
+      // Overlay a dark core to create the border effect
+      const core = document.createElementNS(NS, 'polyline');
+      core.setAttribute('points', pointsStr);
+      core.setAttribute('fill', 'none');
+      core.setAttribute('stroke', '#0d0d14');
+      core.setAttribute('stroke-opacity', '0.7');
+      core.setAttribute('stroke-width', '6');
+      core.setAttribute('stroke-linecap', 'round');
+      core.setAttribute('stroke-linejoin', 'round');
+      core.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(core);
+
+      // ── LED CELLS — visible pixels along the strip ──
       for (let ci = 0; ci < cellCount; ci++) {
-        const t = cellCount > 1 ? ci / (cellCount - 1) : 0;
+        const t = cellCount > 1 ? ci / (cellCount - 1) : 0.5;
         const pos = _interpolatePathClient(allPts, t);
         const { px, py } = rigProject(pos.x, pos.z ?? 0.5, pos.y);
+
+        // LED glow (outer)
+        const glow = document.createElementNS(NS, 'circle');
+        glow.setAttribute('cx', px.toFixed(2));
+        glow.setAttribute('cy', py.toFixed(2));
+        glow.setAttribute('r', '0.6');
+        glow.setAttribute('fill', stripColor);
+        glow.setAttribute('opacity', '0.25');
+        svg.appendChild(glow);
+
+        // LED cell (inner bright dot)
         const dot = document.createElementNS(NS, 'circle');
         dot.setAttribute('cx', px.toFixed(2));
         dot.setAttribute('cy', py.toFixed(2));
-        dot.setAttribute('r', '0.5');
-        dot.setAttribute('fill', isEditing ? '#00ffc8' : 'rgba(0,200,150,0.4)');
+        dot.setAttribute('r', '0.35');
+        dot.setAttribute('fill', stripColor);
+        dot.setAttribute('opacity', '0.9');
         svg.appendChild(dot);
       }
-    }
 
-    // In edit mode, draw draggable waypoint handles (skip index 0 = fixture start)
-    if (isEditing) {
+      // ── CORNER MARKERS — small indicators at each waypoint ──
+      for (let wi = 0; wi < allPts.length; wi++) {
+        const { px, py } = projected[wi];
+        const marker = document.createElementNS(NS, 'circle');
+        marker.setAttribute('cx', px.toFixed(2));
+        marker.setAttribute('cy', py.toFixed(2));
+        marker.setAttribute('r', '0.4');
+        marker.setAttribute('fill', 'none');
+        marker.setAttribute('stroke', stripColor);
+        marker.setAttribute('stroke-width', '0.2');
+        marker.setAttribute('stroke-opacity', '0.5');
+        marker.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(marker);
+      }
+
+      // ── LABEL + ORDER — positioned above the start of the strip ──
+      const startProj = projected[0];
+      const label = document.createElement('div');
+      label.className = 'rig-strip-label';
+      label.style.left = startProj.px + '%';
+      label.style.top  = startProj.py + '%';
+      label.style.marginTop = '-8px';
+      label.innerHTML = `<span class="rig-strip-order">${fi + 1}</span>${esc(f.name)}`;
+      canvas.appendChild(label);
+
+      // ── HIT AREA — invisible draggable region at the strip start for moving/editing ──
+      const hitArea = document.createElement('div');
+      hitArea.className = 'rig-strip-hitarea rig-node';
+      hitArea.dataset.fixtureId = f.id;
+      hitArea.style.left   = startProj.px + '%';
+      hitArea.style.top    = startProj.py + '%';
+      hitArea.style.width  = '20px';
+      hitArea.style.height = '20px';
+      hitArea.style.background = stripColor + '22';
+      hitArea.style.border = '2px solid ' + stripColor;
+      hitArea.style.opacity = '0.4';
+      hitArea.style.borderRadius = '50%';
+      hitArea.title = `${f.name}\nU${f.universe} Ch${f.address}\n${cellCount} cells\n\nDrag to move • Double-click to edit path`;
+      // Drag handlers (reuse existing rig node drag)
+      hitArea.addEventListener('mousedown', rigNodeMouseDown);
+      hitArea.addEventListener('touchstart', rigNodeTouchStart, { passive: false });
+      hitArea.addEventListener('contextmenu', (e) => { e.preventDefault(); rigNodeDepthPopup(e, f); });
+      hitArea.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); startPathEdit(f); });
+      canvas.appendChild(hitArea);
+
+    } else if (isEditing) {
+      // ── EDIT MODE — dashed path with bright cells ──
+      if (allPts.length >= 2) {
+        const polyline = document.createElementNS(NS, 'polyline');
+        polyline.setAttribute('points', pointsStr);
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('stroke', '#00ffc8');
+        polyline.setAttribute('stroke-width', '6');
+        polyline.setAttribute('stroke-opacity', '0.2');
+        polyline.setAttribute('stroke-linecap', 'round');
+        polyline.setAttribute('stroke-linejoin', 'round');
+        polyline.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(polyline);
+
+        // Dashed center line
+        const dash = document.createElementNS(NS, 'polyline');
+        dash.setAttribute('points', pointsStr);
+        dash.setAttribute('fill', 'none');
+        dash.setAttribute('stroke', '#00ffc8');
+        dash.setAttribute('stroke-width', '1');
+        dash.setAttribute('stroke-dasharray', '4,3');
+        dash.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(dash);
+
+        // Cell dots in edit mode
+        for (let ci = 0; ci < cellCount; ci++) {
+          const t = cellCount > 1 ? ci / (cellCount - 1) : 0.5;
+          const pos = _interpolatePathClient(allPts, t);
+          const { px, py } = rigProject(pos.x, pos.z ?? 0.5, pos.y);
+          const dot = document.createElementNS(NS, 'circle');
+          dot.setAttribute('cx', px.toFixed(2));
+          dot.setAttribute('cy', py.toFixed(2));
+          dot.setAttribute('r', '0.5');
+          dot.setAttribute('fill', '#00ffc8');
+          dot.setAttribute('opacity', '0.7');
+          svg.appendChild(dot);
+        }
+      }
+
+      // Draggable waypoint handles
       for (let wi = 0; wi < allPts.length; wi++) {
         const pt = allPts[wi];
         const { px, py } = rigProject(pt.x, pt.z ?? 0.5, pt.y);
@@ -8111,7 +8417,7 @@ function renderCellPaths(canvas) {
           `box-shadow:0 0 6px rgba(0,0,0,0.8);pointer-events:all`;
         g.title = wi === 0 ? 'Strip start (move fixture to reposition)' : `Waypoint ${wi} — drag to move, right-click to delete`;
         if (wi > 0) {
-          const wpIdx = wi - 1; // index into _pathEditWaypoints
+          const wpIdx = wi - 1;
           g.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); _pathHandleDrag(e, wpIdx); });
           g.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); _pathHandleDelete(wpIdx); });
         }
@@ -8146,12 +8452,13 @@ function _interpolatePathClient(pts, t) {
 function _pathHandleDrag(e, wpIdx) {
   const canvas = document.getElementById('rigCanvas');
   const rect   = canvas.getBoundingClientRect();
+  const refZ = _pathEditWaypoints[wpIdx].z ?? (_pathEditFixture ? (_pathEditFixture.rig_z ?? 0.5) : 0.5);
 
   function onMove(ev) {
     const mx = (ev.clientX - rect.left) / rect.width;
     const my = (ev.clientY - rect.top)  / rect.height;
-    const pos = rigUnproject(mx, my); // canvas fraction → world coords
-    _pathEditWaypoints[wpIdx] = { x: pos.wx, y: pos.wy, z: _pathEditWaypoints[wpIdx].z ?? 0.5 };
+    const pos = _pathUnproject(mx, my, refZ);
+    _pathEditWaypoints[wpIdx] = { x: pos.x, y: pos.y, z: pos.z };
     renderRigLayout();
     _showPathEditBanner(_pathEditFixture);
   }
@@ -8421,7 +8728,8 @@ function _buildRigSnapshot() {
       rig_x: f.rig_x != null ? f.rig_x : 0.5,
       rig_y: f.rig_y != null ? f.rig_y : 0.5,
       rig_z: f.rig_z != null ? f.rig_z : 0.5,
-      rig_order: f.rig_order != null ? f.rig_order : 0
+      rig_order: f.rig_order != null ? f.rig_order : 0,
+      cell_path: f.cell_path || null
     })),
     elements: _rigElements.map(el => ({
       type: el.type, label: el.label || '',

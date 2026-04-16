@@ -2071,9 +2071,10 @@ function loadRigLayout(id) {
   const tx = db.transaction(() => {
     // Restore fixture positions
     if (data.fixtures && data.fixtures.length > 0) {
-      const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_z = ?, rig_order = ?, updated_at = datetime(\'now\') WHERE id = ?');
+      const stmt = db.prepare('UPDATE fixtures SET rig_x = ?, rig_y = ?, rig_z = ?, rig_order = ?, cell_path = ?, updated_at = datetime(\'now\') WHERE id = ?');
       for (const f of data.fixtures) {
-        stmt.run(f.rig_x ?? 0.5, f.rig_y ?? 0.5, f.rig_z ?? 0.5, f.rig_order ?? 0, f.id);
+        const cellPath = f.cell_path ? JSON.stringify(f.cell_path) : null;
+        stmt.run(f.rig_x ?? 0.5, f.rig_y ?? 0.5, f.rig_z ?? 0.5, f.rig_order ?? 0, cellPath, f.id);
       }
     }
 
