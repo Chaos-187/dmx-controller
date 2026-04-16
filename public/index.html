@@ -8486,25 +8486,115 @@ function _pathCanvasClick(e) {
   const rect   = canvas.getBoundingClientRect();
   const mx = (e.clientX - rect.left) / rect.width;
   const my = (e.clientY - rect.top)  / rect.height;
-  const pos = rigUnproject(mx, my);
-  _pathEditWaypoints.push({ x: pos.wx, y: pos.wy, z: 0.5 });
+  const refZ = _pathEditFixture.rig_z ?? 0.5;
+  const pos = _pathUnproject(mx, my, refZ);
+  _pathEditWaypoints.push({ x: pos.x, y: pos.y, z: pos.z });
   renderRigLayout();
   _showPathEditBanner(_pathEditFixture);
 }
 
 /**
- * Unproject a canvas fraction (0-1) back to world coords.
- * Only valid in top view (x=rig_x, y=rig_y) — falls back gracefully in other views.
+ * Unproject a canvas screen-fraction (0-1) back to world (rig) coords {x, y, z}.
+ * x = rig_x (L/R 0-1), y = rig_y (depth 0-1), z = rig_z (height 0-1).
+ * refZ is the reference height used to resolve the depth ambiguity in 3D/top views.
  */
-function rigUnproject(sx, sy) {
-  // In top view: px% = rig_x * 100, py% = rig_y * 100
-  if (_rigViewMode === 'top') return { wx: sx, wy: sy };
-  // Front view: px% = rig_x*100, py = (1-rig_z)*100
-  if (_rigViewMode === 'front') return { wx: sx, wy: 0.5 };
-  // Side view: px% = rig_y*100
-  if (_rigViewMode === 'side') return { wx: 0.5, wy: sx };
-  // 3D: approximate by top-view coords (good-enough for path editing)
-  return { wx: sx, wy: sy };
+function _pathUnproject(sx, sy, refZ) {
+  refZ = refZ ?? 0.5;
+  if (_rigViewMode === 'top') {
+    // top: px% = rig_x*100, py% = rig_y*100  (depth on screen-Y)
+    return { x: sx, y: sy, z: refZ };
+  }
+  if (_rigViewMode === 'front') {
+    // front: px% = rig_x*100, py% = rig_z*100 (rig_z=0 is top of screen)
+    return { x: sx, y: 0.5, z: sy };
+  }
+  if (_rigViewMode === 'side') {
+    // side: px% = rig_y*100, py% = rig_z*100
+    return { x: 0.5, y: sx, z: sy };
+  }
+  // ── 3D: ray-cast onto the dominant plane based on camera angle ──
+  // Determine which plane the camera is most looking at:
+  //   - High elevation → looking down → project onto height plane (fix z, solve x & y)
+  //   - Low elevation  → looking from side → project onto depth plane (fix y, solve x & z)
+  const azR = _rigCam.azimuth * Math.PI / 180;
+  const elR = _rigCam.elevation * Math.PI / 180;
+  const cosAz = Math.cos(azR), sinAz = Math.sin(azR);
+  const cosEl = Math.cos(elR), sinEl = Math.sin(elR);
+  const focal = 1.8;
+  const zoom  = _rigCam.zoom;
+  const panX  = _rigCam.panX;
+  const panY  = _rigCam.panY;
+
+  // Invert the projection: sx = 0.5 + (rx3*persp*0.55 + panX)*zoom
+  // → rx3*persp*0.55 = (sx - 0.5)/zoom - panX
+  // Similarly for sy → ry3
+  // But we don't know rz3 (depth in camera space) yet.
+  // Use the reference fixture position to estimate camera-space depth.
+  const refRigY = _pathEditFixture ? (_pathEditFixture.rig_y ?? 0.5) : 0.5;
+
+  // Transform reference point to get camera-space depth
+  const rwx = 0.5 - 0.5, rwy = -(refZ - 0.5), rwz = refRigY - 0.5;
+  const rrx2 = rwx * cosAz + rwz * sinAz;
+  const rry2 = rwy;
+  const rrz2 = -rwx * sinAz + rwz * cosAz;
+  const rrz3 = rry2 * sinEl + rrz2 * cosEl;
+  const refPersp = focal / Math.max(focal + rrz3, 0.1);
+
+  // Use reference persp to get camera-space x,y from screen coords
+  const ss = refPersp * 0.55;
+  const camX = ((sx - 0.5) / zoom - panX) / ss;
+  const camY = -((sy - 0.5) / zoom - panY) / ss;
+
+  // camX = rx3, camY = ry3 in camera space
+  // Invert camera rotation to get world coords.
+  // Camera rotation: Rel * Raz * world → camera
+  // After azimuth: rx2 = wx*cos + wz*sin, ry2 = wy, rz2 = -wx*sin + wz*cos
+  // After elevation: rx3 = rx2, ry3 = ry2*cos - rz2*sin, rz3 = ry2*sin + rz2*cos
+
+  // Determine dominant plane from elevation
+  const absEl = Math.abs(_rigCam.elevation);
+
+  if (absEl > 45) {
+    // Looking mostly down/up → fix height (z=refZ), solve for x and y(depth)
+    // rx3 = rx2 = wx*cosAz + wz*sinAz  → camX = wx*cosAz + wz*sinAz
+    // ry3 = wy*cosEl - rz2*sinEl
+    //      = wy*cosEl - (-wx*sinAz + wz*cosAz)*sinEl
+    // We know wy = -(refZ - 0.5) (fixed height)
+    const wy = -(refZ - 0.5);
+    // From ry3 equation: camY = wy*cosEl - (-wx*sinAz + wz*cosAz)*sinEl
+    // camY = wy*cosEl + wx*sinAz*sinEl - wz*cosAz*sinEl
+    // System:
+    //   camX = wx*cosAz + wz*sinAz
+    //   camY - wy*cosEl = wx*sinAz*sinEl - wz*cosAz*sinEl
+    const rhs2 = camY - wy * cosEl;
+    // Solve: [cosAz, sinAz; sinAz*sinEl, -cosAz*sinEl] * [wx;wz] = [camX; rhs2]
+    const det = cosAz * (-cosAz * sinEl) - sinAz * sinAz * sinEl;
+    if (Math.abs(det) > 0.001) {
+      const wx = (-cosAz * sinEl * camX - sinAz * rhs2) / det;
+      const wz = (sinAz * sinEl * camX - cosAz * rhs2) / det;
+      return {
+        x: Math.max(0, Math.min(1, wx + 0.5)),
+        y: Math.max(0, Math.min(1, wz + 0.5)),
+        z: refZ
+      };
+    }
+  }
+
+  // Looking mostly from the side → fix depth (y=refRigY), solve for x and z(height)
+  // rx3 = rx2 = wx*cosAz + wz*sinAz  → camX = wx*cosAz + wz*sinAz
+  // We know wz = refRigY - 0.5 (fixed depth)
+  const wz = refRigY - 0.5;
+  const wx = (camX - wz * sinAz) / (Math.abs(cosAz) > 0.001 ? cosAz : 0.001);
+  // ry3 = wy*cosEl - rz2*sinEl where rz2 = -wx*sinAz + wz*cosAz
+  const rz2 = -wx * sinAz + wz * cosAz;
+  // camY = wy*cosEl - rz2*sinEl → wy = (camY + rz2*sinEl) / cosEl
+  const wy = Math.abs(cosEl) > 0.001 ? (camY + rz2 * sinEl) / cosEl : 0;
+  // wy = -(rig_z - 0.5) → rig_z = 0.5 - wy
+  return {
+    x: Math.max(0, Math.min(1, wx + 0.5)),
+    y: refRigY,
+    z: Math.max(0, Math.min(1, 0.5 - wy))
+  };
 }
 
 async function saveRigElementToServer(el) {
