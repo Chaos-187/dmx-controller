@@ -105,6 +105,11 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
         const numChunks = Math.max(1, Math.floor(secDurMs / chunkMs));
         const baseDensity = MOVE_DENSITY[sec.label] || 0.5;
 
+        // Re-use the last target preset when a chunk "skips" a new move, so we still
+        // emit a cue for every time slice — no dead air with heads stuck in limbo
+        // between separate movement cues.
+        let lastMoverPresetId = null;
+
         for (let ci = 0; ci < numChunks; ci++) {
           const chunkStart = ci === 0 ? secStartMs : walkBeats(secStartMs, ci * chunkBeats, ctx.beats, beatMs);
           const chunkEnd = ci < numChunks - 1
@@ -124,16 +129,15 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
           // For grouped movers, the "should this chunk move?" decision is
           // made once (by the first member) and all members follow suit.
           const forceMove = ci === 0 && (sec.label === 'chorus' || sec.label === 'drop');
-          let shouldMove;
+          let shouldChange;
           if (gi) {
             // Use group-stable seed so all members get the same roll
             const groupRollKey = `mv-${gi.groupId}-${si}-${ci}`;
             const stableRand = seededSingleRoll(groupRollKey, ctx);
-            shouldMove = forceMove || stableRand < density;
+            shouldChange = forceMove || stableRand < density;
           } else {
-            shouldMove = forceMove || rand() < density;
+            shouldChange = forceMove || rand() < density;
           }
-          if (!shouldMove) continue;
 
           // ── Group-coordinated preset ordering ──
           const basePresetIdx = Math.floor(rand() * presetIds.length);
@@ -147,9 +151,26 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
             ...presetIds.slice(0, adjustedIdx),
           ];
 
-          // Pick a single preset for this cue
-          const pickedPresetId = coordPresetIds[0];
-          const chVals = { mover_preset_id: pickedPresetId };
+          // If we *don't* pick a "new" move this bar, re-use the last preset so the
+          // show still has a fully-populated move lane (continuous cues, no silent gaps).
+          // If we *do* change, keep the same behaviour as before: first entry in the
+          // (freshly) rotated list for this chunk.
+          let pickedPresetId;
+          if (shouldChange || lastMoverPresetId == null) {
+            pickedPresetId = coordPresetIds[0];
+            lastMoverPresetId = pickedPresetId;
+          } else {
+            pickedPresetId = lastMoverPresetId;
+          }
+
+          // On a *voluntary* change, sweep through a short chain in one cue (smoothstep
+          // in the engine). On hold bars, a single pose so output stays constant.
+          const chVals = {};
+          if (shouldChange && coordPresetIds.length >= 2) {
+            chVals.mover_preset_ids = coordPresetIds.slice(0, Math.min(5, coordPresetIds.length));
+          } else {
+            chVals.mover_preset_id = pickedPresetId;
+          }
 
           if (hasSpeed) {
             const baseSpeedDmx = activeSpd[style.speed] || activeSpd.medium;

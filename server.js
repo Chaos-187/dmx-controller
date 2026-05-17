@@ -1922,6 +1922,8 @@ const touchOverrides = {
   blackoutHold: false,           // true while blackout is held (OS2L or touch)
   masterDimmer: 255,             // 0-255 master dimmer level (scales all intensity/color output)
   effectSpeed: 1.0,              // master effect speed multiplier (0.1 – 3.0)
+  /** Per-group submaster 0–255 (MIDI/touch). Missing key = full (255). Multiplied on dimmer channels during playback. */
+  groupDimmers: {},
   os2lOverrideFixtures: new Set(), // fixture IDs currently controlled by an OS2L button action
   colorOverrideFixtures: new Set(),    // fixture IDs with color overridden from touch UI
   movementOverrideFixtures: new Set(), // fixture IDs with movement overridden from touch UI
@@ -2598,7 +2600,7 @@ function stopRunningEffect(slot, skipBlackout) {
     const running = runningQaEffects[s];
     if (!running) continue;
 
-    clearInterval(running.timer);
+    if (running.timer) clearInterval(running.timer);
 
     if (!skipBlackout) {
       const fixMap = getFixtureChannelMapCached();
@@ -2609,11 +2611,15 @@ function stopRunningEffect(slot, skipBlackout) {
         for (const ch of fix.channels) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
           if (s === 'motion') {
-            // Motion slot: only reset pan/tilt to home
+            // Motion slot: reset pan/tilt to home, and zero colour/intensity — the effect loop
+            // forces dimmer on every tick so the beam is visible; without cleanup the head stays hot (often full white).
             if (ch.type === 'pan') channelUpdates[fix.universe][ch.dmx_address] = fix.home_pan ?? 128;
             else if (ch.type === 'tilt') channelUpdates[fix.universe][ch.dmx_address] = fix.home_tilt ?? 128;
+            else if (COLOR_CHANNELS.has(ch.type)) {
+              channelUpdates[fix.universe][ch.dmx_address] = 0;
+            }
           } else {
-            // Color/multicell slot: zero out color & dimmer channels
+            // Color/multicell/rig/sound slot: zero out color & dimmer channels
             if (COLOR_CHANNELS.has(ch.type)) {
               channelUpdates[fix.universe][ch.dmx_address] = 0;
             }
@@ -2633,8 +2639,36 @@ function stopRunningEffect(slot, skipBlackout) {
   }
 }
 
+app.get('/api/effects/status', (req, res) => {
+  const slots = {};
+  for (const [s, st] of Object.entries(runningQaEffects)) {
+    const eff = st.effectId ? db.getEffect(st.effectId) : null;
+    slots[s] = eff
+      ? {
+          effectId: st.effectId,
+          name: eff.name,
+          type: eff.type,
+          effectParams: st.effectParams && typeof st.effectParams === 'object' ? { ...st.effectParams } : {},
+        }
+      : null;
+  }
+  res.json({ slots });
+});
+
+app.post('/api/effects/params', (req, res) => {
+  const { slot, effect_params } = req.body || {};
+  if (!slot || !runningQaEffects[slot]) {
+    return res.status(400).json({ error: 'No effect running in that slot' });
+  }
+  const cur = runningQaEffects[slot].effectParams;
+  const next = { ...(cur && typeof cur === 'object' ? cur : {}), ...(effect_params && typeof effect_params === 'object' ? effect_params : {}) };
+  if (next.color_mode === 'hsl') delete next.color_palette;
+  runningQaEffects[slot].effectParams = next;
+  res.json({ ok: true, effectParams: runningQaEffects[slot].effectParams });
+});
+
 app.post('/api/effects/run', (req, res) => {
-  const { effectId, fixtureIds } = req.body;
+  const { effectId, fixtureIds, effect_params } = req.body;
 
   const effect = db.getEffect(effectId);
   if (!effect) return res.status(404).json({ error: 'Effect not found' });
@@ -2646,22 +2680,32 @@ app.post('/api/effects/run', (req, res) => {
 
   const startTime = Date.now();
   const allFixtures = getFixtureChannelMapCached();
+  const userParams = effect_params && typeof effect_params === 'object' ? { ...effect_params } : {};
+  if (userParams.color_mode === 'hsl') delete userParams.color_palette;
 
   const timer = setInterval(() => {
     if (!dmxOutputEnabled) return;
+    const st = runningQaEffects[slot];
+    if (!st) return;
+    const eff = db.getEffect(st.effectId);
+    if (!eff) return;
 
     const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
     const channelUpdates = {};
+    const live = st.effectParams && typeof st.effectParams === 'object' ? { ...st.effectParams } : {};
+    const effectParams = SOUND_EFFECT_TYPES.has(eff.type)
+      ? { ...live, audio: getCurrentAudioData() }
+      : { ...live };
 
-    for (let fi = 0; fi < fixtureIds.length; fi++) {
-      const fixtureId = fixtureIds[fi];
+    for (let fi = 0; fi < st.fixtureIds.length; fi++) {
+      const fixtureId = st.fixtureIds[fi];
       const fix = getFixtureChannelMapByIdCached(fixtureId);
       if (!fix) continue;
-      if (!isFixtureCompatibleWithEffect(effect, fix)) continue;
+      if (!isFixtureCompatibleWithEffect(eff, fix)) continue;
 
       for (const ch of fix.channels) {
         let progress;
-        if (effect.type === 'color_fade') {
+        if (eff.type === 'color_fade') {
           progress = (elapsed % 4) / 4;
         } else {
           progress = elapsed;
@@ -2670,10 +2714,9 @@ app.post('/api/effects/run', (req, res) => {
         const baseValues = { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
         const channelCtx = buildChannelCtx(ch, fix);
         channelCtx._fixtureOrdinal = fi;
-        channelCtx._fixtureCount = fixtureIds.length;
+        channelCtx._fixtureCount = st.fixtureIds.length;
         channelCtx._rigFixtureCount = allFixtures.length;
-        const effectParams = SOUND_EFFECT_TYPES.has(effect.type) ? { audio: getCurrentAudioData() } : {};
-        let value = computeEffectValue(effect, ch.type, progress, baseValues, effectParams, channelCtx);
+        let value = computeEffectValue(eff, ch.type, progress, baseValues, effectParams, channelCtx);
 
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
@@ -2700,7 +2743,7 @@ app.post('/api/effects/run', (req, res) => {
     }
   }, 10);
 
-  runningQaEffects[slot] = { timer, effectId, fixtureIds };
+  runningQaEffects[slot] = { timer, effectId, fixtureIds, effectParams: userParams };
   console.log(`[QA] Started ${slot} effect "${effect.name}" (type=${effect.type}) on ${fixtureIds.length} fixture(s): [${fixtureIds.join(',')}]`);
   const activeSlots = Object.keys(runningQaEffects);
   if (activeSlots.length > 1) console.log(`[QA]   Concurrent slots active: ${activeSlots.join(', ')}`);
@@ -2708,12 +2751,24 @@ app.post('/api/effects/run', (req, res) => {
 });
 
 app.post('/api/effects/stop', (req, res) => {
-  const { slot } = req.body || {};
+  const QA_SLOT_KEYS = new Set(['color', 'motion', 'multicell', 'rig', 'sound']);
+  let { slot } = req.body || {};
+  if (slot == null || slot === '' || slot === 'all') {
+    slot = undefined;
+  } else {
+    const s = String(slot);
+    if (!QA_SLOT_KEYS.has(s)) {
+      console.warn(`[QA] /api/effects/stop: invalid slot "${s}", stopping all instead`);
+      slot = undefined;
+    } else {
+      slot = s;
+    }
+  }
   const slotsActive = Object.keys(runningQaEffects);
   if (slotsActive.length > 0) {
     console.log(`[QA] Stopping ${slot || 'all'} effect(s) (active: ${slotsActive.join(', ')})`);
   }
-  stopRunningEffect(slot || undefined);
+  stopRunningEffect(slot);
   res.json({ ok: true });
 });
 
@@ -3711,6 +3766,25 @@ function applyMasterDimmer(value, channelType) {
   return Math.round(value * md / 255);
 }
 
+/** Product of (groupDimmers[gid] ?? 255) / 255 for each group the fixture belongs to. */
+function getGroupDimmerScale(fixMap) {
+  const gids = fixMap.group_ids || [];
+  if (gids.length === 0) return 1;
+  const gd = touchOverrides.groupDimmers;
+  let scale = 1;
+  for (const gid of gids) {
+    const v = gd[gid] != null ? gd[gid] : 255;
+    scale *= Math.max(0, Math.min(255, v)) / 255;
+  }
+  return scale;
+}
+
+/** Submaster: scale logical dimmer before master dimmer (sequence + MIDI group faders). */
+function applyGroupDimmerToDimmerValue(value, fixMap) {
+  const s = getGroupDimmerScale(fixMap);
+  return Math.max(0, Math.min(255, Math.round(value * s)));
+}
+
 /**
  * Called on each time update to drive the sequence engine.
  * Finds active cues at the current position and sends DMX values.
@@ -4114,6 +4188,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         const fixHasDimmer = fixMap.channels.some(c => c.type === 'dimmer');
         if (fixHasDimmer) {
           if (ch.type === 'dimmer') {
+            finalValue = applyGroupDimmerToDimmerValue(finalValue, fixMap);
             finalValue = applyMasterDimmer(finalValue, ch.type);
           }
           // RGB/white/amber/uv: do NOT scale — dimmer carries the master dim
@@ -4197,7 +4272,10 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           }
           const fixHasDimmer = fixMap.channels.some(c => c.type === 'dimmer');
           if (fixHasDimmer) {
-            if (ch.type === 'dimmer') finalValue = applyMasterDimmer(finalValue, ch.type);
+            if (ch.type === 'dimmer') {
+              finalValue = applyGroupDimmerToDimmerValue(finalValue, fixMap);
+              finalValue = applyMasterDimmer(finalValue, ch.type);
+            }
           } else {
             finalValue = applyMasterDimmer(finalValue, ch.type);
           }
@@ -4448,6 +4526,7 @@ midiController.init({
   touchOverrides,
   runningQaEffects,
   getDmxOutputEnabled: () => dmxOutputEnabled,
+  isAnySequencePlaying,
   getEffectSlot,
   stopRunningEffect,
   activateScene,

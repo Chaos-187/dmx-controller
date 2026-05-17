@@ -1281,6 +1281,58 @@ function renderCfgEffectsList() {
   list.innerHTML = html;
 }
 
+const EFFECT_EDITOR_PALETTE_TYPES = new Set([
+  'rainbow', 'color_wave', 'fire',
+  'rig_color_wave', 'rig_rainbow', 'rig_depth_wave',
+  'sound_wave', 'sound_vu', 'sound_vu_tb', 'sound_vu_lr',
+]);
+
+function cfgColorSpectrumRow(data) {
+  const hasPal = data.color_mode === 'palette' && data.color_palette && data.color_palette.length >= 2;
+  const mode = hasPal ? 'palette' : 'hsl';
+  const palStr = (data.color_palette && data.color_palette.length)
+    ? JSON.stringify(data.color_palette) : '';
+  return `<div class="form-group" style="margin-top:10px;border-top:1px solid var(--panel-border);padding-top:10px">
+    <label>Color spectrum</label>
+    <select id="effColorMode">
+      <option value="hsl" ${mode === 'hsl' ? 'selected' : ''}>Full rainbow (HSL)</option>
+      <option value="palette" ${mode === 'palette' ? 'selected' : ''}>Custom palette (blend stops)</option>
+    </select>
+    <p class="config-desc" style="font-size:11px;margin:6px 0 4px">Custom: JSON array of hex colors, e.g. <code>["#ff0080","#7928ca","#0070f3"]</code></p>
+    <textarea id="effColorPaletteJson" rows="2" style="width:100%;font-family:ui-monospace,monospace;font-size:11px" placeholder='["#e94560","#f39c12","#27ae60"]'>${palStr.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
+  </div>`;
+}
+
+function cfgReadPaletteFromForm() {
+  const modeEl = document.getElementById('effColorMode');
+  if (!modeEl) return null;
+  const mode = modeEl.value;
+  const raw = (document.getElementById('effColorPaletteJson') && document.getElementById('effColorPaletteJson').value || '').trim();
+  if (mode === 'hsl' || !raw) return { color_mode: 'hsl' };
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length < 2) return { color_mode: 'hsl' };
+    return { color_mode: 'palette', color_palette: arr };
+  } catch (e) {
+    return { color_mode: 'hsl' };
+  }
+}
+
+function cfgMergePaletteFields(type, o) {
+  o = o && typeof o === 'object' ? { ...o } : {};
+  if (!EFFECT_EDITOR_PALETTE_TYPES.has(type)) return o;
+  const p = cfgReadPaletteFromForm();
+  if (!p) return o;
+  if (p.color_mode === 'palette' && p.color_palette && p.color_palette.length >= 2) {
+    o.color_mode = 'palette';
+    o.color_palette = p.color_palette;
+  } else {
+    o.color_mode = 'hsl';
+    delete o.color_palette;
+  }
+  return o;
+}
+
 function cfgOpenEffectModal(eff) {
   cfgEditingEffectId = eff ? eff.id : null;
   document.getElementById('effectModalTitle').textContent = eff ? 'Edit Effect' : 'New Effect';
@@ -1383,7 +1435,11 @@ function cfgRenderEffectParams(type, data) {
       `<div class="form-group"><label>Color 2</label><input type="color" id="effParamGradC2" value="${colors[1]||'#0000ff'}"></div>` +
       `<div class="form-group"><label>Color 3 (opt)</label><input type="color" id="effParamGradC3" value="${colors[2]||'#000000'}"></div></div>` +
       `<div class="form-row"><div class="form-group"><label><input type="checkbox" id="effParamGradC3On" ${colors.length>=3?'checked':''}> Use 3rd color</label></div>${cellRow(data)}</div>`;
+  } else if (type === 'sound_wave') {
+    html = `<div class="form-row"><div class="form-group"><label>Speed</label><input type="number" id="effParamSpeed" value="${data.speed != null ? data.speed : 0.5}" min="0.1" step="0.1"></div>` +
+      `<div class="form-group"><label>Sensitivity</label><input type="number" id="effParamSensitivity" value="${data.sensitivity != null ? data.sensitivity : 1.5}" min="0.1" step="0.1"></div></div>`;
   }
+  if (EFFECT_EDITOR_PALETTE_TYPES.has(type)) html += cfgColorSpectrumRow(data);
   area.innerHTML = html;
 }
 
@@ -1415,6 +1471,12 @@ function cfgGetEffectDataFromForm(type) {
     if (document.getElementById('effParamGradC3On')?.checked) colors.push(document.getElementById('effParamGradC3')?.value || '#00ff00');
     return { speed: +(document.getElementById('effParamSpeed')?.value || 1), colors, channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3) };
   }
+  if (type === 'sound_wave') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 0.5),
+      sensitivity: +(document.getElementById('effParamSensitivity')?.value || 1.5),
+    };
+  }
   return {};
 }
 
@@ -1425,7 +1487,7 @@ async function cfgSaveEffect() {
   const category = document.getElementById('effCategory').value;
   const fixture_target = document.getElementById('effFixtureTarget').value;
   const duration_beats = +(document.getElementById('effDurBeats').value || 4);
-  const effect_data = cfgGetEffectDataFromForm(type);
+  const effect_data = cfgMergePaletteFields(type, cfgGetEffectDataFromForm(type));
   const body = { name, type, category, fixture_target, effect_data, duration_beats };
   if (cfgEditingEffectId) {
     const res = await fetch(`/api/effects/${cfgEditingEffectId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

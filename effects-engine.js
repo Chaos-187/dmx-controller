@@ -47,6 +47,64 @@ function hslToRgb(h, s, l) {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 
+// ─── Optional per-effect color palettes (effect_data / cue effect_params) ───
+// color_mode: 'hsl' (default) | 'palette'
+// color_palette: ['#rrggbb', ...] or [{r,g,b}, ...] — at least 2 stops to blend
+
+function normalizePaletteEntry(entry) {
+  if (entry == null) return null;
+  if (typeof entry === 'string') {
+    let m = entry.trim().replace(/^#/, '');
+    if (m.length === 3) m = m.split('').map(c => c + c).join('');
+    if (m.length === 6) {
+      return {
+        r: parseInt(m.slice(0, 2), 16),
+        g: parseInt(m.slice(2, 4), 16),
+        b: parseInt(m.slice(4, 6), 16),
+      };
+    }
+    return null;
+  }
+  if (typeof entry === 'object' && entry.r != null) {
+    return { r: +entry.r, g: +entry.g, b: +entry.b };
+  }
+  return null;
+}
+
+function getEffectPaletteRgb(data, params) {
+  const raw = params.color_palette != null ? params.color_palette : data.color_palette;
+  if (!raw || !Array.isArray(raw) || raw.length < 2) return null;
+  const out = raw.map(normalizePaletteEntry).filter(Boolean);
+  return out.length >= 2 ? out : null;
+}
+
+function usePaletteColors(data, params) {
+  const mode = params.color_mode != null ? params.color_mode : data.color_mode;
+  if (mode !== 'palette') return false;
+  return getEffectPaletteRgb(data, params) != null;
+}
+
+/** phase in [0,1): linear blend along palette stops (wraps last → first). */
+function rgbAtPalettePhase(phase, palette) {
+  const n = palette.length;
+  if (n === 0) return [255, 255, 255];
+  if (n === 1) {
+    const c = palette[0];
+    return [c.r, c.g, c.b];
+  }
+  const p = ((phase % 1) + 1) % 1;
+  const pos = p * n;
+  const i = Math.floor(pos) % n;
+  const frac = pos - Math.floor(pos);
+  const a = palette[i];
+  const b = palette[(i + 1) % n];
+  return [
+    Math.round(a.r + (b.r - a.r) * frac),
+    Math.round(a.g + (b.g - a.g) * frac),
+    Math.round(a.b + (b.b - a.b) * frac),
+  ];
+}
+
 // ─── Effect Type Sets ───────────────────────────────────────────────────────
 
 const MOVING_HEAD_EFFECT_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
@@ -164,8 +222,15 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'rainbow': {
-      const hue = (progress * 360 * (params.cycles || data.cycles || 1)) % 360;
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const cycles = params.cycles || data.cycles || 1;
+      const palette = getEffectPaletteRgb(data, params);
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase((progress * cycles) % 1, palette);
+      } else {
+        const hue = (progress * 360 * cycles) % 360;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       if (channelType === 'red') return r;
       if (channelType === 'green') return g;
       if (channelType === 'blue') return b;
@@ -300,9 +365,15 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const wavelength = params.wavelength || data.wavelength || 20;
       const speed = params.speed || data.speed || 1;
-
-      const hue = ((cellIndex / wavelength + progress * speed) * 360) % 360;
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const palette = getEffectPaletteRgb(data, params);
+      const phase = ((cellIndex / wavelength + progress * speed) % 1 + 1) % 1;
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(phase, palette);
+      } else {
+        const hue = (phase * 360) % 360;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       if (channelType === 'red') return r;
       if (channelType === 'green') return g;
       if (channelType === 'blue') return b;
@@ -315,11 +386,23 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const intensity = params.intensity || data.intensity || 0.8;
       const cooling   = params.cooling   || data.cooling   || 0.3;
+      const palette = getEffectPaletteRgb(data, params);
 
       const t = progress * 20;
       const flicker  = pseudoRandom(cellIndex * 137 + Math.floor(t * 3));
       const flicker2 = pseudoRandom(cellIndex * 251 + Math.floor(t * 7));
       const heat = Math.max(0, Math.min(1, intensity * (0.5 + 0.5 * flicker) - cooling * flicker2));
+
+      if (usePaletteColors(data, params) && palette) {
+        const [pr, pg, pb] = rgbAtPalettePhase(heat, palette);
+        const s = heat;
+        if (channelType === 'red') return Math.round(pr * s);
+        if (channelType === 'green') return Math.round(pg * s);
+        if (channelType === 'blue') return Math.round(pb * s);
+        if (channelType === 'white') return 0;
+        if (channelType === 'dimmer') return Math.round(255 * s);
+        return null;
+      }
 
       if (channelType === 'red')    return 255 * heat;
       if (channelType === 'green')  return Math.round(100 * heat * flicker);
@@ -571,13 +654,20 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const speed = params.speed || data.speed || 1;
       const wavelength = params.wavelength || data.wavelength || 1.0;
       const dir = params.direction || data.direction || 'left_right';
+      const palette = getEffectPaletteRgb(data, params);
 
       const useY = (dir === 'top_bottom' || dir === 'bottom_top');
       let pos = useY ? (channelCtx._rigPositionY ?? 0.5) : (channelCtx._rigPosition ?? 0.5);
       if (dir === 'right_left' || dir === 'bottom_top') pos = 1 - pos;
 
-      const hue = ((pos / wavelength + progress * speed) * 360) % 360;
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const phase = ((pos / wavelength + progress * speed) % 1 + 1) % 1;
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(phase, palette);
+      } else {
+        const hue = (phase * 360) % 360;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       if (channelType === 'red') return r;
       if (channelType === 'green') return g;
       if (channelType === 'blue') return b;
@@ -659,13 +749,20 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const speed = params.speed || data.speed || 0.5;
       const spread = params.spread || data.spread || 1.0;
       const dir = params.direction || data.direction || 'left_right';
+      const palette = getEffectPaletteRgb(data, params);
 
       const useY = (dir === 'top_bottom' || dir === 'bottom_top');
       let pos = useY ? (channelCtx._rigPositionY ?? 0.5) : (channelCtx._rigPosition ?? 0.5);
       if (dir === 'right_left' || dir === 'bottom_top') pos = 1 - pos;
 
-      const hue = ((pos * spread + progress * speed) * 360) % 360;
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const phase = ((pos * spread + progress * speed) % 1 + 1) % 1;
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(phase, palette);
+      } else {
+        const hue = (phase * 360) % 360;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       if (channelType === 'red') return r;
       if (channelType === 'green') return g;
       if (channelType === 'blue') return b;
@@ -701,11 +798,18 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const speed      = params.speed      || data.speed      || 1;
       const wavelength = params.wavelength || data.wavelength || 1.0;
       const dir        = params.direction  || data.direction  || 'front_back';
+      const palette = getEffectPaletteRgb(data, params);
       let depth = channelCtx._rigPositionY ?? 0.5;
       if (dir === 'back_front') depth = 1 - depth;
 
-      const hue = ((depth / wavelength + progress * speed) * 360) % 360;
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const phase = ((depth / wavelength + progress * speed) % 1 + 1) % 1;
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(phase, palette);
+      } else {
+        const hue = (phase * 360) % 360;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       if (channelType === 'red')    return r;
       if (channelType === 'green')  return g;
       if (channelType === 'blue')   return b;
@@ -822,11 +926,17 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
       const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
       const speed = params.speed || data.speed || 0.5;
-      // Hue shifts across rig + time, wavelength compressed by energy
-      const wavelength = 1.0 - (energy * 0.6); // higher energy = tighter wave
-      const hue = ((pos / Math.max(0.1, wavelength) + progress * speed) * 360) % 360;
+      const palette = getEffectPaletteRgb(data, params);
+      const wavelength = 1.0 - (energy * 0.6);
+      const phase = ((pos / Math.max(0.1, wavelength) + progress * speed) % 1 + 1) % 1;
       const sat = 0.8 + energy * 0.2;
-      const [r, g, b] = hslToRgb(hue / 360, sat, 0.3 + energy * 0.2);
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(phase, palette);
+      } else {
+        const hue = (phase * 360) % 360;
+        [r, g, b] = hslToRgb(hue / 360, sat, 0.3 + energy * 0.2);
+      }
       if (channelType === 'red') return r;
       if (channelType === 'green') return g;
       if (channelType === 'blue') return b;
@@ -883,9 +993,14 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       // Hard on/off segment: lit if bar height exceeds this cell's threshold
       if (energy < pos) return 0;
 
-      // Color gradient: green (bottom) → yellow (mid) → red (top)
-      const hue = (1 - pos) * 120; // 120=green, 60=yellow, 0=red
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const palette = getEffectPaletteRgb(data, params);
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(1 - pos, palette);
+      } else {
+        const hue = (1 - pos) * 120;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
 
       // Top lit cell gets a brightness boost so the leading edge is bright
       const cellThreshold = 1 / Math.max(1, count - 1);
@@ -913,9 +1028,14 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       // light first (threshold near 1) and lower fixtures need more energy.
       const threshold = 1 - pos;
       if (energy < threshold) return 0;
-      // Color: red at top (just lit threshold) → green at bottom (always on)
-      const hue = pos * 120; // 0=red (top), 120=green (bottom)
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const palette = getEffectPaletteRgb(data, params);
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(pos, palette);
+      } else {
+        const hue = pos * 120;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       const cellThreshold = 1 / Math.max(1, fixtureCount - 1);
       const isEdge = (energy - threshold) < cellThreshold;
       const bright = isEdge ? 1.0 : 0.75;
@@ -938,9 +1058,14 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const pos = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
       // Fixture lights when energy exceeds its position threshold
       if (energy < pos) return 0;
-      // Color: green (left) → yellow → red (right)
-      const hue = (1 - pos) * 120;
-      const [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      const palette = getEffectPaletteRgb(data, params);
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase(1 - pos, palette);
+      } else {
+        const hue = (1 - pos) * 120;
+        [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
+      }
       const cellThreshold = 1 / Math.max(1, fixtureCount - 1);
       const isEdge = (energy - pos) < cellThreshold;
       const bright = isEdge ? 1.0 : 0.75;

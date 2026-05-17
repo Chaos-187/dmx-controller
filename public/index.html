@@ -450,6 +450,56 @@
     .btn-danger:hover { border-color: var(--danger); }
     .btn-sm { padding: 4px 10px; font-size: 11px; }
 
+    /* Live color palette (Effects tab + DMX — preset chips must set bg/border; plain .btn has none) */
+    .fx-pal-label {
+      display: block;
+      font-size: 11px; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin: 0 0 6px; font-weight: 600;
+    }
+    .fx-pal-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(7.5rem, 100%), 1fr));
+      gap: 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button.fx-pal-preset.btn {
+      width: 100%;
+      min-height: 40px;
+      background: var(--panel) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--panel-border) !important;
+      padding: 8px 10px !important;
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      text-transform: none !important;
+      letter-spacing: 0.02em !important;
+      line-height: 1.2;
+      touch-action: manipulation;
+    }
+    button.fx-pal-preset.btn:hover {
+      border-color: var(--accent) !important;
+      color: var(--accent) !important;
+      background: rgba(233, 69, 96, 0.1) !important;
+    }
+    button.fx-pal-preset.btn.btn-secondary { border-style: dashed !important; }
+    .fx-pal-custom {
+      display: none;
+      flex-wrap: wrap; align-items: center; gap: 8px;
+      width: 100%; box-sizing: border-box;
+    }
+    .btn-fx-stop-all {
+      background: #c62828 !important; color: #fff !important;
+      border: 2px solid #ff6b6b !important; border-radius: 8px; cursor: pointer;
+      padding: 12px 24px; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+      min-width: min(100%, 240px);
+      line-height: 1.2; font-family: var(--font);
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+    .btn-fx-stop-all:hover { background: #b71c1c !important; border-color: #ff8a80 !important; }
+    .btn-fx-stop-all:active { transform: scale(0.98); }
+
     /* Filter bar */
     .fixtures-filter-bar {
       display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
@@ -1360,7 +1410,7 @@
     }
     .dmx-subtab:hover { color: var(--text); }
     .dmx-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .dmx-subpage { display: none; }
+    .dmx-subpage { display: none; width: 100%; box-sizing: border-box; }
     .dmx-subpage.active { display: block; }
 
     /* Effects Library Tabs */
@@ -1798,6 +1848,7 @@
   <button class="tab-btn" data-tab="fixtures">Fixtures</button>
   <button class="tab-btn" data-tab="scenes">Scenes</button>
   <button class="tab-btn" data-tab="dmxcontrol">DMX Control</button>
+  <button class="tab-btn" data-tab="effectslab">Effects</button>
   <a href="sequencer.html" class="tab-btn" style="text-decoration:none">Sequencer</a>
   <a href="config.html" class="tab-btn" style="text-decoration:none">Config</a>
 </div>
@@ -2129,6 +2180,31 @@
       <h3>Effects</h3>
       <div class="qa-grid" id="qaEffectsGrid"></div>
     </div>
+    <div class="qa-section live-palette-dmx" style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px;border:1px solid var(--panel-border);position:relative;width:100%;box-sizing:border-box">
+      <h3>Live color palette</h3>
+      <p class="config-desc" style="margin-bottom:8px">Same presets as the Effects tab. Use while a palette effect runs; changes apply immediately.</p>
+      <span class="fx-pal-label">Look</span>
+      <div id="dmxLivePresets" class="fx-pal-grid" style="margin-bottom:8px">
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="hsl">Full spectrum</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="warm">Warm</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="cool">Cool</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="neon">Neon</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="ocean">Ocean</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="fire">Fire</button>
+        <button type="button" class="btn btn-sm btn-secondary fx-pal-preset" data-fxpre="dmx" data-pal="custom">Custom…</button>
+      </div>
+      <div id="dmxLiveCustomRow" class="fx-pal-custom">
+        <span class="fx-pal-label" style="width:100%;margin-bottom:0">Stops</span>
+        <input type="color" id="dmxLiveC0" value="#e94560" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0">
+        <input type="color" id="dmxLiveC1" value="#f39c12" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0">
+        <input type="color" id="dmxLiveC2" value="#27ae60" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0">
+        <input type="color" id="dmxLiveC3" value="#2980b9" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0">
+      </div>
+      <div style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+        <input type="radio" name="dmxLiveSpectrum" value="hsl" id="dmxLiveRadHsl" checked>
+        <input type="radio" name="dmxLiveSpectrum" value="palette" id="dmxLiveRadPal">
+      </div>
+    </div>
     <div class="qa-section">
       <h3>Effects Library</h3>
       <div class="effects-lib-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--panel-border);margin-bottom:8px">
@@ -2191,6 +2267,42 @@
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════
+     TAB — EFFECTS ENGINE (run effects, palette-aware)
+     ══════════════════════════════════════════════════════════════ -->
+<div class="tab-page" id="page-effectslab">
+  <div class="effects-lab-page" style="width:100%;max-width:100%;box-sizing:border-box;margin:0;padding:0 clamp(8px,2vw,28px)">
+    <h2 style="margin-bottom:6px">Effects</h2>
+    <p class="config-desc" style="margin-bottom:12px">Effects are grouped by <strong>fixture target</strong> (color, movers, rig, etc.). Set defaults in <a href="config.html" style="color:var(--accent)">Config → Effects</a>. Use the palette row to change color looks <em>live</em> while an effect is running.</p>
+    <div class="qa-section" style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px;border:1px solid var(--panel-border);margin-bottom:16px;position:relative;width:100%;box-sizing:border-box">
+      <h3 style="margin:0 0 6px">Live color palette</h3>
+      <p class="config-desc" style="margin-bottom:8px">Choose a preset look, or <strong>Custom</strong> to edit four stops. Applies to any running effect that uses color palettes (same controls are under DMX Control).</p>
+      <span class="fx-pal-label">Look</span>
+      <div id="engLivePresets" class="fx-pal-grid" style="margin-bottom:8px">
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="hsl">Full spectrum</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="warm">Warm</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="cool">Cool</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="neon">Neon</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="ocean">Ocean</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="fire">Fire</button>
+        <button type="button" class="btn btn-sm btn-secondary fx-pal-preset" data-fxpre="eng" data-pal="custom">Custom…</button>
+      </div>
+      <div id="engLiveCustomRow" class="fx-pal-custom">
+        <span class="fx-pal-label" style="width:100%;margin-bottom:0">Stops</span>
+        <input type="color" id="engLiveC0" value="#e94560" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0" title="Stop 1">
+        <input type="color" id="engLiveC1" value="#f39c12" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0" title="Stop 2">
+        <input type="color" id="engLiveC2" value="#27ae60" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0" title="Stop 3">
+        <input type="color" id="engLiveC3" value="#2980b9" style="width:40px;height:30px;border:1px solid var(--input-border);border-radius:4px;cursor:pointer;padding:0" title="Stop 4">
+      </div>
+      <div style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+        <input type="radio" name="engLiveSpectrum" value="hsl" id="engLiveRadHsl" checked>
+        <input type="radio" name="engLiveSpectrum" value="palette" id="engLiveRadPal">
+      </div>
+    </div>
+    <div id="efxEngineToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;width:100%;box-sizing:border-box"></div>
+    <div id="efxEngineGrid" style="margin-bottom:24px;width:100%;box-sizing:border-box"></div>
+  </div>
+</div>
 
 <!-- ══════════════════════════════════════════════════════════════
      TAB 6 — CONFIGURATION
@@ -4656,6 +4768,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     }
     if (btn.dataset.tab === 'scenes') loadScenes();
     if (btn.dataset.tab === 'dmxcontrol') initDmxControl();
+    if (btn.dataset.tab === 'effectslab') buildEffectsEnginePage();
     if (btn.dataset.tab === 'config') loadConfigPage();
   });
 });
@@ -10097,6 +10210,59 @@ function renderCfgEffectsList() {
   list.innerHTML = html;
 }
 
+// Effect types that show optional Color spectrum (HSL vs custom palette) in the editor
+const EFFECT_EDITOR_PALETTE_TYPES = new Set([
+  'rainbow', 'color_wave', 'fire',
+  'rig_color_wave', 'rig_rainbow', 'rig_depth_wave',
+  'sound_wave', 'sound_vu', 'sound_vu_tb', 'sound_vu_lr',
+]);
+
+function cfgColorSpectrumRow(data) {
+  const hasPal = data.color_mode === 'palette' && data.color_palette && data.color_palette.length >= 2;
+  const mode = hasPal ? 'palette' : 'hsl';
+  const palStr = (data.color_palette && data.color_palette.length)
+    ? JSON.stringify(data.color_palette) : '';
+  return `<div class="form-group" style="margin-top:10px;border-top:1px solid var(--panel-border);padding-top:10px">
+    <label>Color spectrum</label>
+    <select id="effColorMode">
+      <option value="hsl" ${mode === 'hsl' ? 'selected' : ''}>Full rainbow (HSL)</option>
+      <option value="palette" ${mode === 'palette' ? 'selected' : ''}>Custom palette (blend stops)</option>
+    </select>
+    <p class="config-desc" style="font-size:11px;margin:6px 0 4px">Custom: JSON array of hex colors, e.g. <code>["#ff0080","#7928ca","#0070f3"]</code></p>
+    <textarea id="effColorPaletteJson" rows="2" style="width:100%;font-family:ui-monospace,monospace;font-size:11px" placeholder='["#e94560","#f39c12","#27ae60"]'>${palStr.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
+  </div>`;
+}
+
+function cfgReadPaletteFromForm() {
+  const modeEl = document.getElementById('effColorMode');
+  if (!modeEl) return null;
+  const mode = modeEl.value;
+  const raw = (document.getElementById('effColorPaletteJson') && document.getElementById('effColorPaletteJson').value || '').trim();
+  if (mode === 'hsl' || !raw) return { color_mode: 'hsl' };
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length < 2) return { color_mode: 'hsl' };
+    return { color_mode: 'palette', color_palette: arr };
+  } catch (e) {
+    return { color_mode: 'hsl' };
+  }
+}
+
+function cfgMergePaletteFields(type, o) {
+  o = o && typeof o === 'object' ? { ...o } : {};
+  if (!EFFECT_EDITOR_PALETTE_TYPES.has(type)) return o;
+  const p = cfgReadPaletteFromForm();
+  if (!p) return o;
+  if (p.color_mode === 'palette' && p.color_palette && p.color_palette.length >= 2) {
+    o.color_mode = 'palette';
+    o.color_palette = p.color_palette;
+  } else {
+    o.color_mode = 'hsl';
+    delete o.color_palette;
+  }
+  return o;
+}
+
 function cfgOpenEffectModal(eff) {
   cfgEditingEffectId = eff ? eff.id : null;
   document.getElementById('effectModalTitle').textContent = eff ? 'Edit Effect' : 'New Effect';
@@ -10221,7 +10387,11 @@ function cfgRenderEffectParams(type, data) {
       `<div class="form-group"><label>Color 2</label><input type="color" id="effParamGradC2" value="${colors[1]||'#0000ff'}"></div>` +
       `<div class="form-group"><label>Color 3 (opt)</label><input type="color" id="effParamGradC3" value="${colors[2]||'#000000'}"></div></div>` +
       `<div class="form-row"><div class="form-group"><label><input type="checkbox" id="effParamGradC3On" ${colors.length>=3?'checked':''}> Use 3rd color</label></div>${cellRow(data)}</div>`;
+  } else if (type === 'sound_wave') {
+    html = `<div class="form-row"><div class="form-group"><label>Speed</label><input type="number" id="effParamSpeed" value="${data.speed != null ? data.speed : 0.5}" min="0.1" step="0.1"></div>` +
+      `<div class="form-group"><label>Sensitivity</label><input type="number" id="effParamSensitivity" value="${data.sensitivity != null ? data.sensitivity : 1.5}" min="0.1" step="0.1"></div></div>`;
   }
+  if (EFFECT_EDITOR_PALETTE_TYPES.has(type)) html += cfgColorSpectrumRow(data);
   area.innerHTML = html;
 }
 
@@ -10256,6 +10426,12 @@ function cfgGetEffectDataFromForm(type) {
     if (document.getElementById('effParamGradC3On')?.checked) colors.push(document.getElementById('effParamGradC3')?.value || '#00ff00');
     return { speed: +(document.getElementById('effParamSpeed')?.value || 1), colors, channels_per_cell: +(document.getElementById('effParamCpp')?.value || 3) };
   }
+  if (type === 'sound_wave') {
+    return {
+      speed: +(document.getElementById('effParamSpeed')?.value || 0.5),
+      sensitivity: +(document.getElementById('effParamSensitivity')?.value || 1.5),
+    };
+  }
   return {};
 }
 
@@ -10266,7 +10442,7 @@ async function cfgSaveEffect() {
   const category = document.getElementById('effCategory').value;
   const fixture_target = document.getElementById('effFixtureTarget').value;
   const duration_beats = +(document.getElementById('effDurBeats').value || 4);
-  const effect_data = cfgGetEffectDataFromForm(type);
+  const effect_data = cfgMergePaletteFields(type, cfgGetEffectDataFromForm(type));
   const body = { name, type, category, fixture_target, effect_data, duration_beats };
   if (cfgEditingEffectId) {
     const res = await fetch(`/api/effects/${cfgEditingEffectId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -11502,6 +11678,7 @@ async function initDmxControl() {
   if (!activeSubTab || activeSubTab.dataset.dmxsub === 'quickactions') {
     loadQuickActions();
   }
+  wireLivePalettePanels();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -12076,6 +12253,191 @@ function getEffectSlot(type) {
 }
 const qaActiveEffects = {}; // { color: effectId, motion: effectId, multicell: effectId, rig: effectId, sound: effectId }
 
+function qaGetTabsForEffect(eff) {
+  const t = eff.fixture_target || 'all';
+  const tabs = ['all'];
+  if (t === 'color') tabs.push('color');
+  else if (t === 'moving_head' || t === 'moving_head_wash' || t === 'moving_head_spot') tabs.push('motion');
+  else if (t === 'multicell') tabs.push('multicell');
+  else if (t === 'rig') tabs.push('rig');
+  else if (t === 'sound') tabs.push('sound');
+  return tabs;
+}
+
+function collectLiveParamPayload(prefix) {
+  const rad = document.querySelector(`input[name="${prefix}LiveSpectrum"]:checked`);
+  if (!rad) return null;
+  if (rad.value === 'hsl') return { color_mode: 'hsl' };
+  const sw = [0, 1, 2, 3].map(i => document.getElementById(`${prefix}LiveC${i}`)?.value).filter(Boolean);
+  if (sw.length < 2) return { color_mode: 'hsl' };
+  return { color_mode: 'palette', color_palette: sw };
+}
+
+function getLiveEffectParamsForRun() {
+  return collectLiveParamPayload('eng') || collectLiveParamPayload('dmx') || { color_mode: 'hsl' };
+}
+
+const LIVE_FX_PRESET_DATA = {
+  hsl: { mode: 'hsl' },
+  warm: { mode: 'palette', colors: ['#ff4d00', '#ff9e00', '#ffd000', '#ff3366'] },
+  cool: { mode: 'palette', colors: ['#0066ff', '#00c6ff', '#5b4fcf', '#48d1cc'] },
+  neon: { mode: 'palette', colors: ['#ff00ff', '#00ffff', '#ffff00', '#ff0066'] },
+  ocean: { mode: 'palette', colors: ['#001a4d', '#0066cc', '#00a8cc', '#66d9cc'] },
+  fire: { mode: 'palette', colors: ['#1a0000', '#ff3300', '#ff9900', '#ffcc00'] },
+  custom: { mode: 'palette' },
+};
+
+function applyFxLivePreset(prefix, key) {
+  const d = LIVE_FX_PRESET_DATA[key];
+  if (!d || (prefix !== 'eng' && prefix !== 'dmx')) return;
+  const hslRad = document.getElementById(`${prefix}LiveRadHsl`);
+  const palRad = document.getElementById(`${prefix}LiveRadPal`);
+  const customRow = document.getElementById(`${prefix}LiveCustomRow`);
+  if (key === 'hsl' || d.mode === 'hsl') {
+    if (hslRad) hslRad.checked = true;
+    if (customRow) customRow.style.display = 'none';
+  } else {
+    if (palRad) palRad.checked = true;
+    if (key === 'custom') {
+      if (customRow) customRow.style.display = 'flex';
+    } else {
+      if (customRow) customRow.style.display = 'none';
+      const cols = d.colors;
+      for (let i = 0; i < 4; i++) {
+        const el = document.getElementById(`${prefix}LiveC${i}`);
+        if (el && cols && cols[i]) el.value = cols[i];
+      }
+    }
+  }
+  const oth = prefix === 'eng' ? 'dmx' : 'eng';
+  syncLivePaletteMirror(prefix, oth);
+  scheduleLivePalettePush();
+}
+
+let _fxLiveDebounce = null;
+function syncLivePaletteMirror(fromPrefix, toPrefix) {
+  const from = fromPrefix;
+  const to = toPrefix === undefined ? (from === 'eng' ? 'dmx' : 'eng') : toPrefix;
+  const sel = document.querySelector(`input[name="${from}LiveSpectrum"]:checked`);
+  if (sel) {
+    const t = document.querySelector(`input[name="${to}LiveSpectrum"][value="${sel.value}"]`);
+    if (t) t.checked = true;
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = document.getElementById(`${from}LiveC${i}`);
+    const b = document.getElementById(`${to}LiveC${i}`);
+    if (a && b) b.value = a.value;
+  }
+  const crF = document.getElementById(`${from}LiveCustomRow`);
+  const crT = document.getElementById(`${to}LiveCustomRow`);
+  if (crF && crT) {
+    const shown = window.getComputedStyle(crF).display !== 'none';
+    crT.style.display = shown ? 'flex' : 'none';
+  }
+}
+
+async function flushLivePaletteToServer() {
+  const payload = collectLiveParamPayload('eng') || collectLiveParamPayload('dmx');
+  if (!payload) return;
+  let st;
+  try { st = await fetch('/api/effects/status').then(r => r.json()); } catch { return; }
+  const slots = (st && st.slots) || {};
+  for (const [slot, info] of Object.entries(slots)) {
+    if (!info) continue;
+    try {
+      await fetch('/api/effects/params', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot, effect_params: payload }),
+      });
+    } catch (e) { /* ignore */ }
+  }
+}
+function scheduleLivePalettePush() {
+  clearTimeout(_fxLiveDebounce);
+  _fxLiveDebounce = setTimeout(flushLivePaletteToServer, 100);
+}
+/**
+ * Binds once at boot (see Boot): preset clicks must work even if user never opened DMX/Effects before.
+ * Previously wire only ran with buildEffectsEnginePage / initDmxControl, so the palette was dead on a fresh session.
+ */
+function ensureFxLivePaletteWiring() {
+  if (ensureFxLivePaletteWiring._ok) return;
+  ensureFxLivePaletteWiring._ok = true;
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target && ev.target.closest && ev.target.closest('.fx-pal-preset');
+    if (!btn) return;
+    ev.preventDefault();
+    const pre = btn.getAttribute('data-fxpre') || (btn.dataset && (btn.dataset.fxpre || btn.dataset.fxPre));
+    const pal = btn.getAttribute('data-pal') || (btn.dataset && btn.dataset.pal);
+    if (pre && pal) applyFxLivePreset(pre, pal);
+  });
+  ['eng', 'dmx'].forEach((prefix) => {
+    document.querySelectorAll(`input[name="${prefix}LiveSpectrum"]`).forEach((el) => {
+      el.addEventListener('change', () => { syncLivePaletteMirror(prefix); scheduleLivePalettePush(); });
+    });
+    for (let i = 0; i < 4; i++) {
+      const el = document.getElementById(`${prefix}LiveC${i}`);
+      if (el) el.addEventListener('input', () => { syncLivePaletteMirror(prefix); scheduleLivePalettePush(); });
+    }
+  });
+}
+function wireLivePalettePanels() {
+  ensureFxLivePaletteWiring();
+}
+
+const FX_CATEGORY_ORDER = ['color', 'moving_head', 'multicell', 'rig', 'sound'];
+const FX_CATEGORY_LABEL = {
+  color: 'Color & intensity',
+  moving_head: 'Moving heads & beams',
+  multicell: 'Multicell & strips',
+  rig: 'Rig-wide (spatial)',
+  sound: 'Sound-reactive',
+  other: 'Other',
+};
+
+function mapFixtureTargetToCategory(eff) {
+  const ft = eff.fixture_target || 'all';
+  if (ft === 'moving_head' || ft === 'moving_head_wash' || ft === 'moving_head_spot') return 'moving_head';
+  if (ft === 'color' || ft === 'rig' || ft === 'multicell' || ft === 'sound') return ft;
+  if (ft !== 'all') return 'other';
+  if (MOTION_TYPES.has(eff.type)) return 'moving_head';
+  if (RIG_TYPES.has(eff.type)) return 'rig';
+  if (SOUND_TYPES.has(eff.type)) return 'sound';
+  if (MULTICELL_TYPES.has(eff.type)) return 'multicell';
+  return 'color';
+}
+
+function appendEffectsByFixtureCategory(container, effectList, ctx) {
+  const byCat = new Map();
+  for (const e of effectList) {
+    const k = mapFixtureTargetToCategory(e);
+    if (!byCat.has(k)) byCat.set(k, []);
+    byCat.get(k).push(e);
+  }
+  const renderCat = (k, label) => {
+    const list = byCat.get(k);
+    if (!list || !list.length) return;
+    list.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    const group = document.createElement('div');
+    group.className = 'efx-cat-group';
+    group.style.marginBottom = '14px';
+    const head = document.createElement('div');
+    head.className = 'efx-cat-heading';
+    head.textContent = label;
+    head.style.cssText = 'font-size:12px;font-weight:600;color:var(--accent);margin:8px 0 6px';
+    const row = document.createElement('div');
+    row.className = 'qa-grid';
+    for (const eff of list) row.appendChild(createQaEffectLibButton(eff, ctx));
+    group.appendChild(head);
+    group.appendChild(row);
+    container.appendChild(group);
+  };
+  for (const k of FX_CATEGORY_ORDER) renderCat(k, FX_CATEGORY_LABEL[k] || k);
+  const rest = [...byCat.keys()].filter(k => !FX_CATEGORY_ORDER.includes(k));
+  for (const k of rest.sort()) renderCat(k, FX_CATEGORY_LABEL[k] || k);
+}
+
 const EFFECT_STYLE = {
   pulse:      { bg: '#7c4dff', fg: '#fff', border: '#b388ff', icon: '💜' },
   rainbow:    { bg: 'linear-gradient(135deg,#f44,#ff0,#0f0,#0ff,#00f,#f0f)', fg: '#fff', border: '#fff', icon: '🌈' },
@@ -12122,6 +12484,119 @@ const EFFECT_STYLE = {
   sound_vu_lr:    { bg: 'linear-gradient(135deg,#00c853,#ffd600,#d50000)', fg: '#fff', border: '#00c853', icon: '📊' },
 };
 
+function getQaEffectLibContext() {
+  const filtered = getFilteredChannelMap();
+  const fixtureIds = filtered.map(f => f.id);
+  const moverFixtures = filtered.filter(f => f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt'));
+  const multicellFixtures = filtered.filter(f => f.cell_count > 0);
+  const colorFixtures = filtered.filter(f => f.channels.some(ch => ['red', 'green', 'blue'].includes(ch.type)));
+  function getTargetFixtureIds(target) {
+    if (target === 'moving_head' || target === 'moving_head_wash' || target === 'moving_head_spot') return moverFixtures.map(f => f.id);
+    if (target === 'multicell') return multicellFixtures.map(f => f.id);
+    if (target === 'color') return colorFixtures.map(f => f.id);
+    return fixtureIds;
+  }
+  return { fixtureIds, moverFixtures, multicellFixtures, colorFixtures, getTargetFixtureIds };
+}
+
+function createQaEffectLibButton(effect, ctx) {
+  const style = EFFECT_STYLE[effect.type] || { bg: '#555', fg: '#fff', border: '#777', icon: '✨' };
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'qa-btn qa-effect-lib-btn';
+  if (style.bg.includes('gradient')) {
+    btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border};font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.5)`;
+  } else {
+    btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border}`;
+  }
+  btn.textContent = effect.name;
+  const target = effect.fixture_target || 'all';
+  btn.title = `${effect.type} effect (${target.replace('_', ' ')})`;
+  btn.dataset.effectId = effect.id;
+
+  const targetIds = ctx.getTargetFixtureIds(target);
+  if (targetIds.length === 0) {
+    btn.style.opacity = '0.3';
+    btn.title = target === 'moving_head' ? 'No moving head fixtures available'
+      : target === 'multicell' ? 'No multicell fixtures available'
+        : target === 'color' ? 'No color fixtures available'
+          : 'No matching fixtures available';
+  }
+
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (targetIds.length === 0) return;
+    const slot = getEffectSlot(effect.type);
+    if (qaActiveEffects[slot] === effect.id) {
+      try {
+        const res = await fetch('/api/effects/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot }),
+        });
+        if (!res.ok) return;
+      } catch { return; }
+      delete qaActiveEffects[slot];
+      document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
+    } else {
+      const ep = getLiveEffectParamsForRun();
+      const runBody = { effectId: effect.id, fixtureIds: targetIds, effect_params: ep };
+      await fetch('/api/effects/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(runBody),
+      });
+      qaActiveEffects[slot] = effect.id;
+      document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
+      btn.classList.add('toggled-on');
+    }
+  });
+
+  btn.dataset.slot = getEffectSlot(effect.type);
+  return btn;
+}
+
+async function buildEffectsEnginePage() {
+  const grid = document.getElementById('efxEngineGrid');
+  const toolbar = document.getElementById('efxEngineToolbar');
+  if (!grid || !toolbar) return;
+  toolbar.innerHTML = '';
+  grid.innerHTML = '<span style="color:var(--text-dim)">Loading…</span>';
+
+  let effects = [];
+  try {
+    effects = await fetch('/api/effects').then(r => r.json());
+  } catch {
+    grid.textContent = 'Could not load effects.';
+    return;
+  }
+
+  const stopAll = document.createElement('button');
+  stopAll.type = 'button';
+  stopAll.className = 'btn-fx-stop-all';
+  stopAll.textContent = '⏹ Stop all effects';
+  stopAll.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/effects/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      if (!res.ok) return;
+    } catch { return; }
+    for (const k of Object.keys(qaActiveEffects)) delete qaActiveEffects[k];
+    document.querySelectorAll('.qa-effect-lib-btn').forEach(b => b.classList.remove('toggled-on'));
+  });
+  toolbar.appendChild(stopAll);
+
+  grid.innerHTML = '';
+  if (effects.length === 0) {
+    grid.innerHTML = '<p class="config-desc">No effects defined. Open <a href="config.html" style="color:var(--accent)">Config → Effects</a> to create effects and optional color palettes.</p>';
+    return;
+  }
+
+  const ctx = getQaEffectLibContext();
+  appendEffectsByFixtureCategory(grid, effects, ctx);
+  wireLivePalettePanels();
+}
+
 async function buildEffectsLibraryGrid() {
   // Tab switching logic (bind once)
   if (!buildEffectsLibraryGrid._tabsBound) {
@@ -12152,98 +12627,28 @@ async function buildEffectsLibraryGrid() {
     return;
   }
 
-  const filtered = getFilteredChannelMap();
-  const fixtureIds = filtered.map(f => f.id);
+  const ctx = getQaEffectLibContext();
 
-  // Detect fixture capabilities for targeting
-  const moverFixtures = filtered.filter(f => f.channels.some(ch => ch.type === 'pan' || ch.type === 'tilt'));
-  const multicellFixtures = filtered.filter(f => f.cell_count > 0);
-  const colorFixtures = filtered.filter(f => f.channels.some(ch => ['red','green','blue'].includes(ch.type)));
-
-  // Map fixture_target → which fixtures to send to
-  function getTargetFixtureIds(target) {
-    if (target === 'moving_head') return moverFixtures.map(f => f.id);
-    if (target === 'multicell') return multicellFixtures.map(f => f.id);
-    if (target === 'color') return colorFixtures.map(f => f.id);
-    return fixtureIds; // 'all'
-  }
-
-  // Map fixture_target → which tab(s) it appears in
-  // color → Color tab; moving_head → Motion tab; multicell → Multicell tab;
-  // all → All tab (chase/comet/scanner/buildup work everywhere)
-  function getTabsForEffect(eff) {
-    const t = eff.fixture_target || 'all';
-    const tabs = ['all']; // every effect appears in All tab
-    if (t === 'color') tabs.push('color');
-    else if (t === 'moving_head') tabs.push('motion');
-    else if (t === 'multicell') tabs.push('multicell');
-    else if (t === 'rig') tabs.push('rig');
-    else if (t === 'sound') tabs.push('sound');
-    return tabs;
-  }
-
-  // Build effect button
-  function makeEffectBtn(effect) {
-    const style = EFFECT_STYLE[effect.type] || { bg: '#555', fg: '#fff', border: '#777', icon: '✨' };
-    const btn = document.createElement('button');
-    btn.className = 'qa-btn qa-effect-lib-btn';
-    if (style.bg.includes('gradient')) {
-      btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border};font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.5)`;
-    } else {
-      btn.style.cssText = `background:${style.bg};color:${style.fg};border-color:${style.border}`;
+  const tabMeta = [
+    { id: 'efxTabColor', key: 'color' },
+    { id: 'efxTabRig', key: 'rig' },
+    { id: 'efxTabMotion', key: 'motion' },
+    { id: 'efxTabMulticell', key: 'multicell' },
+    { id: 'efxTabSound', key: 'sound' },
+    { id: 'efxTabAll', key: 'all' },
+  ];
+  for (const { id, key } of tabMeta) {
+    const g = document.getElementById(id);
+    if (!g) continue;
+    const inTab = effects.filter(e => qaGetTabsForEffect(e).includes(key));
+    if (inTab.length === 0) {
+      g.innerHTML = '<span style="color:var(--text-dim);font-size:12px;padding:8px">No effects in this category.</span>';
+      continue;
     }
-    btn.textContent = effect.name;
-    const target = effect.fixture_target || 'all';
-    btn.title = `${effect.type} effect (${target.replace('_',' ')})`;
-    btn.dataset.effectId = effect.id;
-
-    const targetIds = getTargetFixtureIds(target);
-    if (targetIds.length === 0) {
-      btn.style.opacity = '0.3';
-      btn.title = target === 'moving_head' ? 'No moving head fixtures available'
-        : target === 'multicell' ? 'No multicell fixtures available'
-        : target === 'color' ? 'No color fixtures available'
-        : 'No matching fixtures available';
-    }
-
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      if (targetIds.length === 0) return;
-      const slot = getEffectSlot(effect.type);
-      if (qaActiveEffects[slot] === effect.id) {
-        // Clicking the active effect in this slot → stop just this slot
-        await fetch('/api/effects/stop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slot }),
-        });
-        delete qaActiveEffects[slot];
-        document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
-      } else {
-        await fetch('/api/effects/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ effectId: effect.id, fixtureIds: targetIds }),
-        });
-        qaActiveEffects[slot] = effect.id;
-        // Only clear toggled state for buttons in the same slot
-        document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
-        btn.classList.add('toggled-on');
-      }
-    });
-
-    btn.dataset.slot = getEffectSlot(effect.type);
-    return btn;
+    inTab.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    inTab.forEach((eff) => g.appendChild(createQaEffectLibButton(eff, ctx)));
   }
-
-  // Populate each tab
-  for (const effect of effects) {
-    const tabs = getTabsForEffect(effect);
-    for (const tab of tabs) {
-      const grid = document.getElementById(tabIds[tab]);
-      if (grid) grid.appendChild(makeEffectBtn(effect));
-    }
-  }
+  wireLivePalettePanels();
 
   // Add a "Stop" button to each tab
   const tabSlotMap = { efxTabColor: 'color', efxTabRig: 'rig', efxTabMotion: 'motion', efxTabMulticell: 'multicell', efxTabSound: 'sound', efxTabAll: null };
@@ -12254,16 +12659,21 @@ async function buildEffectsLibraryGrid() {
       continue;
     }
     const stopBtn = document.createElement('button');
-    stopBtn.className = 'qa-btn';
-    stopBtn.style.cssText = 'background:#c62828;color:#fff;border-color:#ef5350';
-    stopBtn.textContent = slot ? '⏹ Stop' : '⏹ Stop All';
+    stopBtn.type = 'button';
+    stopBtn.className = slot ? 'qa-btn' : 'btn-fx-stop-all';
+    stopBtn.style.cssText = slot ? 'background:#c62828;color:#fff;border-color:#ef5350' : '';
+    if (!slot) stopBtn.style.gridColumn = '1 / -1';
+    stopBtn.textContent = slot ? '⏹ Stop' : '⏹ Stop all effects';
     stopBtn.addEventListener('click', async (e) => {
       e.preventDefault();
-      await fetch('/api/effects/stop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(slot ? { slot } : {}),
-      });
+      try {
+        const res = await fetch('/api/effects/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(slot ? { slot } : {}),
+        });
+        if (!res.ok) return;
+      } catch { return; }
       if (slot) {
         delete qaActiveEffects[slot];
         document.querySelectorAll(`.qa-effect-lib-btn[data-slot="${slot}"]`).forEach(b => b.classList.remove('toggled-on'));
@@ -14224,6 +14634,7 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
 // ═══════════════════════════════════════════════════════════════
 //  Boot
 // ═══════════════════════════════════════════════════════════════
+ensureFxLivePaletteWiring();
 loadGroups();
 loadButtonMaps();
 // Fetch initial DMX output state so header toggle is correct

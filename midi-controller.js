@@ -146,6 +146,7 @@ let runningQaEffects;
 
 // Functions injected from server.js
 let getDmxOutputEnabled;
+let isAnySequencePlaying;
 let getEffectSlot;
 let stopRunningEffect;
 let activateScene;
@@ -220,6 +221,7 @@ function init(deps) {
   touchOverrides = deps.touchOverrides;
   runningQaEffects = deps.runningQaEffects;
   getDmxOutputEnabled      = deps.getDmxOutputEnabled;
+  isAnySequencePlaying     = deps.isAnySequencePlaying || (() => false);
   getEffectSlot            = deps.getEffectSlot;
   stopRunningEffect        = deps.stopRunningEffect;
   activateScene            = deps.activateScene;
@@ -1237,20 +1239,21 @@ function executeFaderAction(mapping, value) {
       const { group_id } = actionData;
       if (!group_id) break;
       const dimVal = Math.round((value / 127) * 255);
-      const channelMap = db.getFixtureChannelMap();
-      const channelUpdates = {};
-
-      for (const fix of channelMap) {
-        if (!(fix.group_ids || []).includes(group_id)) continue;
-        const u = fix.universe;
-        if (!channelUpdates[u]) channelUpdates[u] = [];
-        for (const ch of fix.channels) {
-          if (ch.type === 'dimmer') {
-            channelUpdates[u].push({ ch: ch.dmx_address, val: dimVal });
+      touchOverrides.groupDimmers[group_id] = dimVal;
+      // During sequence playback the engine applies groupDimmers each frame; direct DMX would be overwritten.
+      if (dmxOutputEnabled && !isAnySequencePlaying()) {
+        const channelMap = db.getFixtureChannelMap();
+        const channelUpdates = {};
+        for (const fix of channelMap) {
+          if (!(fix.group_ids || []).includes(group_id)) continue;
+          const u = fix.universe;
+          if (!channelUpdates[u]) channelUpdates[u] = [];
+          for (const ch of fix.channels) {
+            if (ch.type === 'dimmer') {
+              channelUpdates[u].push({ ch: ch.dmx_address, val: dimVal });
+            }
           }
         }
-      }
-      if (dmxOutputEnabled) {
         for (const [u, channels] of Object.entries(channelUpdates)) {
           artnetServer.setChannels(+u, channels);
           dmxUsbServer.setChannels(+u, channels);
