@@ -2124,7 +2124,7 @@ app.post('/api/tracks/import', (req, res) => {
 
     const tracks = vdjParser.parseVdjDatabase(xmlPath);
     const result = db.importTracks(tracks);
-    console.log(`[VDJ] Imported ${result.total} tracks from ${xmlPath}`);
+    console.log(`[VDJ] Imported ${result.total} tracks from ${xmlPath} (+${result.inserted} new, ~${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed)`);
     res.json({ ...result, path: xmlPath });
   } catch (e) {
     console.error(`[VDJ] Import error: ${e.message}`);
@@ -2201,18 +2201,14 @@ app.get('/api/tracks/:id/analysis', (req, res) => {
   res.json(analysis);
 });
 
-// Build analysis config object from persisted settings
+// Build analysis config from persisted app settings (always returns full object)
 function getAnalysisConfig() {
-  const cfg = {};
-  const tp = db.getConfig('analysis_target_peaks');
-  if (tp) cfg.TARGET_PEAKS = parseInt(tp, 10) || undefined;
-  const sr = db.getConfig('analysis_sample_rate');
-  if (sr) cfg.DECODE_SAMPLE_RATE = parseInt(sr, 10) || undefined;
-  const ss = db.getConfig('analysis_section_sensitivity');
-  if (ss) cfg.SECTION_SENSITIVITY = parseFloat(ss) || undefined;
-  const np = db.getConfig('analysis_normalize_pct');
-  if (np) cfg.NORMALIZE_PERCENTILE = parseInt(np, 10) || undefined;
-  return cfg;
+  return {
+    TARGET_PEAKS: parseInt(db.getConfig('analysis_target_peaks') || '2000', 10),
+    DECODE_SAMPLE_RATE: parseInt(db.getConfig('analysis_sample_rate') || '22050', 10),
+    SECTION_SENSITIVITY: parseFloat(db.getConfig('analysis_section_sensitivity') || '1.2'),
+    NORMALIZE_PERCENTILE: parseInt(db.getConfig('analysis_normalize_pct') || '99', 10),
+  };
 }
 
 /**
@@ -2260,18 +2256,25 @@ app.post('/api/tracks/:id/analyze', async (req, res) => {
   res.json({ status: 'started', track_id: trackId });
 
   try {
-    console.log(`[Analysis] Starting analysis for track ${trackId}: ${track.title || track.filename}`);
+    const analysisCfg = getAnalysisConfig();
+    console.log(`[Analysis] Starting track ${trackId}: ${track.title || track.filename}`, analysisCfg);
     const result = await audioAnalyzer.analyzeTrack(filePath, {
       bpm: track.bpm || 0,
       beatgridPos: track.beatgrid_pos || 0,
       anchorPoints: getAnchorPoints(track),
-      config: getAnalysisConfig(),
+      config: analysisCfg,
     });
-    db.upsertTrackAnalysis(trackId, result);
-    console.log(`[Analysis] Completed track ${trackId}: ${result.peak_count} peaks, ${result.energy_levels.length} energy segments, ${result.beats.length} beats, ${(result.sections || []).length} sections`);
+    const saved = db.upsertTrackAnalysis(trackId, result);
+    console.log(`[Analysis] Completed track ${trackId}: ${result.peak_count} peaks, ${(result.sections || []).length} sections, config=`, analysisCfg);
 
     // Notify WebSocket clients
-    broadcast({ type: 'analysis_complete', track_id: trackId });
+    broadcast({
+      type: 'analysis_complete',
+      track_id: trackId,
+      peak_count: result.peak_count,
+      section_count: (result.sections || []).length,
+      analyzed_at: saved?.analyzed_at || null,
+    });
   } catch (e) {
     console.error(`[Analysis] Error for track ${trackId}: ${e.message}`);
     broadcast({ type: 'analysis_error', track_id: trackId, error: e.message });
@@ -4505,7 +4508,7 @@ os2l.init({
       console.log(`[VDJ] Loading database from ${xmlPath}...`);
       const tracks = vdjParser.parseVdjDatabase(xmlPath);
       const result = db.importTracks(tracks);
-      console.log(`[VDJ] Imported ${result.total} tracks (${result.inserted} new, ${result.updated} updated)`);
+      console.log(`[VDJ] Imported ${result.total} tracks (${result.inserted} new, ${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed)`);
     } else {
       console.log('[VDJ] No database path configured — skip track import');
     }

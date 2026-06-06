@@ -1904,6 +1904,8 @@
     <div class="fixtures-toolbar">
       <button class="btn btn-primary" id="btnAddFixture">+ Add Fixture</button>
       <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
+      <button class="btn btn-secondary btn-sm" id="btnExportAddressCsv" title="Download CSV with DMX address for each channel">&#8595; Addressing CSV</button>
+      <button class="btn btn-secondary btn-sm" id="btnExportAddressPrint" title="Open printable addressing sheet">&#128438; Print</button>
       <span style="flex:1"></span>
       <span style="font-size:12px;color:var(--text-dim)" id="fixtureCount"></span>
     </div>
@@ -5511,6 +5513,98 @@ function renderFilteredFixtures() {
   renderFixtureCards(filtered);
 }
 
+function _fixtureGroupMap() {
+  const map = {};
+  for (const g of fixtureGroups) {
+    for (const fid of g.fixture_ids) {
+      if (!map[fid]) map[fid] = [];
+      map[fid].push(g);
+    }
+  }
+  return map;
+}
+
+function _buildAddressingRows(fixtures) {
+  const headers = ['Fixture', 'Universe', 'Address', 'Channels', 'Output'];
+  const rows = [headers];
+  const sorted = [...fixtures].sort((a, b) => a.universe - b.universe || a.address - b.address);
+  for (const f of sorted) {
+    const output = f.output_type === 'dmx_usb' ? 'DMX USB' : 'Art-Net';
+    rows.push([f.name, f.universe, f.address, f.channel_count, output]);
+  }
+  return rows;
+}
+
+function _csvEscape(cell) {
+  const s = String(cell ?? '');
+  return (s.includes(',') || s.includes('"') || s.includes('\n'))
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+async function exportFixtureAddressingCsv() {
+  const fixtures = getFilteredFixtures();
+  if (!fixtures.length) {
+    alert('No fixtures to export. Add fixtures or clear filters.');
+    return;
+  }
+
+  const rows = _buildAddressingRows(fixtures);
+  const csv = rows.map(r => r.map(_csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `dmx-addressing-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function exportFixtureAddressingPrint() {
+  const fixtures = getFilteredFixtures();
+  if (!fixtures.length) {
+    alert('No fixtures to export. Add fixtures or clear filters.');
+    return;
+  }
+
+  const rows = _buildAddressingRows(fixtures);
+  const headers = rows[0];
+  const body = rows.slice(1).map(r =>
+    '<tr>' + r.map((c, i) => {
+      const mono = i === 1 || i === 2 || i === 3;
+      return `<td${mono ? ' style="font-family:monospace"' : ''}>${esc(String(c ?? ''))}</td>`;
+    }).join('') + '</tr>'
+  ).join('');
+
+  const filterNote = fixtures.length < _allFixtures.length
+    ? `<p style="color:#666;font-size:12px">Showing ${fixtures.length} of ${_allFixtures.length} fixtures (current filters applied)</p>`
+    : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DMX Fixture Addressing</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; color: #111; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      table { border-collapse: collapse; width: 100%; font-size: 11px; margin-top: 12px; }
+      th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
+      th { background: #f0f0f0; font-size: 10px; text-transform: uppercase; }
+      tr:nth-child(even) td { background: #fafafa; }
+      @media print { body { margin: 12px; } }
+    </style></head><body>
+    <h1>DMX Fixture Addressing</h1>
+    <p style="margin:0;color:#666;font-size:12px">Generated ${new Date().toLocaleString()}</p>
+    ${filterNote}
+    <table><thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
+    <script>window.onload = () => window.print();<\/script>
+    </body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) {
+    alert('Pop-up blocked. Allow pop-ups to open the print view, or use Addressing CSV instead.');
+    return;
+  }
+  w.document.write(html);
+  w.document.close();
+}
+
 function renderFixtureCards(fixtures) {
   const container = document.getElementById('fixturesGrid');
   container.innerHTML = '';
@@ -5524,14 +5618,7 @@ function renderFixtureCards(fixtures) {
     return;
   }
 
-  // Build a lookup: fixture id → groups it belongs to
-  const fixtureGroupMap = {};
-  for (const g of fixtureGroups) {
-    for (const fid of g.fixture_ids) {
-      if (!fixtureGroupMap[fid]) fixtureGroupMap[fid] = [];
-      fixtureGroupMap[fid].push(g);
-    }
-  }
+  const fixtureGroupMap = _fixtureGroupMap();
 
   const wrap = document.createElement('div');
   wrap.className = 'fixtures-table-wrap';
@@ -5616,6 +5703,8 @@ function renderFixtureCards(fixtures) {
 }
 
 document.getElementById('btnAddFixture').addEventListener('click', () => openFixtureModal());
+document.getElementById('btnExportAddressCsv').addEventListener('click', () => exportFixtureAddressingCsv());
+document.getElementById('btnExportAddressPrint').addEventListener('click', () => exportFixtureAddressingPrint());
 
 // ── Fixture Type Picker (searchable, server-side) ──
 let _ftPickerMeta = { manufacturers: [], categories: [], channelCounts: [], loaded: false };
@@ -13739,7 +13828,7 @@ function renderScenesList(scenes) {
         <button class="btn btn-primary btn-sm" onclick="activateScene(${s.id})">Activate</button>
         <button class="btn btn-secondary btn-sm" onclick="editScene(${s.id})">Edit</button>
         ${!s.is_default ? '<button class="btn btn-secondary btn-sm" onclick="setDefaultScene(' + s.id + ')">Set Default</button>' : ''}
-        <button class="btn btn-danger btn-sm" onclick="deleteScene(${s.id}, \'${esc(s.name).replace(/'/g, "\\'")}\'')">Delete</button>
+        <button class="btn btn-danger btn-sm" data-action="delete-scene" data-id="${s.id}">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -13764,11 +13853,18 @@ async function setDefaultScene(id) {
   loadScenes();
 }
 
-async function deleteScene(id, name) {
+async function deleteScene(id) {
+  const s = _scenesCache.find(x => x.id === id);
+  const name = s ? s.name : 'this scene';
   if (!confirm('Delete scene "' + name + '"?')) return;
   await fetch(`/api/scenes/${id}`, { method: 'DELETE' });
   loadScenes();
 }
+
+document.getElementById('scenesList').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action="delete-scene"]');
+  if (btn) deleteScene(+btn.dataset.id);
+});
 
 // ── Scene Modal ──
 let _editSceneId = null;

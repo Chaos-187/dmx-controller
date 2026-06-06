@@ -9,7 +9,7 @@
  * cascade patterns across all fixtures as one large virtual fixture.
  */
 
-const { applyIntensity, rgbToHex, getFixtureIntensity } = require('./helpers');
+const { applyIntensity, rgbToHex, getFixtureIntensity, stableRoll } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
 
 const CELL_PATTERN_MAP = {
@@ -388,7 +388,8 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
       if (secDurMs < barMs) continue;
 
       const useCascade = canCascade && (
-        CASCADE_SECTIONS.has(label) || rand() > 0.5
+        CASCADE_SECTIONS.has(label)
+        || stableRoll(`mc-cascade-${typeName}-${label}-${secStartMs}`) > 0.5
       );
 
       const fixtureContexts = [];
@@ -432,44 +433,45 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
       const numSubPhrases = Math.max(1, Math.floor(secDurMs / subPhraseMs));
       const useSubPhrases = numSubPhrases >= 2 && label !== 'buildup';
 
+      // Plan patterns once per section — all fixtures of this type share the look
+      const sectionPatterns = [];
+      if (useSubPhrases) {
+        let lastPattern = '';
+        for (let sp = 0; sp < numSubPhrases; sp++) {
+          let pattern;
+          for (let tries = 0; tries < 5; tries++) {
+            const roll = stableRoll(`mc-pat-${typeName}-${label}-${secStartMs}-${sp}-${tries}`);
+            pattern = patterns[Math.floor(roll * patterns.length)];
+            if (pattern !== lastPattern || patterns.length <= 1) break;
+          }
+          lastPattern = pattern;
+          const patPalettes = [allPalettes[sp % allPalettes.length]];
+          if (allPalettes.length > 1) patPalettes.push(allPalettes[(sp + 1) % allPalettes.length]);
+          sectionPatterns.push({ pattern, patPalettes, spStart: secStartMs + sp * subPhraseMs,
+            spEnd: sp === numSubPhrases - 1 ? secEndMs : secStartMs + (sp + 1) * subPhraseMs });
+        }
+      } else {
+        const roll = stableRoll(`mc-pat-${typeName}-${label}-${secStartMs}`);
+        sectionPatterns.push({
+          pattern: patterns[Math.floor(roll * patterns.length)],
+          patPalettes: allPalettes,
+          spStart: secStartMs,
+          spEnd: secEndMs,
+        });
+      }
+
       for (const fCtx of fixtureContexts) {
         const fixBaseIntensity = Math.min(1, baseIntensity * getFixtureIntensity(fCtx.fix.id, label, ctx));
-        if (useSubPhrases) {
-          let lastPattern = '';
-          for (let sp = 0; sp < numSubPhrases; sp++) {
-            const spStart = secStartMs + sp * subPhraseMs;
-            const spEnd = sp === numSubPhrases - 1 ? secEndMs : secStartMs + (sp + 1) * subPhraseMs;
-            const spDur = spEnd - spStart;
-            if (spDur < barMs) continue;
-
-            let pattern;
-            for (let tries = 0; tries < 5; tries++) {
-              pattern = patterns[Math.floor(rand() * patterns.length)];
-              if (pattern !== lastPattern || patterns.length <= 1) break;
-            }
-            lastPattern = pattern;
-
-            const patPalettes = [allPalettes[sp % allPalettes.length]];
-            if (allPalettes.length > 1) patPalettes.push(allPalettes[(sp + 1) % allPalettes.length]);
-
-            const patternCtx = {
-              ...fCtx,
-              secStartMs: spStart, secEndMs: spEnd, secDurMs: spDur,
-              palettes: patPalettes, baseIntensity: fixBaseIntensity, label,
-              ...ctx,
-            };
-
-            _dispatchCellPattern(cues, pattern, patternCtx);
-          }
-        } else {
-          const pattern = patterns[Math.floor(rand() * patterns.length)];
+        for (const spPlan of sectionPatterns) {
+          const spDur = spPlan.spEnd - spPlan.spStart;
+          if (spDur < barMs) continue;
           const patternCtx = {
             ...fCtx,
-            secStartMs, secEndMs, secDurMs,
-            palettes: allPalettes, baseIntensity: fixBaseIntensity, label,
+            secStartMs: spPlan.spStart, secEndMs: spPlan.spEnd, secDurMs: spDur,
+            palettes: spPlan.patPalettes, baseIntensity: fixBaseIntensity, label,
             ...ctx,
           };
-          _dispatchCellPattern(cues, pattern, patternCtx);
+          _dispatchCellPattern(cues, spPlan.pattern, patternCtx);
         }
       }
     }

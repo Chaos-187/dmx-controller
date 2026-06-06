@@ -7,7 +7,7 @@
  */
 
 const { getSectionPalettes } = require('./palettes');
-const { hasVocals, walkBeats, snapToBeat } = require('./helpers');
+const { hasVocals, walkBeats, snapToBeat, stableRoll } = require('./helpers');
 
 const SECTION_EFFECT_TYPES = {
   intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'],                                   rigWide: ['rig_color_wave', 'rig_rainbow'] },
@@ -85,13 +85,14 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
     effectsByType[eff.type].push(eff);
   }
 
-  function pickEffect(desiredTypes) {
+  function pickEffect(desiredTypes, rollKey) {
     const candidates = [];
     for (const t of desiredTypes) {
       if (effectsByType[t]) candidates.push(...effectsByType[t]);
     }
     if (candidates.length === 0) return null;
-    return candidates[Math.floor(rand() * candidates.length)];
+    const r = rollKey ? stableRoll(rollKey) : rand();
+    return candidates[Math.floor(r * candidates.length)];
   }
 
   // ── Group fixtures by type_name ───────────────────────────────────────
@@ -198,6 +199,9 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
   // ── Section-based effect generation ───────────────────────────────────
   if (sections.length > 0) {
     const groupEntries = Object.entries(fixtureGroups);
+    const hasLedBars = groupEntries.some(([, g]) => g.isLedBar);
+    const hasRegulars = groupEntries.some(([, g]) => !g.isLedBar);
+    const mixedRig = hasLedBars && hasRegulars;
     const groupLanes = {};
     for (const [typeName] of groupEntries) {
       groupLanes[typeName] = laneCounter++;
@@ -223,7 +227,8 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       const activeSE = ctx.activeSectionEffects || SECTION_EFFECT_TYPES;
       const typesMap = activeSE[label] || DEFAULT_EFFECT_TYPES;
       const sectionPalette = getSectionPalettes(paletteKey, label, ctx.activePalettes);
-      const baseColor = sectionPalette[Math.floor(rand() * sectionPalette.length)];
+      const paletteIdx = Math.floor(stableRoll(`fx-pal-${label}-${sectionStart}`) * sectionPalette.length);
+      const baseColor = sectionPalette[paletteIdx];
 
       const isHighEnergy = label === 'chorus' || label === 'drop' || label === 'buildup';
       const maxBars = isHighEnergy ? 4 : 2;
@@ -233,24 +238,27 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       if (isHighEnergy) {
         effectStart = sectionStart;
       } else {
-        const offsetBars = Math.floor(rand() * 2) + 1;
+        const offsetBars = Math.floor(stableRoll(`fx-off-${label}-${sectionStart}`) * 2) + 1;
         // Walk actual beats to avoid drift from theoretical barMs
         const rawOffset = walkBeats(sectionStart, offsetBars * 4, ctx.beats, beatMs);
         effectStart = Math.min(snapToBeat(rawOffset, ctx.beats), sectionEnd - effectDur);
         if (effectStart < sectionStart) effectStart = sectionStart;
       }
 
+      // Mixed fixture types → skip per-group FX (rig-wide pass handles unified moments)
+      if (mixedRig) continue;
+
+      const vocalsActive = hasVocals(sectionStart, sectionEnd, ctx);
+      let desiredTypes = hasLedBars ? typesMap.cellAware : typesMap.regular;
+      if (vocalsActive === true) {
+        desiredTypes = desiredTypes.filter(t => t !== 'strobe');
+      }
+
+      // One effect for the whole section — all fixture groups share the moment
+      const effect = pickEffect(desiredTypes, `fx-type-${label}-${sectionStart}`);
+      if (!effect) continue;
+
       for (const [typeName, group] of groupEntries) {
-        let desiredTypes = group.isLedBar ? typesMap.cellAware : typesMap.regular;
-
-        const vocalsActive = hasVocals(sectionStart, sectionEnd, ctx);
-        if (vocalsActive === true) {
-          desiredTypes = desiredTypes.filter(t => t !== 'strobe');
-        }
-
-        const effect = pickEffect(desiredTypes);
-        if (!effect) continue;
-
         const useCascade = CASCADE_TYPES.has(effect.type) && group.fixtures.length > 1;
         emitGroupCues(group, effect, effectStart, effectDur, baseColor, groupLanes[typeName], useCascade);
       }
@@ -276,9 +284,11 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       // Enforce gap from last rig-wide effect
       if (sectionStart < lastRigEndMs + barMs * 4) continue;
 
-      // Low chance — rig effects are rare highlights
+      // Low chance — rig effects are rare highlights (higher when mixed fixture types)
       const rigWideMult = preset.rigWideMult || 1.0;
-      if (rand() > 0.30 * rigWideMult) continue;
+      const mixedRig = hasLedBars && hasRegulars;
+      const rigChance = (mixedRig ? 0.55 : 0.30) * rigWideMult;
+      if (stableRoll(`fx-rig-${label}-${sectionStart}`) > rigChance) continue;
 
       const maxBars = 4;
       const effectDur = Math.min(barMs * maxBars, sectionDuration);

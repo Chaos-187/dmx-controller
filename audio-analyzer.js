@@ -19,7 +19,7 @@ const path = require('path');
 
 const ANALYSIS_VERSION = 14;
 const DEFAULTS = {
-  TARGET_PEAKS:         8000,     // minimum waveform points (overridden by dynamic 100/sec calc)
+  TARGET_PEAKS:         2000,     // waveform resolution tier from app settings (see peaks/sec calc below)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
   DECODE_SAMPLE_RATE:   22050,    // downsample for analysis (mono)
   SECTION_MIN_BARS:     4,        // minimum section length in bars
@@ -1563,8 +1563,9 @@ function analyzeTrack(filePath, opts = {}) {
     });
 
     const totalSamples = Math.ceil(durationSec * DECODE_SAMPLE_RATE);
-    // Dynamic peak count: 150 peaks/sec for smooth waveforms at high zoom
-    const dynamicPeaks = Math.max(TARGET_PEAKS, Math.round(durationSec * 150));
+    // TARGET_PEAKS from settings (1000–8000) maps to peaks/sec; 2000 → 150/sec (legacy default)
+    const peaksPerSec = TARGET_PEAKS * (150 / 2000);
+    const dynamicPeaks = Math.max(TARGET_PEAKS, Math.round(durationSec * peaksPerSec));
     const samplesPerPeak = Math.max(1, Math.floor(totalSamples / dynamicPeaks));
     const samplesPerEnergy = Math.max(1, Math.floor((ENERGY_SEGMENT_MS / 1000) * DECODE_SAMPLE_RATE));
 
@@ -1756,7 +1757,7 @@ function analyzeTrack(filePath, opts = {}) {
         energy_levels: energySegments,
         beats,
         sections,
-        sample_rate: probe.sample_rate,
+        sample_rate: DECODE_SAMPLE_RATE,
         channels: probe.channels,
         duration_ms: durationMs,
         peak_count: waveformPeaks.length,

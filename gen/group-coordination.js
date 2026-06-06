@@ -79,14 +79,14 @@ function getFixtureGroup(fix, groupMap, filterIds) {
 function pickCoordMode(sectionLabel, rand) {
   // Calm sections → sync or mirror; energetic → anything
   const weights = {
-    intro:     { sync: 0.6, mirror: 0.3, fan: 0.0, cascade: 0.1, opposite: 0.0 },
-    verse:     { sync: 0.4, mirror: 0.3, fan: 0.1, cascade: 0.1, opposite: 0.1 },
-    chorus:    { sync: 0.2, mirror: 0.3, fan: 0.15, cascade: 0.15, opposite: 0.2 },
-    bridge:    { sync: 0.4, mirror: 0.3, fan: 0.1, cascade: 0.1, opposite: 0.1 },
-    breakdown: { sync: 0.5, mirror: 0.3, fan: 0.1, cascade: 0.1, opposite: 0.0 },
-    buildup:   { sync: 0.2, mirror: 0.2, fan: 0.2, cascade: 0.3, opposite: 0.1 },
-    drop:      { sync: 0.15, mirror: 0.25, fan: 0.2, cascade: 0.15, opposite: 0.25 },
-    outro:     { sync: 0.6, mirror: 0.2, fan: 0.1, cascade: 0.1, opposite: 0.0 },
+    intro:     { sync: 0.75, mirror: 0.2, fan: 0.0, cascade: 0.05, opposite: 0.0 },
+    verse:     { sync: 0.6, mirror: 0.25, fan: 0.05, cascade: 0.05, opposite: 0.05 },
+    chorus:    { sync: 0.45, mirror: 0.25, fan: 0.1, cascade: 0.1, opposite: 0.1 },
+    bridge:    { sync: 0.55, mirror: 0.25, fan: 0.05, cascade: 0.1, opposite: 0.05 },
+    breakdown: { sync: 0.7, mirror: 0.2, fan: 0.05, cascade: 0.05, opposite: 0.0 },
+    buildup:   { sync: 0.35, mirror: 0.2, fan: 0.15, cascade: 0.2, opposite: 0.1 },
+    drop:      { sync: 0.35, mirror: 0.2, fan: 0.15, cascade: 0.15, opposite: 0.15 },
+    outro:     { sync: 0.75, mirror: 0.15, fan: 0.05, cascade: 0.05, opposite: 0.0 },
   };
   const w = weights[sectionLabel] || weights.verse;
   const r = rand();

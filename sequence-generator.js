@@ -37,6 +37,41 @@ const { buildGroupMap } = require('./gen/group-coordination');
  * a rig-wide effect window.  The rig effect drives all fixtures, so stacking
  * individual cues on top just creates visual clutter.
  */
+/**
+ * Remove color cues that overlap per-fixture FX windows.  Color + effect on
+ * the same fixture at once looks chaotic; let the effect own that moment.
+ */
+function suppressColorDuringFixtureEffects(cues) {
+  const fxByFixture = new Map();
+  for (const c of cues) {
+    if (c.track !== 'fx' || !c.fixture_id) continue;
+    if (!fxByFixture.has(c.fixture_id)) fxByFixture.set(c.fixture_id, []);
+    fxByFixture.get(c.fixture_id).push({
+      start: c.start_ms,
+      end: c.start_ms + c.duration_ms,
+    });
+  }
+  if (fxByFixture.size === 0) return;
+
+  function overlapsFx(fixtureId, startMs, endMs) {
+    const intervals = fxByFixture.get(fixtureId);
+    if (!intervals) return false;
+    for (const iv of intervals) {
+      if (startMs < iv.end && endMs > iv.start) return true;
+    }
+    return false;
+  }
+
+  for (let i = cues.length - 1; i >= 0; i--) {
+    const c = cues[i];
+    if (c.track !== 'color' || !c.fixture_id) continue;
+    const endMs = c.start_ms + c.duration_ms;
+    if (overlapsFx(c.fixture_id, c.start_ms, endMs)) {
+      cues.splice(i, 1);
+    }
+  }
+}
+
 function suppressCuesDuringRigEffects(cues) {
   // Collect rig effect intervals
   const rigIntervals = [];
@@ -250,11 +285,9 @@ function generateSequence(opts) {
     resolveMultiCellConflicts(cues, multiCellFixtures);
   }
 
-  // ── Suppress individual cues during rig-wide effects ──────────────────
-  //   When a rig effect is active it drives all fixtures — individual color
-  //   cues and per-fixture FX that start inside the rig effect window just
-  //   pile up and create visual noise.  Remove them so the rig effect is a
-  //   clean, unified moment.
+  // ── Suppress competing cue layers ─────────────────────────────────────
+  // Per-fixture FX owns its window; rig-wide FX owns the whole rig.
+  suppressColorDuringFixtureEffects(cues);
   suppressCuesDuringRigEffects(cues);
 
   return { cues, bpm, durationMs, palette: paletteKey, genrePreset: genreKey };

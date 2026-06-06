@@ -61,6 +61,12 @@ const SEQ = (() => {
   // ── Helpers ───────────────────────────────────────────────────
   function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function formatDur(s) { if (!s || s <= 0) return '--:--'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
+  function formatTrackDur(seconds) {
+    if (!seconds || seconds <= 0) return '';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function apiGet(url) { return api(url); }
 
@@ -222,6 +228,7 @@ const SEQ = (() => {
       else if (msg.type === 'seq_time') { _pendingTime[msg.deck] = msg.timeMs; _timeDirty = true; }
       else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputPill(); }
       else if (msg.type === 'seq_batch_progress' || msg.type === 'seq_batch_complete') handleBatchMsg(msg);
+      else if (msg.type === 'analysis_complete' || msg.type === 'analysis_error' || msg.type === 'analysis_batch_complete') handleAnalysisMsg(msg);
     };
     ws.onclose = () => {
       $('connDot').classList.remove('on');
@@ -251,6 +258,41 @@ const SEQ = (() => {
   function handleSeqPlaying(msg) {
     if (msg.deck === deck) { isPlaying = msg.playing; $('btnPlay').classList.toggle('active', msg.playing); }
   }
+  function handleAnalysisMsg(msg) {
+    if (msg.type === 'analysis_complete') {
+      const tid = +msg.track_id;
+      _analyzingTracks.delete(tid);
+      const t = _tracks.find(x => x.id === tid);
+      if (t) t.has_analysis = 1;
+      const status = $('trackStatus');
+      if (status && currentPage === 'library') {
+        const peaks = msg.peak_count != null ? `${msg.peak_count.toLocaleString()} peaks` : 'updated';
+        status.textContent = `Track #${tid} re-analyzed (${peaks}) — zoom in to see resolution changes`;
+      }
+      if (currentPage === 'library') renderTrackList();
+      if (wfTrackId === tid || currentSeq?.track_id === tid) {
+        loadWaveform(tid, { force: true }).then(() => {
+          if (currentSeq && !currentId && wfAnalysis) {
+            currentSeq.bpm = (wfAnalysis.bpm > 0 ? wfAnalysis.bpm : currentSeq.bpm);
+            currentSeq.duration_ms = wfAnalysis.duration_ms || currentSeq.duration_ms;
+            currentSeq.beat_offset_ms = wfAnalysis.beat_offset_ms || 0;
+            updateInfoPanel();
+          }
+          renderTimeline();
+        });
+      }
+      return;
+    }
+    if (msg.type === 'analysis_error') {
+      const tid = +msg.track_id;
+      _analyzingTracks.delete(tid);
+      if (currentPage === 'library') renderTrackList();
+      console.error(`Analysis failed for track ${tid}:`, msg.error);
+      return;
+    }
+    if (msg.type === 'analysis_batch_complete' && currentPage === 'library') loadTracks();
+  }
+
   function handleBatchMsg(msg) {
     if (msg.type === 'seq_batch_progress') {
       const pct = Math.round(((msg.completed + msg.failed + msg.skipped) / msg.total) * 100);
@@ -262,7 +304,7 @@ const SEQ = (() => {
       $('genText').textContent = `Done! ${msg.completed} generated, ${msg.skipped} skipped, ${msg.failed} failed`;
       $('genConfirm').disabled = false;
       $('genConfirm').textContent = 'Close';
-      $('genConfirm').onclick = () => { closeModal(); loadAll(); };
+      $('genConfirm').onclick = () => { closeModal(); loadAll(); if (currentPage === 'library') loadTracks(); };
     }
   }
 
@@ -282,6 +324,7 @@ const SEQ = (() => {
     ]);
     sequences = seqRes; fixtures = fixRes; effects = effRes; moverPresets = mpRes; rigLayouts = rigRes;
     renderSeqList();
+    if (currentPage === 'library') await loadTracks();
     renderFixtureChips();
     refreshEffectDropdown();
     refreshMoverDropdown();
@@ -317,7 +360,7 @@ const SEQ = (() => {
     } catch (e) { console.error('Failed to load rig:', e); }
   });
 
-  async function loadSequenceById(id) {
+  async function loadSequenceById(id, opts = {}) {
     if (!id) {
       currentId = null; currentSeq = null; cues = [];
       activeLanes.clear(); selectedIds.clear(); selectedPrimary = null;
@@ -334,25 +377,65 @@ const SEQ = (() => {
     updateInfoPanel(); renderFixtureChips(); renderTimeline();
     $('tlScroll').scrollLeft = 0;
     highlightSeqItem(currentId);
-    if (seq.track_id) loadWaveform(seq.track_id);
+    if (seq.track_id) {
+      loadWaveform(seq.track_id);
+      if (currentPage === 'library') renderTrackList();
+    }
     if (editMode && currentId) {
       wsSend({ type: 'sequence', action: 'preview_load', deck, sequenceId: currentId });
       previewAtPlayhead();
     }
   }
 
-  // ── Sequence List (virtual-scroll) ────────────────────────────
+  // ── Sequence List (virtual-scroll) + Track Library ────────────
   const SEQ_ROW_H = 30;           // fixed row height in px
   const SEQ_BUFFER = 10;          // extra rows above/below viewport
-  let _seqFiltered = [];          // filtered view of sequences
+  const TRACKS_PER_PAGE = 100;
+  let _seqFiltered = [];          // filtered view of manual sequences
   let _seqQuery = '';             // current search string
   let _seqScrollRAF = 0;
+  let currentPage = 'editor';
+
+  // Track library state
+  let _tracks = [];
+  let _tracksTotal = 0;
+  let _tracksPage = 0;
+  let _tracksQuery = '';
+  let _tracksGenre = '';
+  let _tracksSource = '';
+  let _tracksBpmMin = '';
+  let _tracksBpmMax = '';
+  let _tracksGenresLoaded = false;
+  let _tracksSearchTimer = 0;
+  let _analyzingTracks = new Set();
+
+  // Generate modal state
+  let _genOptions = null;
+  let _genPendingTrackId = null;
+  let _genPendingBtn = null;
+  let _genBulkMode = false;
+
+  function manualSequences() {
+    return sequences.filter(s => !s.track_id);
+  }
 
   function filterSequences() {
-    if (!_seqQuery) { _seqFiltered = sequences; }
+    const manual = manualSequences();
+    if (!_seqQuery) { _seqFiltered = manual; }
     else {
       const q = _seqQuery.toLowerCase();
-      _seqFiltered = sequences.filter(s => s.name && s.name.toLowerCase().includes(q));
+      _seqFiltered = manual.filter(s => s.name && s.name.toLowerCase().includes(q));
+    }
+  }
+
+  function setPage(page) {
+    currentPage = page;
+    $$('.page-tab', $('pageTabs')).forEach(b => b.classList.toggle('active', b.dataset.page === page));
+    $$('.page-view').forEach(v => v.classList.toggle('active', v.dataset.page === page));
+    if (page === 'library') {
+      if (!_tracksGenresLoaded) loadTrackGenres();
+      loadTracksStats();
+      loadTracks();
     }
   }
 
@@ -361,17 +444,18 @@ const SEQ = (() => {
     const list = $('seqList');
     const vp = $('seqViewport');
     const status = $('seqStatus');
-    if (!sequences.length) {
+    const manualCount = manualSequences().length;
+    if (!manualCount) {
       vp.style.height = '0'; vp.innerHTML = '';
       list.scrollTop = 0;
-      status.textContent = 'No sequences';
+      status.textContent = _seqQuery ? 'No matches' : 'No manual sequences';
       return;
     }
     // Set virtual height so scrollbar reflects full list
     vp.style.height = (_seqFiltered.length * SEQ_ROW_H) + 'px';
     status.textContent = _seqQuery
-      ? `${_seqFiltered.length} of ${sequences.length.toLocaleString()}`
-      : `${sequences.length.toLocaleString()} sequences`;
+      ? `${_seqFiltered.length} of ${manualCount.toLocaleString()} manual`
+      : `${manualCount.toLocaleString()} manual sequence${manualCount === 1 ? '' : 's'}`;
     paintVisibleSeqs();
   }
 
@@ -397,6 +481,364 @@ const SEQ = (() => {
   function onSeqListScroll() {
     cancelAnimationFrame(_seqScrollRAF);
     _seqScrollRAF = requestAnimationFrame(paintVisibleSeqs);
+  }
+
+  // ── Track Library ─────────────────────────────────────────────
+  async function loadTrackGenres() {
+    if (_tracksGenresLoaded) return;
+    try {
+      const genres = await api('/api/tracks/genres');
+      const sel = $('tracksGenreFilter');
+      sel.innerHTML = '<option value="">All genres</option>';
+      for (const g of genres) {
+        const opt = document.createElement('option');
+        opt.value = g.genre;
+        opt.textContent = `${g.genre} (${g.count})`;
+        sel.appendChild(opt);
+      }
+      _tracksGenresLoaded = true;
+    } catch (e) { console.warn('Failed to load genres', e); }
+  }
+
+  async function loadTracksStats() {
+    try {
+      const stats = await api('/api/tracks/stats');
+      $('statTotal').textContent = (stats.total || 0).toLocaleString();
+      $('statLocal').textContent = (stats.local || 0).toLocaleString();
+      $('statNetsearch').textContent = (stats.netsearch || 0).toLocaleString();
+      $('statBpm').textContent = (stats.withBpm || 0).toLocaleString();
+      $('statGenres').textContent = (stats.genres || 0).toLocaleString();
+    } catch (e) { console.warn('Failed to load track stats', e); }
+  }
+
+  function buildTracksParams() {
+    const params = new URLSearchParams();
+    if (_tracksQuery) params.set('search', _tracksQuery);
+    if (_tracksGenre) params.set('genre', _tracksGenre);
+    if (_tracksSource) params.set('sourceType', _tracksSource);
+    if (_tracksBpmMin) params.set('minBpm', _tracksBpmMin);
+    if (_tracksBpmMax) params.set('maxBpm', _tracksBpmMax);
+    params.set('limit', String(TRACKS_PER_PAGE));
+    params.set('offset', String(_tracksPage * TRACKS_PER_PAGE));
+    return params;
+  }
+
+  async function loadTracks() {
+    const status = $('trackStatus');
+    if (status) status.textContent = 'Loading…';
+    try {
+      const data = await api('/api/tracks?' + buildTracksParams().toString());
+      _tracks = data.tracks || [];
+      _tracksTotal = data.total || 0;
+      renderTrackList();
+    } catch (e) {
+      console.error('Failed to load tracks', e);
+      if ($('tracksBody')) $('tracksBody').innerHTML = '<tr><td colspan="11" class="tracks-empty">Failed to load tracks</td></tr>';
+      if (status) status.textContent = 'Load failed';
+    }
+  }
+
+  function renderTrackList() {
+    const tbody = $('tracksBody');
+    const status = $('trackStatus');
+    if (!tbody) return;
+
+    if (!_tracks.length) {
+      const msg = _tracksTotal === 0
+        ? 'No tracks imported yet. Configure VirtualDJ in the controller, then Re-import.'
+        : 'No tracks match your filters.';
+      tbody.innerHTML = `<tr><td colspan="11" class="tracks-empty">${msg}</td></tr>`;
+      updateTracksPagination();
+      if (status) status.textContent = _tracksTotal === 0 ? '0 tracks' : '0 matches';
+      return;
+    }
+
+    const startIdx = _tracksPage * TRACKS_PER_PAGE;
+    tbody.innerHTML = _tracks.map((t, i) => {
+      const hasSeq = !!t.sequence_id;
+      const hasAn = !!t.has_analysis;
+      const rowActive = hasSeq && currentId === t.sequence_id ? ' row-active' : '';
+      const bpmStr = t.bpm > 0 ? t.bpm.toFixed(1) : '';
+      const srcLabel = t.source_type === 'local' ? 'Local' : 'Net';
+      const analyzing = _analyzingTracks.has(t.id);
+      const anBtn = hasAn
+        ? `<div class="trk-action-group">` +
+          `<button type="button" class="trk-action-btn analyzed" data-action="view-analysis" data-track-id="${t.id}"${analyzing ? ' disabled' : ''}>&#9835; View</button>` +
+          `<button type="button" class="trk-action-btn reanalyze${analyzing ? ' analyzing' : ''}" data-action="reanalyze" data-track-id="${t.id}"${analyzing ? ' disabled' : ''}>${analyzing ? '…' : '&#8635; Re-run'}</button>` +
+          `</div>`
+        : `<button type="button" class="trk-action-btn${analyzing ? ' analyzing' : ''}" data-action="analyze" data-track-id="${t.id}"${analyzing ? ' disabled' : ''}>${analyzing ? 'Analyzing…' : '&#127911; Analyze'}</button>`;
+      const seqBtn = hasSeq
+        ? `<button type="button" class="trk-action-btn has-seq" data-action="edit-seq" data-track-id="${t.id}" data-seq-id="${t.sequence_id}">&#9835; Edit</button>`
+        : `<button type="button" class="trk-action-btn" data-action="gen-seq" data-track-id="${t.id}">&#127917; Seq</button>`;
+      return `<tr class="${rowActive}" data-track-id="${t.id}">` +
+        `<td style="color:var(--text-muted)">${startIdx + i + 1}</td>` +
+        `<td class="trk-title" title="${esc(t.filepath || '')}">${esc(t.title || t.filename)}</td>` +
+        `<td class="trk-artist">${esc(t.author)}</td>` +
+        `<td class="trk-genre">${esc(t.genre)}</td>` +
+        `<td class="trk-path" title="${esc(t.filepath || '')}">${esc(t.filepath)}</td>` +
+        `<td class="trk-bpm">${bpmStr}</td>` +
+        `<td class="trk-key">${esc(t.key)}</td>` +
+        `<td class="trk-duration">${formatTrackDur(t.song_length)}</td>` +
+        `<td><span class="trk-source ${esc(t.source_type || '')}">${srcLabel}</span></td>` +
+        `<td>${anBtn}</td>` +
+        `<td>${seqBtn}</td>` +
+        `</tr>`;
+    }).join('');
+
+    updateTracksPagination();
+    if (status) {
+      const start = startIdx + 1;
+      const end = startIdx + _tracks.length;
+      status.textContent = `Showing ${start}–${end} of ${_tracksTotal.toLocaleString()}`;
+    }
+  }
+
+  function updateTracksPagination() {
+    const totalPages = Math.max(1, Math.ceil(_tracksTotal / TRACKS_PER_PAGE));
+    const page = _tracksPage + 1;
+    $('tracksPageLabel').textContent = _tracksTotal ? `Page ${page} / ${totalPages}` : '—';
+    $('tracksPrev').disabled = _tracksPage <= 0;
+    $('tracksNext').disabled = _tracksPage >= totalPages - 1;
+  }
+
+  async function loadGenOptions() {
+    if (_genOptions && _genOptions.palettes && _genOptions.palettes.length > 0) return _genOptions;
+    try {
+      _genOptions = await api('/api/sequences/generate-options');
+    } catch (e) {
+      console.warn('Failed to load generate options', e);
+      _genOptions = { palettes: [], genres: [] };
+    }
+    return _genOptions;
+  }
+
+  function populateGenSelects(opts) {
+    const palSel = $('genPalette');
+    const genSel = $('genGenre');
+    palSel.innerHTML = '<option value="random">Random</option>';
+    (opts.palettes || []).filter(p => p.key !== 'random').forEach(p => {
+      palSel.innerHTML += `<option value="${p.key}">${esc(p.label)}</option>`;
+    });
+    genSel.innerHTML = '<option value="auto">Auto-detect</option>';
+    (opts.genres || []).forEach(g => {
+      genSel.innerHTML += `<option value="${g.key}">${esc(g.label)}</option>`;
+    });
+    loadTemplates();
+  }
+
+  async function openGenerateModal(trackId, btn) {
+    _genBulkMode = false;
+    _genPendingTrackId = trackId;
+    _genPendingBtn = btn;
+
+    const opts = await loadGenOptions();
+    populateGenSelects(opts);
+
+    try {
+      const tr = await api(`/api/tracks/${trackId}`);
+      $('genModalTitle').textContent = 'Generate Sequence';
+      $('genTrackInfo').innerHTML = `<strong>${esc(tr.title || tr.filename)}</strong><br>${esc(tr.author || '')}${tr.genre ? ' · ' + esc(tr.genre) : ''}`;
+      $('genGenreHint').textContent = tr.genre
+        ? `Track genre: "${tr.genre}" — auto-detect will map this automatically`
+        : 'No genre tag on track — select a preset or use default';
+    } catch (e) {
+      $('genTrackInfo').textContent = `Track #${trackId}`;
+    }
+
+    $('genProgress').style.display = 'none';
+    $('genActions').style.display = 'flex';
+    $('genConfirm').disabled = false;
+    $('genConfirm').textContent = 'Generate';
+    $('genConfirm').onclick = confirmGenerateSingle;
+    $('genModal').classList.add('open');
+  }
+
+  async function openBulkGenerateModal() {
+    _genBulkMode = true;
+    _genPendingTrackId = null;
+    _genPendingBtn = null;
+
+    const opts = await loadGenOptions();
+    populateGenSelects(opts);
+
+    const countParams = buildTracksParams();
+    countParams.set('limit', '1');
+    countParams.set('offset', '0');
+    const countData = await api('/api/tracks?' + countParams.toString());
+    const totalFiltered = countData.total || 0;
+
+    $('genModalTitle').textContent = 'Bulk Generate Sequences';
+    $('genTrackInfo').innerHTML = `Will generate sequences for <strong>${totalFiltered}</strong> tracks matching the current filter.<br><span style="font-size:11px;color:var(--text-dim)">Tracks without analysis will be auto-analyzed first.</span>`;
+    $('genGenreHint').textContent = 'Auto-detect uses each track\'s genre tag individually';
+    $('genProgress').style.display = 'none';
+    $('genActions').style.display = 'flex';
+    $('genConfirm').disabled = false;
+    $('genConfirm').textContent = 'Generate All';
+    $('genConfirm').onclick = confirmBulkGenerate;
+    $('genModal').classList.add('open');
+  }
+
+  async function handleTrackAction(action, trackId, btn, seqId) {
+    if (action === 'gen-seq') {
+      const check = await fetch(`/api/sequences/by-track/${trackId}`);
+      if (check.ok) {
+        const existing = await check.json();
+        await loadSequenceById(existing.id);
+        setPage('editor');
+        return;
+      }
+      await openGenerateModal(trackId, btn);
+      return;
+    }
+    if (action === 'edit-seq' && seqId) {
+      await loadSequenceById(+seqId);
+      setPage('editor');
+      return;
+    }
+    if (action === 'analyze' || action === 'reanalyze') {
+      await startTrackAnalysis(trackId, btn);
+      return;
+    }
+    if (action === 'view-analysis') {
+      await loadTrackAnalysisView(trackId);
+      setPage('editor');
+    }
+  }
+
+  async function startTrackAnalysis(trackId, btn) {
+    if (!btn || btn.disabled) return;
+    trackId = +trackId;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.classList.add('analyzing');
+    btn.textContent = '…';
+
+    try {
+      const res = await fetch(`/api/tracks/${trackId}/analyze`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Analysis failed');
+      _analyzingTracks.add(trackId);
+      if (btn.dataset.action === 'analyze') btn.textContent = 'Analyzing…';
+      else btn.textContent = '…';
+      renderTrackList();
+    } catch (e) {
+      alert('Analysis failed: ' + e.message);
+      btn.disabled = false;
+      btn.classList.remove('analyzing');
+      btn.innerHTML = origHtml;
+    }
+  }
+
+  /** Open sequencer with track waveform/analysis (loads sequence too if one exists). */
+  async function loadTrackAnalysisView(trackId) {
+    trackId = +trackId;
+
+    try {
+      const res = await fetch(`/api/sequences/by-track/${trackId}`);
+      if (res.ok) {
+        await loadSequenceById((await res.json()).id);
+        return;
+      }
+    } catch (e) {
+      console.warn('Sequence lookup failed for track', trackId, e);
+    }
+
+    currentId = null;
+    currentSeq = null;
+    cues = [];
+    activeLanes.clear();
+    selectedIds.clear();
+    selectedPrimary = null;
+    highlightSeqItem(null);
+
+    await loadWaveform(trackId);
+
+    const track = wfTrackInfo || {};
+    const bpm = (wfAnalysis?.bpm > 0 ? wfAnalysis.bpm : null) || (track.bpm > 0 ? track.bpm : 128);
+    const durMs = wfAnalysis?.duration_ms
+      || (track.song_length > 0 ? Math.round(track.song_length * 1000) : 180000);
+
+    currentSeq = {
+      name: track.title || track.filename || 'Track',
+      bpm,
+      duration_ms: durMs,
+      beat_offset_ms: wfAnalysis?.beat_offset_ms || 0,
+      track_id: trackId,
+    };
+
+    updateInfoPanel();
+    renderFixtureChips();
+    renderTimeline();
+    $('tlScroll').scrollLeft = 0;
+    if (currentPage === 'library') renderTrackList();
+  }
+
+  async function confirmGenerateSingle() {
+    const trackId = _genPendingTrackId;
+    const btn = _genPendingBtn;
+    const palette = $('genPalette').value;
+    const genre = $('genGenre').value;
+    const templateId = $('genTemplate').value;
+    closeModal();
+
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+    try {
+      const body = {
+        overwrite: true,
+        palette: palette === 'random' ? undefined : palette,
+        genre: genre === 'auto' ? undefined : genre,
+      };
+      if (templateId) body.template_id = +templateId;
+
+      const seq = await apiPost(`/api/sequences/generate/${trackId}`, body);
+      if (seq.error) throw new Error(seq.error);
+      const existingIdx = sequences.findIndex(s => s.id === seq.id);
+      if (existingIdx >= 0) sequences[existingIdx] = seq;
+      else sequences.unshift(seq);
+      renderSeqList();
+      await loadSequenceById(seq.id);
+      setPage('editor');
+      await loadTracks();
+    } catch (e) {
+      console.error('Generate failed', e);
+      alert('Failed: ' + e.message);
+      if (btn) btn.textContent = 'Generate';
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function confirmBulkGenerate() {
+    const palette = $('genPalette').value;
+    const genre = $('genGenre').value;
+
+    const params = buildTracksParams();
+    params.set('limit', '10000');
+    params.set('offset', '0');
+    const data = await api('/api/tracks?' + params.toString());
+    const trackIds = (data.tracks || []).map(t => t.id);
+    if (!trackIds.length) { alert('No tracks match the current filter.'); return; }
+
+    $('genConfirm').disabled = true;
+    $('genConfirm').textContent = 'Generating…';
+    $('genProgress').style.display = 'block';
+    $('genFill').style.width = '0%';
+    $('genText').textContent = `0 / ${trackIds.length}`;
+
+    try {
+      await apiPost('/api/sequences/generate-batch', {
+        track_ids: trackIds,
+        palette: palette === 'random' ? undefined : palette,
+        genre: genre === 'auto' ? undefined : genre,
+        overwrite: false,
+      });
+    } catch (e) {
+      alert('Bulk generate failed: ' + e.message);
+      $('genConfirm').disabled = false;
+      $('genConfirm').textContent = 'Generate All';
+      $('genProgress').style.display = 'none';
+    }
   }
 
   function highlightSeqItem(id) {
@@ -916,9 +1358,10 @@ const SEQ = (() => {
   // ═══════════════════════════════════════════════════════════════
   //  Waveform
   // ═══════════════════════════════════════════════════════════════
-  async function loadWaveform(trackId) {
+  async function loadWaveform(trackId, opts = {}) {
     try {
-      const res = await fetch(`/api/tracks/${trackId}/analysis`);
+      const cacheBust = opts.force ? `?_=${Date.now()}` : '';
+      const res = await fetch(`/api/tracks/${trackId}/analysis${cacheBust}`, { cache: 'no-store' });
       if (!res.ok) { wfAnalysis = null; wfTrackId = null; renderTimeline(); return; }
       const data = await res.json();
       wfTrackId = trackId; wfAnalysis = data;
@@ -1497,6 +1940,11 @@ const SEQ = (() => {
 
     // ── Sequence list: virtual scroll + search ──
     on('seqList', 'scroll', onSeqListScroll);
+    // ── Page tabs ──
+    $$('.page-tab', $('pageTabs')).forEach(btn => {
+      btn.addEventListener('click', () => setPage(btn.dataset.page));
+    });
+
     $('seqList').addEventListener('click', e => {
       const item = e.target.closest('.seq-item');
       if (item) loadSequenceById(+item.dataset.id);
@@ -1506,6 +1954,60 @@ const SEQ = (() => {
       _seqQuery = e.target.value.trim();
       clearTimeout(_sqt);
       _sqt = setTimeout(() => { renderSeqList(); }, _seqQuery.length > 1 ? 80 : 200);
+    });
+
+    // ── Track library ──
+    on('tracksSearch', 'input', e => {
+      _tracksQuery = e.target.value.trim();
+      _tracksPage = 0;
+      clearTimeout(_tracksSearchTimer);
+      _tracksSearchTimer = setTimeout(() => loadTracks(), _tracksQuery.length > 1 ? 120 : 250);
+    });
+    on('tracksGenreFilter', 'change', e => {
+      _tracksGenre = e.target.value;
+      _tracksPage = 0;
+      loadTracks();
+    });
+    on('tracksSourceFilter', 'change', e => {
+      _tracksSource = e.target.value;
+      _tracksPage = 0;
+      loadTracks();
+    });
+    const applyBpmFilter = () => {
+      _tracksBpmMin = $('tracksBpmMin').value;
+      _tracksBpmMax = $('tracksBpmMax').value;
+      _tracksPage = 0;
+      loadTracks();
+    };
+    on('tracksBpmMin', 'change', applyBpmFilter);
+    on('tracksBpmMax', 'change', applyBpmFilter);
+    on('tracksPrev', 'click', () => { if (_tracksPage > 0) { _tracksPage--; loadTracks(); } });
+    on('tracksNext', 'click', () => {
+      const maxPage = Math.ceil(_tracksTotal / TRACKS_PER_PAGE) - 1;
+      if (_tracksPage < maxPage) { _tracksPage++; loadTracks(); }
+    });
+    on('btnBulkGenerate', 'click', openBulkGenerateModal);
+    on('btnImportTracks', 'click', async () => {
+      const btn = $('btnImportTracks');
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        await apiPost('/api/tracks/import', {});
+        _tracksPage = 0;
+        await loadTracksStats();
+        await loadTracks();
+      } catch (e) {
+        alert('Import failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '&#8635; Re-import';
+      }
+    });
+    $('tracksBody').addEventListener('click', e => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      e.stopPropagation();
+      handleTrackAction(btn.dataset.action, +btn.dataset.trackId, btn, btn.dataset.seqId ? +btn.dataset.seqId : null);
     });
 
     // ── Save Sequence ──
@@ -1538,7 +2040,9 @@ const SEQ = (() => {
       sequences = sequences.filter(s => s.id !== currentId);
       currentId = null; currentSeq = null; cues = [];
       selectedIds.clear(); selectedPrimary = null;
-      renderSeqList(); renderTimeline(); updateProps();
+      renderSeqList();
+      if (currentPage === 'library') loadTracks();
+      renderTimeline(); updateProps();
     });
 
     // ── Apply / Delete Cue ──
@@ -2126,7 +2630,12 @@ const SEQ = (() => {
     const seqParam = params.get('seq');
     const deckParam = params.get('deck');
     if (deckParam) { deck = +deckParam; $('deckSel').value = deckParam; }
-    if (seqParam) setTimeout(() => loadSequenceById(+seqParam), 500);
+    const pageParam = params.get('page');
+    if (pageParam === 'library') setPage('library');
+    if (seqParam) setTimeout(async () => {
+      await loadSequenceById(+seqParam);
+      setPage('editor');
+    }, 500);
   }
 
   // Run after DOM is ready

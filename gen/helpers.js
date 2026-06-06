@@ -221,6 +221,19 @@ function seededRandom(seed) {
 }
 
 /**
+ * Stable 0–1 roll from a string key — same key always yields the same value.
+ * Use for decisions that must match across all fixtures in a section (cue type,
+ * effect pick, strobe gate, etc.).
+ */
+function stableRoll(key) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+  }
+  return ((h * 2654435761) >>> 0) / 4294967296;
+}
+
+/**
  * Get per-fixture intensity multiplier based on fixture role and section label.
  * Returns a 0–1 scalar that should multiply the section intensity.
  * @param {number} fixtureId
@@ -326,6 +339,7 @@ module.exports = {
   beatIndexAt,
   walkBeats,
   seededRandom,
+  stableRoll,
   getFixtureIntensity,
   getStemEnergy,
   hasVocals,

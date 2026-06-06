@@ -2341,41 +2341,228 @@ function getTrackStats() {
   return { total, local, netsearch, withBpm, genres };
 }
 
+/** Normalise tag fields for identity matching */
+function normTrackTag(s) {
+  return (s || '').trim().toLowerCase();
+}
+
+function pathSuffixKey(filepath) {
+  if (!filepath) return '';
+  const m = filepath.match(/^[A-Za-z]:[\\/](.*)$/);
+  return (m ? m[1] : filepath).replace(/\//g, '\\').toLowerCase();
+}
+
+function identityFullKey(author, title, remix) {
+  return `${normTrackTag(author)}\0${normTrackTag(title)}\0${normTrackTag(remix)}`;
+}
+
+function identityTitleKey(author, title) {
+  return `${normTrackTag(author)}\0${normTrackTag(title)}`;
+}
+
+/** Prefer rows that already have sequences/analysis (stable across re-imports). */
+function isBetterImportCandidate(a, b) {
+  const scoreA = (a.has_seq ? 4 : 0) + (a.has_an ? 2 : 0);
+  const scoreB = (b.has_seq ? 4 : 0) + (b.has_an ? 2 : 0);
+  if (scoreA !== scoreB) return scoreA > scoreB;
+  return a.id < b.id;
+}
+
+function mapPutBest(map, key, entry) {
+  if (!key) return;
+  const cur = map.get(key);
+  if (!cur || isBetterImportCandidate(entry, cur)) map.set(key, entry);
+}
+
+/**
+ * Build in-memory lookup tables once per import (avoids per-track SQL).
+ */
+function buildTrackImportIndex() {
+  const rows = db.prepare(`
+    SELECT t.id, t.filepath, t.author, t.title, t.remix, t.audio_sig,
+      EXISTS(SELECT 1 FROM light_sequences ls WHERE ls.track_id = t.id) AS has_seq,
+      EXISTS(SELECT 1 FROM track_analysis ta WHERE ta.track_id = t.id) AS has_an
+    FROM tracks t
+  `).all();
+
+  const index = {
+    byExactPath: new Map(),
+    byPathSuffix: new Map(),
+    byAudioSig: new Map(),
+    byIdentityFull: new Map(),
+    byIdentityTitle: new Map(),
+    filepathById: new Map(),
+  };
+
+  for (const row of rows) {
+    const entry = { id: row.id, has_seq: !!row.has_seq, has_an: !!row.has_an };
+    index.filepathById.set(row.id, row.filepath);
+    mapPutBest(index.byExactPath, row.filepath, entry);
+
+    const suffix = pathSuffixKey(row.filepath);
+    if (suffix) mapPutBest(index.byPathSuffix, suffix, entry);
+
+    if (row.audio_sig) mapPutBest(index.byAudioSig, row.audio_sig, entry);
+
+    if (normTrackTag(row.title)) {
+      mapPutBest(index.byIdentityFull, identityFullKey(row.author, row.title, row.remix), entry);
+      mapPutBest(index.byIdentityTitle, identityTitleKey(row.author, row.title), entry);
+    }
+  }
+
+  return index;
+}
+
+function resolveExistingId(track, index) {
+  if (normTrackTag(track.title)) {
+    const full = index.byIdentityFull.get(identityFullKey(track.author, track.title, track.remix));
+    if (full) return full.id;
+    const titleOnly = index.byIdentityTitle.get(identityTitleKey(track.author, track.title));
+    if (titleOnly) return titleOnly.id;
+  }
+
+  if (track.audio_sig) {
+    const bySig = index.byAudioSig.get(track.audio_sig);
+    if (bySig) return bySig.id;
+  }
+
+  const exact = index.byExactPath.get(track.filepath);
+  if (exact) return exact.id;
+
+  const suffix = pathSuffixKey(track.filepath);
+  if (suffix) {
+    const bySuffix = index.byPathSuffix.get(suffix);
+    if (bySuffix) return bySuffix.id;
+  }
+
+  return null;
+}
+
+function removeIndexEntryForPath(index, filepath, id) {
+  const exact = index.byExactPath.get(filepath);
+  if (exact && exact.id === id) index.byExactPath.delete(filepath);
+  const suffix = pathSuffixKey(filepath);
+  if (suffix) {
+    const suf = index.byPathSuffix.get(suffix);
+    if (suf && suf.id === id) index.byPathSuffix.delete(suffix);
+  }
+}
+
+function registerTrackInIndex(index, id, track, meta) {
+  const entry = { id, has_seq: !!meta.has_seq, has_an: !!meta.has_an };
+  index.filepathById.set(id, track.filepath);
+  mapPutBest(index.byExactPath, track.filepath, entry);
+
+  const suffix = pathSuffixKey(track.filepath);
+  if (suffix) mapPutBest(index.byPathSuffix, suffix, entry);
+
+  if (track.audio_sig) mapPutBest(index.byAudioSig, track.audio_sig, entry);
+
+  if (normTrackTag(track.title)) {
+    mapPutBest(index.byIdentityFull, identityFullKey(track.author, track.title, track.remix), entry);
+    mapPutBest(index.byIdentityTitle, identityTitleKey(track.author, track.title), entry);
+  }
+}
+
+/**
+ * Remove a path-only duplicate created by a prior import (no sequence or analysis).
+ */
+function clearStaleDuplicateAtPath(index, keepId, filepath, deleteStmt) {
+  const stale = index.byExactPath.get(filepath);
+  if (!stale || stale.id === keepId) return false;
+  if (stale.has_seq || stale.has_an) return false;
+
+  deleteStmt.run(stale.id);
+  index.filepathById.delete(stale.id);
+  removeIndexEntryForPath(index, filepath, stale.id);
+  return true;
+}
+
 function importTracks(trackArray) {
-  const upsert = db.prepare(`
-    INSERT INTO tracks (
+  const trackColumns = `
       filepath, filename, file_size, flag, author, title, remix, genre, album, year,
       tag_flag, song_length, bitrate, last_modified, first_seen, cover,
       bpm, key, volume, audio_sig, beatgrid_pos, automix_point, poi_json,
       netsearch, source_type, imported_at
-    ) VALUES (
+  `;
+  const trackValues = `
       @filepath, @filename, @file_size, @flag, @author, @title, @remix, @genre, @album, @year,
       @tag_flag, @song_length, @bitrate, @last_modified, @first_seen, @cover,
       @bpm, @key, @volume, @audio_sig, @beatgrid_pos, @automix_point, @poi_json,
       @netsearch, @source_type, datetime('now')
-    )
-    ON CONFLICT(filepath) DO UPDATE SET
-      filename=excluded.filename, file_size=excluded.file_size, flag=excluded.flag,
-      author=excluded.author, title=excluded.title, remix=excluded.remix,
-      genre=excluded.genre, album=excluded.album, year=excluded.year,
-      tag_flag=excluded.tag_flag, song_length=excluded.song_length, bitrate=excluded.bitrate,
-      last_modified=excluded.last_modified, first_seen=excluded.first_seen, cover=excluded.cover,
-      bpm=excluded.bpm, key=excluded.key, volume=excluded.volume, audio_sig=excluded.audio_sig,
-      beatgrid_pos=excluded.beatgrid_pos, automix_point=excluded.automix_point, poi_json=excluded.poi_json,
-      netsearch=excluded.netsearch, source_type=excluded.source_type, imported_at=datetime('now')
+  `;
+
+  const insertNew = db.prepare(`
+    INSERT INTO tracks (${trackColumns}) VALUES (${trackValues})
   `);
 
+  const updateExisting = db.prepare(`
+    UPDATE tracks SET
+      filepath=@filepath, filename=@filename, file_size=@file_size, flag=@flag,
+      author=@author, title=@title, remix=@remix, genre=@genre, album=@album, year=@year,
+      tag_flag=@tag_flag, song_length=@song_length, bitrate=@bitrate,
+      last_modified=@last_modified, first_seen=@first_seen, cover=@cover,
+      bpm=@bpm, key=@key, volume=@volume, audio_sig=@audio_sig,
+      beatgrid_pos=@beatgrid_pos, automix_point=@automix_point, poi_json=@poi_json,
+      netsearch=@netsearch, source_type=@source_type, imported_at=datetime('now')
+    WHERE id=@id
+  `);
+
+  const deleteTrack = db.prepare('DELETE FROM tracks WHERE id = ?');
+
   const bulkImport = db.transaction((tracks) => {
+    const index = buildTrackImportIndex();
     let inserted = 0;
     let updated = 0;
+    let pathUpdated = 0;
+    let duplicatesRemoved = 0;
+
     for (const track of tracks) {
-      const result = upsert.run(track);
-      if (result.changes > 0) {
-        if (result.lastInsertRowid) inserted++;
-        else updated++;
+      const existingId = resolveExistingId(track, index);
+
+      if (existingId) {
+        const oldFilepath = index.filepathById.get(existingId);
+        if (clearStaleDuplicateAtPath(index, existingId, track.filepath, deleteTrack)) {
+          duplicatesRemoved++;
+        }
+
+        const pathChanged = oldFilepath && oldFilepath !== track.filepath;
+        updateExisting.run({ ...track, id: existingId });
+        updated++;
+        if (pathChanged) {
+          pathUpdated++;
+          if (oldFilepath) removeIndexEntryForPath(index, oldFilepath, existingId);
+        }
+
+        const prev = index.byIdentityFull.get(identityFullKey(track.author, track.title, track.remix))
+          || index.byIdentityTitle.get(identityTitleKey(track.author, track.title))
+          || { has_seq: false, has_an: false };
+        registerTrackInIndex(index, existingId, track, {
+          has_seq: prev.has_seq,
+          has_an: prev.has_an,
+        });
+        continue;
+      }
+
+      try {
+        const result = insertNew.run(track);
+        inserted++;
+        registerTrackInIndex(index, Number(result.lastInsertRowid), track, { has_seq: false, has_an: false });
+      } catch (e) {
+        if (String(e.message || '').includes('UNIQUE')) {
+          const byPath = index.byExactPath.get(track.filepath);
+          if (byPath) {
+            updateExisting.run({ ...track, id: byPath.id });
+            updated++;
+            registerTrackInIndex(index, byPath.id, track, byPath);
+          }
+        } else {
+          throw e;
+        }
       }
     }
-    return { inserted, updated, total: tracks.length };
+
+    return { inserted, updated, pathUpdated, duplicatesRemoved, total: tracks.length };
   });
 
   return bulkImport(trackArray);

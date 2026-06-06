@@ -955,12 +955,12 @@
 
         <!-- Audio Analysis Tab -->
         <div class="settings-tab-panel" id="settab-analysis">
-          <p class="config-desc" style="margin-top:16px">Settings that control waveform analysis quality and section detection. Changes apply to new analyses only.</p>
+          <p class="config-desc" style="margin-top:16px">Settings passed to ffmpeg analysis on each run. Saved automatically when changed. Existing tracks keep old data until you <strong>Re-run</strong> analysis from the Track Library.</p>
           <table class="subs-table" style="margin-top:16px">
             <thead><tr><th>Setting</th><th style="width:200px">Value</th></tr></thead>
             <tbody>
               <tr>
-                <td><strong>Waveform Resolution</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Number of peak points. Higher = more detail but larger data. Default: 2000</div></td>
+                <td><strong>Waveform Resolution</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Peaks per second in the waveform (2000 ≈ 150/sec). Higher = sharper zoom detail. Default: 2000</div></td>
                 <td><select id="settingAnalysisPeaks" style="width:100%"><option value="1000">1000 (Low)</option><option value="2000" selected>2000 (Default)</option><option value="4000">4000 (High)</option><option value="8000">8000 (Ultra)</option></select></td>
               </tr>
               <tr>

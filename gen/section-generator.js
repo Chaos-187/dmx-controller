@@ -5,7 +5,7 @@
  * song sections (verse, chorus, drop, etc.) with beat-grid snapping.
  */
 
-const { applyIntensity, rgbToHex, CUE_COLORS, getFixtureIntensity, hasVocals, getDrumDensity, getStemEnergy, walkBeats } = require('./helpers');
+const { applyIntensity, rgbToHex, CUE_COLORS, getFixtureIntensity, hasVocals, getDrumDensity, getStemEnergy, walkBeats, stableRoll } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
 const { getFixtureGroup, pickCoordMode, getColorOffset } = require('./group-coordination');
 
@@ -102,8 +102,9 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
 
         const secProgress = numCues > 1 ? ci / (numCues - 1) : 0.5;
 
-        // ── Color index from flattened palette ──
-        let colorIdx = (fiIdx + si + Math.floor(ci / cuesPerColorChange)) % totalFlatColors;
+        // ── Rig-wide base color (all fixtures share unless group coord offsets) ──
+        const colorStep = Math.floor(ci / cuesPerColorChange);
+        let colorIdx = (si + colorStep) % totalFlatColors;
 
         // ── Group-aware palette coordination ──
         const gi = fixtureGroupInfo.get(fix.id);
@@ -113,8 +114,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
             sectionColorModes.set(cmKey, pickCoordMode(sec.label, rand));
           }
           const coordMode = sectionColorModes.get(cmKey);
-          const leaderIdx = gi.members[0] ? fixtures.indexOf(gi.members[0]) : 0;
-          const baseColorIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / cuesPerColorChange)) % totalFlatColors;
+          const baseColorIdx = (si + colorStep) % totalFlatColors;
           colorIdx = getColorOffset(gi, coordMode, baseColorIdx, totalFlatColors);
         }
 
@@ -182,28 +182,29 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
         // Don't set white on normal color cues — it washes out the color;
         // white is only added for strobe hits where a full flash is desired.
 
-        // Per-section cue type: energetic sections mostly solid, calm ones mostly fades
+        // Per-section cue type — stable across all fixtures in this time slice
         let cueType;
         const isEnergetic = sec.label === 'drop' || sec.label === 'chorus' || sec.label === 'buildup';
+        const typeRoll = stableRoll(`ctype-${sec.label}-${si}-${ci}`);
         if (isEnergetic) {
-          cueType = rand() < 0.8 ? 'solid' : 'static';
+          cueType = typeRoll < 0.8 ? 'solid' : 'static';
         } else if (sec.label === 'intro' || sec.label === 'breakdown' || sec.label === 'outro') {
-          cueType = rand() < 0.7 ? 'static' : 'solid';
+          cueType = typeRoll < 0.7 ? 'static' : 'solid';
         } else {
-          cueType = rand() < 0.5 ? 'solid' : 'static';
+          cueType = typeRoll < 0.5 ? 'solid' : 'static';
         }
 
         // For transitions, fade into the NEXT cue's color for a smooth flow
         let endVals = null;
         if (cueType === 'static') {
           // Look ahead to the next colour in the flat array
-          let nextColorIdx = (fiIdx + si + Math.floor((ci + 1) / cuesPerColorChange)) % totalFlatColors;
+          const nextColorStep = Math.floor((ci + 1) / cuesPerColorChange);
+          let nextColorIdx = (si + nextColorStep) % totalFlatColors;
           if (gi && totalFlatColors > 0) {
             const cmKey = `${gi.groupId}-${si}`;
             const coordMode = sectionColorModes.get(cmKey);
             if (coordMode) {
-              const leaderIdx = gi.members[0] ? fixtures.indexOf(gi.members[0]) : 0;
-              const baseNext = (Math.max(0, leaderIdx) + si + Math.floor((ci + 1) / cuesPerColorChange)) % totalFlatColors;
+              const baseNext = (si + nextColorStep) % totalFlatColors;
               nextColorIdx = getColorOffset(gi, coordMode, baseNext, totalFlatColors);
             }
           }
@@ -213,8 +214,14 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
           if (hasDimmer) endVals.dimmer = 255;
         }
 
+        // Stagger colour changes only when the group is in cascade mode
         let cascadeOffset = 0;
-        if (CASCADE_COLOR_SECTIONS.has(sec.label) && fixtures.length > 1) {
+        const giCascade = fixtureGroupInfo.get(fix.id);
+        const cascadeMode = giCascade
+          ? sectionColorModes.get(`${giCascade.groupId}-${si}`)
+          : null;
+        if (CASCADE_COLOR_SECTIONS.has(sec.label) && fixtures.length > 1
+            && cascadeMode === 'cascade') {
           cascadeOffset = Math.round((colorCascadeMap.get(fix.id) || 0) * colorCascadeSpreadMs);
         }
 
@@ -324,7 +331,7 @@ function generateSectionBased(cues, fixtures, sections, beats, energyLevels, ctx
       // ── Energy-driven accent pulses in verses/bridges ───────────────
       if (!colorOnly && preset.accentPulses && (sec.label === 'verse' || sec.label === 'bridge') && secDurMs > barMs * 4) {
         const accentPaletteList = getSectionPalettes(paletteKey, sec.label, ctx.activePalettes);
-        const accentPalette = accentPaletteList[(fiIdx + si + 1) % accentPaletteList.length];
+        const accentPalette = accentPaletteList[(si + 1) % accentPaletteList.length];
 
         const sectionEnergy = energyLevels.filter(e => e.time_ms >= secStartMs && e.time_ms < secEndMs);
 

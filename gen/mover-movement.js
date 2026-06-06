@@ -10,7 +10,7 @@
  */
 
 const { getFixtureGroup, pickCoordMode, getPresetOffset, getTimingOffset } = require('./group-coordination');
-const { walkBeats } = require('./helpers');
+const { walkBeats, stableRoll } = require('./helpers');
 
 const MOVEMENT_STYLES = {
   intro:     { barsPerMove: 4,   range: 0.4, speed: 'slow' },
@@ -133,14 +133,16 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
           if (gi) {
             // Use group-stable seed so all members get the same roll
             const groupRollKey = `mv-${gi.groupId}-${si}-${ci}`;
-            const stableRand = seededSingleRoll(groupRollKey, ctx);
-            shouldChange = forceMove || stableRand < density;
+            shouldChange = forceMove || stableRoll(groupRollKey) < density;
           } else {
             shouldChange = forceMove || rand() < density;
           }
 
-          // ── Group-coordinated preset ordering ──
-          const basePresetIdx = Math.floor(rand() * presetIds.length);
+          // ── Group-coordinated preset ordering (stable per group+chunk) ──
+          const presetRollKey = gi
+            ? `mv-preset-${gi.groupId}-${si}-${ci}`
+            : `mv-preset-${fix.id}-${si}-${ci}`;
+          const basePresetIdx = Math.floor(stableRoll(presetRollKey) * presetIds.length);
           const adjustedIdx = gi
             ? getPresetOffset(gi, coordMode, presetIds.length, basePresetIdx)
             : basePresetIdx;
@@ -181,7 +183,8 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
 
           if (hasGobo && (sec.label === 'chorus' || sec.label === 'drop'
               || (sec.label === 'buildup' && bpmFactor > 0.5))) {
-            chVals.gobo = Math.floor(rand() * 8) * 16;
+            const goboKey = gi ? `gobo-${gi.groupId}-${si}` : `gobo-${fix.id}-${si}`;
+            chVals.gobo = Math.floor(stableRoll(goboKey) * 8) * 16;
           }
 
           // ── Group-coordinated timing offset (cascade mode) ──
@@ -232,20 +235,6 @@ function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets)
   }
 
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
-}
-
-/**
- * Produce a stable random value for a given key so all group members
- * get the same result. Uses a simple hash to derive a 0-1 float.
- */
-function seededSingleRoll(key, ctx) {
-  let h = 0;
-  for (let i = 0; i < key.length; i++) {
-    h = ((h << 5) - h + key.charCodeAt(i)) | 0;
-  }
-  // Mix with generator seed for song-specific variation
-  h = ((h * 2654435761) >>> 0) / 4294967296;
-  return h;
 }
 
 module.exports = { MOVEMENT_STYLES, DEFAULT_MOVEMENT, SPEED_DMX, generateMoverMovement };

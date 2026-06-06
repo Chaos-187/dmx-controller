@@ -64,8 +64,8 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
           if (cueDur < barMs * 0.5) cueDur = Math.min(barMs, secEndMs - cueStart);
           if (cueDur <= 0) continue;
 
-          // Pick a palette colour pair and find nearest wheel positions
-          let paletteIdx = (fiIdx + si + Math.floor(ci / 4)) % palettes.length;
+          // Rig-wide palette step — all fixtures share unless group offsets apply
+          let paletteIdx = (si + Math.floor(ci / 4)) % palettes.length;
 
           // ── Group-aware palette coordination ──
           const gi = cwGroupInfo.get(fix.id);
@@ -75,8 +75,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
               cwSectionModes.set(cmKey, pickCoordMode(sec.label, rand));
             }
             const coordMode = cwSectionModes.get(cmKey);
-            const leaderIdx = gi.members[0] ? cwFixtures.indexOf(gi.members[0]) : 0;
-            const basePaletteIdx = (Math.max(0, leaderIdx) + si + Math.floor(ci / 4)) % palettes.length;
+            const basePaletteIdx = (si + Math.floor(ci / 4)) % palettes.length;
             paletteIdx = getColorOffset(gi, coordMode, basePaletteIdx, palettes.length);
           }
 

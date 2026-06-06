@@ -5,7 +5,7 @@
  * at regular bar intervals across the full track duration.
  */
 
-const { applyIntensity, CUE_COLORS, getFixtureIntensity, walkBeats } = require('./helpers');
+const { applyIntensity, CUE_COLORS, getFixtureIntensity, walkBeats, stableRoll } = require('./helpers');
 const { getSectionPalettes } = require('./palettes');
 
 function generateBarBased(cues, fixtures, ctx) {
@@ -28,7 +28,7 @@ function generateBarBased(cues, fixtures, ctx) {
 
     for (let bar = 0; bar < totalBars; bar += sectionBars) {
       const paletteIdx = Math.floor(bar / sectionBars) % allPalettes.length;
-      const palette = allPalettes[(paletteIdx + fiIdx) % allPalettes.length];
+      const palette = allPalettes[paletteIdx];
       const startMs = snapBar(walkBeats(0, bar * 4, beats, beatMs));
       const endMs = snapBar(walkBeats(0, (bar + sectionBars) * 4, beats, beatMs));
       const durMs = Math.min(endMs - startMs, durationMs - startMs);
@@ -46,7 +46,7 @@ function generateBarBased(cues, fixtures, ctx) {
       // For transitions, fade into the NEXT cue's color for smooth flow
       let endVals = null;
       if (cueType === 'static') {
-        const nextPaletteIdx = (Math.floor((bar + sectionBars) / sectionBars) % allPalettes.length + fiIdx) % allPalettes.length;
+        const nextPaletteIdx = Math.floor((bar + sectionBars) / sectionBars) % allPalettes.length;
         const nextPalette = allPalettes[nextPaletteIdx];
         const endColor = applyIntensity(nextPalette[0], intensity);
         endVals = { red: endColor.r, green: endColor.g, blue: endColor.b };
@@ -62,13 +62,14 @@ function generateBarBased(cues, fixtures, ctx) {
         track: 'color',
         channel_values: startVals,
         end_channel_values: endVals,
-        color: CUE_COLORS[(paletteIdx + fiIdx) % CUE_COLORS.length],
+        color: CUE_COLORS[paletteIdx % CUE_COLORS.length],
         label: '',
       });
 
       // Add occasional strobe
       const strobeChance = 0.3 * preset.strobeMult * (0.3 + 0.7 * bpmFactor);
-      if (!noStrobes && bar % 8 === 0 && bar > 0 && strobeChance > 0 && rand() < strobeChance) {
+      if (!noStrobes && bar % 8 === 0 && bar > 0 && strobeChance > 0
+          && stableRoll(`bar-strobe-${bar}`) < strobeChance) {
         const strobeDur = Math.round(beatMs);
         const strobeVals = { red: 255, green: 255, blue: 255, strobe_hz: 12 };
         if (hasDimmer) strobeVals.dimmer = 255;

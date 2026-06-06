@@ -43,13 +43,22 @@
   </div>
 </header>
 
-<!-- ══════ Main Layout ══════ -->
-<div class="app-layout">
+<!-- ══════ Page Tabs ══════ -->
+<nav class="page-tabs" id="pageTabs">
+  <button type="button" class="page-tab active" data-page="editor">Sequencer</button>
+  <button type="button" class="page-tab" data-page="library">Track Library</button>
+</nav>
+
+<div class="page-shell">
+
+  <!-- ══════ Editor (manual sequences + timeline) ══════ -->
+  <div class="page-view active" id="pageEditor" data-page="editor">
+  <div class="app-layout">
 
   <!-- ── Left Sidebar ── -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-section">
-      <h3 class="sidebar-title">Sequences</h3>
+      <h3 class="sidebar-title">Manual Sequences</h3>
       <div class="sidebar-actions">
         <button class="sb-btn sb-btn-accent" id="btnNewSeq">+ New</button>
         <button class="sb-btn sb-btn-danger" id="btnDelSeq">Delete</button>
@@ -226,7 +235,78 @@
     </div>
   </aside>
 
-</div>
+  </div><!-- /app-layout -->
+  </div><!-- /pageEditor -->
+
+  <!-- ══════ Track Library (auto-generated sequences) ══════ -->
+  <div class="page-view" id="pageLibrary" data-page="library">
+    <div class="library-page">
+      <div class="library-header">
+        <div>
+          <h2 class="library-title">&#127925; Track Library</h2>
+          <p class="library-sub">Browse your VirtualDJ library and generate auto-sequences per track</p>
+        </div>
+        <div class="library-header-actions">
+          <button type="button" class="sb-btn" id="btnImportTracks" title="Re-import from VirtualDJ database">&#8635; Re-import</button>
+          <button type="button" class="sb-btn sb-btn-accent" id="btnBulkGenerate">&#127917; Bulk Generate</button>
+        </div>
+      </div>
+
+      <div class="tracks-stats-bar" id="tracksStats">
+        <span>Total:<span class="stat-val" id="statTotal">0</span></span>
+        <span>Local:<span class="stat-val" id="statLocal">0</span></span>
+        <span>NetSearch:<span class="stat-val" id="statNetsearch">0</span></span>
+        <span>With BPM:<span class="stat-val" id="statBpm">0</span></span>
+        <span>Genres:<span class="stat-val" id="statGenres">0</span></span>
+      </div>
+
+      <div class="library-toolbar">
+        <input type="text" id="tracksSearch" class="library-search" placeholder="Search artist, title, remix…" autocomplete="off" spellcheck="false">
+        <select id="tracksGenreFilter" class="library-select"><option value="">All genres</option></select>
+        <select id="tracksSourceFilter" class="library-select">
+          <option value="">All sources</option>
+          <option value="local">Local</option>
+          <option value="netsearch">NetSearch</option>
+        </select>
+        <input type="number" id="tracksBpmMin" class="library-select library-bpm" placeholder="BPM min" min="0" max="300">
+        <input type="number" id="tracksBpmMax" class="library-select library-bpm" placeholder="BPM max" min="0" max="300">
+      </div>
+
+      <div class="tracks-table-wrap">
+        <table class="tracks-table">
+          <thead>
+            <tr>
+              <th style="width:36px">#</th>
+              <th>Title</th>
+              <th>Artist</th>
+              <th>Genre</th>
+              <th>Path</th>
+              <th style="width:64px;text-align:right">BPM</th>
+              <th style="width:40px">Key</th>
+              <th style="width:64px;text-align:right">Duration</th>
+              <th style="width:56px">Source</th>
+              <th style="width:140px">Analyze</th>
+              <th style="width:72px">Sequence</th>
+            </tr>
+          </thead>
+          <tbody id="tracksBody">
+            <tr><td colspan="11" class="tracks-empty">Loading tracks…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="library-footer">
+        <div class="tracks-pagination">
+          <button type="button" class="tracks-page-btn" id="tracksPrev" disabled>&laquo; Prev</button>
+          <span class="tracks-page-label" id="tracksPageLabel">—</span>
+          <button type="button" class="tracks-page-btn" id="tracksNext" disabled>Next &raquo;</button>
+        </div>
+        <div class="seq-list-status" id="trackStatus"></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page-shell -->
 
 <!-- ══════ Generate Modal ══════ -->
 <div class="modal-backdrop" id="genModal">
@@ -245,6 +325,7 @@
       <label>Genre</label>
       <select id="genGenre" class="prop-input"><option value="auto">Auto-detect</option></select>
     </div>
+    <p class="gen-hint" id="genGenreHint">Uses track genre tag to pick behaviour preset</p>
     <div id="genProgress" style="display:none">
       <div class="progress-track"><div class="progress-fill" id="genFill"></div></div>
       <div class="progress-text" id="genText"></div>
