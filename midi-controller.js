@@ -954,11 +954,15 @@ function executeMidiAction(mapping, isOn) {
       const { red = 0, green = 0, blue = 0, white = 0, group_id } = actionData;
       if (activate) {
         activeColorOverride = { red, green, blue, white, group_id };
+        touchOverrides.activeColorOverride = { red, green, blue, white, group_id };
       } else {
         activeColorOverride = null;
+        touchOverrides.activeColorOverride = null;
       }
-      const colorFixtureIds = sendColorToDmx(red, green, blue, white, group_id, activate);
-      setOverride(colorFixtureIds, activate);
+      // When a sequence is playing, color is overlaid each tick — only push DMX when idle
+      if (!isAnySequencePlaying()) {
+        sendColorToDmx(red, green, blue, white, group_id, activate);
+      }
       broadcast({ type: 'midi_action', action: 'color', mapping: mapping.name, active: activate });
       break;
     }
@@ -1128,6 +1132,7 @@ function executeMidiAction(mapping, isOn) {
         deactivateScene();
         // Clear active color override state
         activeColorOverride = null;
+        touchOverrides.activeColorOverride = null;
         // Clear ALL active toggles (effects, colors, strobes, scenes, etc.)
         // and reset their LEDs + release overrides
         const mappings = getCachedMidiMappings();
@@ -1144,6 +1149,8 @@ function executeMidiAction(mapping, isOn) {
         if (pauseAllSequences) pauseAllSequences();
         // Release all overrides
         setOverride(getAffectedFixtureIds(), false);
+        touchOverrides.colorOverrideFixtures.clear();
+        touchOverrides.activeColorOverride = null;
         // Zero out all fixtures to ensure nothing stays lit
         const dmxOutputEnabled = getDmxOutputEnabled();
         if (dmxOutputEnabled) {

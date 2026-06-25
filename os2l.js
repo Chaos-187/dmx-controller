@@ -442,6 +442,11 @@ function executeMapAction(map, activate) {
     case 'color':
     case 'color_preset': {
       const { red = 0, green = 0, blue = 0, white = 0, group_id } = actionData;
+      if (activate) {
+        touchOverrides.activeColorOverride = { red, green, blue, white, group_id };
+      } else {
+        touchOverrides.activeColorOverride = null;
+      }
       const channelMap = db.getFixtureChannelMap();
       const channelUpdates = {};
       const colorFixtureIds = [];
@@ -485,8 +490,6 @@ function executeMapAction(map, activate) {
           dmxUsbServer.setChannels(+u, channels);
         }
       }
-      // Override color-affected fixtures so sequence doesn't fight
-      setOs2lOverride(colorFixtureIds, activate);
       broadcast({ type: 'os2l_action', action: 'color', map: map.name, active: activate });
       break;
     }

@@ -17,6 +17,13 @@ const path = require('path');
 const ROOT = __dirname;
 const DIST = path.join(ROOT, 'dist');
 
+// Must match package.json → pkg.targets (node24-win-x64 embeds Node 24 / ABI 137)
+const PKG_TARGET = 'node24-win-x64';
+const PKG_NODE_VERSION = process.env.PKG_NODE_VERSION || '24.11.0';
+const PKG_NODE_ABI = 137;
+
+const NATIVE_MODULES = ['better-sqlite3', 'ftdi-d2xx', 'usb'];
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function ensureDir(dir) {
@@ -56,6 +63,51 @@ if (fs.existsSync(DIST)) {
   console.log('Cleaned dist/');
 }
 ensureDir(DIST);
+
+// ─── Rebuild native addons for pkg's embedded Node (not local Node) ─────────
+
+function rebuildNativeModulesForPkg() {
+  const localAbi = +process.versions.modules;
+  console.log(`Local Node ${process.version} (ABI ${localAbi}), pkg target ${PKG_TARGET} (ABI ${PKG_NODE_ABI})`);
+
+  if (localAbi === PKG_NODE_ABI) {
+    console.log('Native modules already match pkg target — skipping rebuild.');
+    return;
+  }
+
+  console.log('\nRebuilding native modules for pkg target (this may take a minute)...');
+  console.log('(Close dmx-controller.exe if running — the .node file cannot be replaced while in use.)\n');
+
+  const rebuildEnv = {
+    ...process.env,
+    npm_config_disturl: 'https://nodejs.org/dist',
+  };
+
+  for (const mod of NATIVE_MODULES) {
+    const modPath = path.join(ROOT, 'node_modules', mod);
+    if (!fs.existsSync(modPath)) {
+      console.warn(`  SKIP (not installed): ${mod}`);
+      continue;
+    }
+    console.log(`  rebuilding ${mod}...`);
+    execSync(
+      `npm rebuild ${mod} --build-from-source --target=${PKG_NODE_VERSION} --target_arch=x64 --target_platform=win32`,
+      {
+        cwd: ROOT,
+        stdio: 'inherit',
+        env: { ...process.env, npm_config_disturl: 'https://nodejs.org/dist' },
+      }
+    );
+  }
+
+  console.log('Native rebuild complete.\n');
+  console.warn(
+    'Note: native modules in node_modules now target Node 24 (for the exe).',
+    'For local dev with another Node version, run: npm rebuild better-sqlite3 ftdi-d2xx usb\n'
+  );
+}
+
+rebuildNativeModulesForPkg();
 
 // ─── Run pkg ────────────────────────────────────────────────────────────────
 

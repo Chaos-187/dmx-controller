@@ -1928,6 +1928,8 @@ const touchOverrides = {
   colorOverrideFixtures: new Set(),    // fixture IDs with color overridden from touch UI
   movementOverrideFixtures: new Set(), // fixture IDs with movement overridden from touch UI
   smokeOverrideFixtures: new Set(),    // fixture IDs with smoke overridden from touch UI
+  /** MIDI / OS2L live color — applied as overlay each sequence tick (movement continues). */
+  activeColorOverride: null,
 };
 
 app.get('/api/dmx/output', (req, res) => {
@@ -4290,6 +4292,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   }
 
   // Send all channel updates
+  applyActiveColorOverrideToUpdates(channelUpdates);
   for (const [u, chMap] of Object.entries(channelUpdates)) {
     const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
     if (channels.length > 0) {
@@ -4310,6 +4313,47 @@ const {
   RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
   PAN_TILT, COLOR_CHANNELS,
 } = require('./effects-engine');
+
+/** Overlay MIDI/OS2L color on top of sequence output (movement/effects already in channelUpdates). */
+function applyActiveColorOverrideToUpdates(channelUpdates) {
+  const ov = touchOverrides.activeColorOverride;
+  if (!ov) return;
+
+  const { red = 0, green = 0, blue = 0, white = 0, group_id } = ov;
+  const fixtures = getFixtureChannelMapCached();
+
+  for (const fix of fixtures) {
+    if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+    const u = fix.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+
+    for (const ch of fix.channels) {
+      const colorMap = { red, green, blue, white };
+      if (colorMap[ch.type] !== undefined) {
+        let val = colorMap[ch.type];
+        if (!fixHasDimmer) val = applyMasterDimmer(val, ch.type);
+        val = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
+        channelUpdates[u][ch.dmx_address] = applyInvert(val, ch);
+      } else if (ch.type === 'color_wheel' && fix.color_wheel_map && fix.color_wheel_map.length) {
+        let best = null, bestDist = Infinity;
+        for (const entry of fix.color_wheel_map) {
+          const hex = entry.color_hex;
+          const cr = parseInt(hex.slice(1, 3), 16);
+          const cg = parseInt(hex.slice(3, 5), 16);
+          const cb = parseInt(hex.slice(5, 7), 16);
+          const dist = (cr - red) ** 2 + (cg - green) ** 2 + (cb - blue) ** 2;
+          if (dist < bestDist) { bestDist = dist; best = entry; }
+        }
+        channelUpdates[u][ch.dmx_address] = applyInvert(best ? best.dmx_start : 0, ch);
+      } else if (ch.type === 'dimmer') {
+        let val = applyGroupDimmerToDimmerValue(applyMasterDimmer(255, ch.type), fix);
+        val = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
+        channelUpdates[u][ch.dmx_address] = applyInvert(val, ch);
+      }
+    }
+  }
+}
 
 const httpServer = http.createServer(app);
 
