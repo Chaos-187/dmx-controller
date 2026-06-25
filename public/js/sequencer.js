@@ -275,7 +275,7 @@ const SEQ = (() => {
           if (currentSeq && !currentId && wfAnalysis) {
             currentSeq.bpm = (wfAnalysis.bpm > 0 ? wfAnalysis.bpm : currentSeq.bpm);
             currentSeq.duration_ms = wfAnalysis.duration_ms || currentSeq.duration_ms;
-            currentSeq.beat_offset_ms = wfAnalysis.beat_offset_ms || 0;
+            syncBeatOffsetForAnalysis();
             updateInfoPanel();
           }
           renderTimeline();
@@ -568,7 +568,10 @@ const SEQ = (() => {
           `</div>`
         : `<button type="button" class="trk-action-btn${analyzing ? ' analyzing' : ''}" data-action="analyze" data-track-id="${t.id}"${analyzing ? ' disabled' : ''}>${analyzing ? 'Analyzing…' : '&#127911; Analyze'}</button>`;
       const seqBtn = hasSeq
-        ? `<button type="button" class="trk-action-btn has-seq" data-action="edit-seq" data-track-id="${t.id}" data-seq-id="${t.sequence_id}">&#9835; Edit</button>`
+        ? `<div class="trk-action-group">` +
+          `<button type="button" class="trk-action-btn has-seq" data-action="edit-seq" data-track-id="${t.id}" data-seq-id="${t.sequence_id}">&#9835; Edit</button>` +
+          `<button type="button" class="trk-action-btn" data-action="gen-seq" data-track-id="${t.id}">&#8635; Re-gen</button>` +
+          `</div>`
         : `<button type="button" class="trk-action-btn" data-action="gen-seq" data-track-id="${t.id}">&#127917; Seq</button>`;
       return `<tr class="${rowActive}" data-track-id="${t.id}">` +
         `<td style="color:var(--text-muted)">${startIdx + i + 1}</td>` +
@@ -668,7 +671,7 @@ const SEQ = (() => {
     const totalFiltered = countData.total || 0;
 
     $('genModalTitle').textContent = 'Bulk Generate Sequences';
-    $('genTrackInfo').innerHTML = `Will generate sequences for <strong>${totalFiltered}</strong> tracks matching the current filter.<br><span style="font-size:11px;color:var(--text-dim)">Tracks without analysis will be auto-analyzed first.</span>`;
+    $('genTrackInfo').innerHTML = `Will generate sequences for <strong>${totalFiltered}</strong> tracks matching the current filter.<br><span style="font-size:11px;color:var(--text-dim)">Outdated or missing analysis is re-run first. Existing sequences are replaced.</span>`;
     $('genGenreHint').textContent = 'Auto-detect uses each track\'s genre tag individually';
     $('genProgress').style.display = 'none';
     $('genActions').style.display = 'flex';
@@ -680,13 +683,6 @@ const SEQ = (() => {
 
   async function handleTrackAction(action, trackId, btn, seqId) {
     if (action === 'gen-seq') {
-      const check = await fetch(`/api/sequences/by-track/${trackId}`);
-      if (check.ok) {
-        const existing = await check.json();
-        await loadSequenceById(existing.id);
-        setPage('editor');
-        return;
-      }
       await openGenerateModal(trackId, btn);
       return;
     }
@@ -762,9 +758,10 @@ const SEQ = (() => {
       name: track.title || track.filename || 'Track',
       bpm,
       duration_ms: durMs,
-      beat_offset_ms: wfAnalysis?.beat_offset_ms || 0,
+      beat_offset_ms: 0,
       track_id: trackId,
     };
+    syncBeatOffsetForAnalysis();
 
     updateInfoPanel();
     renderFixtureChips();
@@ -831,7 +828,7 @@ const SEQ = (() => {
         track_ids: trackIds,
         palette: palette === 'random' ? undefined : palette,
         genre: genre === 'auto' ? undefined : genre,
-        overwrite: false,
+        overwrite: true,
       });
     } catch (e) {
       alert('Bulk generate failed: ' + e.message);
@@ -1358,6 +1355,26 @@ const SEQ = (() => {
   // ═══════════════════════════════════════════════════════════════
   //  Waveform
   // ═══════════════════════════════════════════════════════════════
+  /** Align beat offset with analysis: fluid beats include VDJ phase; uniform fallback uses beatgrid_pos. */
+  function syncBeatOffsetForAnalysis() {
+    if (!currentSeq || !wfAnalysis) return;
+    const hasFluidBeats = wfAnalysis.beats && wfAnalysis.beats.length > 4;
+    const bgMs = Math.round((wfTrackInfo?.beatgrid_pos || 0) * 1000);
+    const offset = currentSeq.beat_offset_ms || 0;
+    let changed = false;
+    if (hasFluidBeats) {
+      // Legacy: Beat Offset was sometimes set to beatgrid ms to fix the old uniform grid.
+      if (bgMs > 0 && Math.abs(offset - bgMs) < 5) {
+        currentSeq.beat_offset_ms = 0;
+        changed = true;
+      }
+    } else if (!currentId && bgMs > 0 && !offset) {
+      currentSeq.beat_offset_ms = bgMs;
+      changed = true;
+    }
+    if (changed) updateInfoPanel();
+  }
+
   async function loadWaveform(trackId, opts = {}) {
     try {
       const cacheBust = opts.force ? `?_=${Date.now()}` : '';
@@ -1377,6 +1394,7 @@ const SEQ = (() => {
       } else { wfData = null; wfRawPeaks = null; }
       const tRes = await fetch(`/api/tracks/${trackId}`);
       wfTrackInfo = tRes.ok ? await tRes.json() : null;
+      syncBeatOffsetForAnalysis();
       renderTimeline();
     } catch (e) { console.error('Waveform load failed', e); }
   }

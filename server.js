@@ -2194,12 +2194,11 @@ app.get('/api/analysis/status', async (req, res) => {
 app.get('/api/tracks/:id/analysis', (req, res) => {
   const analysis = db.getTrackAnalysis(+req.params.id);
   if (!analysis) return res.status(404).json({ error: 'No analysis found' });
-  // Parse JSON fields
+  // Parse JSON fields for the sequencer timeline (beats drive the grid; energy_levels stay server-side)
   analysis.waveform_peaks = JSON.parse(analysis.waveform_peaks || '[]');
   analysis.sections = JSON.parse(analysis.sections || '[]');
-  // Strip energy_levels and beats — only used server-side for generation, not by the waveform renderer
+  analysis.beats = JSON.parse(analysis.beats || '[]');
   delete analysis.energy_levels;
-  delete analysis.beats;
   res.json(analysis);
 });
 
@@ -2222,7 +2221,10 @@ function getAnchorPoints(track) {
     const pois = JSON.parse(track.poi_json || '[]');
     return pois
       .filter(p => p.type === 'beatgrid' && p.pos)
-      .map(p => ({ pos_ms: parseFloat(p.pos) * 1000 }))
+      .map(p => ({
+        pos_ms: parseFloat(p.pos) * 1000,
+        bpm: p.bpm > 0 ? parseFloat(p.bpm) : undefined,
+      }))
       .filter(p => !isNaN(p.pos_ms))
       .sort((a, b) => a.pos_ms - b.pos_ms);
   } catch { return []; }
@@ -3111,7 +3113,7 @@ app.post('/api/touch-actions/auto-populate', (req, res) => {
 // ─── Sequences API (extracted to sequence-routes.js) ────────────────────────
 const sequenceGenerator = require('./sequence-generator');
 const sequenceRoutes = require('./sequence-routes');
-sequenceRoutes.init({ db, audioAnalyzer, sequenceGenerator, broadcast, getAnalysisConfig });
+sequenceRoutes.init({ db, audioAnalyzer, sequenceGenerator, broadcast, getAnalysisConfig, getAnchorPoints });
 app.use(sequenceRoutes.router);
 
 // ─── Static Scene Engine ────────────────────────────────────────────────────

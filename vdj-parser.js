@@ -63,6 +63,7 @@ function parseSong(song) {
       type:  p['@_Type'] || '',
       point: p['@_Point'] || '',
       num:   p['@_Num'] || '',
+      bpm:   parseFloat(p['@_Bpm'] || '0') || 0,
     }));
 
   // Extract beatgrid position (first beatgrid Poi)
@@ -72,7 +73,10 @@ function parseSong(song) {
   // Extract all beatgrid anchor points (for multi-point tempo support)
   const beatgridPoints = poiData
     .filter(p => p.type === 'beatgrid' && p.pos)
-    .map(p => ({ pos_sec: parseFloat(p.pos) }))
+    .map(p => ({
+      pos_sec: parseFloat(p.pos),
+      bpm: p.bpm > 0 ? p.bpm : undefined,
+    }))
     .filter(p => !isNaN(p.pos_sec))
     .sort((a, b) => a.pos_sec - b.pos_sec);
 

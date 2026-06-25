@@ -2,12 +2,96 @@
  * Color Palettes, Genre Palettes, Genre Presets & Section Styles
  *
  * Extracted from sequence-generator.js for modularity.
+ *
+ * ─── Palette data shape ───────────────────────────────────────────────────
+ *
+ *   paletteName: {
+ *     label: 'Display Name',
+ *     verse: [ [colorA, colorB], [colorA, colorB], ... ],  // "pairs" per section
+ *     chorus: [ ... ],
+ *     ...
+ *   }
+ *
+ * Each section (intro, verse, chorus, …) holds an array of COLOR PAIRS.
+ *
+ * WHY TWO COLORS PER PAIR?
+ *   Each pair is [startColor, endColor] for one cue slot:
+ *   • Color-wheel fixtures crossfade from start → end within a single cue.
+ *   • RGB fixtures flatten all pairs into one rotation pool; both colors become
+ *     separate steps when the generator cycles hues bar-to-bar.
+ *   • For `static` (fade) cues, the end color is often the next step in the pool;
+ *     the pair still defines a harmonious A→B gradient for wheels and LED bars.
+ *
+ * Pair counts per section are expanded automatically to SECTION_PAIR_COUNTS
+ * by bridging existing pairs (end of pair N → start of pair N+1).
  */
 
-// ─── Named Color Palette Themes ─────────────────────────────────────────────
-// Each palette defines color pairs for each section type.
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-const colorPalettes = {
+const SECTION_PAIR_COUNTS = {
+  intro: 4,
+  verse: 6,
+  chorus: 8,
+  bridge: 5,
+  breakdown: 4,
+  buildup: 5,
+  drop: 8,
+  outro: 4,
+};
+
+/** Expand a section's pair list by cross-fading between neighbouring pairs. */
+function expandSectionPairs(pairs, target) {
+  if (!pairs?.length) return pairs;
+  if (pairs.length >= target) return pairs;
+  const out = [...pairs];
+  const n = pairs.length;
+  for (let k = 0; out.length < target; k++) {
+    const a = pairs[k % n];
+    const b = pairs[(k + 1) % n];
+    out.push([a[1], b[0]]);
+  }
+  return out;
+}
+
+function applyPaletteExpansion(palettes) {
+  const expanded = {};
+  for (const [key, pal] of Object.entries(palettes)) {
+    expanded[key] = { label: pal.label };
+    for (const [sec, pairs] of Object.entries(pal)) {
+      if (sec === 'label') continue;
+      expanded[key][sec] = expandSectionPairs(pairs, SECTION_PAIR_COUNTS[sec] || pairs.length);
+    }
+  }
+  return expanded;
+}
+
+/** Merge stored DB palettes with code defaults (adds new themes + extra pairs). */
+function mergeColorPaletteDefaults(stored, defaults) {
+  if (!stored || typeof stored !== 'object') return defaults;
+  const out = { ...stored };
+  for (const [palKey, palDef] of Object.entries(defaults)) {
+    if (!out[palKey]) {
+      out[palKey] = palDef;
+      continue;
+    }
+    const merged = { ...out[palKey], label: out[palKey].label || palDef.label };
+    for (const [sec, defPairs] of Object.entries(palDef)) {
+      if (sec === 'label') continue;
+      const storedPairs = merged[sec];
+      if (!Array.isArray(storedPairs)) {
+        merged[sec] = defPairs;
+      } else if (defPairs.length > storedPairs.length) {
+        merged[sec] = [...storedPairs, ...defPairs.slice(storedPairs.length)];
+      }
+    }
+    out[palKey] = merged;
+  }
+  return out;
+}
+
+// ─── Named Color Palette Themes ─────────────────────────────────────────────
+
+const rawColorPalettes = {
   vibrant: {
     label: 'Vibrant',
     intro:     [[ {r:180,g:0,b:60},   {r:0,g:40,b:200}    ], [ {r:0,g:40,b:180},   {r:160,g:0,b:120}  ], [ {r:120,g:0,b:200}, {r:200,g:60,b:0}   ]],
@@ -129,7 +213,97 @@ const colorPalettes = {
     drop:      [[ {r:255,g:0,b:0},    {r:0,g:255,b:0}     ], [ {r:0,g:0,b:255},    {r:255,g:255,b:0}  ], [ {r:255,g:0,b:255}, {r:0,g:255,b:255} ], [ {r:255,g:100,b:0}, {r:100,g:0,b:255} ]],
     outro:     [[ {r:60,g:0,b:80},    {r:20,g:0,b:30}     ], [ {r:0,g:40,b:60},    {r:0,g:15,b:25}    ]],
   },
+  gold: {
+    label: 'Gold & Amber',
+    intro:     [[ {r:80,g:50,b:0},    {r:140,g:90,b:10}  ], [ {r:100,g:60,b:0},   {r:180,g:120,b:20} ]],
+    verse:     [[ {r:255,g:180,b:0},  {r:200,g:120,b:0}  ], [ {r:255,g:200,b:40}, {r:180,g:100,b:0}  ], [ {r:220,g:160,b:0}, {r:255,g:220,b:60} ]],
+    chorus:    [[ {r:255,g:215,b:0},  {r:255,g:140,b:0}  ], [ {r:255,g:180,b:30}, {r:200,g:80,b:0}   ], [ {r:255,g:200,b:50}, {r:255,g:120,b:0} ]],
+    bridge:    [[ {r:200,g:150,b:40}, {r:255,g:180,b:60} ], [ {r:180,g:120,b:30}, {r:220,g:160,b:50} ]],
+    breakdown: [[ {r:60,g:40,b:10},   {r:30,g:20,b:0}    ], [ {r:80,g:50,b:5},    {r:40,g:25,b:0}    ]],
+    buildup:   [[ {r:255,g:160,b:0},  {r:255,g:200,b:40} ], [ {r:220,g:140,b:0},  {r:255,g:180,b:20} ]],
+    drop:      [[ {r:255,g:200,b:0},  {r:255,g:120,b:0}  ], [ {r:255,g:180,b:30}, {r:200,g:80,b:0}   ], [ {r:255,g:220,b:60}, {r:255,g:140,b:0} ]],
+    outro:     [[ {r:80,g:50,b:10},   {r:30,g:20,b:0}    ], [ {r:60,g:35,b:5},    {r:20,g:12,b:0}    ]],
+  },
+  ice: {
+    label: 'Ice & Frost',
+    intro:     [[ {r:180,g:220,b:255}, {r:120,g:180,b:240} ], [ {r:200,g:240,b:255}, {r:100,g:160,b:220} ]],
+    verse:     [[ {r:220,g:240,b:255}, {r:180,g:200,b:255} ], [ {r:200,g:255,b:255}, {r:150,g:180,b:240} ], [ {r:240,g:250,b:255}, {r:180,g:220,b:255} ]],
+    chorus:    [[ {r:255,g:255,b:255}, {r:180,g:220,b:255} ], [ {r:220,g:255,b:255}, {r:200,g:240,b:255} ], [ {r:255,g:255,b:255}, {r:160,g:200,b:255} ]],
+    bridge:    [[ {r:200,g:230,b:255}, {r:160,g:190,b:240} ], [ {r:180,g:220,b:255}, {r:140,g:170,b:230} ]],
+    breakdown: [[ {r:100,g:140,b:180}, {r:60,g:90,b:140}  ], [ {r:80,g:120,b:160},  {r:50,g:70,b:120}  ]],
+    buildup:   [[ {r:200,g:240,b:255}, {r:255,g:255,b:255} ], [ {r:180,g:220,b:255}, {r:240,g:250,b:255} ]],
+    drop:      [[ {r:255,g:255,b:255}, {r:200,g:240,b:255} ], [ {r:220,g:255,b:255}, {r:255,g:255,b:255} ], [ {r:180,g:230,b:255}, {r:255,g:255,b:255} ]],
+    outro:     [[ {r:80,g:110,b:150},  {r:40,g:55,b:80}   ], [ {r:60,g:85,b:120},   {r:30,g:40,b:60}   ]],
+  },
+  candy: {
+    label: 'Candy Pop',
+    intro:     [[ {r:255,g:120,b:180}, {r:120,g:255,b:200} ], [ {r:255,g:180,b:220}, {r:180,g:255,b:180} ]],
+    verse:     [[ {r:255,g:100,b:150}, {r:100,g:255,b:180} ], [ {r:255,g:200,b:100}, {r:150,g:255,b:150} ], [ {r:255,g:150,b:200}, {r:200,g:255,b:100} ]],
+    chorus:    [[ {r:255,g:80,b:180},  {r:80,g:255,b:200}  ], [ {r:255,g:180,b:80},  {r:180,g:80,b:255}  ], [ {r:255,g:120,b:200}, {r:120,g:255,b:120} ]],
+    bridge:    [[ {r:255,g:200,b:150}, {r:150,g:200,b:255} ], [ {r:200,g:255,b:180}, {r:255,g:150,b:200} ]],
+    breakdown: [[ {r:180,g:100,b:140}, {r:100,g:140,b:180} ], [ {r:160,g:120,b:160}, {r:120,g:160,b:180} ]],
+    buildup:   [[ {r:255,g:150,b:180}, {r:150,g:255,b:200} ], [ {r:255,g:200,b:120}, {r:120,g:255,b:180} ]],
+    drop:      [[ {r:255,g:80,b:200},  {r:80,g:255,b:180}  ], [ {r:255,g:200,b:80},  {r:80,g:200,b:255}  ], [ {r:255,g:120,b:255}, {r:255,g:255,b:100} ]],
+    outro:     [[ {r:160,g:80,b:120},  {r:80,g:100,b:140}  ], [ {r:140,g:90,b:130},  {r:60,g:70,b:100}  ]],
+  },
+  noir: {
+    label: 'Noir / Dark',
+    intro:     [[ {r:80,g:0,b:40},    {r:20,g:0,b:30}    ], [ {r:60,g:0,b:60},    {r:15,g:0,b:25}    ]],
+    verse:     [[ {r:180,g:0,b:80},   {r:60,g:0,b:100}   ], [ {r:140,g:0,b:60},   {r:80,g:0,b:140}   ], [ {r:200,g:0,b:100},  {r:40,g:0,b:80}    ]],
+    chorus:    [[ {r:255,g:0,b:80},   {r:120,g:0,b:180}  ], [ {r:200,g:0,b:60},   {r:80,g:0,b:200}   ], [ {r:255,g:0,b:120},  {r:60,g:0,b:160}   ]],
+    bridge:    [[ {r:160,g:0,b:100},  {r:80,g:0,b:120}   ], [ {r:140,g:0,b:80},   {r:60,g:0,b:100}   ]],
+    breakdown: [[ {r:30,g:0,b:20},    {r:10,g:0,b:15}    ], [ {r:20,g:0,b:30},    {r:8,g:0,b:12}     ]],
+    buildup:   [[ {r:180,g:0,b:60},   {r:80,g:0,b:140}   ], [ {r:200,g:0,b:80},   {r:60,g:0,b:160}   ]],
+    drop:      [[ {r:255,g:0,b:60},   {r:100,g:0,b:200}  ], [ {r:220,g:0,b:80},   {r:80,g:0,b:220}   ], [ {r:255,g:0,b:100},  {r:120,g:0,b:180}  ]],
+    outro:     [[ {r:40,g:0,b:25},    {r:10,g:0,b:10}    ], [ {r:25,g:0,b:20},    {r:5,g:0,b:8}      ]],
+  },
+  tropical: {
+    label: 'Tropical',
+    intro:     [[ {r:0,g:180,b:120},  {r:255,g:120,b:60}  ], [ {r:0,g:200,b:140},  {r:255,g:160,b:80} ]],
+    verse:     [[ {r:0,g:255,b:160},  {r:255,g:180,b:0}  ], [ {r:255,g:80,b:120}, {r:0,g:220,b:180}  ], [ {r:255,g:200,b:0},  {r:0,g:200,b:200} ]],
+    chorus:    [[ {r:255,g:60,b:100}, {r:0,g:255,b:180}  ], [ {r:255,g:200,b:0},  {r:0,g:200,b:255}  ], [ {r:255,g:120,b:60}, {r:0,g:255,b:140} ]],
+    bridge:    [[ {r:255,g:180,b:80}, {r:0,g:200,b:160}  ], [ {r:255,g:140,b:100}, {r:0,g:180,b:200} ]],
+    breakdown: [[ {r:0,g:100,b:80},   {r:80,g:60,b:40}   ], [ {r:0,g:80,b:60},    {r:60,g:40,b:30}   ]],
+    buildup:   [[ {r:255,g:140,b:60}, {r:0,g:255,b:160} ], [ {r:255,g:200,b:0},  {r:0,g:220,b:200} ]],
+    drop:      [[ {r:255,g:80,b:100}, {r:0,g:255,b:200}  ], [ {r:255,g:200,b:0},  {r:0,g:200,b:255}  ], [ {r:255,g:120,b:60}, {r:0,g:255,b:180} ]],
+    outro:     [[ {r:0,g:80,b:60},    {r:40,g:40,b:20}   ], [ {r:0,g:60,b:50},    {r:30,g:30,b:15}   ]],
+  },
+  retro: {
+    label: 'Retro / Synthwave',
+    intro:     [[ {r:255,g:0,b:120},  {r:80,g:0,b:180}   ], [ {r:200,g:0,b:160},  {r:0,g:180,b:255}  ]],
+    verse:     [[ {r:255,g:0,b:180},  {r:0,g:200,b:255}  ], [ {r:200,g:0,b:255},  {r:255,g:60,b:120} ], [ {r:255,g:0,b:200},  {r:0,g:255,b:220} ]],
+    chorus:    [[ {r:255,g:0,b:255},  {r:0,g:255,b:255}  ], [ {r:255,g:60,b:180}, {r:0,g:200,b:255}  ], [ {r:200,g:0,b:255},  {r:255,g:0,b:120} ]],
+    bridge:    [[ {r:180,g:0,b:200},  {r:0,g:180,b:220}  ], [ {r:255,g:0,b:160},  {r:80,g:0,b:200}   ]],
+    breakdown: [[ {r:60,g:0,b:100},   {r:0,g:60,b:120}   ], [ {r:40,g:0,b:80},    {r:0,g:40,b:100}   ]],
+    buildup:   [[ {r:255,g:0,b:200},  {r:0,g:255,b:255}  ], [ {r:200,g:0,b:255},  {r:255,g:0,b:120} ]],
+    drop:      [[ {r:255,g:0,b:255},  {r:0,g:255,b:200}  ], [ {r:255,g:60,b:180}, {r:0,g:200,b:255}  ], [ {r:200,g:0,b:255},  {r:255,g:255,b:0} ]],
+    outro:     [[ {r:40,g:0,b:60},    {r:0,g:20,b:40}    ], [ {r:30,g:0,b:50},    {r:0,g:15,b:30}    ]],
+  },
+  aurora: {
+    label: 'Aurora',
+    intro:     [[ {r:0,g:120,b:80},   {r:80,g:0,b:160}   ], [ {r:0,g:160,b:100},  {r:120,g:0,b:200}  ]],
+    verse:     [[ {r:0,g:255,b:120},  {r:160,g:0,b:255}  ], [ {r:0,g:200,b:180},  {r:200,g:0,b:200}  ], [ {r:80,g:255,b:100}, {r:120,g:0,b:255} ]],
+    chorus:    [[ {r:0,g:255,b:160},  {r:200,g:0,b:255}  ], [ {r:80,g:255,b:120}, {r:160,g:0,b:220}  ], [ {r:0,g:220,b:200},  {r:255,g:0,b:180} ]],
+    bridge:    [[ {r:0,g:200,b:140},  {r:140,g:0,b:200}  ], [ {r:60,g:255,b:100}, {r:100,g:0,b:180}  ]],
+    breakdown: [[ {r:0,g:60,b:40},    {r:40,g:0,b:80}    ], [ {r:0,g:40,b:60},    {r:30,g:0,b:60}    ]],
+    buildup:   [[ {r:0,g:220,b:140},  {r:180,g:0,b:255}  ], [ {r:60,g:255,b:80},  {r:140,g:0,b:220} ]],
+    drop:      [[ {r:0,g:255,b:180},  {r:255,g:0,b:200}  ], [ {r:80,g:255,b:120}, {r:200,g:0,b:255}  ], [ {r:0,g:255,b:120},  {r:255,g:80,b:200} ]],
+    outro:     [[ {r:0,g:40,b:30},    {r:20,g:0,b:50}    ], [ {r:0,g:30,b:40},    {r:15,g:0,b:40}    ]],
+  },
+  crimson: {
+    label: 'Crimson',
+    intro:     [[ {r:120,g:0,b:30},   {r:60,g:0,b:40}    ], [ {r:100,g:0,b:20},   {r:40,g:0,b:30}    ]],
+    verse:     [[ {r:220,g:0,b:60},   {r:180,g:0,b:80}    ], [ {r:255,g:0,b:80},   {r:160,g:0,b:100}  ], [ {r:200,g:0,b:40},  {r:255,g:0,b:120} ]],
+    chorus:    [[ {r:255,g:0,b:60},   {r:255,g:0,b:160}  ], [ {r:255,g:40,b:0},  {r:200,g:0,b:180}  ], [ {r:255,g:0,b:100},  {r:255,g:60,b:0}  ]],
+    bridge:    [[ {r:200,g:0,b:80},   {r:255,g:0,b:140}  ], [ {r:180,g:0,b:60},   {r:220,g:0,b:160}  ]],
+    breakdown: [[ {r:60,g:0,b:20},    {r:30,g:0,b:15}    ], [ {r:40,g:0,b:25},    {r:20,g:0,b:10}    ]],
+    buildup:   [[ {r:255,g:0,b:40},   {r:255,g:0,b:140}  ], [ {r:220,g:0,b:60},   {r:255,g:40,b:0}   ]],
+    drop:      [[ {r:255,g:0,b:0},    {r:255,g:0,b:180}  ], [ {r:255,g:0,b:80},   {r:200,g:0,b:255}  ], [ {r:255,g:40,b:0},  {r:255,g:0,b:120} ]],
+    outro:     [[ {r:50,g:0,b:15},    {r:15,g:0,b:8}      ], [ {r:35,g:0,b:12},    {r:10,g:0,b:5}      ]],
+  },
 };
+
+const colorPalettes = applyPaletteExpansion(rawColorPalettes);
 
 const PALETTE_KEYS = Object.keys(colorPalettes);
 const ALL_PALETTE_OPTIONS = [...PALETTE_KEYS, 'random'];
@@ -376,6 +550,10 @@ function getSectionPalettes(paletteName, sectionLabel, palettesMap) {
 
 module.exports = {
   colorPalettes,
+  rawColorPalettes,
+  SECTION_PAIR_COUNTS,
+  expandSectionPairs,
+  mergeColorPaletteDefaults,
   PALETTE_KEYS,
   ALL_PALETTE_OPTIONS,
   genrePalettes,

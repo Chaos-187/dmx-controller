@@ -8,18 +8,56 @@
 const express = require('express');
 const router = express.Router();
 
-let _db, _audioAnalyzer, _sequenceGenerator, _broadcast, _getAnalysisConfig;
+let _db, _audioAnalyzer, _sequenceGenerator, _broadcast, _getAnalysisConfig, _getAnchorPoints;
 
 /**
  * Initialise the router with shared dependencies from server.js.
  * Call once at startup before mounting.
  */
-function init({ db, audioAnalyzer, sequenceGenerator, broadcast, getAnalysisConfig }) {
+function init({ db, audioAnalyzer, sequenceGenerator, broadcast, getAnalysisConfig, getAnchorPoints }) {
   _db = db;
   _audioAnalyzer = audioAnalyzer;
   _sequenceGenerator = sequenceGenerator;
   _broadcast = broadcast;
   _getAnalysisConfig = getAnalysisConfig;
+  _getAnchorPoints = getAnchorPoints || (() => []);
+}
+
+/** Re-analyze when missing or older than the current analysis engine version. */
+async function ensureTrackAnalysis(track, analysisCfg) {
+  let analysis = _db.getTrackAnalysis(track.id);
+  const needsAnalysis = !analysis
+    || (analysis.analysis_version || 0) < _audioAnalyzer.ANALYSIS_VERSION;
+  if (!needsAnalysis) return analysis;
+
+  const filePath = track.filepath;
+  if (!filePath || !require('fs').existsSync(filePath)) return analysis;
+
+  try {
+    const ffmpegOk = await _audioAnalyzer.checkFfmpeg();
+    if (!ffmpegOk) {
+      console.warn(`[Generate] ffmpeg not available — skipping analysis for track ${track.id}`);
+      return analysis;
+    }
+    console.log(`[Generate] Analyzing track ${track.id} (analysis v${analysis?.analysis_version || 0} → v${_audioAnalyzer.ANALYSIS_VERSION})...`);
+    const result = await _audioAnalyzer.analyzeTrack(filePath, {
+      bpm: track.bpm || 0,
+      beatgridPos: track.beatgrid_pos || 0,
+      anchorPoints: _getAnchorPoints(track),
+      config: analysisCfg,
+    });
+    _db.upsertTrackAnalysis(track.id, result);
+    analysis = _db.getTrackAnalysis(track.id);
+    _broadcast({
+      type: 'analysis_complete',
+      track_id: track.id,
+      peak_count: result.peak_count,
+    });
+    console.log(`[Generate] Analysis complete for track ${track.id}: ${result.peak_count} peaks`);
+  } catch (e) {
+    console.warn(`[Generate] Analysis failed for track ${track.id}: ${e.message}`);
+  }
+  return analysis;
 }
 
 // ─── Database Stats & Bulk Delete ───────────────────────────────────────────
@@ -173,28 +211,8 @@ router.post('/api/sequences/generate/:trackId', async (req, res) => {
   }
 
   const fixtures = _db.getFixtureChannelMap();
-  let analysis = _db.getTrackAnalysis(track.id);
-
-  // Auto-analyze if no analysis exists
-  if (!analysis && track.filepath && require('fs').existsSync(track.filepath)) {
-    try {
-      const ffmpegOk = await _audioAnalyzer.checkFfmpeg();
-      if (ffmpegOk) {
-        console.log(`[Generate] Auto-analyzing track ${track.id} before sequence generation...`);
-        const result = await _audioAnalyzer.analyzeTrack(track.filepath, {
-          bpm: track.bpm || 0,
-          beatgridPos: track.beatgrid_pos || 0,
-          config: _getAnalysisConfig(),
-        });
-        _db.upsertTrackAnalysis(track.id, result);
-        analysis = _db.getTrackAnalysis(track.id);
-        _broadcast({ type: 'analysis_complete', track_id: track.id });
-        console.log(`[Generate] Auto-analysis complete for track ${track.id}`);
-      }
-    } catch (e) {
-      console.warn(`[Generate] Auto-analysis failed for track ${track.id}: ${e.message}`);
-    }
-  }
+  const analysisCfg = _getAnalysisConfig();
+  const analysis = await ensureTrackAnalysis(track, analysisCfg);
 
   const { palette: palKey, genre: genKey, template_id } = req.body || {};
 
@@ -275,25 +293,8 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
     workItems.push({ trackId, track, existingSeq: existing });
   }
 
-  // Parallel analysis with concurrency limit
   async function analyzeOne(item) {
-    let analysis = _db.getTrackAnalysis(item.track.id);
-    if (!analysis && item.track.filepath && require('fs').existsSync(item.track.filepath)) {
-      try {
-        const ffmpegOk = await _audioAnalyzer.checkFfmpeg();
-        if (ffmpegOk) {
-          const result = await _audioAnalyzer.analyzeTrack(item.track.filepath, {
-            bpm: item.track.bpm || 0, beatgridPos: item.track.beatgrid_pos || 0,
-            config: analysisCfg,
-          });
-          _db.upsertTrackAnalysis(item.track.id, result);
-          analysis = _db.getTrackAnalysis(item.track.id);
-          _broadcast({ type: 'analysis_complete', track_id: item.track.id });
-        }
-      } catch (e) {
-        console.warn(`[BulkGen] Auto-analysis failed for track ${item.trackId}: ${e.message}`);
-      }
-    }
+    const analysis = await ensureTrackAnalysis(item.track, analysisCfg);
     return { item, analysis };
   }
 

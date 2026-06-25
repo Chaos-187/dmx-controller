@@ -17,7 +17,7 @@ const path = require('path');
 
 // ─── Default Constants (overridable via opts.config) ────────────────────────
 
-const ANALYSIS_VERSION = 14;
+const ANALYSIS_VERSION = 15;
 const DEFAULTS = {
   TARGET_PEAKS:         2000,     // waveform resolution tier from app settings (see peaks/sec calc below)
   ENERGY_SEGMENT_MS:    50,       // energy computed every N ms  (was 100)
@@ -182,6 +182,111 @@ function probeFile(filePath) {
 
 // ─── Fluid Beat Detection ───────────────────────────────────────────────────
 
+/** Refine metadata BPM using median onset interval when close to the guide tempo. */
+function refineBpmFromIOIs(iois, guideBpm) {
+  if (!iois.length || guideBpm <= 0) return guideBpm;
+  const close = iois.filter(x => Math.abs(x.impliedBpm - guideBpm) / guideBpm < 0.06);
+  if (close.length < 5) return guideBpm;
+  const bpms = close.map(x => x.impliedBpm).sort((a, b) => a - b);
+  return bpms[Math.floor(bpms.length / 2)];
+}
+
+/** Build tempo regions from VDJ beatgrid anchors (each anchor carries its local BPM). */
+function buildTempoRegionsFromAnchors(anchorPoints, defaultBpm, durationMs) {
+  if (!anchorPoints || anchorPoints.length === 0) return [];
+  const sorted = [...anchorPoints].sort((a, b) => a.pos_ms - b.pos_ms);
+  const regions = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const ap = sorted[i];
+    const regionBpm = ap.bpm > 0 ? ap.bpm : defaultBpm;
+    if (regionBpm <= 0) continue;
+    const endMs = i + 1 < sorted.length ? sorted[i + 1].pos_ms : durationMs;
+    regions.push({ startMs: ap.pos_ms, endMs, bpm: regionBpm });
+  }
+  return regions;
+}
+
+function getBpmAtTime(timeMs, defaultBpm, tempoRegions, runningIntervals) {
+  for (const r of tempoRegions) {
+    if (timeMs >= r.startMs && timeMs < r.endMs) return r.bpm;
+  }
+  if (runningIntervals.length >= 6) {
+    const sorted = [...runningIntervals].sort((a, b) => a - b);
+    return 60000 / sorted[Math.floor(sorted.length / 2)];
+  }
+  return defaultBpm;
+}
+
+/**
+ * Walk beats forward from the first-beat anchor, locking each beat to the
+ * strongest bass onset in a window around the prediction.  Each step builds
+ * on the previous snapped beat so BPM error cannot accumulate.
+ */
+function trackBeatsCumulative(onsetPeaks, phaseMs, bpm, durationMs, tempoRegions) {
+  const fluidBeats = [];
+  const runningIntervals = [];
+  const beatMsAt = (t) => 60000 / getBpmAtTime(t, bpm, tempoRegions, runningIntervals);
+
+  // Pre-beats before the first anchor
+  if (phaseMs > 0) {
+    const pre = [];
+    let t = phaseMs;
+    let guard = 0;
+    while (guard++ < 512) {
+      const step = beatMsAt(t);
+      t -= step;
+      if (t < -step * 0.05) break;
+      pre.push(Math.round(t));
+    }
+    pre.reverse();
+    fluidBeats.push(...pre);
+  }
+
+  let lastBeat = phaseMs >= 0 ? phaseMs : 0;
+  if (fluidBeats.length === 0 || fluidBeats[fluidBeats.length - 1] !== Math.round(lastBeat)) {
+    fluidBeats.push(Math.round(lastBeat));
+  }
+
+  let onsetIdx = 0;
+  const maxBeats = Math.ceil(durationMs / (60000 / Math.max(bpm, 40))) + 8;
+
+  for (let n = 0; n < maxBeats && lastBeat < durationMs; n++) {
+    const beatMs = beatMsAt(lastBeat);
+    const predicted = lastBeat + beatMs;
+    if (predicted > durationMs + beatMs * 0.4) break;
+
+    const halfWin = beatMs * 0.22;
+    const winLo = predicted - halfWin;
+    const winHi = predicted + halfWin;
+
+    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx].time_ms < winLo) onsetIdx++;
+
+    let bestOnset = null;
+    let bestScore = 0;
+    for (let oi = onsetIdx; oi < onsetPeaks.length; oi++) {
+      const o = onsetPeaks[oi];
+      if (o.time_ms > winHi) break;
+      const dist = Math.abs(o.time_ms - predicted);
+      const score = o.strength * (1 - dist / halfWin);
+      if (score > bestScore) { bestScore = score; bestOnset = o; }
+    }
+
+    const minGap = beatMs * 0.72;
+    let nextBeat = (bestOnset && bestOnset.time_ms - lastBeat >= minGap)
+      ? bestOnset.time_ms
+      : predicted;
+
+    if (nextBeat - lastBeat < minGap) nextBeat = predicted;
+
+    runningIntervals.push(nextBeat - lastBeat);
+    if (runningIntervals.length > 24) runningIntervals.shift();
+    lastBeat = nextBeat;
+    fluidBeats.push(Math.round(lastBeat));
+  }
+
+  return fluidBeats;
+}
+
 /**
  * Detect actual beat positions from bass energy data, guided by BPM.
  *
@@ -193,11 +298,11 @@ function probeFile(filePath) {
  * Algorithm:
  * 1. Compute a bass onset strength function from energy segments.
  * 2. Find local peaks that exceed an adaptive threshold.
- * 3. Estimate local tempo from onset intervals; detect tempo changes.
- * 4. If tempo varies >3%, build an adaptive grid with per-region BPM.
- *    Otherwise use the global BPM for a uniform grid (guided by anchors).
- * 5. Snap grid beats toward detected onsets with weighted blending.
- * 6. Return actual beat times (not evenly spaced).
+ * 3. Estimate local tempo from onset intervals; build tempo regions from
+ *    VDJ multi-anchor beatgrid or audio when tempo varies >3%.
+ * 4. Refine guide BPM from median onset intervals.
+ * 5. Walk beats cumulatively from the first-beat anchor, locking each beat
+ *    to the strongest onset in a prediction window (prevents BPM drift).
  *
  * @param {Array}  energySegments  – [{time_ms, bass, energy, ...}, ...]
  * @param {number} bpm             – reference BPM from metadata
@@ -209,7 +314,10 @@ function probeFile(filePath) {
 function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0, anchorPoints = []) {
   if (!energySegments.length || bpm <= 0) return [];
 
-  const expectedBeatMs = 60000 / bpm;
+  // Prefer BPM stored on VDJ beatgrid anchor POIs (actual BPM, not beat interval)
+  const anchorBpm = (anchorPoints || []).find(a => a.bpm > 0)?.bpm;
+  let effectiveBpm = anchorBpm || bpm;
+  const expectedBeatMs = 60000 / effectiveBpm;
 
   const segDt = energySegments.length > 1
     ? energySegments[1].time_ms - energySegments[0].time_ms
@@ -302,35 +410,36 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0, anchorPoi
     }
   }
 
-  // Determine if tempo varies significantly
-  let useAdaptiveGrid = false;
-  let tempoRegions = []; // { startMs, endMs, bpm }
+  // Determine tempo regions (multi-anchor VDJ grid or audio-estimated changes)
+  let tempoRegions = [];
 
-  if (anchorPoints && anchorPoints.length >= 2) {
-    // Multi-anchor points provided (e.g. from VDJ beatgrid Pois)
-    // Infer local BPM between consecutive anchors
-    for (let i = 0; i < anchorPoints.length - 1; i++) {
-      const ap = anchorPoints[i];
-      const bp = anchorPoints[i + 1];
-      const dtMs = bp.pos_ms - ap.pos_ms;
-      const regionBpm = ap.bpm || bpm;
-      const beatsInRegion = Math.round(dtMs / (60000 / regionBpm));
-      if (beatsInRegion > 0) {
-        const actualBeatMs = dtMs / beatsInRegion;
-        tempoRegions.push({
-          startMs: ap.pos_ms,
-          endMs:   bp.pos_ms,
-          bpm:     60000 / actualBeatMs,
-        });
+  if (anchorPoints && anchorPoints.length >= 1) {
+    const explicitRegions = buildTempoRegionsFromAnchors(anchorPoints, effectiveBpm, durationMs);
+    if (explicitRegions.length > 0) {
+      tempoRegions = explicitRegions;
+    } else if (anchorPoints.length >= 2) {
+      // Legacy: infer BPM between anchors when POI lacks explicit BPM
+      for (let i = 0; i < anchorPoints.length - 1; i++) {
+        const ap = anchorPoints[i];
+        const bp = anchorPoints[i + 1];
+        const dtMs = bp.pos_ms - ap.pos_ms;
+        const regionBpm = ap.bpm || effectiveBpm;
+        const beatsInRegion = Math.round(dtMs / (60000 / regionBpm));
+        if (beatsInRegion > 0) {
+          tempoRegions.push({
+            startMs: ap.pos_ms,
+            endMs:   bp.pos_ms,
+            bpm:     60000 / (dtMs / beatsInRegion),
+          });
+        }
+      }
+      if (tempoRegions.length > 0) {
+        tempoRegions[tempoRegions.length - 1].endMs = durationMs;
       }
     }
-    // Extend last region to end of track
-    if (tempoRegions.length > 0) {
-      tempoRegions[tempoRegions.length - 1].endMs = durationMs;
-      useAdaptiveGrid = tempoRegions.some(r => Math.abs(r.bpm - bpm) / bpm > 0.03);
-    }
-  } else if (localTempos.length >= 3) {
-    // Audio-estimated local tempos — check for variance
+  }
+
+  if (tempoRegions.length === 0 && localTempos.length >= 3) {
     const localBpms = localTempos.map(x => x.bpm);
     const bpmMin = Math.min(...localBpms);
     const bpmMax = Math.max(...localBpms);
@@ -338,9 +447,6 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0, anchorPoi
     const variance = (bpmMax - bpmMin) / bpmMid;
 
     if (variance > 0.03) {
-      useAdaptiveGrid = true;
-      // Build tempo regions from local estimates
-      // Smooth local tempos with 3-point median for stability
       const smoothed = localTempos.map((lt, idx) => {
         const lo = Math.max(0, idx - 1);
         const hi = Math.min(localTempos.length - 1, idx + 1);
@@ -360,129 +466,12 @@ function detectBeats(energySegments, bpm, durationMs, firstBeatMs = 0, anchorPoi
     }
   }
 
-  // ── 4. Build beat grid (adaptive or uniform) ─────────────────────
+  // Refine guide BPM from detected onset intervals (fixes small Scan BPM drift)
+  effectiveBpm = refineBpmFromIOIs(iois, effectiveBpm);
+
+  // ── 4. Cumulative onset tracking (no fixed-grid drift) ───────────
   const phase = firstBeatMs >= 0 ? firstBeatMs : 0;
-  const gridBeats = [];
-
-  if (useAdaptiveGrid && tempoRegions.length > 0) {
-    // Adaptive grid: walk through each tempo region
-    // Start with pre-beat phase using first region's BPM
-    const firstBpm = tempoRegions[0].bpm;
-    const firstBeatInterval = 60000 / firstBpm;
-
-    if (phase > firstBeatInterval) {
-      let t = phase - firstBeatInterval;
-      const preBeats = [];
-      while (t >= 0) {
-        preBeats.push(t);
-        t -= firstBeatInterval;
-      }
-      preBeats.reverse();
-      for (const bt of preBeats) gridBeats.push(bt);
-    }
-
-    // Walk forward, switching BPM at region boundaries
-    let t = phase;
-    while (t < durationMs) {
-      gridBeats.push(t);
-      // Find which tempo region we're in
-      let regionBpm = bpm; // fallback
-      for (const r of tempoRegions) {
-        if (t >= r.startMs && t < r.endMs) {
-          regionBpm = r.bpm;
-          break;
-        }
-      }
-      t += 60000 / regionBpm;
-    }
-  } else {
-    // Uniform grid (original behavior)
-    if (phase > expectedBeatMs) {
-      let t = phase - expectedBeatMs;
-      const preBeats = [];
-      while (t >= 0) {
-        preBeats.push(t);
-        t -= expectedBeatMs;
-      }
-      preBeats.reverse();
-      for (const bt of preBeats) gridBeats.push(bt);
-    }
-    while (phase + gridBeats.length * expectedBeatMs < durationMs || gridBeats.length === 0) {
-      // Re-walk forward properly
-      break; // handled below
-    }
-    // Walk forward through the track
-    let gTime = phase;
-    while (gTime < durationMs) {
-      gridBeats.push(gTime);
-      gTime += expectedBeatMs;
-    }
-  }
-
-  // Dedupe and sort (adaptive grid may have overlap from pre-beats)
-  const uniqueGrid = [...new Set(gridBeats.map(b => Math.round(b * 10) / 10))].sort((a, b) => a - b);
-
-  // ── 5. Snap grid toward nearest onset with weighted blending ──────
-  const tolerance = expectedBeatMs * 0.15;
-  const fluidBeats = [];
-  let onsetIdx = 0;
-
-  for (let bi = 0; bi < uniqueGrid.length; bi++) {
-    const expected = uniqueGrid[bi];
-    // Use local BPM for spacing check
-    let localBeatMs = expectedBeatMs;
-    if (useAdaptiveGrid) {
-      for (const r of tempoRegions) {
-        if (expected >= r.startMs && expected < r.endMs) {
-          localBeatMs = 60000 / r.bpm;
-          break;
-        }
-      }
-    }
-    const localTolerance = localBeatMs * 0.15;
-
-    // Advance onset pointer
-    while (onsetIdx < onsetPeaks.length && onsetPeaks[onsetIdx].time_ms < expected - localTolerance) {
-      onsetIdx++;
-    }
-
-    // Find the strongest onset within tolerance
-    let bestOnset = null;
-    let bestScore = 0;
-    for (let oi = Math.max(0, onsetIdx - 1); oi < onsetPeaks.length; oi++) {
-      const o = onsetPeaks[oi];
-      const dist = Math.abs(o.time_ms - expected);
-      if (dist > localTolerance) {
-        if (o.time_ms > expected + localTolerance) break;
-        continue;
-      }
-      const proximityWeight = 1 - dist / localTolerance;
-      const score = o.strength * proximityWeight;
-      if (score > bestScore) {
-        bestScore = score;
-        bestOnset = o;
-      }
-    }
-
-    let finalTime;
-    if (bestOnset) {
-      const dist = Math.abs(bestOnset.time_ms - expected);
-      const blendWeight = 0.5 * (1 - dist / localTolerance);
-      finalTime = expected + (bestOnset.time_ms - expected) * blendWeight;
-    } else {
-      finalTime = expected;
-    }
-
-    // Enforce minimum spacing: at least 75% of local beat interval
-    const prevBeat = fluidBeats.length > 0 ? fluidBeats[fluidBeats.length - 1] : -Infinity;
-    if (finalTime - prevBeat >= localBeatMs * 0.75) {
-      fluidBeats.push(Math.round(finalTime));
-    } else if (expected - prevBeat >= localBeatMs * 0.75) {
-      fluidBeats.push(Math.round(expected));
-    }
-  }
-
-  return fluidBeats;
+  return trackBeatsCumulative(onsetPeaks, phase, effectiveBpm, durationMs, tempoRegions);
 }
 
 /**
