@@ -15,6 +15,7 @@ A Node.js-based DMX lighting controller with real-time VirtualDJ integration via
 - **VirtualDJ Database Import** — Parses VirtualDJ's `database.xml` to import track metadata (BPM, key, genre, duration, beatgrid, POIs)
 - **SQLite Database** — Persistent storage using better-sqlite3 with WAL mode for all configuration, fixtures, subscriptions, and track data
 - **Worker Threads** — Art-Net and DMX USB transmission run in dedicated worker threads to avoid blocking the main event loop
+- **Bitfocus Companion Module** — Control from Elgato Stream Deck (and other Companion surfaces) via HTTP/WebSocket; see [docs/companion.md](docs/companion.md)
 
 ## Architecture
 
@@ -42,6 +43,12 @@ A Node.js-based DMX lighting controller with real-time VirtualDJ integration via
                    │  vdj-parser.js   │                        │  Browser UI  │
                    │  (XML parser)    │                        │  index.html  │
                    └──────────────────┘        port 80       └─────────────┘
+                                                                    ▲
+                   ┌──────────────────┐   HTTP + WebSocket          │
+                   │ Bitfocus         │ ────────────────────────────┘
+                   │ Companion        │   (Stream Deck module)
+                   │ + Stream Deck    │
+                   └──────────────────┘
 ```
 
 ## Prerequisites
@@ -87,6 +94,22 @@ The server starts three listeners:
 - **mDNS** — advertises the `DMX-Controller` service for auto-discovery
 
 Open `http://localhost` in a browser to access the web UI.
+
+## Stream Deck / Bitfocus Companion
+
+Use the included Companion module to control the show from an Elgato Stream Deck (or any Companion-supported surface) over the network — blackout, DMX output, scenes, effects, sequencer decks, and live VDJ feedback.
+
+```bash
+cd companion
+npm install
+npm run build
+```
+
+Then add the **repo root** (`dmx-controller`, not `dmx-controller/companion`) to **Companion → Settings → Developer modules path** and enable developer modules.
+
+**Import a full page layout:** use the included `.companionconfig` files in `companion/config/` (see [docs/companion.md](docs/companion.md)).
+
+Full setup, actions, feedbacks, and API mapping: **[docs/companion.md](docs/companion.md)**
 
 ## Web UI Tabs
 
@@ -214,6 +237,11 @@ The server pushes the following message types to connected browser clients:
 | `event` | Other OS2L events |
 | `log` | Raw OS2L message for the event log |
 | `dmxOutput` | DMX output enabled/disabled state change |
+| `touchBlackoutHold` | Blackout hold state (Touch / MIDI / Companion) |
+| `scene_activated` / `scene_deactivated` | Static scene state |
+| `seq_playing` / `seq_loaded` / `seq_unloaded` | Sequencer deck state |
+
+Companion and other external clients can connect to the same WebSocket. See [docs/companion.md](docs/companion.md).
 
 ## Database Schema
 
@@ -278,6 +306,12 @@ dmx-controller/
 ├── dmx-usb-server.js      # DMX USB orchestrator — manages worker thread
 ├── dmx-usb-worker.js      # DMX USB worker — FTDI D2XX / libusb (Worker Thread)
 ├── vdj-parser.js          # VirtualDJ database.xml parser
+├── companion/             # Bitfocus Companion module (Stream Deck)
+│   ├── companion/         # Module manifest + HELP
+│   └── src/               # TypeScript source
+├── docs/
+│   ├── api.md             # REST + WebSocket API reference
+│   └── companion.md       # Stream Deck / Companion integration
 ├── package.json
 └── public/
     ├── index.html          # Single-page web UI (HTML + CSS + JS)

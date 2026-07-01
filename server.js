@@ -1930,7 +1930,59 @@ const touchOverrides = {
   smokeOverrideFixtures: new Set(),    // fixture IDs with smoke overridden from touch UI
   /** MIDI / OS2L live color — applied as overlay each sequence tick (movement continues). */
   activeColorOverride: null,
+  /** True while Full On is held — blocks effect ticks from overwriting DMX. */
+  fullOnHold: false,
+  /** Stream Deck Colors page: true = push on/release off, false = tap toggle. */
+  companionColorPushMode: true,
 };
+
+function normalizeFixtureId(id) {
+  const n = Number(id);
+  return Number.isFinite(n) ? n : id;
+}
+
+function isFixtureDisabled(id) {
+  if (id == null) return false;
+  const nid = normalizeFixtureId(id);
+  return touchOverrides.disabledFixtures.has(nid) || touchOverrides.disabledFixtures.has(id);
+}
+
+let _disabledDmxChannelCacheKey = '';
+let _disabledDmxChannelSet = null;
+
+function getDisabledDmxChannelSet() {
+  const key = [...touchOverrides.disabledFixtures].sort((a, b) => Number(a) - Number(b)).join(',');
+  if (_disabledDmxChannelCacheKey === key && _disabledDmxChannelSet) return _disabledDmxChannelSet;
+  const set = new Set();
+  for (const fix of getFixtureChannelMapCached()) {
+    if (!isFixtureDisabled(fix.id)) continue;
+    const u = fix.universe || 1;
+    for (const ch of fix.channels) set.add(`${u}:${ch.dmx_address}`);
+  }
+  _disabledDmxChannelCacheKey = key;
+  _disabledDmxChannelSet = set;
+  return set;
+}
+
+function filterDmxChannelsForDisabledFixtures(universe, channels) {
+  if (!Array.isArray(channels) || channels.length === 0 || touchOverrides.disabledFixtures.size === 0) {
+    return channels || [];
+  }
+  const disabled = getDisabledDmxChannelSet();
+  if (disabled.size === 0) return channels;
+  const u = universe || 1;
+  return channels.filter(({ ch }) => !disabled.has(`${u}:${ch}`));
+}
+
+function clearFixtureOverrideTracking(fixtureId) {
+  const fid = normalizeFixtureId(fixtureId);
+  touchOverrides.colorOverrideFixtures.delete(fid);
+  touchOverrides.colorOverrideFixtures.delete(fixtureId);
+  touchOverrides.movementOverrideFixtures.delete(fid);
+  touchOverrides.movementOverrideFixtures.delete(fixtureId);
+  touchOverrides.smokeOverrideFixtures.delete(fid);
+  touchOverrides.smokeOverrideFixtures.delete(fixtureId);
+}
 
 app.get('/api/dmx/output', (req, res) => {
   res.json({ enabled: dmxOutputEnabled });
@@ -1950,16 +2002,20 @@ app.post('/api/dmx/output', (req, res) => {
 app.post('/api/dmx/channel', (req, res) => {
   const { universe, channel, value } = req.body;
   if (!dmxOutputEnabled) return res.json({ ok: true, outputOff: true });
-  artnetServer.setChannel(universe, channel, value);
-  dmxUsbServer.setChannel(universe, channel, value);
+  const filtered = filterDmxChannelsForDisabledFixtures(universe, [{ ch: channel, val: value }]);
+  if (filtered.length === 0) return res.json({ ok: true, skipped: true });
+  artnetServer.setChannel(universe, channel, filtered[0].val);
+  dmxUsbServer.setChannel(universe, channel, filtered[0].val);
   res.json({ ok: true });
 });
 
 app.post('/api/dmx/channels', (req, res) => {
   const { universe, channels } = req.body;  // channels: [{ch, val}]
   if (!dmxOutputEnabled) return res.json({ ok: true, outputOff: true });
-  artnetServer.setChannels(universe, channels);
-  dmxUsbServer.setChannels(universe, channels);
+  const filtered = filterDmxChannelsForDisabledFixtures(universe, channels);
+  if (filtered.length === 0) return res.json({ ok: true, skipped: true });
+  artnetServer.setChannels(universe, filtered);
+  dmxUsbServer.setChannels(universe, filtered);
   res.json({ ok: true });
 });
 
@@ -1995,13 +2051,18 @@ app.get('/api/touch/state', (req, res) => {
     blackoutHold: touchOverrides.blackoutHold,
     masterDimmer: touchOverrides.masterDimmer,
     effectSpeed: touchOverrides.effectSpeed,
+    companionColorPushMode: touchOverrides.companionColorPushMode,
   });
 });
 
 app.post('/api/touch/fixture-disable', (req, res) => {
-  const { fixtureId, disabled } = req.body;
+  const fixtureId = normalizeFixtureId(req.body.fixtureId);
+  const { disabled } = req.body;
+  // Drop legacy string/number duplicates
+  touchOverrides.disabledFixtures.delete(req.body.fixtureId);
   if (disabled) {
     touchOverrides.disabledFixtures.add(fixtureId);
+    clearFixtureOverrideTracking(fixtureId);
     // Immediately zero out this fixture's channels
     const allFixtures = db.getFixtureChannelMap();
     const fixMap = allFixtures.find(f => f.id === fixtureId);
@@ -2013,6 +2074,7 @@ app.post('/api/touch/fixture-disable', (req, res) => {
   } else {
     touchOverrides.disabledFixtures.delete(fixtureId);
   }
+  _disabledDmxChannelCacheKey = '';
   broadcast({ type: 'touchFixtureDisable', fixtureId, disabled: !!disabled });
   console.log(`[TOUCH] Fixture ${fixtureId} ${disabled ? 'DISABLED' : 'ENABLED'}`);
   res.json({ ok: true, disabledFixtures: [...touchOverrides.disabledFixtures] });
@@ -2049,8 +2111,13 @@ app.post('/api/touch/color-override', (req, res) => {
   const { fixtureIds, active } = req.body;
   if (!Array.isArray(fixtureIds)) return res.status(400).json({ error: 'fixtureIds required' });
   for (const id of fixtureIds) {
-    if (active) touchOverrides.colorOverrideFixtures.add(id);
-    else touchOverrides.colorOverrideFixtures.delete(id);
+    const fid = normalizeFixtureId(id);
+    if (isFixtureDisabled(fid)) continue;
+    if (active) touchOverrides.colorOverrideFixtures.add(fid);
+    else {
+      touchOverrides.colorOverrideFixtures.delete(fid);
+      touchOverrides.colorOverrideFixtures.delete(id);
+    }
   }
   console.log(`[TOUCH] Color override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.colorOverrideFixtures.size})`);
   res.json({ ok: true });
@@ -2085,6 +2152,12 @@ os2l.registerRoutes(app);
 // ─── MIDI Controller API (delegated to midi-controller module) ──────────────
 
 midiController.registerRoutes(app);
+
+// ─── Companion (Stream Deck) API ────────────────────────────────────────────
+
+const companionRoutes = require('./companion-routes');
+companionRoutes.init({ db, midiController, touchOverrides, broadcast });
+companionRoutes.registerRoutes(app);
 
 // ─── Tracks API ─────────────────────────────────────────────────────────────
 
@@ -2461,6 +2534,23 @@ app.get('/api/effects', (req, res) => {
   res.json(db.getEffects());
 });
 
+// Literal paths MUST come before /api/effects/:id (otherwise "status" is parsed as an id)
+app.get('/api/effects/status', (req, res) => {
+  const slots = {};
+  for (const [s, st] of Object.entries(runningQaEffects)) {
+    const eff = st.effectId ? db.getEffect(st.effectId) : null;
+    slots[s] = eff
+      ? {
+          effectId: st.effectId,
+          name: eff.name,
+          type: eff.type,
+          effectParams: st.effectParams && typeof st.effectParams === 'object' ? { ...st.effectParams } : {},
+        }
+      : null;
+  }
+  res.json({ slots });
+});
+
 app.get('/api/effects/:id', (req, res) => {
   const e = db.getEffect(+req.params.id);
   e ? res.json(e) : res.status(404).json({ error: 'Not found' });
@@ -2646,22 +2736,6 @@ function stopRunningEffect(slot, skipBlackout) {
   }
 }
 
-app.get('/api/effects/status', (req, res) => {
-  const slots = {};
-  for (const [s, st] of Object.entries(runningQaEffects)) {
-    const eff = st.effectId ? db.getEffect(st.effectId) : null;
-    slots[s] = eff
-      ? {
-          effectId: st.effectId,
-          name: eff.name,
-          type: eff.type,
-          effectParams: st.effectParams && typeof st.effectParams === 'object' ? { ...st.effectParams } : {},
-        }
-      : null;
-  }
-  res.json({ slots });
-});
-
 app.post('/api/effects/params', (req, res) => {
   const { slot, effect_params } = req.body || {};
   if (!slot || !runningQaEffects[slot]) {
@@ -2692,6 +2766,7 @@ app.post('/api/effects/run', (req, res) => {
 
   const timer = setInterval(() => {
     if (!dmxOutputEnabled) return;
+    if (touchOverrides.fullOnHold) return;
     const st = runningQaEffects[slot];
     if (!st) return;
     const eff = db.getEffect(st.effectId);
@@ -3143,7 +3218,7 @@ function activateScene(sceneId) {
     const startTime = Date.now();
     sceneEffectTimer = setInterval(() => {
       if (!dmxOutputEnabled || !activeStaticScene) return;
-      if (touchOverrides.blackoutHold) return;
+      if (touchOverrides.blackoutHold || touchOverrides.fullOnHold) return;
       processSceneEffects(activeStaticScene, startTime);
     }, 10); // ~100 Hz
     console.log(`[SCENE] Started effect loop for scene "${scene.name}"`);
@@ -3897,6 +3972,8 @@ function getFixtureChannelMapByIdCached(id) {
 function invalidateFixtureChannelMapCache() {
   _cachedFixtureChannelMap = null;
   _cachedFixtureChannelMapById = null;
+  _disabledDmxChannelCacheKey = '';
+  _disabledDmxChannelSet = null;
 }
 
 // Cached effects for hot-path processing (refreshed on effect changes)
@@ -3941,7 +4018,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   if (!dmxOutputEnabled) return;
 
   // ── Touch blackout hold: suppress all playback output ──
-  if (touchOverrides.blackoutHold) return;
+  if (touchOverrides.blackoutHold || touchOverrides.fullOnHold) return;
 
   // ── Crossfader: gate, blend, or off ────────────────────────────────────
   let crossfaderLevel = 1; // 0–1 multiplier for crossfader blending
@@ -4325,6 +4402,7 @@ function applyActiveColorOverrideToUpdates(channelUpdates) {
   const fixtures = getFixtureChannelMapCached();
 
   for (const fix of fixtures) {
+    if (isFixtureDisabled(fix.id)) continue;
     if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
     const u = fix.universe;
     if (!channelUpdates[u]) channelUpdates[u] = {};

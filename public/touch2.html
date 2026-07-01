@@ -71,6 +71,8 @@ body{
   -webkit-tap-highlight-color:transparent;transition:all .2s;
 }
 .seg-ctrl button.active{background:var(--active);color:#000}
+.seg-ctrl-full{width:100%;justify-content:stretch}
+.seg-ctrl-full button{flex:1;text-align:center;padding:12px 14px;font-size:13px;font-weight:700}
 
 /* ═══════════════════════════════════════════════════════════════
    TAB BAR (bottom iOS-style)
@@ -537,10 +539,6 @@ input[type=range]::-moz-range-thumb{
      ═══════════════════════════════════════════════════════════════ -->
 <div class="toolbar">
   <span id="statusPip" class="status-pip err"></span>
-  <div class="seg-ctrl" id="modeSwitch">
-    <button class="active" data-mode="hold">HOLD</button>
-    <button data-mode="toggle">TOGGLE</button>
-  </div>
   <div class="toolbar-spacer"></div>
   <button class="toolbar-pill" id="btnOutput">OUTPUT</button>
   <button class="toolbar-pill" id="btnBlackout">BLACKOUT</button>
@@ -583,6 +581,22 @@ input[type=range]::-moz-range-thumb{
       </div>
     </div>
     <div class="actions-grid" id="actionsGrid"></div>
+  </div>
+
+  <!-- ─── COLORS ─────────────────────────────────── -->
+  <div class="page page-dash" id="page-colors">
+    <div class="section-label">Apply To</div>
+    <div class="chip-row" id="colorTargetGroups"></div>
+    <div class="slider-wrap" style="margin-top:4px">
+      <span class="slider-label">Int.</span>
+      <input type="range" id="colorIntensity" min="0" max="255" value="255">
+      <span class="slider-val" id="colorIntVal">255</span>
+    </div>
+    <div class="color-grid" id="colorGrid"></div>
+    <div class="seg-ctrl seg-ctrl-full" id="colorModeSwitch">
+      <button class="active" data-mode="hold">HOLD</button>
+      <button data-mode="toggle">TOGGLE</button>
+    </div>
   </div>
 
   <!-- ─── EFFECTS ────────────────────────────────── -->
@@ -665,6 +679,7 @@ input[type=range]::-moz-range-thumb{
      ═══════════════════════════════════════════════════════════════ -->
 <div class="tab-bar">
   <button class="active" data-page="actions"><span class="tab-icon">&#9654;</span>Actions</button>
+  <button data-page="colors"><span class="tab-icon">&#127912;</span>Colors</button>
   <button data-page="effects"><span class="tab-icon">&#10024;</span>Effects</button>
   <button data-page="groups"><span class="tab-icon">&#9783;</span>Groups</button>
   <button data-page="fixtures"><span class="tab-icon">&#128161;</span>Fixtures</button>
@@ -811,6 +826,7 @@ let fixtureEnabled = {}, fixtureDimmer = {}, groupDimmer = {};
 let masterDimValue = 255;
 let lastRgbOnlyValues = {}; // fixtureId → { chAddr: baseVal, ... } for RGB-only fixtures
 let holdMode = true;
+let colorHoldMode = true;
 let activeSceneId = null;
 let actionActiveStates = {}; // track toggle state per action button
 let activeEffectSlots = {}; // track running effect per slot
@@ -837,7 +853,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkPinStatus();
 
   initTabs();
-  initModeSwitch();
+  initColorModeSwitch();
   initSliderBindings();
   initFxButtons();
   initActionCards();
@@ -860,22 +876,31 @@ function initTabs() {
   });
 }
 
-/* ─── Mode Switch ──────────────────────────────────────────── */
-function initModeSwitch() {
-  const sw = document.getElementById('modeSwitch');
+/* ─── Color hold / toggle (colors page only) ───────────────── */
+function initColorModeSwitch() {
+  const sw = document.getElementById('colorModeSwitch');
+  if (!sw) return;
   sw.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => {
-      holdMode = btn.dataset.mode === 'hold';
+      colorHoldMode = btn.dataset.mode === 'hold';
       sw.querySelectorAll('button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      if (holdMode) releaseAllActions();
-      renderColors(); // rebind color hold/toggle events
+      if (colorHoldMode) {
+        clearColorOverrideDMX();
+        selectedColor = null;
+        renderColorActive();
+      }
+      renderColors();
     });
   });
 }
 
 /* ─── Slider bindings ──────────────────────────────────────── */
 function initSliderBindings() {
+  bindSlider('colorIntensity', 'colorIntVal', v => {
+    colorIntensity = v;
+    if (selectedColor !== null) sendColorOverride();
+  });
   bindSlider('masterDim', 'masterDimVal', v => {
     sendMasterDimmer(v);
     fetch('/api/touch/master-dimmer', {
@@ -1084,6 +1109,8 @@ function updateDeckStrip(decks) {
    RENDER
    ═══════════════════════════════════════════════════════════════ */
 function renderAll() {
+  renderColors();
+  renderColorTargetGroups();
   renderGroupDimmers();
   renderFixtureList();
   renderMoverPresets();
@@ -1107,41 +1134,17 @@ function renderBlackoutBtn() {
 /* ─── Colors ───────────────────────────────────────────────── */
 function renderColors() {
   const grid = document.getElementById('colorGrid');
-  // Color tiles
-  let html = COLORS.map((c, i) => {
+  if (!grid) return;
+  grid.innerHTML = COLORS.map((c, i) => {
     const dark = (c.r + c.g + c.b) > 600;
     return '<div class="color-tile' + (selectedColor === i ? ' active' : '') +
       '" style="background:' + c.hex + '" data-idx="' + i + '">' +
       '<span class="color-label" style="' + (dark ? 'color:#000;text-shadow:none;background:linear-gradient(transparent,rgba(255,255,255,.3))' : '') + '">' + c.name + '</span></div>';
   }).join('');
 
-  // Action tiles (same style as colors)
-  const actions = [
-    { action:'fullWhite', icon:'&#9728;&#xFE0E;', label:'Full White' },
-    { action:'fullColor', icon:'&#127912;', label:'Full Color' },
-    { action:'dimWarm',   icon:'&#127774;', label:'Dim Warm' },
-    { action:'allOff',    icon:'&#9679;', label:'All Off' },
-    { action:'strobe',    icon:'&#9889;', label:'Strobe' },
-    { action:'uvMode',    icon:'&#128302;', label:'UV Mode' },
-  ];
-  html += actions.map(a =>
-    '<div class="color-tile action-tile" data-action="' + a.action + '">' +
-    '<span class="tile-icon">' + a.icon + '</span>' +
-    '<span class="color-label">' + a.label + '</span></div>'
-  ).join('');
-
-  // Mover preset tiles
-  html += moverPresets.map((p, i) =>
-    '<div class="color-tile mover-tile" data-mover="' + i + '">' +
-    '<span class="color-label">' + esc(p.name) + '</span></div>'
-  ).join('');
-
-  grid.innerHTML = html;
-
-  // Bind color tiles
-  grid.querySelectorAll('.color-tile:not(.action-tile):not(.mover-tile)').forEach(el => {
+  grid.querySelectorAll('.color-tile').forEach(el => {
     const idx = +el.dataset.idx;
-    if (holdMode) {
+    if (colorHoldMode) {
       let t = false;
       el.addEventListener('touchstart', e => { e.preventDefault(); t = true; selectedColor = idx; renderColorActive(); sendColorOverride(); }, { passive: false });
       el.addEventListener('touchend', e => { e.preventDefault(); t = false; clearColorOverrideDMX(); selectedColor = null; renderColorActive(); }, { passive: false });
@@ -1151,29 +1154,21 @@ function renderColors() {
       el.addEventListener('mouseleave', () => { if (!t && selectedColor === idx) { clearColorOverrideDMX(); selectedColor = null; renderColorActive(); } });
     } else {
       el.addEventListener('click', () => {
-        selectedColor = selectedColor === idx ? null : idx;
+        if (selectedColor === idx) {
+          clearColorOverrideDMX();
+          selectedColor = null;
+        } else {
+          selectedColor = idx;
+          sendColorOverride();
+        }
         renderColorActive();
-        if (selectedColor !== null) sendColorOverride();
       });
     }
-  });
-
-  // Bind action tiles
-  grid.querySelectorAll('.action-tile[data-action]').forEach(card => {
-    const action = card.dataset.action;
-    const onFn = () => runAction(action, true);
-    const offFn = () => runAction(action, false);
-    bindHoldToggle(card, onFn, offFn);
-  });
-
-  // Bind mover tiles
-  grid.querySelectorAll('.mover-tile[data-mover]').forEach(el => {
-    el.addEventListener('click', () => sendMoverPreset(moverPresets[+el.dataset.mover]));
   });
 }
 
 function renderColorActive() {
-  document.querySelectorAll('.color-tile').forEach(el => {
+  document.querySelectorAll('#colorGrid .color-tile').forEach(el => {
     el.classList.toggle('active', +el.dataset.idx === selectedColor);
   });
 }
@@ -1242,7 +1237,11 @@ function renderFixtureList() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fixtureId: id, disabled: !fixtureEnabled[id] })
       });
-      if (!fixtureEnabled[id]) blackoutFixture(id);
+      if (!fixtureEnabled[id]) {
+        blackoutFixture(id);
+        notifyOverride('color', [id], false);
+        notifyOverride('movement', [id], false);
+      }
     });
   });
 

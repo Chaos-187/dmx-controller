@@ -53,6 +53,9 @@
     <button class="config-sidebar-btn" data-cfgtab="midi">
       <span class="sidebar-icon">&#127929;</span> MIDI Controller
     </button>
+    <button class="config-sidebar-btn" data-cfgtab="companion">
+      <span class="sidebar-icon">&#128187;</span> Companion
+    </button>
 
     <span class="sidebar-group-label">DJ Integration</span>
     <button class="config-sidebar-btn" data-cfgtab="vdj">
@@ -367,6 +370,37 @@
             </tr></thead>
             <tbody id="midiMappingsTableBody"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Bitfocus Companion / Stream Deck ═══ -->
+    <div class="config-sub-page" id="cfgpage-companion">
+      <div class="config-section">
+        <h3><span class="section-icon">&#128187;</span> Bitfocus Companion</h3>
+        <p class="config-desc">Export a Stream Deck layout for <a href="https://companion.free/" target="_blank" rel="noopener" style="color:var(--accent)">Bitfocus Companion</a>. Layouts include Home, Colors, and FX pages with OUTPUT/BLACKOUT on every page.</p>
+        <div class="config-card">
+          <h4>Export Layout</h4>
+          <p class="config-desc">Built from your current effects and MIDI mappings. For an APC-matched layout, load default MIDI mappings first under <strong>MIDI Controller</strong>.</p>
+          <div class="config-row" style="margin-bottom:8px">
+            <label>Companion host</label>
+            <input type="text" id="companionExportHost" placeholder="192.168.1.10" style="width:200px">
+            <span class="cfg-hint">IP or hostname the Stream Deck PC uses to reach this server</span>
+          </div>
+          <div class="config-row" style="margin-bottom:12px">
+            <label>HTTP port</label>
+            <input type="number" id="companionExportPort" min="1" max="65535" value="80" style="width:100px">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary btn-sm" id="btnExportCompanion15">&#128190; Stream Deck (5&times;3)</button>
+            <button class="btn btn-primary btn-sm" id="btnExportCompanionXL">&#128190; Stream Deck XL (8&times;4)</button>
+          </div>
+          <p style="font-size:11px;color:var(--text-dim);margin-top:10px;margin-bottom:0">Import in Companion: Settings &rarr; Import / Export. Enable <strong>Connections</strong> and <strong>Buttons</strong>.</p>
+          <div id="companionExportStatus" style="font-size:11px;color:var(--text-dim);margin-top:8px"></div>
+        </div>
+        <div class="config-card" style="margin-top:16px">
+          <h4>Module Setup</h4>
+          <p class="config-desc" style="margin-bottom:0">Install the DMX Controller module in Companion (developer path → repo root). See <code>companion/companion/HELP.md</code> in the project for build and connection steps.</p>
         </div>
       </div>
     </div>

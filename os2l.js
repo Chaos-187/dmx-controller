@@ -453,6 +453,12 @@ function executeMapAction(map, activate) {
 
       for (const fix of channelMap) {
         if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+        if (touchOverrides?.disabledFixtures?.size) {
+          const nid = Number(fix.id);
+          if (touchOverrides.disabledFixtures.has(fix.id) || (Number.isFinite(nid) && touchOverrides.disabledFixtures.has(nid))) {
+            continue;
+          }
+        }
         colorFixtureIds.push(fix.id);
         const u = fix.universe;
         if (!channelUpdates[u]) channelUpdates[u] = [];

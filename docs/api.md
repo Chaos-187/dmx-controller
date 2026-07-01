@@ -26,6 +26,7 @@ All request/response bodies are JSON. Set `Content-Type: application/json` for P
 - [Sequence Cues](#sequence-cues)
 - [Auto-Generate Sequence](#auto-generate-sequence)
 - [WebSocket](#websocket)
+- [External Control (Companion)](#external-control-companion)
 
 ---
 
@@ -1135,3 +1136,99 @@ Connect to the WebSocket server at `ws://localhost`.
 ```json
 { "type": "seq_time", "deck": 1, "timeMs": 45230 }
 ```
+
+#### `touchBlackoutHold` — Blackout hold state
+
+```json
+{ "type": "touchBlackoutHold", "active": true }
+```
+
+#### `scene_activated` / `scene_deactivated` — Static scene state
+
+```json
+{ "type": "scene_activated", "sceneId": 3, "sceneName": "Warm Ambience" }
+{ "type": "scene_deactivated" }
+```
+
+---
+
+## External Control (Companion)
+
+The recommended way to control the DMX Controller from an **Elgato Stream Deck** is the included **Bitfocus Companion module** in the [`companion/`](../companion/) directory.
+
+See **[companion.md](./companion.md)** for installation, Stream Deck layout tips, and the full list of module actions and feedbacks.
+
+### Endpoints commonly used by Companion
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/version` | Connection health check |
+| `GET` / `POST` | `/api/dmx/output` | Read / set global output |
+| `POST` | `/api/touch/blackout-hold` | `{ "active": true \| false }` |
+| `POST` | `/api/touch/master-dimmer` | `{ "value": 0-255 }` |
+| `POST` | `/api/touch/effect-speed` | `{ "value": 0.1-3.0 }` |
+| `GET` | `/api/scenes` | List scenes |
+| `GET` | `/api/scenes/active` | `{ "activeSceneId": number \| null }` |
+| `POST` | `/api/scenes/:id/activate` | Activate scene |
+| `POST` | `/api/scenes/deactivate` | Deactivate scene |
+| `GET` | `/api/effects` | List effects |
+| `GET` | `/api/effects/status` | Running effect slots |
+| `POST` | `/api/effects/run` | `{ "effectId", "fixtureIds" }` |
+| `POST` | `/api/effects/stop` | `{ "slot" }` optional |
+| `GET` | `/api/groups` | Fixture groups (includes `fixture_ids`) |
+| `GET` | `/api/fixtures` | All fixtures |
+| `GET` | `/api/sequences` | List sequences |
+
+### Companion-specific endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/companion/layouts` | List available Stream Deck layout downloads |
+| `GET` | `/api/companion/config?layout=streamdeck15` | Download `.companionconfig` (colours from DB, effects from live data) |
+| `GET` / `POST` | `/api/companion/color-mode` | Read or set Colors page input mode |
+| `POST` | `/api/companion/color-release` | Clear all latched companion colours and turn fixtures off |
+| `POST` | `/api/companion/trigger` | Fire action `{ action_type, action_data, mode, key }` (same engine as MIDI) |
+
+#### Color input mode
+
+```http
+GET /api/companion/color-mode
+→ { "pushMode": true, "holdMode": true }
+```
+
+```http
+POST /api/companion/color-mode
+Content-Type: application/json
+
+{ "toggle": true }
+```
+
+Or set explicitly: `{ "push": true }` (PUSH) / `{ "push": false }` (TOGGLE).
+
+Switching **PUSH ↔ TOGGLE** clears all latched companion colour states on the server and turns fixtures off.
+
+#### Colour trigger (used by module)
+
+```http
+POST /api/companion/trigger
+Content-Type: application/json
+
+{
+  "action_type": "color",
+  "action_data": { "red": 255, "green": 0, "blue": 0, "white": 0 },
+  "mode": "on",
+  "key": "color-255-0-0-0"
+}
+```
+
+| `mode` (raw) | PUSH mode (server) | TOGGLE mode (server) |
+|--------------|-------------------|----------------------|
+| `on` | Apply colour | Toggle latch |
+| `off` | Clear colour | Ignored |
+| `toggle` | Apply colour | Toggle latch |
+
+`POST /api/companion/color-release` clears all companion colour latch state (same as the **Release Color** module action). **Only applies in PUSH mode** — ignored in TOGGLE mode so release steps do not undo latched colours.
+
+WebSocket clients (including Companion) use the same server as the browser UI. Sequence transport commands are sent as [client → server sequence messages](#sequence-command); state and feedback use the [server → client message types](#server--client-message-types) above.
+
+The server also broadcasts `{ "type": "companionColorMode", "pushMode": boolean }` when the Colors page input mode changes.

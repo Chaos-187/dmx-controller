@@ -206,6 +206,112 @@ const midiRunningEffects = {};
 // { red, green, blue, white, group_id } — allows re-applying when master dimmer changes
 let activeColorOverride = null;
 
+// Software strobe for RGB fixtures without a hardware strobe channel
+let softwareStrobeTimer = null;
+let softwareStrobeFixtureIds = [];
+
+const SOFTWARE_STROBE_COLOR_TYPES = new Set(['red', 'green', 'blue', 'white', 'amber', 'uv']);
+
+function fixtureHasHardwareStrobe(fix) {
+  for (const ch of fix.channels) {
+    if (ch.type === 'strobe') return true;
+    if (ch.ranges && ch.ranges.some((r) => r.type === 'strobe')) return true;
+  }
+  return false;
+}
+
+function fixtureSupportsSoftwareStrobe(fix) {
+  if (fixtureHasHardwareStrobe(fix)) return false;
+  return fix.channels.some((ch) => SOFTWARE_STROBE_COLOR_TYPES.has(ch.type) || ch.type === 'dimmer');
+}
+
+function strobeColorForFixture(fix) {
+  const ov = activeColorOverride || touchOverrides.activeColorOverride;
+  if (ov) {
+    if (ov.group_id && !(fix.group_ids || []).includes(ov.group_id)) return null;
+    return {
+      red: ov.red || 0,
+      green: ov.green || 0,
+      blue: ov.blue || 0,
+      white: ov.white || 0,
+    };
+  }
+  return { red: 255, green: 255, blue: 255, white: 255 };
+}
+
+function sendSoftwareStrobeFrame(onPhase) {
+  if (touchOverrides.fullOnHold) return;
+  const channelMap = getFixtureChannelMapCached();
+  const channelUpdates = {};
+
+  for (const fix of channelMap) {
+    if (!softwareStrobeFixtureIds.includes(fix.id)) continue;
+    const color = strobeColorForFixture(fix);
+    if (!color) continue;
+    const u = fix.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = [];
+    const fixHasDimmer = fix.channels.some((c) => c.type === 'dimmer');
+
+    for (const ch of fix.channels) {
+      const colorMap = { red: color.red, green: color.green, blue: color.blue, white: color.white };
+      if (colorMap[ch.type] !== undefined) {
+        let val = onPhase ? colorMap[ch.type] : 0;
+        if (onPhase && !fixHasDimmer) val = applyMasterDimmer(val, ch.type);
+        channelUpdates[u].push({ ch: ch.dmx_address, val });
+      } else if (ch.type === 'dimmer') {
+        const val = onPhase ? applyMasterDimmer(255, ch.type) : 0;
+        channelUpdates[u].push({ ch: ch.dmx_address, val });
+      }
+    }
+  }
+
+  if (!getDmxOutputEnabled()) return;
+  for (const [u, channels] of Object.entries(channelUpdates)) {
+    artnetServer.setChannels(+u, channels);
+    dmxUsbServer.setChannels(+u, channels);
+  }
+}
+
+function stopSoftwareStrobe(restoreColor) {
+  if (softwareStrobeTimer) {
+    clearInterval(softwareStrobeTimer);
+    softwareStrobeTimer = null;
+  }
+  const ids = [...softwareStrobeFixtureIds];
+  if (ids.length) setOverride(ids, false);
+  softwareStrobeFixtureIds = [];
+
+  if (!getDmxOutputEnabled() || !ids.length) return;
+  const ov = activeColorOverride || touchOverrides.activeColorOverride;
+  if (restoreColor && ov) {
+    sendColorToDmx(ov.red || 0, ov.green || 0, ov.blue || 0, ov.white || 0, ov.group_id, true);
+    return;
+  }
+  // Turn off — temporarily restore ids for one final frame
+  softwareStrobeFixtureIds = ids;
+  sendSoftwareStrobeFrame(false);
+  softwareStrobeFixtureIds = [];
+}
+
+function startSoftwareStrobe(strobeSpeed, fixtureIds) {
+  stopSoftwareStrobe(false);
+  if (!fixtureIds.length) return;
+
+  softwareStrobeFixtureIds = fixtureIds;
+  setOverride(fixtureIds, true);
+
+  const hz = Math.max(2, (strobeSpeed / 255) * 15 + 2);
+  const halfPeriodMs = Math.max(30, Math.round(500 / hz));
+  let onPhase = true;
+  sendSoftwareStrobeFrame(true);
+  softwareStrobeTimer = setInterval(() => {
+    onPhase = !onPhase;
+    sendSoftwareStrobeFrame(onPhase);
+  }, halfPeriodMs);
+
+  console.log(`[MIDI] Software strobe on ${fixtureIds.length} fixture(s) at ~${hz.toFixed(1)} Hz`);
+}
+
 // ─── Initialise ─────────────────────────────────────────────────────────────
 
 /**
@@ -797,6 +903,12 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
 
   for (const fix of channelMap) {
     if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+    if (touchOverrides?.disabledFixtures?.size) {
+      const nid = Number(fix.id);
+      if (touchOverrides.disabledFixtures.has(fix.id) || (Number.isFinite(nid) && touchOverrides.disabledFixtures.has(nid))) {
+        continue;
+      }
+    }
     colorFixtureIds.push(fix.id);
     const u = fix.universe;
     if (!channelUpdates[u]) channelUpdates[u] = [];
@@ -843,6 +955,48 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
     }
   }
   return colorFixtureIds;
+}
+
+/** Set all DMX channels to 255 on every universe in use (or one universe if filtered). */
+function applyFullOnDmx(universeFilter) {
+  const channelMap = getFixtureChannelMapCached();
+  const universes = new Set();
+  if (universeFilter) {
+    universes.add(universeFilter);
+  } else {
+    for (const fix of channelMap) universes.add(fix.universe || 1);
+    if (universes.size === 0) universes.add(1);
+  }
+  if (!getDmxOutputEnabled()) return;
+  for (const universe of universes) {
+    const ch = [];
+    for (let i = 1; i <= 512; i++) ch.push({ ch: i, val: 255 });
+    artnetServer.setChannels(universe, ch);
+    dmxUsbServer.setChannels(universe, ch);
+  }
+}
+
+/** Restore fixture channels after Full On release (pan/tilt home, others off). */
+function restoreAfterFullOn(universeFilter) {
+  const channelMap = getFixtureChannelMapCached();
+  const byUniverse = {};
+  for (const fix of channelMap) {
+    const u = fix.universe || 1;
+    if (universeFilter && u !== universeFilter) continue;
+    if (!byUniverse[u]) byUniverse[u] = {};
+    for (const c of fix.channels) {
+      if (c.type === 'pan') byUniverse[u][c.dmx_address] = fix.home_pan ?? 128;
+      else if (c.type === 'tilt') byUniverse[u][c.dmx_address] = fix.home_tilt ?? 128;
+      else byUniverse[u][c.dmx_address] = 0;
+    }
+  }
+  if (!getDmxOutputEnabled()) return;
+  for (const [u, chMap] of Object.entries(byUniverse)) {
+    const ch = [];
+    for (let i = 1; i <= 512; i++) ch.push({ ch: i, val: chMap[i] ?? 0 });
+    artnetServer.setChannels(+u, ch);
+    dmxUsbServer.setChannels(+u, ch);
+  }
 }
 
 // ─── Action Execution ───────────────────────────────────────────────────────
@@ -916,6 +1070,7 @@ function executeMidiAction(mapping, isOn) {
       const channelMap = getFixtureChannelMapCached();
       const channelUpdates = {};
       const strobeFixtureIds = [];
+      const softwareStrobeIds = [];
 
       for (const fix of channelMap) {
         const u = fix.universe;
@@ -936,7 +1091,17 @@ function executeMidiAction(mapping, isOn) {
             }
           }
         }
-        if (fixAffected) strobeFixtureIds.push(fix.id);
+        if (fixAffected) {
+          strobeFixtureIds.push(fix.id);
+        } else if (activate && fixtureSupportsSoftwareStrobe(fix) && strobeColorForFixture(fix)) {
+          softwareStrobeIds.push(fix.id);
+        }
+      }
+
+      if (activate) {
+        if (softwareStrobeIds.length) startSoftwareStrobe(strobeSpeed, softwareStrobeIds);
+      } else {
+        stopSoftwareStrobe(true);
       }
 
       if (dmxOutputEnabled) {
@@ -953,32 +1118,47 @@ function executeMidiAction(mapping, isOn) {
     case 'color': {
       const { red = 0, green = 0, blue = 0, white = 0, group_id } = actionData;
       if (activate) {
+        if (mapping.toggle_mode === 'toggle') {
+          releaseOtherCompanionColorToggles(mapping.id);
+        }
         activeColorOverride = { red, green, blue, white, group_id };
         touchOverrides.activeColorOverride = { red, green, blue, white, group_id };
+        if (!isAnySequencePlaying()) {
+          sendColorToDmx(red, green, blue, white, group_id, true);
+        }
       } else {
         activeColorOverride = null;
         touchOverrides.activeColorOverride = null;
-      }
-      // When a sequence is playing, color is overlaid each tick — only push DMX when idle
-      if (!isAnySequencePlaying()) {
-        sendColorToDmx(red, green, blue, white, group_id, activate);
+        sendColorToDmx(red, green, blue, white, group_id, false);
       }
       broadcast({ type: 'midi_action', action: 'color', mapping: mapping.name, active: activate });
       break;
     }
 
     case 'effect': {
-      const { effect_id, group_id } = actionData;
-      if (activate && effect_id) {
-        const effect = db.getEffect(effect_id);
-        if (effect) {
-          const channelMap = getFixtureChannelMapCached();
-          const fixtureByIdMap = getFixtureChannelMapByIdMap();
-          let fixtureIds = channelMap.map(f => f.id);
-          if (group_id) {
-            fixtureIds = channelMap.filter(f => (f.group_ids || []).includes(group_id)).map(f => f.id);
-          }
-          if (fixtureIds.length > 0) {
+      const { effect_id, effect_name, group_id } = actionData;
+      let resolvedEffectId = effect_id;
+      if (activate && (resolvedEffectId || effect_name)) {
+        let effect = resolvedEffectId ? db.getEffect(resolvedEffectId) : null;
+        if (!effect && effect_name) {
+          const norm = String(effect_name).normalize('NFKC').replace(/\u2192/g, '->').trim().toLowerCase();
+          effect = (db.getEffects ? db.getEffects() : []).find((e) => {
+            const en = String(e.name).normalize('NFKC').replace(/\u2192/g, '->').trim().toLowerCase();
+            return en === norm || en.includes(norm);
+          }) || null;
+          if (effect) resolvedEffectId = effect.id;
+        }
+        if (!effect) {
+          console.log(`[MIDI] Effect not found (id=${effect_id}, name=${effect_name || ''}) — no action taken`);
+          break;
+        }
+        const channelMap = getFixtureChannelMapCached();
+        const fixtureByIdMap = getFixtureChannelMapByIdMap();
+        let fixtureIds = channelMap.map(f => f.id);
+        if (group_id) {
+          fixtureIds = channelMap.filter(f => (f.group_ids || []).includes(group_id)).map(f => f.id);
+        }
+        if (fixtureIds.length > 0) {
             const slot = getEffectSlot(effect.type);
             stopRunningEffect(slot, true);
             setOverride(fixtureIds, true);
@@ -986,6 +1166,7 @@ function executeMidiAction(mapping, isOn) {
 
             const timer = setInterval(() => {
               if (!getDmxOutputEnabled()) return;
+              if (touchOverrides.fullOnHold) return;
               const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
               const chUpdates = {};
               for (let fi = 0; fi < fixtureIds.length; fi++) {
@@ -1021,19 +1202,20 @@ function executeMidiAction(mapping, isOn) {
                 }
               }
             }, 25);
-            runningQaEffects[slot] = { timer, effectId: effect_id, fixtureIds };
-            midiRunningEffects[slot] = { timer, effectId: effect_id, fixtureIds };
-            console.log(`[MIDI] Started effect "${effect.name}" via MIDI mapping`);
+            runningQaEffects[slot] = { timer, effectId: resolvedEffectId, fixtureIds };
+            midiRunningEffects[slot] = { timer, effectId: resolvedEffectId, fixtureIds };
+            console.log(`[MIDI] Started effect "${effect.name}" (id ${resolvedEffectId}) on ${fixtureIds.length} fixture(s)`);
+          } else {
+            console.log(`[MIDI] Effect "${effect.name}" — no fixtures to run on (add fixtures in Config → Devices)`);
           }
-        }
       } else {
         // Deactivate: only stop the slot for THIS specific effect
-        if (effect_id) {
-          const deactivatedEffect = db.getEffect(effect_id);
+        if (resolvedEffectId) {
+          const deactivatedEffect = db.getEffect(resolvedEffectId);
           if (deactivatedEffect) {
             const slot = getEffectSlot(deactivatedEffect.type);
             const entry = midiRunningEffects[slot];
-            if (entry && entry.effectId === effect_id) {
+            if (entry && entry.effectId === resolvedEffectId) {
               if (entry.fixtureIds) setOverride(entry.fixtureIds, false);
               delete midiRunningEffects[slot];
               stopRunningEffect(slot, false);
@@ -1085,33 +1267,19 @@ function executeMidiAction(mapping, isOn) {
     }
 
     case 'full_on': {
-      const universe = actionData.universe || 1;
+      const universe = actionData.universe || null;
+      touchOverrides.fullOnHold = activate;
       setOverride(getAffectedFixtureIds(), activate);
       if (activate) {
-        const ch = [];
-        for (let i = 1; i <= 512; i++) ch.push({ ch: i, val: 255 });
-        if (dmxOutputEnabled) {
-          artnetServer.setChannels(universe, ch);
-          dmxUsbServer.setChannels(universe, ch);
-        }
+        stopSoftwareStrobe(false);
+        applyFullOnDmx(universe);
       } else {
-        // Send home positions for pan/tilt, 0 for everything else
-        const channelMap = getFixtureChannelMapCached();
-        const chUpdates = {};
-        for (const fix of channelMap) {
-          if (fix.universe !== universe) continue;
-          for (const c of fix.channels) {
-            if (c.type === 'pan') chUpdates[c.dmx_address] = fix.home_pan ?? 128;
-            else if (c.type === 'tilt') chUpdates[c.dmx_address] = fix.home_tilt ?? 128;
-            else chUpdates[c.dmx_address] = 0;
-          }
-        }
-        // Fill gaps with 0 for any unclaimed channels
-        const ch = [];
-        for (let i = 1; i <= 512; i++) ch.push({ ch: i, val: chUpdates[i] ?? 0 });
-        if (dmxOutputEnabled) {
-          artnetServer.setChannels(universe, ch);
-          dmxUsbServer.setChannels(universe, ch);
+        touchOverrides.fullOnHold = false;
+        const ov = activeColorOverride || touchOverrides.activeColorOverride;
+        if (ov) {
+          sendColorToDmx(ov.red || 0, ov.green || 0, ov.blue || 0, ov.white || 0, ov.group_id, true);
+        } else {
+          restoreAfterFullOn(universe);
         }
       }
       broadcast({ type: 'midi_action', action: 'full_on', mapping: mapping.name, active: activate });
@@ -1120,6 +1288,8 @@ function executeMidiAction(mapping, isOn) {
 
     case 'stop_all_effects': {
       if (activate) {
+        stopSoftwareStrobe(false);
+        touchOverrides.fullOnHold = false;
         // Stop all MIDI-started effects and release their overrides
         for (const slot of Object.keys(midiRunningEffects)) {
           const entry = midiRunningEffects[slot];
@@ -1893,6 +2063,121 @@ function createDefaultMappings() {
   console.log(`[MIDI] Created default APC Mini mappings (${PAGE_COUNT} pages)`);
 }
 
+// ─── External trigger (Companion, etc.) ─────────────────────────────────────
+
+/**
+ * Fire a DMX action using the same engine as MIDI mappings.
+ * @param {string} action_type
+ * @param {object} action_data
+ * @param {{ mode?: 'toggle'|'on'|'off'|'momentary', key?: string, active?: boolean }} opts
+ */
+function isCompanionColorToggleKey(key) {
+  const s = String(key);
+  return s.startsWith('color-') || s.startsWith('companion-color-');
+}
+
+function parseCompanionColorKey(key) {
+  const s = String(key);
+  if (s.startsWith('color-')) {
+    const parts = s.slice(6).split('-').map(Number);
+    if (parts.length >= 3 && parts.every((n) => Number.isFinite(n))) {
+      const [red, green, blue, white = 0] = parts;
+      return { red, green, blue, white };
+    }
+  }
+  if (s.startsWith('companion-color-')) {
+    try {
+      const data = JSON.parse(s.slice('companion-color-'.length));
+      return {
+        red: data.red ?? 0,
+        green: data.green ?? 0,
+        blue: data.blue ?? 0,
+        white: data.white ?? 0,
+      };
+    } catch (_) { /* ignore */ }
+  }
+  return null;
+}
+
+function companionColorMapping(key, rgb) {
+  return {
+    id: key,
+    name: 'Companion',
+    action_type: 'color',
+    action_data: JSON.stringify(rgb),
+    toggle_mode: 'momentary',
+    midi_type: 'note',
+    midi_number: 0,
+  };
+}
+
+function deactivateCompanionColorKey(key) {
+  if (!isCompanionColorToggleKey(key)) return false;
+  const rgb = parseCompanionColorKey(key);
+  activeToggles.delete(key);
+  if (rgb) {
+    executeMidiAction(companionColorMapping(key, rgb), false);
+  }
+  return true;
+}
+
+function releaseOtherCompanionColorToggles(currentKey) {
+  for (const key of [...activeToggles]) {
+    if (key === currentKey) continue;
+    if (!isCompanionColorToggleKey(key)) continue;
+    deactivateCompanionColorKey(key);
+  }
+}
+
+function clearCompanionColorOverride() {
+  const ov = activeColorOverride || touchOverrides?.activeColorOverride;
+  let cleared = 0;
+  for (const key of [...activeToggles]) {
+    if (deactivateCompanionColorKey(key)) cleared++;
+  }
+  activeColorOverride = null;
+  if (touchOverrides) touchOverrides.activeColorOverride = null;
+  if (getDmxOutputEnabled()) {
+    if (ov) {
+      sendColorToDmx(ov.red || 0, ov.green || 0, ov.blue || 0, ov.white || 0, ov.group_id, false);
+    } else {
+      sendColorToDmx(0, 0, 0, 0, null, false);
+    }
+  }
+  if (cleared > 0 || ov) {
+    broadcast({ type: 'midi_action', action: 'color', mapping: 'Companion', active: false });
+    console.log(`[Companion] Cleared color state (${cleared} toggle key(s)${ov ? ', had override' : ''})`);
+  }
+}
+
+function triggerAction(action_type, action_data = {}, opts = {}) {
+  const mode = opts.mode || 'momentary';
+  const key = opts.key || `companion-${action_type}-${JSON.stringify(action_data)}`;
+  const mapping = {
+    id: key,
+    name: 'Companion',
+    action_type,
+    action_data: JSON.stringify(action_data || {}),
+    toggle_mode: mode === 'toggle' ? 'toggle' : 'momentary',
+    midi_type: 'note',
+    midi_number: 0,
+  };
+
+  if (mode === 'toggle') {
+    executeMidiAction(mapping, true);
+    return;
+  }
+  if (mode === 'on') {
+    executeMidiAction(mapping, true);
+    return;
+  }
+  if (mode === 'off') {
+    executeMidiAction(mapping, false);
+    return;
+  }
+  executeMidiAction(mapping, !!opts.active);
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -1901,6 +2186,10 @@ module.exports = {
   stop,
   reconnect,
   registerRoutes,
+  triggerAction,
+  clearCompanionColorOverride,
+  PAGE_NAMES,
+  PAGE_COUNT,
   listPorts,
   isConnected: () => connected,
   getDeviceName: () => currentDeviceName,
@@ -1915,6 +2204,4 @@ module.exports = {
   // Page system
   getCurrentPage: () => currentPage,
   switchPage,
-  PAGE_NAMES,
-  PAGE_COUNT,
 };

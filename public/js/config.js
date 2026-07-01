@@ -509,6 +509,7 @@ function loadActiveTabData() {
     'fixture-library': () => loadTypes(),
     about:           () => loadAboutInfo(),
     midi:            () => { loadMidiStatus(); loadMidiMappings(); },
+    companion:       () => loadCompanionExportDefaults(),
   };
   if (loaders[tab]) loaders[tab]();
 }
@@ -3573,6 +3574,55 @@ document.getElementById('btnMidiDefaults').addEventListener('click', async () =>
   await fetch('/api/midi/presets/default', { method: 'POST' });
   loadMidiMappings();
 });
+
+async function loadCompanionExportDefaults() {
+  const hostEl = document.getElementById('companionExportHost');
+  const portEl = document.getElementById('companionExportPort');
+  if (!hostEl) return;
+  try {
+    const [status, config] = await Promise.all([
+      fetch('/api/mdns/status').then(r => r.json()),
+      fetch('/api/config').then(r => r.json()),
+    ]);
+    if (hostEl.dataset.userEdited !== '1') {
+      hostEl.value = status.ip || (status.fqdn || '').replace(/\.local$/i, '') || window.location.hostname || '127.0.0.1';
+    }
+    if (portEl) portEl.value = config.web_port || status.web_port || window.location.port || '80';
+  } catch (e) {
+    console.warn('Companion export defaults:', e);
+  }
+}
+
+document.getElementById('companionExportHost')?.addEventListener('input', (e) => {
+  e.target.dataset.userEdited = '1';
+});
+
+async function downloadCompanionConfig(layout) {
+  const statusEl = document.getElementById('companionExportStatus');
+  const host = document.getElementById('companionExportHost')?.value.trim() || '127.0.0.1';
+  const port = document.getElementById('companionExportPort')?.value || '80';
+  const label = layout === 'streamdeck-xl' ? 'Stream Deck XL' : 'Stream Deck (5×3)';
+  if (statusEl) statusEl.textContent = `Generating ${label} layout…`;
+  try {
+    const url = `/api/companion/config?layout=${encodeURIComponent(layout)}&host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(await resp.text() || 'Export failed');
+    const blob = await resp.blob();
+    const filename = `dmx-controller-${layout}.companionconfig`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    if (statusEl) statusEl.textContent = `Downloaded ${filename} (host ${host}:${port})`;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '';
+    alert(`Companion export failed: ${e.message}`);
+  }
+}
+
+document.getElementById('btnExportCompanion15')?.addEventListener('click', () => downloadCompanionConfig('streamdeck15'));
+document.getElementById('btnExportCompanionXL')?.addEventListener('click', () => downloadCompanionConfig('streamdeck-xl'));
 
 document.getElementById('btnMidiLearn').addEventListener('click', async () => {
   const btn = document.getElementById('btnMidiLearn');

@@ -47,6 +47,13 @@
     .mode-switch .mode-opt.active {
       background: var(--accent); color: #111;
     }
+    .mode-switch-full {
+      display: flex; width: 100%; max-width: 480px; margin: 0 auto;
+      border: 2px solid var(--border); border-radius: 14px; overflow: hidden; padding: 0;
+    }
+    .mode-switch-full .mode-opt {
+      flex: 1; text-align: center; padding: 16px 12px; font-size: 15px; font-weight: 700;
+    }
 
     /* Buttons */
     .btn {
@@ -244,10 +251,6 @@
 <div class="header">
   <h1>DMX Show Control</h1>
   <div class="header-actions">
-    <div class="mode-switch" id="modeSwitch">
-      <div class="mode-opt active" data-mode="hold">HOLD</div>
-      <div class="mode-opt" data-mode="toggle">TOGGLE</div>
-    </div>
     <button id="btnOutput" class="btn btn-master" style="padding:12px 18px">OUTPUT</button>
     <button id="btnBlackout" class="btn btn-blackout" style="padding:12px 18px">BLACKOUT</button>
   </div>
@@ -285,6 +288,12 @@
     </div>
     <div style="text-align:center;margin-top:14px">
       <button class="btn" style="background:var(--border);color:var(--text);font-size:14px;padding:12px 28px" onclick="clearColorOverride()">Clear Override</button>
+    </div>
+    <div style="margin-top:16px">
+      <div class="mode-switch mode-switch-full" id="colorModeSwitch">
+        <div class="mode-opt active" data-mode="hold">HOLD</div>
+        <div class="mode-opt" data-mode="toggle">TOGGLE</div>
+      </div>
     </div>
   </div>
   <div class="section">
@@ -360,6 +369,7 @@ let fixtureEnabled = {};
 let fixtureDimmer = {};
 let groupDimmer = {};
 let holdMode = true;
+let colorHoldMode = true;
 let ws = null;
 
 const COLORS = [
@@ -380,7 +390,7 @@ const COLORS = [
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
   initTabs();
-  initModeSwitch();
+  initColorModeSwitch();
   initFxBarButtons();
   initActionButtons();
   await Promise.all([fetchFixtures(), fetchGroups(), fetchMoverPresets(), fetchOutputState()]);
@@ -399,21 +409,24 @@ function initTabs() {
   });
 }
 
-function initModeSwitch() {
-  const sw = document.getElementById('modeSwitch');
+function initColorModeSwitch() {
+  const sw = document.getElementById('colorModeSwitch');
+  if (!sw) return;
   sw.querySelectorAll('.mode-opt').forEach(opt => {
     opt.addEventListener('click', () => {
-      holdMode = opt.dataset.mode === 'hold';
+      colorHoldMode = opt.dataset.mode === 'hold';
       sw.querySelectorAll('.mode-opt').forEach(o => o.classList.remove('active'));
       opt.classList.add('active');
-      if (holdMode) releaseAllActions();
-      // Re-render colors to rebind events
+      if (colorHoldMode) {
+        clearColorOverrideDMX();
+        selectedColor = null;
+        renderColorActive();
+      }
       renderColors();
     });
   });
 }
 
-// FX bar buttons: strobe / smoke / haze with hold/toggle support
 function initFxBarButtons() {
   bindHoldToggle(document.getElementById('btnStrobe'), strobeOn, strobeOff);
   bindHoldToggle(document.getElementById('btnSmoke'), () => setSmokeHaze('smoke', true), () => setSmokeHaze('smoke', false));
@@ -583,7 +596,7 @@ function renderColors() {
   ).join('');
   grid.querySelectorAll('.color-swatch').forEach(el => {
     const idx = +el.dataset.idx;
-    if (holdMode) {
+    if (colorHoldMode) {
       let touchActive = false;
       el.addEventListener('touchstart', (e) => {
         e.preventDefault(); touchActive = true;
@@ -611,9 +624,14 @@ function renderColors() {
       });
     } else {
       el.addEventListener('click', () => {
-        selectedColor = selectedColor === idx ? null : idx;
+        if (selectedColor === idx) {
+          clearColorOverrideDMX();
+          selectedColor = null;
+        } else {
+          selectedColor = idx;
+          sendColorOverride();
+        }
         renderColorActive();
-        if (selectedColor !== null) sendColorOverride();
       });
     }
   });
@@ -679,7 +697,11 @@ function renderFixtureList() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fixtureId: id, disabled: !fixtureEnabled[id] })
       });
-      if (!fixtureEnabled[id]) blackoutFixture(id);
+      if (!fixtureEnabled[id]) {
+        blackoutFixture(id);
+        notifyOverride('color', [id], false);
+        notifyOverride('movement', [id], false);
+      }
     });
   });
 }
