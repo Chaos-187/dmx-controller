@@ -515,6 +515,7 @@ function handleOs2lSubscribed(data) {
                 touchOverrides.colorOverrideFixtures.clear();
                 touchOverrides.movementOverrideFixtures.clear();
                 touchOverrides.smokeOverrideFixtures.clear();
+                touchOverrides.atmosphereOverrideFixtures.clear();
                 deactivateScene(); // Stop any scene effect loop from end-action
                 stopPlaybackTimer(deck);
                 blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
@@ -550,6 +551,7 @@ function handleOs2lSubscribed(data) {
           touchOverrides.colorOverrideFixtures.clear();
           touchOverrides.movementOverrideFixtures.clear();
           touchOverrides.smokeOverrideFixtures.clear();
+          touchOverrides.atmosphereOverrideFixtures.clear();
           deactivateScene(); // Stop any scene effect loop from end-action
           stopPlaybackTimer(deck);
           blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
@@ -1928,6 +1930,7 @@ const touchOverrides = {
   colorOverrideFixtures: new Set(),    // fixture IDs with color overridden from touch UI
   movementOverrideFixtures: new Set(), // fixture IDs with movement overridden from touch UI
   smokeOverrideFixtures: new Set(),    // fixture IDs with smoke overridden from touch UI
+  atmosphereOverrideFixtures: new Set(), // fixture IDs with atmosphere/fire overridden (manual only)
   /** MIDI / OS2L live color — applied as overlay each sequence tick (movement continues). */
   activeColorOverride: null,
   /** True while Full On is held — blocks effect ticks from overwriting DMX. */
@@ -1982,6 +1985,8 @@ function clearFixtureOverrideTracking(fixtureId) {
   touchOverrides.movementOverrideFixtures.delete(fixtureId);
   touchOverrides.smokeOverrideFixtures.delete(fid);
   touchOverrides.smokeOverrideFixtures.delete(fixtureId);
+  touchOverrides.atmosphereOverrideFixtures.delete(fid);
+  touchOverrides.atmosphereOverrideFixtures.delete(fixtureId);
 }
 
 app.get('/api/dmx/output', (req, res) => {
@@ -2142,6 +2147,17 @@ app.post('/api/touch/smoke-override', (req, res) => {
     else touchOverrides.smokeOverrideFixtures.delete(id);
   }
   console.log(`[TOUCH] Smoke override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.smokeOverrideFixtures.size})`);
+  res.json({ ok: true });
+});
+
+app.post('/api/touch/atmosphere-override', (req, res) => {
+  const { fixtureIds, active } = req.body;
+  if (!Array.isArray(fixtureIds)) return res.status(400).json({ error: 'fixtureIds required' });
+  for (const id of fixtureIds) {
+    if (active) touchOverrides.atmosphereOverrideFixtures.add(id);
+    else touchOverrides.atmosphereOverrideFixtures.delete(id);
+  }
+  console.log(`[TOUCH] Atmosphere override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.atmosphereOverrideFixtures.size})`);
   res.json({ ok: true });
 });
 
@@ -4121,6 +4137,8 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
       if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
       if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
       if (hasSmokeOverride && ch.type === 'smoke') continue;
+      // Atmosphere (fire/flame) is manual-only — never driven by sequences
+      if (ch.type === 'atmosphere') continue;
 
       let value = null;
       let skipRangeMap = false; // true when value is already mapped to a specific range
@@ -4313,6 +4331,8 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
         if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
         if (hasSmokeOverride && ch.type === 'smoke') continue;
+      // Atmosphere (fire/flame) is manual-only — never driven by sequences
+      if (ch.type === 'atmosphere') continue;
 
         const channelCtx = buildChannelCtx(ch, fixMap);
         channelCtx._rigFixtureCount = fixtureCount;

@@ -84,6 +84,9 @@ Variable: `$(dmx-controller:color_mode)` → `PUSH` or `TOGGLE`
 |--------|-------------|
 | DMX Output | Toggle, enable, or disable global DMX output |
 | Blackout Hold | Momentary or toggle blackout (press + release) |
+| Strobe | Strobe on while held (press + release) |
+| Smoke | Smoke/fog on while held (press + release) |
+| Fire Effect | Fire FX on while held (press + release) |
 | Set Color (Press) | Turn a colour on (press step) |
 | Release Color | Turn off active push colour (release step) |
 | Toggle Color Input Mode | Switch Colors page between PUSH and TOGGLE |
@@ -92,11 +95,18 @@ Variable: `$(dmx-controller:color_mode)` → `PUSH` or `TOGGLE`
 | Toggle Fixture | Enable/disable a fixture |
 | Run Effect | Start a quick-action effect on all fixtures or a group |
 | Stop Effects | Stop all effects or a specific slot |
-| Strobe / Full On | Momentary rig controls |
+| Full On | Full rig on while held |
 | Master Dimmer | Set master dimmer 0–255 |
 | Effect Speed | Set effect speed multiplier 0.1–3.0× |
 | Sequence: Load / Play / Pause / Unload | Control sequencer decks 1–4 via WebSocket |
 | Refresh Scenes / Effects / Sequences | Reload dropdown choices after config changes |
+
+### Home page — Strobe, Smoke, Fire
+
+The **Home** page includes **STROBE**, **SMOKE**, and **FIRE** buttons (after the page shortcuts). Each uses **press + release** — on while held, off when released — same as **BLACKOUT**.
+
+- **Smoke** — drives fixtures with a `smoke` channel (fog/haze machines)
+- **Fire** — drives fixtures with an `atmosphere` channel (flame/pyro machines). Manual trigger only — sequences never control atmosphere channels.
 
 ### Blackout on Stream Deck
 

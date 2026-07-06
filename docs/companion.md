@@ -104,7 +104,7 @@ Status should show **OK** when the server is reachable.
 
 | Page | MIDI equivalent | Contents |
 |------|-----------------|----------|
-| **Home** | Global (page 0) | Page shortcuts, globals, scene off — nav row: **BLACKOUT**, **OUTPUT** only |
+| **Home** | Global (page 0) | Page shortcuts, **STROBE**, **SMOKE**, **FIRE** (hold), other globals, scene off — nav: **BLACKOUT**, **OUTPUT** |
 | **Fixtures** | — | Toggle fixtures on/off |
 | **Scenes** | — | Activate scenes |
 | **Colors** | Page 1 | Color presets — **PUSH** or **TOGGLE** input mode |
@@ -198,6 +198,9 @@ After adding scenes, effects, or sequences in the DMX Config UI, run **Refresh S
 |----|-------------|
 | `dmx_output` | Toggle / on / off global DMX output |
 | `blackout` | Blackout hold on, off, or toggle |
+| `strobe` | Strobe on/off/toggle (hold on Stream Deck) |
+| `smoke` | Smoke/fog machines on/off/toggle (hold) |
+| `fire` | Atmosphere/fire machines on/off/toggle (hold; `atmosphere` channel type) |
 | `set_color_press` | Set color on button press (PUSH / TOGGLE) |
 | `release_color` | Clear active push color on button release (no options) |
 | `set_color_release` | Legacy per-colour release — prefer `release_color` |
@@ -208,7 +211,6 @@ After adding scenes, effects, or sequences in the DMX Config UI, run **Refresh S
 | `toggle_fixture` | Enable/disable a fixture from the rig |
 | `run_effect` | Run quick-action effect (all fixtures or group) |
 | `stop_effects` | Stop all or one effect slot |
-| `strobe` | Strobe on/off/toggle |
 | `full_on` | Full on hold |
 | `master_dimmer` | Set master dimmer 0–255 |
 | `effect_speed` | Set effect speed 0.1–3.0× |

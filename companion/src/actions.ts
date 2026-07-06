@@ -9,6 +9,8 @@ export type ActionsSchema = {	dmx_output: { options: { mode: string } }
 	release_color: { options: Record<string, never> }
 	toggle_color_mode: { options: Record<string, never> }
 	strobe: { options: { mode: string } }
+	smoke: { options: { mode: string } }
+	fire: { options: { mode: string } }
 	full_on: { options: { mode: string } }
 	activate_scene: { options: { scene_id: string; scene_name: string; mode: string } }
 	deactivate_scene: { options: Record<string, never> }
@@ -229,6 +231,54 @@ export function UpdateActions(self: ModuleInstance): void {
 				logAction(self, 'strobe', { mode })
 				if (!requireClient(self, client, 'strobe')) return
 				await client!.trigger('strobe', {}, mode)
+				self.checkAllFeedbacks()
+			},
+		},
+
+		smoke: {
+			name: 'Smoke',
+			options: [
+				{
+					id: 'mode',
+					type: 'dropdown',
+					label: 'Mode',
+					default: 'on',
+					choices: [
+						{ id: 'on', label: 'On' },
+						{ id: 'off', label: 'Off' },
+						{ id: 'toggle', label: 'Toggle' },
+					],
+				},
+			],
+			callback: async (event) => {
+				const mode = String(optionValue(event.options.mode) || 'on')
+				logAction(self, 'smoke', { mode })
+				if (!requireClient(self, client, 'smoke')) return
+				await client!.trigger('smoke', {}, mode)
+				self.checkAllFeedbacks()
+			},
+		},
+
+		fire: {
+			name: 'Fire (Atmosphere)',
+			options: [
+				{
+					id: 'mode',
+					type: 'dropdown',
+					label: 'Mode',
+					default: 'on',
+					choices: [
+						{ id: 'on', label: 'On' },
+						{ id: 'off', label: 'Off' },
+						{ id: 'toggle', label: 'Toggle' },
+					],
+				},
+			],
+			callback: async (event) => {
+				const mode = String(optionValue(event.options.mode) || 'on')
+				logAction(self, 'fire', { mode })
+				if (!requireClient(self, client, 'fire')) return
+				await client!.trigger('fire', {}, mode)
 				self.checkAllFeedbacks()
 			},
 		},

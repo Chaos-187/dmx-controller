@@ -163,6 +163,24 @@ function mkOutputButton() {
 }
 
 /** Bottom row: HOME, STOP FX (or color mode on Colors page), shortcuts, BLACKOUT + OUTPUT. */
+function mkHoldActionButton({ text, bgcolor, color = 0xffffff, actionId, extraOpts = {} }) {
+  return mkButton({
+    text,
+    bgcolor,
+    color,
+    down: [mkAction(actionId, { ...extraOpts, mode: 'on' })],
+    up: [mkAction(actionId, { ...extraOpts, mode: 'off' })],
+  });
+}
+
+function mkHomeUtilityButtons() {
+  return [
+    mkHoldActionButton({ text: 'STROBE', bgcolor: 0xffd60a, color: 0x000000, actionId: 'strobe' }),
+    mkHoldActionButton({ text: 'SMOKE', bgcolor: 0x78909c, actionId: 'smoke' }),
+    mkHoldActionButton({ text: 'FIRE', bgcolor: 0xbf360c, actionId: 'fire' }),
+  ];
+}
+
 function mkStopFxButton() {
   return mkButton({
     text: 'STOP\nFX',
@@ -306,13 +324,11 @@ function mappingToButton(mapping, effects = []) {
     case 'blackout':
       return mkBlackoutButton();
     case 'strobe':
-      return mkButton({
-        text: 'STROBE',
-        bgcolor: 0xffd60a,
-        color: 0x000000,
-        down: [mkAction('strobe', { mode: 'on' })],
-        up: [mkAction('strobe', { mode: 'off' })],
-      });
+      return mkHoldActionButton({ text: 'STROBE', bgcolor: 0xffd60a, color: 0x000000, actionId: 'strobe' });
+    case 'smoke':
+      return mkHoldActionButton({ text: 'SMOKE', bgcolor: 0x78909c, actionId: 'smoke' });
+    case 'fire':
+      return mkHoldActionButton({ text: 'FIRE', bgcolor: 0xbf360c, actionId: 'fire' });
     case 'full_on':
       return mkButton({
         text: 'FULL ON',
@@ -368,8 +384,12 @@ function buildHomePage(pageMap, midiMappings, effects, cols, rows) {
     mkPageShortcut('Rig FX', 'Rig\nFX', pageMap, 0x0a84ff),
   ];
 
+  const homeUtilities = mkHomeUtilityButtons();
+  const skipHomeGlobals = new Set(['strobe', 'smoke', 'fire']);
+
   const globals = globalMappings(midiMappings)
     .filter((m) => m.action_type !== 'blackout' && m.action_type !== 'stop_all_effects')
+    .filter((m) => !skipHomeGlobals.has(m.action_type))
     .map((m) => mappingToButton(m, effects))
     .filter(Boolean);
 
@@ -380,7 +400,7 @@ function buildHomePage(pageMap, midiMappings, effects, cols, rows) {
     down: [mkAction('deactivate_scene', {})],
   });
 
-  fillGrid(controls, cols, contentRows, [...pageLinks, ...globals, sceneOff].slice(0, maxItems));
+  fillGrid(controls, cols, contentRows, [...pageLinks, ...homeUtilities, ...globals, sceneOff].slice(0, maxItems));
   addNavBar(controls, cols, rows, pageMap, 'Home');
   return mkPage('Home', controls, cols, rows);
 }

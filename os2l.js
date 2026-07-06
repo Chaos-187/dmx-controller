@@ -624,6 +624,35 @@ function executeMapAction(map, activate) {
       break;
     }
 
+    case 'fire': {
+      const channelMap = db.getFixtureChannelMap();
+      const channelUpdates = {};
+      const atmosphereFixtureIds = [];
+      for (const fix of channelMap) {
+        const u = fix.universe;
+        if (!channelUpdates[u]) channelUpdates[u] = [];
+        for (const ch of fix.channels) {
+          if (ch.type === 'atmosphere') {
+            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? 255 : 0 });
+            if (!atmosphereFixtureIds.includes(fix.id)) atmosphereFixtureIds.push(fix.id);
+          }
+        }
+      }
+      if (dmxOutputEnabled) {
+        for (const [u, channels] of Object.entries(channelUpdates)) {
+          artnetServer.setChannels(+u, channels);
+          dmxUsbServer.setChannels(+u, channels);
+        }
+      }
+      for (const id of atmosphereFixtureIds) {
+        if (activate) touchOverrides.atmosphereOverrideFixtures.add(id);
+        else touchOverrides.atmosphereOverrideFixtures.delete(id);
+      }
+      setOs2lOverride(atmosphereFixtureIds, activate);
+      broadcast({ type: 'os2l_action', action: map.action_type, map: map.name, active: activate });
+      break;
+    }
+
     default:
       console.warn(`[OS2L] Unknown action type: ${map.action_type}`);
   }

@@ -3,7 +3,7 @@
   "type": "full",
   "pages": {
     "1": {
-      "id": "MWpX0gDAfV9I6M8r",
+      "id": "imnnLfp9sWh-3cnq",
       "name": "Home",
       "controls": {
         "0": {
@@ -34,7 +34,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "FLbOsRgbCab3zTiI",
+                      "id": "D3IxiNo_6i3HJqRW",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -87,7 +87,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "4Dd4uWHUycBnjYO3",
+                      "id": "S1TUHB9RUlrnkXCs",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -140,7 +140,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "Q862eF1n69_ShMrT",
+                      "id": "Hv73EzwZyYe0MH4r",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -193,7 +193,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "mJZJTxNx3qImG5hr",
+                      "id": "aB93s7juuKCm2Fgu",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -246,7 +246,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "UK8Ce6iv4WQItn7y",
+                      "id": "HIQMd0n8zdSiDNcU",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -301,7 +301,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "DfcA0sNrvO3f3BMA",
+                      "id": "9Nj7QYK9nnqeqZ2M",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -354,7 +354,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "2ke7Id2dQg2oweDo",
+                      "id": "-Z6aenkQym4f8rBY",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -383,14 +383,14 @@
           "2": {
             "type": "button",
             "style": {
-              "text": "SCENE\nOFF",
+              "text": "STROBE",
               "textExpression": false,
               "size": "14",
               "png64": null,
               "alignment": "center:center",
               "pngalignment": "center:center",
-              "color": 16777215,
-              "bgcolor": 4473924,
+              "color": 0,
+              "bgcolor": 16766474,
               "show_topbar": false,
               "png": null,
               "latch": false
@@ -407,14 +407,157 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "zuznKktWLegEA0xN",
-                      "definitionId": "deactivate_scene",
+                      "id": "GdeABfg--7WCoqXX",
+                      "definitionId": "strobe",
                       "connectionId": "dmx-controller-connection",
-                      "options": {},
+                      "options": {
+                        "mode": {
+                          "isExpression": false,
+                          "value": "on"
+                        }
+                      },
                       "upgradeIndex": -1
                     }
                   ],
-                  "up": []
+                  "up": [
+                    {
+                      "type": "action",
+                      "id": "tB4xjmrfndWuYc8s",
+                      "definitionId": "strobe",
+                      "connectionId": "dmx-controller-connection",
+                      "options": {
+                        "mode": {
+                          "isExpression": false,
+                          "value": "off"
+                        }
+                      },
+                      "upgradeIndex": -1
+                    }
+                  ]
+                },
+                "options": {
+                  "runWhileHeld": []
+                }
+              }
+            },
+            "localVariables": []
+          },
+          "3": {
+            "type": "button",
+            "style": {
+              "text": "SMOKE",
+              "textExpression": false,
+              "size": "14",
+              "png64": null,
+              "alignment": "center:center",
+              "pngalignment": "center:center",
+              "color": 16777215,
+              "bgcolor": 7901340,
+              "show_topbar": false,
+              "png": null,
+              "latch": false
+            },
+            "options": {
+              "stepProgression": "auto",
+              "stepExpression": "",
+              "rotaryActions": false
+            },
+            "feedbacks": [],
+            "steps": {
+              "0": {
+                "action_sets": {
+                  "down": [
+                    {
+                      "type": "action",
+                      "id": "TskCw_5Wf7hGLufu",
+                      "definitionId": "smoke",
+                      "connectionId": "dmx-controller-connection",
+                      "options": {
+                        "mode": {
+                          "isExpression": false,
+                          "value": "on"
+                        }
+                      },
+                      "upgradeIndex": -1
+                    }
+                  ],
+                  "up": [
+                    {
+                      "type": "action",
+                      "id": "BPeWm2MigvrffJBh",
+                      "definitionId": "smoke",
+                      "connectionId": "dmx-controller-connection",
+                      "options": {
+                        "mode": {
+                          "isExpression": false,
+                          "value": "off"
+                        }
+                      },
+                      "upgradeIndex": -1
+                    }
+                  ]
+                },
+                "options": {
+                  "runWhileHeld": []
+                }
+              }
+            },
+            "localVariables": []
+          },
+          "4": {
+            "type": "button",
+            "style": {
+              "text": "FIRE",
+              "textExpression": false,
+              "size": "14",
+              "png64": null,
+              "alignment": "center:center",
+              "pngalignment": "center:center",
+              "color": 16777215,
+              "bgcolor": 12531212,
+              "show_topbar": false,
+              "png": null,
+              "latch": false
+            },
+            "options": {
+              "stepProgression": "auto",
+              "stepExpression": "",
+              "rotaryActions": false
+            },
+            "feedbacks": [],
+            "steps": {
+              "0": {
+                "action_sets": {
+                  "down": [
+                    {
+                      "type": "action",
+                      "id": "BgktJkTBMzC1k00I",
+                      "definitionId": "fire",
+                      "connectionId": "dmx-controller-connection",
+                      "options": {
+                        "mode": {
+                          "isExpression": false,
+                          "value": "on"
+                        }
+                      },
+                      "upgradeIndex": -1
+                    }
+                  ],
+                  "up": [
+                    {
+                      "type": "action",
+                      "id": "M-sEQOWc4X3t4Nv1",
+                      "definitionId": "fire",
+                      "connectionId": "dmx-controller-connection",
+                      "options": {
+                        "mode": {
+                          "isExpression": false,
+                          "value": "off"
+                        }
+                      },
+                      "upgradeIndex": -1
+                    }
+                  ]
                 },
                 "options": {
                   "runWhileHeld": []
@@ -452,7 +595,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "Fe5sVk2DfrlLZyIh",
+                      "id": "mdYL1AFq1uWGJRQF",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -495,7 +638,7 @@
             },
             "feedbacks": [
               {
-                "id": "TlhBfl7zCMncCCh7",
+                "id": "NTTIOprT-z5SwSIV",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -516,7 +659,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "zDcCFzLNpC8KOE43",
+                      "id": "WjSzM5EQeNfbhHhx",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -531,7 +674,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "lkxm22JJeRkebQ1C",
+                      "id": "hJntnpCYaH-x-4mU",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -573,7 +716,7 @@
             },
             "feedbacks": [
               {
-                "id": "YMJh7KiX-tHZqcCm",
+                "id": "fdMPudxJNhaZs5w_",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -595,7 +738,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "YfyWZjoo1cayKpvR",
+                      "id": "quIJlXL8MSxDZEzh",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -626,7 +769,7 @@
       }
     },
     "2": {
-      "id": "mOur9NoDfRI34_ev",
+      "id": "F4WJ_dO7mnstapVv",
       "name": "Fixtures",
       "controls": {
         "2": {
@@ -657,7 +800,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "EZefJXfInc2QdeKE",
+                      "id": "czawu7ktL9Gz5YJ8",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -710,7 +853,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "zZ3jnlxBDICqAmsH",
+                      "id": "FAD_-cC3pnykjtC_",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -758,7 +901,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "d6E8MXUvt0O-GSTu",
+                      "id": "6sbq5vOlK-DLbJF2",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -806,7 +949,7 @@
             },
             "feedbacks": [
               {
-                "id": "RoV87OPrfvgM_hVx",
+                "id": "3-xPUZFqDc20Emya",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -827,7 +970,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "Jy9SahrUMebWl6mG",
+                      "id": "25aT4yreM3MQWtYj",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -842,7 +985,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "6Si4vYDlAOiGYQSs",
+                      "id": "EUgt1nZn5J8dwdA6",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -884,7 +1027,7 @@
             },
             "feedbacks": [
               {
-                "id": "eVR3TkppaM2PNuWs",
+                "id": "MGo4ltRHLfy7jbMi",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -906,7 +1049,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "AOdHWmD094yAL4jf",
+                      "id": "Jw4wZfhzjZrpck7y",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -937,7 +1080,7 @@
       }
     },
     "3": {
-      "id": "xXuL1r4Apm8yjZ6O",
+      "id": "5t1DFK-I4O5qwEWZ",
       "name": "Scenes",
       "controls": {
         "0": {
@@ -968,7 +1111,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "-EHvHrF-cJQvLVLj",
+                      "id": "VwLbPaVN1cQ0POmf",
                       "definitionId": "deactivate_scene",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1013,7 +1156,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "jkDgs-rir3FMUwO-",
+                      "id": "RfMYepMQQGSGLBgp",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -1066,7 +1209,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "J2QAvnrbmYS2MLu8",
+                      "id": "ept4phHHNQP2ch8N",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1114,7 +1257,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "8umYahLg5T6FP25C",
+                      "id": "mIkCuIByidHUv8YU",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -1162,7 +1305,7 @@
             },
             "feedbacks": [
               {
-                "id": "JkqStf6UgoieVkb4",
+                "id": "33UpDahAtP220tTU",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -1183,7 +1326,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "MxjRsTU8AK_Mbj-2",
+                      "id": "IXCBlbCYOlImpgfz",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1198,7 +1341,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "JX34-MUfHFyYR3aP",
+                      "id": "EUERD-waxBC1494p",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1240,7 +1383,7 @@
             },
             "feedbacks": [
               {
-                "id": "TUle_RLX6ftoP2IQ",
+                "id": "LHOqY40hQStyC16h",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -1262,7 +1405,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "7Broji-Be0DEcfxo",
+                      "id": "fiyVS7NV5i4HYscE",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1293,7 +1436,7 @@
       }
     },
     "4": {
-      "id": "L2m2Fk_bWCSAUQlW",
+      "id": "UpQ8YmS1Ef1JBkaL",
       "name": "Colors",
       "controls": {
         "0": {
@@ -1324,7 +1467,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "pesy_IJHDbYYbDsk",
+                      "id": "RNmpWDpRqlcSl43d",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1351,7 +1494,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "e_jJfVgyGSXu_g5A",
+                      "id": "MQR97i4Ikaek2Voz",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1393,7 +1536,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "APSK4cgrI_oJpws9",
+                      "id": "fkAftB4Tla5iQyLr",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1420,7 +1563,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "bGC5bBhTC-kl5rwo",
+                      "id": "g7nMWzTqy1bqB6EM",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1462,7 +1605,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "MCRm_Ad3BvqT0iZS",
+                      "id": "a7itfKmjKVMT2yy8",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1489,7 +1632,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "rwZPRjrDsidHe8GC",
+                      "id": "YQ1PcQ-okhHkOZJS",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1531,7 +1674,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "JyIRiF4kGRf_vrr2",
+                      "id": "aTwv5io0TFw_iyDi",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1558,7 +1701,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "m98J2YA5V9WMnbOm",
+                      "id": "OKiFzsnwNu4dJ8go",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1600,7 +1743,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "TBsVDLm_aaJK74_l",
+                      "id": "2ynjZOEUBa9wc1A-",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1627,7 +1770,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "452U32HhgxFNvUzV",
+                      "id": "ALV4pAPiw_yY53yZ",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1671,7 +1814,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "Nju6eb6Rhdf5s9kf",
+                      "id": "m1SrDdlvEHi66aCw",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1698,7 +1841,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "b_LsZrGDMxBqCXHW",
+                      "id": "rfXabk4NRbcQDGps",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1740,7 +1883,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "UQT6gWtJSZY_Ykap",
+                      "id": "AS9GOIFlHYVF6LbS",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1767,7 +1910,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "LaKZjleL6YTcg3Og",
+                      "id": "R1lvSmGqoDC4y7Yi",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1809,7 +1952,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "AUva0Q5fXZaawqmJ",
+                      "id": "lZ_CoOEBMwfXjgJA",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1836,7 +1979,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "-Ao2pO0oq7DKxK4s",
+                      "id": "lSKp7j9TW36ujZG_",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1878,7 +2021,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "bz01x--FDlTsoKFD",
+                      "id": "VRprufiTbln4CFMB",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1905,7 +2048,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "nvp68INNISME_Ftt",
+                      "id": "h3eH_BZBYuv71jp9",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -1947,7 +2090,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "KP-mxHz1Ls0ZpaZR",
+                      "id": "g9o2Ldhu2-Yaxe3L",
                       "definitionId": "set_color_press",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -1974,7 +2117,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "B-PcnuIpZBLMKEEk",
+                      "id": "lD7L5xkJGYHgvA1s",
                       "definitionId": "release_color",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -2018,7 +2161,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "v31eu0gNqwpF3PUG",
+                      "id": "Jaq0nKRCP8VeWu1b",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -2066,7 +2209,7 @@
             },
             "feedbacks": [
               {
-                "id": "zGqSmO3GZw7narTU",
+                "id": "XBRfMl90WVKZ18ZS",
                 "type": "feedback",
                 "definitionId": "color_push_mode",
                 "connectionId": "dmx-controller-connection",
@@ -2083,7 +2226,7 @@
                 }
               },
               {
-                "id": "0DfKqKGwqGBeToXr",
+                "id": "57rq7HkI7XAb7GN1",
                 "type": "feedback",
                 "definitionId": "color_toggle_mode",
                 "connectionId": "dmx-controller-connection",
@@ -2106,7 +2249,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "cMsAp85Sa5WvM7Vi",
+                      "id": "4DAiq0JMTDheWAlb",
                       "definitionId": "toggle_color_mode",
                       "connectionId": "dmx-controller-connection",
                       "options": {},
@@ -2149,7 +2292,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "3jlFl8M7kKHsTcJj",
+                      "id": "ZHPOt-S08PzOWm1P",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -2197,7 +2340,7 @@
             },
             "feedbacks": [
               {
-                "id": "7RyQ-voZlHcrCv8Q",
+                "id": "fNNkR3zOq7ymYVKk",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -2218,7 +2361,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "XF0z2EK3n53GHsgV",
+                      "id": "DCmbUbqPZXEro-Cb",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2233,7 +2376,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "NbQRLjpDXybC59lB",
+                      "id": "h6L2kAPfBSwpqG7n",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2275,7 +2418,7 @@
             },
             "feedbacks": [
               {
-                "id": "ycaQfLTZKMKPStSm",
+                "id": "v1pSx76yN_pXVCpY",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -2297,7 +2440,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "Dhyry4E5_75CkRg7",
+                      "id": "J88vlb7V27yoBXqe",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2328,7 +2471,7 @@
       }
     },
     "5": {
-      "id": "F2pIMMonbFZPRPCQ",
+      "id": "x8eOZ6BrG-DllJBa",
       "name": "Color FX",
       "controls": {
         "0": {
@@ -2359,7 +2502,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "YUYTSPGdSn2H1H79",
+                      "id": "Nnr8_acyCYVgLuwr",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2423,7 +2566,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "a-_lb_f7WFQj7HsI",
+                      "id": "Rzvd-E0WaGe-6Rfd",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2487,7 +2630,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "vCcv-cJ2nUYhOVzN",
+                      "id": "8Y2PT78SL_1cpTRZ",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2551,7 +2694,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "LjSnacxHLjBvxEMO",
+                      "id": "WzA8yjh_FmJQAR53",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2615,7 +2758,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "74G-R6drUoowmhbc",
+                      "id": "mWMmArfImib5Xh_q",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2681,7 +2824,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "Y8b_2MAon4JYPLaX",
+                      "id": "eDdd_ZvH8YCtg3cy",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2745,7 +2888,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "bAk-Owm7SxlSH5dq",
+                      "id": "RtiN01N_akNWqG45",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2809,7 +2952,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "z-QOL60_P37iyDcB",
+                      "id": "hMoo_Y9SfAWWuVIg",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2873,7 +3016,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "o1MlV6mn_N7JiV_4",
+                      "id": "FbiLJqytdNgnv3jB",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -2937,7 +3080,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "l_otpCcnuFxte-IH",
+                      "id": "H3QoDlqb9787VM-b",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3003,7 +3146,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "fgq3Fc3l9O81cig4",
+                      "id": "8y1Bg_bZ_4K2l9je",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -3056,7 +3199,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "CwMNyguxt_VLClz1",
+                      "id": "va7tDJ_kum7kYzD1",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3104,7 +3247,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "JPwYvvIVovdVqOvq",
+                      "id": "UADmar9tXDy6Lien",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -3152,7 +3295,7 @@
             },
             "feedbacks": [
               {
-                "id": "xUo2MezQQOWLwm5K",
+                "id": "x0Xn7IcA-zmCoF3Q",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -3173,7 +3316,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "zk99kiR-ChC2Cd-3",
+                      "id": "9oqx-z0xC1P79Mp-",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3188,7 +3331,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "BiU0SeK9Wffxlu2X",
+                      "id": "eyLx5hd2aATikr7w",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3230,7 +3373,7 @@
             },
             "feedbacks": [
               {
-                "id": "VhRLymSCynlYapym",
+                "id": "DcE-Ry_sJnPio6ZK",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -3252,7 +3395,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "ovD-qphvHVrMe0HU",
+                      "id": "rrjxJqfkTGDXNopy",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3283,7 +3426,7 @@
       }
     },
     "6": {
-      "id": "CojwmSO6ZmZ7-20E",
+      "id": "I2dvu0pCW_It6gLZ",
       "name": "Cell FX",
       "controls": {
         "0": {
@@ -3314,7 +3457,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "-8CokdEo7TofJ7BG",
+                      "id": "_a8x0gw40kXktf_O",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3378,7 +3521,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "cLtnueMTxKWojrWQ",
+                      "id": "7knvzHtZro10VZND",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3442,7 +3585,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "1bpNjLCg3J8Hha_K",
+                      "id": "DM61eLVeyIcsBHUe",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3506,7 +3649,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "1rnlDfyuSuy6aN9g",
+                      "id": "lPbHfK3FuhZZsoR9",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3570,7 +3713,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "H7Pt5X9fHtWDB7WA",
+                      "id": "AqpiQ3ZznD5Ag7y-",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3636,7 +3779,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "FwCgRYaA_2-skHqc",
+                      "id": "S1ta0PpYW8rgxfpa",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3700,7 +3843,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "xdLhvTnjMHp2dDOV",
+                      "id": "wmCzw9kWgOfInd3P",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3764,7 +3907,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "pl7-TlGAUjxZEJca",
+                      "id": "HYrCHDeQNBJR_MJB",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3828,7 +3971,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "woWMbNwCJd14fD9R",
+                      "id": "1VQljtU-YtWlJlWb",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3892,7 +4035,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "XGOKQcoF22yZ_PCt",
+                      "id": "oqKhIlrJiEac_7IF",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -3958,7 +4101,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "3ieCyUGUp9_HuKrt",
+                      "id": "6at8OZGdfWS3qlxq",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -4011,7 +4154,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "uxYbKaMO0CADuT3u",
+                      "id": "2f4nhznL8KXeeo9c",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4059,7 +4202,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "uo5zTGKOpTuQI8dA",
+                      "id": "PyWkZtnYuhAtIL3L",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -4107,7 +4250,7 @@
             },
             "feedbacks": [
               {
-                "id": "uhwqFKzUyKjWLFRb",
+                "id": "jg_K-Sqb5e8qm85H",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -4128,7 +4271,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "8nUa3eF0dzouxOyC",
+                      "id": "TLTel5_tqb0IAMej",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4143,7 +4286,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "EuZ2z4Ra5T6woOol",
+                      "id": "hZsgwMJiZNBU8chW",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4185,7 +4328,7 @@
             },
             "feedbacks": [
               {
-                "id": "oiwGNJnWHQ3H3lqN",
+                "id": "CSdYWQ9Nj1ZtRRfF",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -4207,7 +4350,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "t9OjwJTQUOPGLowI",
+                      "id": "KwDeSv9EgkrwX5mb",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4238,7 +4381,7 @@
       }
     },
     "7": {
-      "id": "Nkv4PDiwt8xqLHCZ",
+      "id": "q-EcX7OmTLZqiano",
       "name": "Mover FX",
       "controls": {
         "0": {
@@ -4269,7 +4412,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "kOPs_F44ZpuAgagj",
+                      "id": "ARTfqXFQT2055BXa",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4333,7 +4476,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "AU9rHteZCfNxEOQt",
+                      "id": "ndQFHbk_9qmVxnyv",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4397,7 +4540,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "uiXJGeumilCz42wd",
+                      "id": "W7doTE63N6XvE59M",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4461,7 +4604,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "UYpuIb74tlBpW589",
+                      "id": "Uc9qJkkd5QkEekMP",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4525,7 +4668,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "9NaLspWGzjPe2A5s",
+                      "id": "kGzW_o1SODyi6WOM",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4591,7 +4734,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "FTFkF5u0XUgLdtvf",
+                      "id": "g0Lm3GABLHzuaeNA",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4655,7 +4798,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "AMtGRNTEkMreI-Ui",
+                      "id": "cbIvhaS0qHnfQcEm",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4719,7 +4862,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "oTJyiM3DHDwpnSPY",
+                      "id": "oQ2KtVIjR9Lc0R3L",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4783,7 +4926,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "lanp-c5hwYF19mey",
+                      "id": "VGUuWrIbdTMxAL40",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4847,7 +4990,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "hquesJf7MgkBAHgG",
+                      "id": "pu5_AHyKuOv5p845",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -4913,7 +5056,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "sfKStXY2arCuCp_f",
+                      "id": "khEzX0IQtVnzkLnd",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -4966,7 +5109,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "lATNEbo-hZ_hPjih",
+                      "id": "-W2cyR9_PGokcepq",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5014,7 +5157,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "a_dDapYjvIC8zvTH",
+                      "id": "MkXyGFXlADoWheSF",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -5062,7 +5205,7 @@
             },
             "feedbacks": [
               {
-                "id": "GYfWZtO2AAKfUa0O",
+                "id": "sZjBTGytvd6fqkxt",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -5083,7 +5226,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "X6ZBABnkIIPd8cw3",
+                      "id": "di8XL90NbfuGM2HB",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5098,7 +5241,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "2QcuuOMapTs2oMPv",
+                      "id": "LQ4OQpbB8sniR9vK",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5140,7 +5283,7 @@
             },
             "feedbacks": [
               {
-                "id": "SCRXfiJoW9klLCaA",
+                "id": "pVAoSBWDNE5ixYeG",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -5162,7 +5305,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "NpNieu1SIZHmDMXj",
+                      "id": "OpFDUlt1unY89b1q",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5193,7 +5336,7 @@
       }
     },
     "8": {
-      "id": "mC5wTzOM2LPiWYZ0",
+      "id": "dbmzIkc1J4vEYh6P",
       "name": "Rig FX",
       "controls": {
         "0": {
@@ -5224,7 +5367,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "FUbKxZwNXByOTXtc",
+                      "id": "AmHTakSYyeNJ14N_",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5288,7 +5431,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "dkE7eDJC_KocxFSy",
+                      "id": "M5E5lg7r6vNEW2pn",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5352,7 +5495,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "lsSD6M8-wQ1o9awU",
+                      "id": "XhAM3WUdeeDJdFZk",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5416,7 +5559,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "8RCI_jw5pX-Iz-Z-",
+                      "id": "ThX5GSmc7qastPt8",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5480,7 +5623,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "vG5acgtWSsKosF5K",
+                      "id": "_G6BYAH1RNtHItXE",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5546,7 +5689,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "dO3QAV_r4boKdkEa",
+                      "id": "eHlq3NocxOncpNAS",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5610,7 +5753,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "qFSCU2mlCb6N0R3M",
+                      "id": "7eqAIQ20gcEWTF-5",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5674,7 +5817,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "VTDxuj-xOG8GgEpW",
+                      "id": "Mtr-0YeXoHY3YSZf",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5738,7 +5881,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "KUNGZvwcO9NnwKIb",
+                      "id": "6SAPP2ilmE2n1IAi",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5802,7 +5945,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "EV1MgPJ9v9IKB4TH",
+                      "id": "mhyDk5-k9rDUAe6A",
                       "definitionId": "run_effect",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5868,7 +6011,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "0Qj17NP2nNXfvngC",
+                      "id": "rJzDJvxAKMalExaO",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -5921,7 +6064,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "68eWquKNF_Vg6Gos",
+                      "id": "r8HnH2Z9FXD2knxS",
                       "definitionId": "stop_effects",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -5969,7 +6112,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "xr6zjJn3of7toZOn",
+                      "id": "P4sKgcXT3dg5FT7P",
                       "definitionId": "set_page",
                       "connectionId": "internal",
                       "options": {
@@ -6017,7 +6160,7 @@
             },
             "feedbacks": [
               {
-                "id": "04SFqA2EpeRtoG8h",
+                "id": "p6IjZT4yWCj_cviz",
                 "type": "feedback",
                 "definitionId": "blackout_active",
                 "connectionId": "dmx-controller-connection",
@@ -6038,7 +6181,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "EU7LiPK95j_COcXC",
+                      "id": "RGpF-LfcbENbzFyx",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -6053,7 +6196,7 @@
                   "up": [
                     {
                       "type": "action",
-                      "id": "6Ud2LMFK6w_AB9c8",
+                      "id": "pPqmJxv2MHdaGynX",
                       "definitionId": "blackout",
                       "connectionId": "dmx-controller-connection",
                       "options": {
@@ -6095,7 +6238,7 @@
             },
             "feedbacks": [
               {
-                "id": "vYyvEOAoUmaIwIXA",
+                "id": "GmR2ii0oGbZwpFH2",
                 "type": "feedback",
                 "definitionId": "dmx_output_on",
                 "connectionId": "dmx-controller-connection",
@@ -6117,7 +6260,7 @@
                   "down": [
                     {
                       "type": "action",
-                      "id": "4umdyUvz9NcuTRCl",
+                      "id": "ggjk-aTDzCZ0UDIC",
                       "definitionId": "dmx_output",
                       "connectionId": "dmx-controller-connection",
                       "options": {

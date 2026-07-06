@@ -5,7 +5,7 @@
   "name": "dmx-controller",
   "shortname": "DMX",
   "description": "Control Eyup Events DMX Controller from Bitfocus Companion (Stream Deck, etc.)",
-  "version": "1.0.7",
+  "version": "1.0.9",
   "license": "MIT",
   "repository": "git+https://github.com/eyup-events/dmx-controller.git",
   "bugs": "https://github.com/eyup-events/dmx-controller/issues",

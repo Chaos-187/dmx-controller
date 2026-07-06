@@ -1115,6 +1115,82 @@ function executeMidiAction(mapping, isOn) {
       break;
     }
 
+    case 'smoke': {
+      const channelMap = getFixtureChannelMapCached();
+      const channelUpdates = {};
+      const smokeFixtureIds = [];
+
+      for (const fix of channelMap) {
+        if (touchOverrides?.disabledFixtures?.size) {
+          const nid = Number(fix.id);
+          if (touchOverrides.disabledFixtures.has(fix.id) || (Number.isFinite(nid) && touchOverrides.disabledFixtures.has(nid))) {
+            continue;
+          }
+        }
+        const u = fix.universe;
+        if (!channelUpdates[u]) channelUpdates[u] = [];
+        let fixAffected = false;
+        for (const ch of fix.channels) {
+          if (ch.type === 'smoke') {
+            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? 255 : 0 });
+            fixAffected = true;
+          }
+        }
+        if (fixAffected) smokeFixtureIds.push(fix.id);
+      }
+
+      if (dmxOutputEnabled) {
+        for (const [u, channels] of Object.entries(channelUpdates)) {
+          artnetServer.setChannels(+u, channels);
+          dmxUsbServer.setChannels(+u, channels);
+        }
+      }
+      for (const id of smokeFixtureIds) {
+        if (activate) touchOverrides.smokeOverrideFixtures.add(id);
+        else touchOverrides.smokeOverrideFixtures.delete(id);
+      }
+      broadcast({ type: 'midi_action', action: 'smoke', mapping: mapping.name, active: activate });
+      break;
+    }
+
+    case 'fire': {
+      const channelMap = getFixtureChannelMapCached();
+      const channelUpdates = {};
+      const atmosphereFixtureIds = [];
+
+      for (const fix of channelMap) {
+        if (touchOverrides?.disabledFixtures?.size) {
+          const nid = Number(fix.id);
+          if (touchOverrides.disabledFixtures.has(fix.id) || (Number.isFinite(nid) && touchOverrides.disabledFixtures.has(nid))) {
+            continue;
+          }
+        }
+        const u = fix.universe;
+        if (!channelUpdates[u]) channelUpdates[u] = [];
+        let fixAffected = false;
+        for (const ch of fix.channels) {
+          if (ch.type === 'atmosphere') {
+            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? 255 : 0 });
+            fixAffected = true;
+          }
+        }
+        if (fixAffected) atmosphereFixtureIds.push(fix.id);
+      }
+
+      if (dmxOutputEnabled) {
+        for (const [u, channels] of Object.entries(channelUpdates)) {
+          artnetServer.setChannels(+u, channels);
+          dmxUsbServer.setChannels(+u, channels);
+        }
+      }
+      for (const id of atmosphereFixtureIds) {
+        if (activate) touchOverrides.atmosphereOverrideFixtures.add(id);
+        else touchOverrides.atmosphereOverrideFixtures.delete(id);
+      }
+      broadcast({ type: 'midi_action', action: 'fire', mapping: mapping.name, active: activate });
+      break;
+    }
+
     case 'color': {
       const { red = 0, green = 0, blue = 0, white = 0, group_id } = actionData;
       if (activate) {
@@ -1320,6 +1396,8 @@ function executeMidiAction(mapping, isOn) {
         // Release all overrides
         setOverride(getAffectedFixtureIds(), false);
         touchOverrides.colorOverrideFixtures.clear();
+        touchOverrides.smokeOverrideFixtures.clear();
+        touchOverrides.atmosphereOverrideFixtures.clear();
         touchOverrides.activeColorOverride = null;
         // Zero out all fixtures to ensure nothing stays lit
         const dmxOutputEnabled = getDmxOutputEnabled();
@@ -1330,7 +1408,7 @@ function executeMidiAction(mapping, isOn) {
             const u = fix.universe;
             if (!channelUpdates[u]) channelUpdates[u] = {};
             for (const ch of fix.channels) {
-              if (['dimmer','red','green','blue','white','amber','uv','strobe'].includes(ch.type)) {
+              if (['dimmer','red','green','blue','white','amber','uv','strobe','smoke','atmosphere'].includes(ch.type)) {
                 channelUpdates[u][ch.dmx_address] = 0;
               } else if (ch.type === 'pan') {
                 channelUpdates[u][ch.dmx_address] = fix.home_pan ?? 128;

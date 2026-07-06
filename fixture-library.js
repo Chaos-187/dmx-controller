@@ -179,6 +179,7 @@ function guessTypeFromName(name) {
   if (/\bfrost\b/.test(n)) return 'frost';
   if (/\bspeed\b/.test(n)) return 'speed';
   if (/\bsmoke\b/.test(n) || /\bfog\b/.test(n) || /\bhaze\b/.test(n)) return 'smoke';
+  if (/\bfire\b/.test(n) || /\bflame\b/.test(n) || /\batmosphere\b/.test(n) || /\bpyro\b/.test(n)) return 'atmosphere';
   if (/\bmacro\b/.test(n) || /\bauto\b/.test(n) || /\beffect\b/.test(n)) return 'macro';
   return 'other';
 }
