@@ -4,27 +4,27 @@
 
 /* ── Variables ─────────────────────────────────────────────────── */
 :root {
-  --bg:           #0a0a0f;
-  --bg-1:         #111118;
-  --bg-2:         #16161f;
-  --bg-3:         #1c1c28;
-  --surface:      #1e1e2c;
-  --surface-hi:   #262638;
-  --border:       #2a2a40;
-  --border-hi:    #3a3a58;
-  --accent:       #e94560;
-  --accent-dim:   #a83350;
-  --accent-glow:  rgba(233,69,96,.35);
-  --green:        #00e676;
-  --green-dim:    rgba(0,230,118,.15);
-  --yellow:       #ffd600;
-  --cyan:         #00e5ff;
-  --blue:         #448aff;
-  --purple:       #8e24aa;
-  --text:         #e8e8ee;
-  --text-dim:     #7a7a90;
-  --text-muted:   #555568;
-  --danger:       #ff4455;
+  --bg:           #0e1013;
+  --bg-1:         #14171c;
+  --bg-2:         #191d23;
+  --bg-3:         #1e232b;
+  --surface:      #20252e;
+  --surface-hi:   #29303b;
+  --border:       #262b34;
+  --border-hi:    #343b47;
+  --accent:       #6366f1;
+  --accent-dim:   #4649c0;
+  --accent-glow:  rgba(99,102,241,.35);
+  --green:        #34d399;
+  --green-dim:    rgba(52,211,153,.15);
+  --yellow:       #fbbf24;
+  --cyan:         #22d3ee;
+  --blue:         #60a5fa;
+  --purple:       #a78bfa;
+  --text:         #e6e8ee;
+  --text-dim:     #8b90a0;
+  --text-muted:   #5b6070;
+  --danger:       #f87171;
   --radius:       8px;
   --radius-sm:    5px;
   --sidebar-w:    260px;
@@ -275,7 +275,7 @@ body {
   padding: 8px 12px; border-bottom: 1px solid var(--border);
   font-size: 12px; vertical-align: middle;
 }
-.tracks-table tbody tr:hover td { background: rgba(233,69,96,.04); }
+.tracks-table tbody tr:hover td { background: rgba(99,102,241,.04); }
 .tracks-table tbody tr.row-active td { background: var(--accent-glow); }
 .tracks-table .trk-title { color: var(--text); font-weight: 500; max-width: 280px; }
 .tracks-table .trk-artist { color: var(--cyan); max-width: 180px; }

@@ -1,4 +1,6 @@
-# DMX Controller
+# Thaluxis DMX
+
+**Lighting control forged for live events.**
 
 A Node.js-based DMX lighting controller with real-time VirtualDJ integration via the OS2L protocol. Features a browser-based web UI, Art-Net and USB DMX output, fixture management, and VirtualDJ database import.
 

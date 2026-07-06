@@ -1,7 +1,7 @@
 {
   "name": "dmx-controller",
   "version": "1.1.0",
-  "description": "DMX Light Controller with VirtualDJ OS2L integration",
+  "description": "Thaluxis DMX — Lighting control forged for live events. VirtualDJ OS2L integration.",
   "main": "server.js",
   "bin": "server.js",
   "scripts": {

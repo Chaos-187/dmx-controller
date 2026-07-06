@@ -2033,7 +2033,7 @@ const AUDIO_METER_BANDS = [
   { key: 'bass',      label: 'Bass',      color: '#ff5400' },
   { key: 'mid',       label: 'Mid',       color: '#00e676' },
   { key: 'upper_mid', label: 'Upper Mid', color: '#448aff' },
-  { key: 'treble',    label: 'Treble',    color: '#e94560' },
+  { key: 'treble',    label: 'Treble',    color: '#fb7185' },
   { key: 'energy',    label: 'Energy',    color: '#ffd600' },
 ];
 
