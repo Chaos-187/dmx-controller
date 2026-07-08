@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0e1013">
+<title>Thaluxis DMX — Touch</title>
+<link rel="stylesheet" href="css/touch3.css">
+</head>
+<body>
+
+<!-- ══════ PIN Lock ══════ -->
+<div class="pin-overlay" id="pinOverlay">
+  <div class="pin-logo">Thaluxis <span>DMX</span></div>
+  <div class="pin-subtitle">Enter PIN to unlock</div>
+  <div class="pin-dots" id="pinDots"></div>
+  <div class="pin-pad" id="pinPad">
+    <button class="pin-key" data-digit="1">1</button>
+    <button class="pin-key" data-digit="2">2</button>
+    <button class="pin-key" data-digit="3">3</button>
+    <button class="pin-key" data-digit="4">4</button>
+    <button class="pin-key" data-digit="5">5</button>
+    <button class="pin-key" data-digit="6">6</button>
+    <button class="pin-key" data-digit="7">7</button>
+    <button class="pin-key" data-digit="8">8</button>
+    <button class="pin-key" data-digit="9">9</button>
+    <div class="pin-key empty"></div>
+    <button class="pin-key" data-digit="0">0</button>
+    <button class="pin-key fn" id="pinBackspace">&#9003;</button>
+  </div>
+</div>
+
+<!-- ══════ Top Bar ══════ -->
+<header class="topbar">
+  <div class="brand">
+    <span class="status-pip err" id="statusPip"></span>
+    Thaluxis <b>Touch</b>
+  </div>
+  <div class="deck-chips">
+    <div class="deck-chip" id="deckChip1">
+      <span class="dc-num">1</span>
+      <span class="dc-dot" id="deckDot1"></span>
+      <span class="dc-track empty" id="deckTrack1">No track</span>
+      <span class="dc-bpm" id="deckBpm1"></span>
+    </div>
+    <div class="deck-chip" id="deckChip2">
+      <span class="dc-num">2</span>
+      <span class="dc-dot" id="deckDot2"></span>
+      <span class="dc-track empty" id="deckTrack2">No track</span>
+      <span class="dc-bpm" id="deckBpm2"></span>
+    </div>
+  </div>
+  <div class="top-actions">
+    <button class="pill" id="btnOutput">OUTPUT</button>
+    <button class="pill danger" id="btnBlackout">BLACKOUT</button>
+  </div>
+</header>
+
+<!-- ══════ Main Content (single scrollable page) ══════ -->
+<main class="content">
+
+  <section class="card">
+    <div class="card-head"><h2>Quick Actions</h2></div>
+    <div class="actions-grid" id="actionsGrid"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Colors</h2>
+      <div class="seg" id="colorModeSwitch">
+        <button class="active" data-mode="hold">Hold</button>
+        <button data-mode="toggle">Toggle</button>
+      </div>
+    </div>
+    <div class="chip-row" id="colorTargetGroups"></div>
+    <div class="slider-row">
+      <span class="s-label">Intensity</span>
+      <input type="range" id="colorIntensity" min="0" max="255" value="255">
+      <span class="s-val" id="colorIntVal">255</span>
+    </div>
+    <div class="color-grid" id="colorGrid"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Effects</h2>
+      <button class="mini-btn danger" id="btnStopAllFx">&#9632; Stop All</button>
+    </div>
+    <div class="slider-row">
+      <span class="s-label">Speed</span>
+      <input type="range" id="effectSpeed" min="10" max="300" value="100">
+      <span class="s-val" id="effectSpeedVal">1.0x</span>
+    </div>
+    <div class="fx-tabs" id="fxTabs"></div>
+    <div class="fx-grid" id="fxGrid"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Scenes</h2>
+      <div id="sceneActiveStatus"></div>
+    </div>
+    <div class="scene-grid" id="scenesList"></div>
+  </section>
+
+  <section class="card" id="moversCard" style="display:none">
+    <div class="card-head">
+      <h2>Movers</h2>
+      <button class="mini-btn" id="btnClearMove">Clear Override</button>
+    </div>
+    <div class="chip-row" id="moverChips"></div>
+    <div class="preset-grid" id="moverPresetGrid"></div>
+    <div class="mover-sliders">
+      <div class="slider-row"><span class="s-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="s-val" id="panVal">128</span></div>
+      <div class="slider-row"><span class="s-label">Tilt</span><input type="range" id="manualTilt" min="0" max="255" value="128"><span class="s-val" id="tiltVal">128</span></div>
+      <div class="slider-row"><span class="s-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="s-val" id="speedVal">128</span></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ══════ Bottom Bar: master dimmer + Lights button ══════ -->
+<footer class="bottombar">
+  <span class="s-label">Master</span>
+  <input type="range" id="masterDim" min="0" max="255" value="255">
+  <span class="s-val" id="masterDimVal">255</span>
+  <button class="lights-btn" id="btnLights">&#128161; Lights</button>
+</footer>
+
+<!-- ══════ Lights Modal ══════ -->
+<div class="modal" id="lightsModal">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>&#128161; Lights</h2>
+      <div class="modal-head-actions">
+        <button class="mini-btn" id="btnAllOn">All On</button>
+        <button class="mini-btn" id="btnAllOff">All Off</button>
+        <button class="modal-close" id="btnCloseLights">&#10005;</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="section-label" id="groupTogglesLabel">Groups &mdash; tap to toggle</div>
+      <div class="fixture-grid" id="groupToggles"></div>
+      <div class="section-label" id="groupDimLabel">Group Dimmers</div>
+      <div id="groupDimmers"></div>
+      <div class="section-label">Fixtures &mdash; tap to toggle</div>
+      <div class="fixture-grid" id="fixtureGrid"></div>
+    </div>
+  </div>
+</div>
+
+<script src="js/state.js"></script>
+<script src="js/api.js"></script>
+<script src="js/actions.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

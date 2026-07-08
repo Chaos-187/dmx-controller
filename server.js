@@ -2050,6 +2050,19 @@ app.post('/api/touch-pin/verify', (req, res) => {
 
 // ─── Touch Override API ──────────────────────────────────────────────────────
 
+// Fire a server-side action from a touch UI (same engine as MIDI/Companion/OS2L).
+// Touch clients never compute DMX themselves — this is the single entry point.
+app.post('/api/touch/trigger', (req, res) => {
+  const { action_type, action_data, mode, key } = req.body || {};
+  if (!action_type) return res.status(400).json({ error: 'action_type required' });
+  try {
+    midiController.triggerAction(action_type, action_data || {}, { mode: mode || 'on', key });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/touch/state', (req, res) => {
   res.json({
     disabledFixtures: [...touchOverrides.disabledFixtures],
@@ -2104,6 +2117,32 @@ app.post('/api/touch/master-dimmer', (req, res) => {
   res.json({ ok: true, masterDimmer: val });
 });
 
+app.post('/api/touch/group-dimmer', (req, res) => {
+  const groupId = +req.body.groupId;
+  if (!groupId) return res.status(400).json({ error: 'groupId required' });
+  const val = Math.max(0, Math.min(255, Math.round(+req.body.value || 0)));
+  touchOverrides.groupDimmers[groupId] = val;
+  // During sequence playback the engine applies groupDimmers each frame; direct DMX would be overwritten.
+  if (dmxOutputEnabled && !isAnySequencePlaying()) {
+    const channelUpdates = {};
+    for (const fix of getFixtureChannelMapCached()) {
+      if (!(fix.group_ids || []).includes(groupId)) continue;
+      if (isFixtureDisabled(fix.id)) continue;
+      const u = fix.universe;
+      if (!channelUpdates[u]) channelUpdates[u] = [];
+      for (const ch of fix.channels) {
+        if (ch.type === 'dimmer') channelUpdates[u].push({ ch: ch.dmx_address, val });
+      }
+    }
+    for (const [u, channels] of Object.entries(channelUpdates)) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+  broadcast({ type: 'groupDimmer', group_id: groupId, value: val });
+  res.json({ ok: true, groupId, value: val });
+});
+
 app.post('/api/touch/effect-speed', (req, res) => {
   const val = Math.max(0.1, Math.min(3.0, parseFloat(req.body.value) || 1.0));
   touchOverrides.effectSpeed = val;
@@ -2137,6 +2176,64 @@ app.post('/api/touch/movement-override', (req, res) => {
   }
   console.log(`[TOUCH] Movement override ${active ? 'ON' : 'OFF'} for ${fixtureIds.length} fixtures (total active: ${touchOverrides.movementOverrideFixtures.size})`);
   res.json({ ok: true });
+});
+
+// Apply a saved mover preset server-side (touch UIs stay DMX-free)
+app.post('/api/touch/mover-preset', (req, res) => {
+  const preset = db.getMoverPreset(+req.body.presetId);
+  if (!preset || !preset.positions) return res.status(404).json({ error: 'Preset not found' });
+  const only = Array.isArray(req.body.fixtureIds) ? new Set(req.body.fixtureIds.map(normalizeFixtureId)) : null;
+
+  const channelUpdates = {};
+  const affectedIds = [];
+  for (const pos of preset.positions) {
+    const fix = getFixtureChannelMapByIdCached(normalizeFixtureId(pos.fixture_id));
+    if (!fix || isFixtureDisabled(fix.id)) continue;
+    if (only && !only.has(fix.id)) continue;
+    affectedIds.push(fix.id);
+    if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = [];
+    for (const ch of fix.channels) {
+      if (ch.type === 'pan' && pos.pan !== undefined) channelUpdates[fix.universe].push({ ch: ch.dmx_address, val: pos.pan });
+      if (ch.type === 'tilt' && pos.tilt !== undefined) channelUpdates[fix.universe].push({ ch: ch.dmx_address, val: pos.tilt });
+    }
+    touchOverrides.movementOverrideFixtures.add(fix.id);
+  }
+  if (dmxOutputEnabled) {
+    for (const [u, channels] of Object.entries(channelUpdates)) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+  console.log(`[TOUCH] Mover preset "${preset.name}" applied to ${affectedIds.length} fixture(s)`);
+  res.json({ ok: true, fixtureIds: affectedIds });
+});
+
+// Manual pan/tilt/speed for movers, computed server-side
+app.post('/api/touch/mover-position', (req, res) => {
+  const { fixtureIds, pan, tilt, speed } = req.body;
+  if (!Array.isArray(fixtureIds) || !fixtureIds.length) return res.status(400).json({ error: 'fixtureIds required' });
+
+  const channelUpdates = {};
+  const affectedIds = [];
+  for (const id of fixtureIds) {
+    const fix = getFixtureChannelMapByIdCached(normalizeFixtureId(id));
+    if (!fix || isFixtureDisabled(fix.id)) continue;
+    affectedIds.push(fix.id);
+    if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = [];
+    for (const ch of fix.channels) {
+      if (ch.type === 'pan' && pan !== undefined) channelUpdates[fix.universe].push({ ch: ch.dmx_address, val: Math.max(0, Math.min(255, Math.round(+pan))) });
+      if (ch.type === 'tilt' && tilt !== undefined) channelUpdates[fix.universe].push({ ch: ch.dmx_address, val: Math.max(0, Math.min(255, Math.round(+tilt))) });
+      if (ch.type === 'speed' && speed !== undefined) channelUpdates[fix.universe].push({ ch: ch.dmx_address, val: Math.max(0, Math.min(255, Math.round(+speed))) });
+    }
+    touchOverrides.movementOverrideFixtures.add(fix.id);
+  }
+  if (dmxOutputEnabled) {
+    for (const [u, channels] of Object.entries(channelUpdates)) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+  res.json({ ok: true, fixtureIds: affectedIds });
 });
 
 app.post('/api/touch/smoke-override', (req, res) => {
