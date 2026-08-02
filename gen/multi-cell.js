@@ -9,19 +9,95 @@
  * cascade patterns across all fixtures as one large virtual fixture.
  */
 
-const { applyIntensity, rgbToHex, getFixtureIntensity, stableRoll } = require('./helpers');
+const { applyIntensity, rgbToHex, getFixtureIntensity, stableRoll, lerpColor } = require('./helpers');
 const { sectionStyles, defaultStyle, getSectionPalettes } = require('./palettes');
 
 const CELL_PATTERN_MAP = {
-  intro:     ['fill_sweep', 'color_wave', 'breathe'],
-  verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase'],
-  chorus:    ['chase', 'alternate', 'scatter', 'all_flash'],
-  bridge:    ['color_wave', 'alternate', 'chase_slow'],
-  breakdown: ['fill_sweep', 'breathe'],
-  buildup:   ['build_reveal', 'chase_accel'],
-  drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
-  outro:     ['fill_sweep', 'color_wave', 'breathe'],
+  intro:     ['fill_sweep', 'color_wave', 'breathe', 'sparkle_field'],
+  verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase', 'sparkle_field', 'checker', 'split_wipe'],
+  chorus:    ['chase', 'alternate', 'scatter', 'all_flash', 'split_wipe', 'sparkle_field'],
+  bridge:    ['color_wave', 'alternate', 'chase_slow', 'center_pulse', 'checker'],
+  breakdown: ['fill_sweep', 'breathe', 'center_pulse'],
+  buildup:   ['build_reveal', 'chase_accel', 'split_wipe'],
+  drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash', 'sparkle_field'],
+  outro:     ['fill_sweep', 'color_wave', 'breathe', 'center_pulse'],
 };
+
+/** Expanded pattern pool for fixtures with many cells (e.g. Atomic Strobe 48ch). */
+const LARGE_CELL_PATTERN_MAP = {
+  intro:     ['gradient_sweep', 'ripple', 'blocks', 'breathe', 'fill_sweep', 'center_pulse', 'sparkle_field'],
+  verse:     ['segments', 'comet', 'dual_chase', 'gradient_sweep', 'blocks', 'snake', 'color_wave', 'checker', 'mirror', 'split_wipe', 'sparkle_field'],
+  chorus:    ['dual_chase', 'comet', 'segments', 'ripple', 'scatter', 'snake', 'all_flash', 'mirror', 'split_wipe', 'sparkle_field'],
+  bridge:    ['gradient_sweep', 'blocks', 'ripple', 'color_wave', 'comet', 'center_pulse', 'checker'],
+  breakdown: ['ripple', 'breathe', 'gradient_sweep', 'blocks', 'center_pulse', 'sparkle_field'],
+  buildup:   ['build_reveal', 'comet', 'segments', 'chase_accel', 'ripple', 'split_wipe', 'mirror'],
+  drop:      ['dual_chase', 'snake', 'scatter_strobe', 'segments', 'ripple', 'all_flash', 'mirror', 'split_wipe', 'sparkle_field'],
+  outro:     ['gradient_sweep', 'fill_sweep', 'breathe', 'ripple', 'center_pulse'],
+};
+
+const LARGE_CELL_THRESHOLD = 16;
+
+function isLargeCellCount(cellCount) {
+  return cellCount >= LARGE_CELL_THRESHOLD;
+}
+
+function getPatternPool(label, cellCount, ctx) {
+  const section = label || 'verse';
+  const base = ctx.activeCellPatterns || CELL_PATTERN_MAP;
+  const baseList = base[section] || base.verse || CELL_PATTERN_MAP.verse;
+
+  if (!isLargeCellCount(cellCount)) return baseList;
+
+  const largeList = LARGE_CELL_PATTERN_MAP[section] || LARGE_CELL_PATTERN_MAP.verse;
+  // Always merge large-cell patterns in — saved generator config must not block them.
+  return [...new Set([...largeList, ...baseList])];
+}
+
+/** Lit window width for chase-style patterns — avoids 1-cell steps on 48-pixel fixtures. */
+function chaseWindowSize(cellCount) {
+  if (!isLargeCellCount(cellCount)) return 1;
+  return Math.max(2, Math.min(8, Math.round(cellCount / 8)));
+}
+
+function chaseStepCount(cellCount, windowSize) {
+  if (!isLargeCellCount(cellCount)) return cellCount;
+  const stride = Math.max(1, Math.floor(windowSize / 2));
+  return Math.max(8, Math.ceil((cellCount - windowSize) / stride) + 1);
+}
+
+function pickPattern(patterns, recent, seedKey) {
+  let pattern = patterns[0];
+  for (let tries = 0; tries < 8; tries++) {
+    const roll = stableRoll(`${seedKey}-${tries}`);
+    pattern = patterns[Math.floor(roll * patterns.length)];
+    if (!recent.includes(pattern) || patterns.length <= recent.length) break;
+  }
+  return pattern;
+}
+
+function subPhraseBarsFor(cellCount) {
+  if (cellCount >= 32) return 4;
+  if (cellCount >= LARGE_CELL_THRESHOLD) return 6;
+  return 8;
+}
+
+/** Beat interval for per-cell pattern updates — coarser on large fixtures to limit cue count. */
+function patternTickMs(p) {
+  const { beatMs, barMs, cellCount } = p;
+  if (!isLargeCellCount(cellCount)) return beatMs;
+  return Math.max(beatMs * 2, Math.round(barMs / 4));
+}
+
+/** Merge new default patterns into saved generator config without dropping custom entries. */
+function mergeCellPatternDefaults(existing, defaults) {
+  const merged = { ...defaults, ...existing };
+  for (const section of new Set([...Object.keys(defaults), ...Object.keys(existing || {})])) {
+    const base = defaults[section] || [];
+    const cur = (existing && existing[section]) || [];
+    merged[section] = [...new Set([...base, ...cur])];
+  }
+  return merged;
+}
 
 // ─── Helper: resolve virtual cell to actual fixture + cell ──────────────────
 
@@ -80,7 +156,10 @@ function cellPatternChase(cues, p, speed) {
   const cycleDur = speed === 'fast' ? beatMs
     : speed === 'medium' ? beatMs * 2
     : barMs;
-  const cellDur = cycleDur / cellCount;
+  const windowSize = chaseWindowSize(cellCount);
+  const steps = chaseStepCount(cellCount, windowSize);
+  const stepDur = cycleDur / steps;
+  const stride = isLargeCellCount(cellCount) ? Math.max(1, Math.floor(windowSize / 2)) : 1;
 
   const pal = palettes[Math.floor(rand() * palettes.length)];
   const onColor = applyIntensity(pal[0], Math.min(1, baseIntensity * 1.2));
@@ -89,13 +168,17 @@ function cellPatternChase(cues, p, speed) {
   let t = secStartMs;
   let direction = 1;
   while (t < secEndMs) {
-    for (let step = 0; step < cellCount; step++) {
-      const cellIdx = direction > 0 ? step : (cellCount - 1 - step);
-      const cell = cellIdx + 1;
-      const cueStart = t + step * cellDur;
-      if (cueStart >= secEndMs) break;
-      const dur = Math.min(cellDur, secEndMs - cueStart);
-      cellCue(cues, p, cell, cueStart, dur, onColor, offColor, 'solid', 'chase');
+    for (let step = 0; step < steps; step++) {
+      const head = direction > 0 ? step * stride : (steps - 1 - step) * stride;
+      for (let w = 0; w < windowSize; w++) {
+        const cellIdx = head + w;
+        if (cellIdx < 0 || cellIdx >= cellCount) continue;
+        const cell = cellIdx + 1;
+        const cueStart = t + step * stepDur;
+        if (cueStart >= secEndMs) break;
+        const dur = Math.min(stepDur, secEndMs - cueStart);
+        cellCue(cues, p, cell, cueStart, dur, onColor, offColor, 'solid', 'chase');
+      }
     }
     t += cycleDur;
     if (rand() > 0.6) direction *= -1;
@@ -106,8 +189,8 @@ function cellPatternChaseAccel(cues, p) {
   const { cellCount, secStartMs, secEndMs, secDurMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
 
   const pal = palettes[Math.floor(rand() * palettes.length)];
-  const color = applyIntensity(pal[0], Math.min(1, baseIntensity * 1.3));
   const dimColor = applyIntensity(pal[1], baseIntensity * 0.1);
+  const windowSize = chaseWindowSize(cellCount);
 
   const startCycleDur = barMs;
   const endCycleDur = beatMs * 0.5;
@@ -116,16 +199,23 @@ function cellPatternChaseAccel(cues, p) {
   while (t < secEndMs) {
     const progress = Math.min(1, (t - secStartMs) / secDurMs);
     const cycleDur = startCycleDur + (endCycleDur - startCycleDur) * (progress * progress);
-    const cellDur = cycleDur / cellCount;
+    const steps = chaseStepCount(cellCount, windowSize);
+    const stepDur = cycleDur / steps;
+    const stride = isLargeCellCount(cellCount) ? Math.max(1, Math.floor(windowSize / 2)) : 1;
     const intensity = Math.min(1, baseIntensity * (0.5 + progress * 0.8));
     const c = applyIntensity(pal[0], intensity);
 
-    for (let step = 0; step < cellCount; step++) {
-      const cell = step + 1;
-      const cueStart = t + step * cellDur;
-      if (cueStart >= secEndMs) break;
-      const dur = Math.min(cellDur, secEndMs - cueStart);
-      cellCue(cues, p, cell, cueStart, dur, c, dimColor, 'solid', 'build');
+    for (let step = 0; step < steps; step++) {
+      const head = step * stride;
+      for (let w = 0; w < windowSize; w++) {
+        const cellIdx = head + w;
+        if (cellIdx >= cellCount) continue;
+        const cell = cellIdx + 1;
+        const cueStart = t + step * stepDur;
+        if (cueStart >= secEndMs) break;
+        const dur = Math.min(stepDur, secEndMs - cueStart);
+        cellCue(cues, p, cell, cueStart, dur, c, dimColor, 'solid', 'build');
+      }
     }
     t += cycleDur;
   }
@@ -135,6 +225,7 @@ function cellPatternAlternate(cues, p, speed) {
   const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
 
   const swapInterval = speed === 'fast' ? beatMs : beatMs * 2;
+  const blockSize = isLargeCellCount(cellCount) ? Math.max(2, Math.round(cellCount / 12)) : 1;
 
   const pal1 = palettes[Math.floor(rand() * palettes.length)];
   const pal2 = palettes[(Math.floor(rand() * palettes.length) + 1) % palettes.length] || pal1;
@@ -146,7 +237,8 @@ function cellPatternAlternate(cues, p, speed) {
   while (t < secEndMs) {
     const dur = Math.min(swapInterval, secEndMs - t);
     for (let cell = 1; cell <= cellCount; cell++) {
-      const isOdd = cell % 2 === 1;
+      const blockIdx = Math.floor((cell - 1) / blockSize);
+      const isOdd = blockIdx % 2 === 0;
       const useA = isOdd ? !swapState : swapState;
       cellCue(cues, p, cell, t, dur, useA ? colorA : colorB, null, 'solid', 'alt');
     }
@@ -185,7 +277,10 @@ function cellPatternScatter(cues, p, strobeMode) {
 
   let t = secStartMs;
   while (t < secEndMs) {
-    const numFlashes = Math.floor(rand() * Math.min(3, cellCount)) + 1;
+    const maxFlashes = isLargeCellCount(cellCount)
+      ? Math.min(12, Math.max(4, Math.floor(cellCount / 6)))
+      : Math.min(3, cellCount);
+    const numFlashes = Math.floor(rand() * maxFlashes) + 1;
     const pal = palettes[Math.floor(rand() * palettes.length)];
     const color = applyIntensity(pal[0], intensity);
 
@@ -339,6 +434,286 @@ function cellPatternBreathe(cues, p) {
   }
 }
 
+// ─── Large-cell patterns (16+ segments) ─────────────────────────────────────
+
+function cellPatternRipple(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const cycleDur = barMs * 2;
+  const width = Math.max(2, Math.round(cellCount / 12));
+  const center = (cellCount - 1) / 2;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const onColor = applyIntensity(pal[0], baseIntensity);
+  const offColor = applyIntensity(pal[1], baseIntensity * 0.08);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const progress = ((t - secStartMs) % cycleDur) / cycleDur;
+    const waveFront = progress * (center + 2);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const dist = Math.abs((cell - 1) - center);
+      const lit = Math.abs(dist - waveFront) <= width;
+      const dur = Math.min(beatMs, secEndMs - t);
+      if (dur <= 0) continue;
+      cellCue(cues, p, cell, t, dur, lit ? onColor : offColor, null, 'solid', 'ripple');
+    }
+    t += beatMs;
+  }
+}
+
+function cellPatternSegments(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const segSize = Math.max(2, Math.min(8, Math.round(cellCount / 8)));
+  const steps = Math.max(4, Math.ceil(cellCount / Math.max(1, Math.floor(segSize / 2))));
+  const stepDur = beatMs * 2;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const onColor = applyIntensity(pal[0], baseIntensity);
+  const offColor = applyIntensity(pal[1], baseIntensity * 0.06);
+
+  let t = secStartMs;
+  let offset = 0;
+  while (t < secEndMs) {
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const idx = cell - 1;
+      const segIdx = Math.floor((idx + offset) / segSize);
+      const lit = segIdx % 2 === 0;
+      const dur = Math.min(stepDur, secEndMs - t);
+      if (dur <= 0) continue;
+      cellCue(cues, p, cell, t, dur, lit ? onColor : offColor, null, 'solid', 'seg');
+    }
+    t += stepDur;
+    offset = (offset + Math.max(1, Math.floor(segSize / 2))) % segSize;
+  }
+}
+
+function cellPatternComet(cues, p, tailCells) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const headSize = chaseWindowSize(cellCount);
+  const tail = tailCells != null ? tailCells : Math.max(headSize, Math.min(16, Math.round(cellCount / 4)));
+  const steps = chaseStepCount(cellCount, headSize);
+  const cycleDur = barMs * 2;
+  const stepDur = cycleDur / steps;
+  const stride = Math.max(1, Math.floor(headSize / 2));
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const headColor = applyIntensity(pal[0], baseIntensity);
+  const offColor = applyIntensity(pal[1], baseIntensity * 0.04);
+
+  let t = secStartMs;
+  let direction = 1;
+  while (t < secEndMs) {
+    for (let step = 0; step < steps; step++) {
+      const head = direction > 0 ? step * stride : (steps - 1 - step) * stride;
+      for (let cell = 1; cell <= cellCount; cell++) {
+        const idx = cell - 1;
+        let behind = direction > 0 ? head - idx : idx - head;
+        if (behind < 0) behind = -1;
+        let color = offColor;
+        if (behind >= 0 && behind < headSize) color = headColor;
+        else if (behind >= headSize && behind < headSize + tail) {
+          const fade = 1 - (behind - headSize) / tail;
+          color = applyIntensity(pal[0], baseIntensity * fade * 0.6);
+        }
+        const cueStart = t + step * stepDur;
+        if (cueStart >= secEndMs) break;
+        const dur = Math.min(stepDur, secEndMs - cueStart);
+        cellCue(cues, p, cell, cueStart, dur, color, null, 'solid', 'comet');
+      }
+    }
+    t += cycleDur;
+    if (rand() > 0.5) direction *= -1;
+  }
+}
+
+function cellPatternDualChase(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const windowSize = chaseWindowSize(cellCount);
+  const steps = chaseStepCount(cellCount, windowSize);
+  const cycleDur = barMs * 2;
+  const stepDur = cycleDur / steps;
+  const stride = Math.max(1, Math.floor(windowSize / 2));
+  const pal1 = palettes[Math.floor(rand() * palettes.length)];
+  const pal2 = palettes[(Math.floor(rand() * palettes.length) + 1) % palettes.length] || pal1;
+  const colorA = applyIntensity(pal1[0], baseIntensity);
+  const colorB = applyIntensity(pal2[0], baseIntensity);
+  const offColor = applyIntensity(pal1[1], baseIntensity * 0.05);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    for (let step = 0; step < steps; step++) {
+      const headA = step * stride;
+      const headB = cellCount - windowSize - step * stride;
+      for (let cell = 1; cell <= cellCount; cell++) {
+        const idx = cell - 1;
+        const inA = idx >= headA && idx < headA + windowSize;
+        const inB = idx >= headB && idx < headB + windowSize;
+        const color = inA ? colorA : inB ? colorB : offColor;
+        const cueStart = t + step * stepDur;
+        if (cueStart >= secEndMs) break;
+        const dur = Math.min(stepDur, secEndMs - cueStart);
+        cellCue(cues, p, cell, cueStart, dur, color, null, 'solid', 'dual');
+      }
+    }
+    t += cycleDur;
+  }
+}
+
+function cellPatternGradientSweep(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const c1 = pal[0];
+  const c2 = pal[1] || pal[0];
+  const cycleDur = barMs * 4;
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const phase = ((t - secStartMs) % cycleDur) / cycleDur;
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const pos = (((cell - 1) / Math.max(1, cellCount - 1)) + phase) % 1;
+      const color = applyIntensity(lerpColor(c1, c2, pos), baseIntensity);
+      const dur = Math.min(beatMs, secEndMs - t);
+      if (dur <= 0) continue;
+      cellCue(cues, p, cell, t, dur, color, null, 'solid', 'grad');
+    }
+    t += beatMs;
+  }
+}
+
+function cellPatternBlocks(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, beatMs, rand } = p;
+  const blockSize = Math.max(3, Math.min(8, Math.round(cellCount / 10)));
+  const swapInterval = beatMs * 2;
+  const pal1 = palettes[Math.floor(rand() * palettes.length)];
+  const pal2 = palettes[(Math.floor(rand() * palettes.length) + 1) % palettes.length] || pal1;
+  const colors = [
+    applyIntensity(pal1[0], baseIntensity),
+    applyIntensity(pal2[0], baseIntensity),
+    applyIntensity(pal1[1], baseIntensity),
+    applyIntensity(pal2[1], baseIntensity),
+  ];
+
+  let t = secStartMs;
+  let shift = 0;
+  while (t < secEndMs) {
+    const dur = Math.min(swapInterval, secEndMs - t);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const blockIdx = Math.floor((cell - 1 + shift) / blockSize);
+      const color = colors[blockIdx % colors.length];
+      cellCue(cues, p, cell, t, dur, color, null, 'solid', 'block');
+    }
+    t += swapInterval;
+    shift = (shift + Math.max(1, Math.floor(blockSize / 2))) % blockSize;
+  }
+}
+
+function cellPatternSparkleField(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, rand } = p;
+  const tickMs = patternTickMs(p);
+  const density = isLargeCellCount(cellCount) ? 0.18 : 0.3;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const sparkColor = applyIntensity(pal[0], baseIntensity);
+  const offColor = applyIntensity(pal[1], baseIntensity * 0.04);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const dur = Math.min(tickMs, secEndMs - t);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      cellCue(cues, p, cell, t, dur, rand() < density ? sparkColor : offColor, null, 'solid', 'sparkle');
+    }
+    t += tickMs;
+  }
+}
+
+function cellPatternCenterPulse(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, rand } = p;
+  const tickMs = patternTickMs(p);
+  const center = (cellCount - 1) / 2;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const cycleDur = barMs * 2;
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const phase = ((t - secStartMs) % cycleDur) / cycleDur;
+    const pulse = 0.5 + 0.5 * Math.sin(phase * Math.PI * 2);
+    const dur = Math.min(tickMs, secEndMs - t);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const dist = Math.abs((cell - 1) - center) / Math.max(1, center);
+      const level = pulse * (1 - dist * 0.55);
+      const color = applyIntensity(pal[0], baseIntensity * Math.max(0.05, level));
+      cellCue(cues, p, cell, t, dur, color, null, 'solid', 'pulse');
+    }
+    t += tickMs;
+  }
+}
+
+function cellPatternChecker(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, beatMs, rand } = p;
+  const blockSize = isLargeCellCount(cellCount) ? Math.max(2, Math.round(cellCount / 12)) : 1;
+  const pal1 = palettes[Math.floor(rand() * palettes.length)];
+  const pal2 = palettes[(Math.floor(rand() * palettes.length) + 1) % palettes.length] || pal1;
+  const colorA = applyIntensity(pal1[0], baseIntensity);
+  const colorB = applyIntensity(pal2[0], baseIntensity);
+
+  let t = secStartMs;
+  let offset = 0;
+  while (t < secEndMs) {
+    const dur = Math.min(beatMs * 2, secEndMs - t);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const blockIdx = Math.floor((cell - 1) / blockSize);
+      const useA = (blockIdx + offset) % 2 === 0;
+      cellCue(cues, p, cell, t, dur, useA ? colorA : colorB, null, 'solid', 'check');
+    }
+    t += dur;
+    offset = (offset + 1) % 2;
+  }
+}
+
+function cellPatternSplitWipe(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const cycleDur = barMs * 2;
+  const pal1 = palettes[Math.floor(rand() * palettes.length)];
+  const pal2 = palettes[(Math.floor(rand() * palettes.length) + 1) % palettes.length] || pal1;
+  const colorA = applyIntensity(pal1[0], baseIntensity);
+  const colorB = applyIntensity(pal2[0], baseIntensity);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const progress = ((t - secStartMs) % cycleDur) / cycleDur;
+    const split = progress * cellCount;
+    const dur = Math.min(beatMs, secEndMs - t);
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const color = (cell - 1) < split ? colorA : colorB;
+      cellCue(cues, p, cell, t, dur, color, null, 'solid', 'wipe');
+    }
+    t += beatMs;
+  }
+}
+
+function cellPatternMirror(cues, p) {
+  const { cellCount, secStartMs, secEndMs, palettes, baseIntensity, barMs, beatMs, rand } = p;
+  const center = (cellCount - 1) / 2;
+  const cycleDur = barMs * 2;
+  const steps = Math.max(4, Math.ceil(center));
+  const stepDur = cycleDur / steps;
+  const windowSize = isLargeCellCount(cellCount) ? chaseWindowSize(cellCount) : 1;
+  const pal = palettes[Math.floor(rand() * palettes.length)];
+  const onColor = applyIntensity(pal[0], baseIntensity);
+  const offColor = applyIntensity(pal[1], baseIntensity * 0.05);
+
+  let t = secStartMs;
+  while (t < secEndMs) {
+    const progress = ((t - secStartMs) % cycleDur) / cycleDur;
+    const spread = progress * center;
+    for (let cell = 1; cell <= cellCount; cell++) {
+      const dist = Math.abs((cell - 1) - center);
+      const lit = Math.abs(dist - spread) < windowSize;
+      const cueStart = t;
+      if (cueStart >= secEndMs) break;
+      const dur = Math.min(stepDur, secEndMs - cueStart);
+      cellCue(cues, p, cell, cueStart, dur, lit ? onColor : offColor, null, 'solid', 'mirror');
+    }
+    t += stepDur;
+  }
+}
+
 // ─── Dispatch ───────────────────────────────────────────────────────────────
 
 function _dispatchCellPattern(cues, pattern, ctx) {
@@ -356,6 +731,18 @@ function _dispatchCellPattern(cues, pattern, ctx) {
     case 'build_reveal':   cellPatternBuildReveal(cues, ctx); break;
     case 'all_flash':      cellPatternAllFlash(cues, ctx); break;
     case 'breathe':        cellPatternBreathe(cues, ctx); break;
+    case 'ripple':         cellPatternRipple(cues, ctx); break;
+    case 'segments':       cellPatternSegments(cues, ctx); break;
+    case 'comet':          cellPatternComet(cues, ctx); break;
+    case 'snake':          cellPatternComet(cues, ctx, Math.max(8, Math.round(ctx.cellCount / 3))); break;
+    case 'dual_chase':     cellPatternDualChase(cues, ctx); break;
+    case 'gradient_sweep': cellPatternGradientSweep(cues, ctx); break;
+    case 'blocks':         cellPatternBlocks(cues, ctx); break;
+    case 'sparkle_field':  cellPatternSparkleField(cues, ctx); break;
+    case 'center_pulse':   cellPatternCenterPulse(cues, ctx); break;
+    case 'checker':        cellPatternChecker(cues, ctx); break;
+    case 'split_wipe':     cellPatternSplitWipe(cues, ctx); break;
+    case 'mirror':         cellPatternMirror(cues, ctx); break;
   }
 }
 
@@ -363,8 +750,6 @@ function _dispatchCellPattern(cues, pattern, ctx) {
 
 function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
   const { barMs, beatMs, rand, paletteKey, preset, snapBeat } = ctx;
-
-  const SUB_PHRASE_BARS = 8;
 
   // Group multi-cell fixtures by type_name for cross-fixture cascading
   const fixtureGroups = {};
@@ -379,6 +764,7 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
 
   for (const [typeName, group] of Object.entries(fixtureGroups)) {
     const canCascade = group.length > 1;
+    const maxCellCount = Math.max(...group.map(f => f.cell_count || 0));
 
     for (const section of sections) {
       const label = section.label || 'verse';
@@ -408,7 +794,7 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
           cellCount: virtualCells.length,
           virtualCells,
           hasDimmer: refFix.channels.some(ch => ch.type === 'dimmer'),
-          hasWhite: refFix.channels.some(ch => ch.type === 'white'),
+          hasWhite: refFix.channels.some(ch => ch.type === 'white' && ch.cell != null),
         });
       } else {
         for (const fix of group) {
@@ -418,42 +804,40 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
             lane: existingCue ? existingCue.lane : 0,
             cellCount: fix.cell_count,
             hasDimmer: fix.channels.some(ch => ch.type === 'dimmer'),
-            hasWhite: fix.channels.some(ch => ch.type === 'white'),
+            hasWhite: fix.channels.some(ch => ch.type === 'white' && ch.cell != null),
           });
         }
       }
 
-      const activeCPM = ctx.activeCellPatterns || CELL_PATTERN_MAP;
-      const patterns = activeCPM[label] || activeCPM.verse || CELL_PATTERN_MAP.verse;
+      const patterns = getPatternPool(label, maxCellCount, ctx);
       const allPalettes = getSectionPalettes(paletteKey, label, ctx.activePalettes);
       const style = (ctx.activeSectionStyles || sectionStyles)[label] || defaultStyle;
       const baseIntensity = Math.min(1, ((style.intensity[0] + style.intensity[1]) / 2) * preset.intensityMult);
 
-      const subPhraseMs = SUB_PHRASE_BARS * barMs;
+      const subPhraseBars = subPhraseBarsFor(maxCellCount);
+      const subPhraseMs = subPhraseBars * barMs;
       const numSubPhrases = Math.max(1, Math.floor(secDurMs / subPhraseMs));
       const useSubPhrases = numSubPhrases >= 2 && label !== 'buildup';
 
-      // Plan patterns once per section — all fixtures of this type share the look
       const sectionPatterns = [];
+      const recentPatterns = [];
       if (useSubPhrases) {
-        let lastPattern = '';
         for (let sp = 0; sp < numSubPhrases; sp++) {
-          let pattern;
-          for (let tries = 0; tries < 5; tries++) {
-            const roll = stableRoll(`mc-pat-${typeName}-${label}-${secStartMs}-${sp}-${tries}`);
-            pattern = patterns[Math.floor(roll * patterns.length)];
-            if (pattern !== lastPattern || patterns.length <= 1) break;
-          }
-          lastPattern = pattern;
+          const pattern = pickPattern(
+            patterns,
+            recentPatterns,
+            `mc-pat-${typeName}-${label}-${secStartMs}-${sp}`,
+          );
+          recentPatterns.push(pattern);
+          if (recentPatterns.length > 2) recentPatterns.shift();
           const patPalettes = [allPalettes[sp % allPalettes.length]];
           if (allPalettes.length > 1) patPalettes.push(allPalettes[(sp + 1) % allPalettes.length]);
           sectionPatterns.push({ pattern, patPalettes, spStart: secStartMs + sp * subPhraseMs,
             spEnd: sp === numSubPhrases - 1 ? secEndMs : secStartMs + (sp + 1) * subPhraseMs });
         }
       } else {
-        const roll = stableRoll(`mc-pat-${typeName}-${label}-${secStartMs}`);
         sectionPatterns.push({
-          pattern: patterns[Math.floor(roll * patterns.length)],
+          pattern: pickPattern(patterns, [], `mc-pat-${typeName}-${label}-${secStartMs}`),
           patPalettes: allPalettes,
           spStart: secStartMs,
           spEnd: secEndMs,
@@ -480,4 +864,9 @@ function generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx) {
   cues.sort((a, b) => a.start_ms - b.start_ms || a.lane - b.lane);
 }
 
-module.exports = { CELL_PATTERN_MAP, generateMultiCellPatterns };
+module.exports = {
+  CELL_PATTERN_MAP,
+  LARGE_CELL_PATTERN_MAP,
+  mergeCellPatternDefaults,
+  generateMultiCellPatterns,
+};

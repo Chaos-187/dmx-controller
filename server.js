@@ -52,6 +52,13 @@ const os2l = require('./os2l');
 const midiController = require('./midi-controller');
 const fixtureLibrary = require('./fixture-library');
 const { WebUSB } = require('usb');
+const {
+  pseudoRandom, hslToRgb, computeEffectValue, isFixtureCompatibleWithEffect,
+  shouldApplyCellCue, isAuxiliaryMulticellChannel,
+  MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES,
+  RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
+  PAN_TILT, COLOR_CHANNELS,
+} = require('./effects-engine');
 
 // ─── Authentication Helpers ─────────────────────────────────────────────────
 
@@ -519,7 +526,7 @@ function handleOs2lSubscribed(data) {
                 deactivateScene(); // Stop any scene effect loop from end-action
                 stopPlaybackTimer(deck);
                 blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
-                activeSequences[deck] = { sequence: generatedSeq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+                activeSequences[deck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
                 broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
                 console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck} (duration=${generatedSeq.duration_ms}ms)`);
 
@@ -555,7 +562,7 @@ function handleOs2lSubscribed(data) {
           deactivateScene(); // Stop any scene effect loop from end-action
           stopPlaybackTimer(deck);
           blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
-          activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+          activeSequences[deck] = { sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
           broadcast({ type: 'seq_loaded', deck, sequence: seq });
           console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} (duration=${seq.duration_ms}ms)`);
 
@@ -3419,10 +3426,12 @@ function processSceneEffects(scene, startTime) {
         if (SOUND_EFFECT_TYPES.has(effect.type) && !seqEffectParams.audio) seqEffectParams.audio = getCurrentAudioData();
         let value = computeEffectValue(effect, ch.type, progress, baseValues, seqEffectParams, channelCtx);
 
-        // If the effect doesn't control this channel (e.g. motion effect → color channels),
-        // fall back to the base value so colours/dimmer still get sent.
         if (value === null || value === undefined) {
-          value = baseValues[ch.type] !== undefined ? baseValues[ch.type] : null;
+          if (isAuxiliaryMulticellChannel(ch, fix)) {
+            value = null;
+          } else {
+            value = baseValues[ch.type] !== undefined ? baseValues[ch.type] : null;
+          }
         }
 
         if (value !== null && value !== undefined) {
@@ -3812,7 +3821,7 @@ function handleSequenceCommand(ws, msg) {
       deactivateScene(); // Stop any scene effect loop from end-action
       stopPlaybackTimer(deck);
       blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
-      activeSequences[deck] = { sequence: seq, lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+      activeSequences[deck] = { sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
       broadcast({ type: 'seq_loaded', deck, sequence: seq });
       console.log(`[SEQ] Loaded sequence "${seq.name}" on deck ${deck}`);
       break;
@@ -3872,7 +3881,7 @@ function handleSequenceCommand(ws, msg) {
       stopPlaybackTimer(deck);
       blackoutDeckFixtures(deck);
       activeSequences[deck] = {
-        sequence: seq, lastTimeMs: -1, playing: false,
+        sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false,
         currentTimeMs: 0, vdjDriven: false, previewMode: true,
       };
       broadcast({ type: 'seq_loaded', deck, sequence: seq });
@@ -3897,6 +3906,7 @@ function handleSequenceCommand(ws, msg) {
       if (activeSequences[deck] && activeSequences[deck].sequence) {
         const seqId = activeSequences[deck].sequence.id;
         activeSequences[deck].sequence.cues = db.getSequenceCues(seqId);
+        activeSequences[deck].cuesByStart = sortCuesByStart(activeSequences[deck].sequence.cues);
         const t = msg.timeMs != null ? msg.timeMs : activeSequences[deck].currentTimeMs;
         activeSequences[deck].currentTimeMs = t;
         processSequenceAtTime(deck, t, { preview: true });
@@ -3914,7 +3924,7 @@ function handleSequenceCommand(ws, msg) {
       const fixMap = getFixtureChannelMapByIdCached(fixtureId);
       if (!fixMap) break;
       for (const ch of fixMap.channels) {
-        if (msg.cell != null && ch.cell != null && ch.cell !== msg.cell) continue;
+        if (!shouldApplyCellCue(msg.cell, ch)) continue;
         if (vals[ch.type] === undefined) continue;
         let v = Math.round(Math.max(0, Math.min(255, vals[ch.type])));
         v = mapValueToRange(v, ch, ch.type === 'dimmer' ? 'dimmer' : ch.type);
@@ -4027,6 +4037,7 @@ function interpolateAlongPath(waypoints, t) {
 function buildChannelCtx(ch, fix) {
   const ctx = {
     channel_number: ch.channel_number,
+    channel_type: ch.type,
     total_channels: fix.channels.length,
     home_pan: fix.home_pan ?? 128,
     home_tilt: fix.home_tilt ?? 128,
@@ -4109,6 +4120,28 @@ function getMoverPresetCached(id) {
 }
 function invalidateMoverPresetCache() { _moverPresetCache.clear(); }
 
+function sortCuesByStart(cues) {
+  return cues.slice().sort((a, b) => a.start_ms - b.start_ms || (a.cell ? 1 : 0) - (b.cell ? 1 : 0));
+}
+
+/** Keep master dimmer up on multi-cell fixtures whenever they have active cues. */
+function ensureMulticellMasterDimmer(channelUpdates, activeCues, allFixtures) {
+  const activeFixtureIds = new Set(activeCues.map(c => c.fixture_id).filter(Boolean));
+  for (const fixMap of allFixtures) {
+    if (!activeFixtureIds.has(fixMap.id)) continue;
+    if ((fixMap.cell_count || 0) <= 0) continue;
+    const dimmerCh = fixMap.channels.find(c => c.type === 'dimmer' && !c.cell);
+    if (!dimmerCh) continue;
+    const u = fixMap.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    if (channelUpdates[u][dimmerCh.dmx_address] !== undefined) continue;
+    let val = mapValueToRange(255, dimmerCh, 'dimmer');
+    val = applyGroupDimmerToDimmerValue(val, fixMap);
+    val = applyMasterDimmer(val, 'dimmer');
+    channelUpdates[u][dimmerCh.dmx_address] = applyInvert(val, dimmerCh);
+  }
+}
+
 function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   const deckSeq = activeSequences[deckNum];
   if (!deckSeq || !deckSeq.sequence) return;
@@ -4117,6 +4150,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
   const seq = deckSeq.sequence;
   const cues = seq.cues || [];
+  const cuesByStart = deckSeq.cuesByStart || cues;
 
   // Pre-fetch fixture channel map once for the entire tick (avoid per-cue DB queries)
   const allFixtures = getFixtureChannelMapCached();
@@ -4184,8 +4218,9 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   // Build a map of active color-track cues per fixture for effect base-color resolution
   const activeColorCuesByFixture = new Map(); // fixtureId → color cue
   const fixturesWithFx = new Set(); // fixtures that have their own per-fixture effect cue
-  for (const cue of cues) {
-    if (timeMs < cue.start_ms || timeMs >= cue.start_ms + cue.duration_ms) continue;
+  for (const cue of cuesByStart) {
+    if (cue.start_ms > timeMs) break;
+    if (timeMs >= cue.start_ms + cue.duration_ms) continue;
     // Rig-wide master cues (fixture_id 0) are processed in a separate pass
     if (cue.fixture_id === 0) { rigWideCues.push(cue); continue; }
     activeCues.push(cue);
@@ -4227,9 +4262,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
     const endVals = cue.end_channel_values;
 
     for (const ch of fixMap.channels) {
-      // Cell filtering: if cue targets a specific cell, only apply to that cell's channels
-      if (cue.cell != null && ch.cell != null && ch.cell !== cue.cell) continue;
-      // If cue targets a cell but channel has no cell assignment (master channel), still apply
+      if (!shouldApplyCellCue(cue.cell, ch)) continue;
       // Skip channels that are overridden by touch UI
       if (hasColorOverride && COLOR_CHANNELS.has(ch.type)) continue;
       if (hasMovementOverride && PAN_TILT.has(ch.type)) continue;
@@ -4316,11 +4349,13 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           const touchEffectParams = cue.effect_params || {};
           if (SOUND_EFFECT_TYPES.has(effect.type) && !touchEffectParams.audio) touchEffectParams.audio = getCurrentAudioData();
           value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, touchEffectParams, channelCtx);
-          // If the effect doesn't control this channel (e.g. motion effect → color channels),
-          // fall back to the resolved base channel value so colours/dimmer still get sent.
           if (value === null || value === undefined) {
-            value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
-                  : (ch.type === 'dimmer' ? 255 : null);
+            if (isAuxiliaryMulticellChannel(ch, fixMap)) {
+              value = null;
+            } else {
+              value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
+                    : (ch.type === 'dimmer' ? 255 : null);
+            }
           }
         }
       } else if (cue.cue_type === 'movement') {
@@ -4457,8 +4492,12 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         if (SOUND_EFFECT_TYPES.has(effect.type) && !rigEffectParams.audio) rigEffectParams.audio = getCurrentAudioData();
         let value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, rigEffectParams, channelCtx);
         if (value === null || value === undefined) {
-          value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
-                : (ch.type === 'dimmer' ? 255 : null);
+          if (isAuxiliaryMulticellChannel(ch, fixMap)) {
+            value = null;
+          } else {
+            value = effectBaseVals[ch.type] !== undefined ? effectBaseVals[ch.type]
+                  : (ch.type === 'dimmer' ? 255 : null);
+          }
         }
 
         if (value !== null && value !== undefined) {
@@ -4488,6 +4527,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   }
 
   // Send all channel updates
+  ensureMulticellMasterDimmer(channelUpdates, activeCues, allFixtures);
   applyActiveColorOverrideToUpdates(channelUpdates);
   for (const [u, chMap] of Object.entries(channelUpdates)) {
     const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
@@ -4502,13 +4542,8 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
 /**
  * Deterministic pseudo-random for sparkle / fire effects.
+ * (effects-engine import moved to top of file)
  */
-const {
-  pseudoRandom, hslToRgb, computeEffectValue, isFixtureCompatibleWithEffect,
-  MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES,
-  RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
-  PAN_TILT, COLOR_CHANNELS,
-} = require('./effects-engine');
 
 /** Overlay MIDI/OS2L color on top of sequence output (movement/effects already in channelUpdates). */
 function applyActiveColorOverrideToUpdates(channelUpdates) {

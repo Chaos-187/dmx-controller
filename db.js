@@ -665,6 +665,14 @@ function init() {
     console.log('[DB] Migrated fixtures: added cell_path column');
   }
 
+  // Migrate: add image_url column to gobo_wheel_slots if missing
+  try {
+    db.prepare('SELECT image_url FROM gobo_wheel_slots LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE gobo_wheel_slots ADD COLUMN image_url TEXT DEFAULT ''");
+    console.log('[DB] Migrated gobo_wheel_slots: added image_url column');
+  }
+
   // Migrate: fixture_type_modes — create default modes for existing fixture types
   // and link channels and fixtures to their modes
   migrateToModes();
@@ -788,6 +796,16 @@ function init() {
     });
     console.log('[DB] Added Generic 60W Spot Moving Head fixture type');
   }
+
+  // Migration: add Generic Atomic LED Strobe (154ch point control) if not present
+  const hasAtomicStrobe = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = 'Generic Atomic LED Strobe'").get().c;
+  if (hasAtomicStrobe === 0) {
+    createAtomicLedStrobeFixtureType();
+    console.log('[DB] Added Generic Atomic LED Strobe fixture type (154ch point control)');
+  }
+
+  // Atomic Strobe is a pixel matrix — ensure category is multi_cell
+  db.prepare("UPDATE fixture_types SET category = 'multi_cell' WHERE name = 'Generic Atomic LED Strobe' AND category != 'multi_cell'").run();
 
   // Seed default color wheel map for 60W Spot Moving Head
   seedDefaultColorWheelMap();
@@ -1110,10 +1128,11 @@ function createLedBarFixtureType({ name, manufacturer, cellCount, channelPattern
   if (!cellCount || cellCount < 1) throw new Error('cellCount is required and must be >= 1');
   const pattern = channelPattern || ['red', 'green', 'blue'];
   const channels = [];
+  let chNum = 1;
   for (let cell = 1; cell <= cellCount; cell++) {
     for (const type of pattern) {
       const label = type.charAt(0).toUpperCase() + type.slice(1);
-      channels.push({ name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
+      channels.push({ channel_number: chNum++, name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
     }
   }
   return createFixtureType({
@@ -1140,10 +1159,13 @@ function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChann
   const pattern = cellChannelPattern || ['red', 'green', 'blue'];
   const channels = [];
 
+  let chNum = 1;
+
   // Master/global channels first (cell = null)
   if (masterChannels && masterChannels.length > 0) {
     for (const mc of masterChannels) {
       channels.push({
+        channel_number: chNum++,
         name: mc.name || mc.type.charAt(0).toUpperCase() + mc.type.slice(1),
         type: mc.type || 'dimmer',
         default_value: mc.default_value || 0,
@@ -1156,7 +1178,7 @@ function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChann
   for (let cell = 1; cell <= cellCount; cell++) {
     for (const type of pattern) {
       const label = type.charAt(0).toUpperCase() + type.slice(1);
-      channels.push({ name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
+      channels.push({ channel_number: chNum++, name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
     }
   }
 
@@ -1165,6 +1187,40 @@ function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChann
     manufacturer: manufacturer || 'Generic',
     category: 'multi_cell',
     channels,
+  });
+}
+
+/**
+ * Generic Atomic LED Strobe — 154-channel point-control mode.
+ * CH1  master dimmer, CH2 master strobe,
+ * CH3–146  48× RGB segments (3ch each),
+ * CH147–154  8× independent white segments.
+ */
+function createAtomicLedStrobeFixtureType() {
+  const channels = [
+    { channel_number: 1, name: 'Master Dimmer', type: 'dimmer', default_value: 0, cell: null },
+    { channel_number: 2, name: 'Master Strobe', type: 'strobe', default_value: 0, cell: null },
+  ];
+  for (let seg = 1; seg <= 48; seg++) {
+    const base = 3 + (seg - 1) * 3;
+    channels.push(
+      { channel_number: base,     name: `Seg ${seg} Red`,   type: 'red',   default_value: 0, cell: seg },
+      { channel_number: base + 1, name: `Seg ${seg} Green`, type: 'green', default_value: 0, cell: seg },
+      { channel_number: base + 2, name: `Seg ${seg} Blue`,  type: 'blue',  default_value: 0, cell: seg },
+    );
+  }
+  for (let w = 1; w <= 8; w++) {
+    channels.push({ channel_number: 146 + w, name: `White ${w}`, type: 'white', default_value: 0, cell: null });
+  }
+  return createFixtureType({
+    name: 'Generic Atomic LED Strobe',
+    manufacturer: 'Generic',
+    category: 'multi_cell',
+    modes: [{
+      name: '154 Channel (Point Control)',
+      short_name: '154ch',
+      channels,
+    }],
   });
 }
 
@@ -2923,6 +2979,7 @@ function seedDefaultMoverPresets() {
 // ─── Generator Config (stored in config table as JSON) ──────────────────────
 
 const { colorPalettes, mergeColorPaletteDefaults } = require('./gen/palettes');
+const { mergeCellPatternDefaults } = require('./gen/multi-cell');
 
 const GENERATOR_CONFIG_DEFAULTS = {
   gen_color_palettes: colorPalettes,
@@ -3000,19 +3057,20 @@ const GENERATOR_CONFIG_DEFAULTS = {
     outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
   },
   gen_cell_patterns: {
-    intro:     ['fill_sweep', 'color_wave', 'breathe'],
-    verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase'],
-    chorus:    ['chase', 'alternate', 'scatter', 'all_flash'],
-    bridge:    ['color_wave', 'alternate', 'chase_slow'],
-    breakdown: ['fill_sweep', 'breathe'],
-    buildup:   ['build_reveal', 'chase_accel'],
-    drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash'],
-    outro:     ['fill_sweep', 'color_wave', 'breathe'],
+    intro:     ['fill_sweep', 'color_wave', 'breathe', 'sparkle_field', 'center_pulse'],
+    verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase', 'sparkle_field', 'checker', 'split_wipe'],
+    chorus:    ['chase', 'alternate', 'scatter', 'all_flash', 'split_wipe', 'sparkle_field'],
+    bridge:    ['color_wave', 'alternate', 'chase_slow', 'center_pulse', 'checker'],
+    breakdown: ['fill_sweep', 'breathe', 'center_pulse', 'sparkle_field'],
+    buildup:   ['build_reveal', 'chase_accel', 'split_wipe'],
+    drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash', 'sparkle_field'],
+    outro:     ['fill_sweep', 'color_wave', 'breathe', 'center_pulse'],
   },
   gen_fixture_intensity: {
     par:         { intro: 0.90, verse: 0.85, chorus: 0.95, bridge: 0.80, breakdown: 0.70, buildup: 0.85, drop: 1.00, outro: 0.90 },
     mover:       { intro: 0.55, verse: 0.70, chorus: 0.90, bridge: 0.65, breakdown: 0.45, buildup: 0.75, drop: 1.00, outro: 0.50 },
     led_bar:     { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
+    multi_cell:  { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
     color_wheel: { intro: 0.70, verse: 0.80, chorus: 1.00, bridge: 0.70, breakdown: 0.50, buildup: 0.85, drop: 1.00, outro: 0.60 },
   },
 };
@@ -3036,6 +3094,12 @@ function getGeneratorConfig() {
       let val = row ? JSON.parse(row.value) : GENERATOR_CONFIG_DEFAULTS[key];
       if (key === 'gen_color_palettes' && row) {
         val = mergeColorPaletteDefaults(val, GENERATOR_CONFIG_DEFAULTS.gen_color_palettes);
+      }
+      if (key === 'gen_cell_patterns') {
+        val = mergeCellPatternDefaults(row ? val : null, GENERATOR_CONFIG_DEFAULTS.gen_cell_patterns);
+      }
+      if (key === 'gen_fixture_intensity') {
+        val = { ...GENERATOR_CONFIG_DEFAULTS.gen_fixture_intensity, ...val };
       }
       result[key] = val;
     } catch (e) {
@@ -3961,6 +4025,7 @@ module.exports = {
   getFixtureTypeSummaries, searchFixtureTypes,
   createLedBarFixtureType,
   createMultiCellFixtureType,
+  createAtomicLedStrobeFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
   getGoboWheelMap, getAllGoboWheelMaps, setGoboWheelMap, deleteGoboWheelMap,
   getFixtures, getFixture, createFixture, createFixtureBatch, updateFixture, deleteFixture, updateFixtureRigPositions,

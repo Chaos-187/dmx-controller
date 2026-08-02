@@ -115,6 +115,30 @@ const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_ch
 const PAN_TILT = new Set(['pan','tilt']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
 
+/** Fixture-wide control channels — not per-cell RGB/white segments. */
+const GLOBAL_MASTER_CHANNEL_TYPES = new Set([
+  'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
+  'pan', 'pan_fine', 'tilt', 'tilt_fine',
+  'gobo', 'gobo_rotation', 'color_wheel', 'focus', 'zoom', 'prism',
+  'smoke', 'atmosphere',
+]);
+
+function isGlobalMasterChannel(type) {
+  return GLOBAL_MASTER_CHANNEL_TYPES.has(type);
+}
+
+/** Whether a cell-targeted cue should drive this channel. */
+function shouldApplyCellCue(cueCell, ch) {
+  if (cueCell == null) return true;
+  if (ch.cell != null) return ch.cell === cueCell;
+  return isGlobalMasterChannel(ch.type);
+}
+
+/** Independent segments on a multicell fixture (e.g. white pixels not in the cell grid). */
+function isAuxiliaryMulticellChannel(ch, fix) {
+  return (fix.cell_count || 0) > 0 && ch.cell == null && !isGlobalMasterChannel(ch.type);
+}
+
 // ─── Fixture Compatibility ──────────────────────────────────────────────────
 
 /**
@@ -194,16 +218,21 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
    */
   function resolveCellInfo() {
     if (channelCtx.cell_count > 0 && channelCtx.cell) {
-      return { cellIndex: channelCtx.cell - 1, cellCount: channelCtx.cell_count, isMaster: false };
+      return { cellIndex: channelCtx.cell - 1, cellCount: channelCtx.cell_count, isMaster: false, excluded: false };
     }
     if (channelCtx.cell_count > 0 && !channelCtx.cell) {
-      return { cellIndex: 0, cellCount: channelCtx.cell_count, isMaster: true };
+      const chType = channelCtx.channel_type;
+      if (chType && !isGlobalMasterChannel(chType)) {
+        return { cellIndex: -1, cellCount: channelCtx.cell_count, isMaster: false, excluded: true };
+      }
+      return { cellIndex: 0, cellCount: channelCtx.cell_count, isMaster: true, excluded: false };
     }
     const cpp = getCpp();
     return {
       cellIndex: Math.floor((channelCtx.channel_number - 1) / cpp),
       cellCount: Math.max(1, Math.floor(channelCtx.total_channels / cpp)),
       isMaster: false,
+      excluded: false,
     };
   }
 
@@ -262,7 +291,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // ══════════════════════════════════════════════════════════════════════
 
     case 'chase': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
@@ -302,7 +332,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'comet': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const tail  = params.tail  || data.tail  || 10;
@@ -325,7 +356,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'scanner': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 1;
@@ -345,7 +377,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'sparkle': {
-      const { cellIndex, isMaster } = resolveCellInfo();
+      const { cellIndex, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const density  = params.density    || data.density    || 0.1;
       const fadeSpd  = params.fade_speed || data.fade_speed || 6;
@@ -361,7 +394,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'color_wave': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const wavelength = params.wavelength || data.wavelength || 20;
       const speed = params.speed || data.speed || 1;
@@ -382,7 +416,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'fire': {
-      const { cellIndex, isMaster } = resolveCellInfo();
+      const { cellIndex, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const intensity = params.intensity || data.intensity || 0.8;
       const cooling   = params.cooling   || data.cooling   || 0.3;
@@ -413,7 +448,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'buildup': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const dir = params.direction || data.direction || 'left';
       const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
@@ -428,7 +464,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'segments': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const segSize = params.segment_size || data.segment_size || 2;
       const speed = params.offset_speed || data.offset_speed || 1;
@@ -439,7 +476,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'ripple': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
@@ -458,7 +496,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'cell_strobe': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const freq = params.frequency || data.frequency || 8;
       const pattern = params.pattern || data.pattern || 'sequential';
@@ -475,7 +514,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     }
 
     case 'gradient': {
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
       if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
       const speed = params.speed || data.speed || 1;
       const colors = data.colors || ['#ff0000', '#0000ff'];
@@ -965,7 +1005,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     // producing a proper rising/falling VU bar.  Color: green → yellow → red.
     case 'sound_vu': {
       const audio = params.audio || {};
-      const { cellIndex, cellCount, isMaster } = resolveCellInfo();
+      const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
+      if (excluded) return null;
 
       // Master channel of a multicell fixture: use overall energy for dimmer
       if (isMaster) {
@@ -1090,6 +1131,9 @@ module.exports = {
   hslToRgb,
   computeEffectValue,
   isFixtureCompatibleWithEffect,
+  isGlobalMasterChannel,
+  shouldApplyCellCue,
+  isAuxiliaryMulticellChannel,
   MOVING_HEAD_EFFECT_TYPES,
   MULTICELL_EFFECT_TYPES,
   COLOR_EFFECT_TYPES,
@@ -1097,4 +1141,5 @@ module.exports = {
   SOUND_EFFECT_TYPES,
   PAN_TILT,
   COLOR_CHANNELS,
+  GLOBAL_MASTER_CHANNEL_TYPES,
 };

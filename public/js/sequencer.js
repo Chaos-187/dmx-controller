@@ -1585,7 +1585,7 @@ const SEQ = (() => {
     const chVals = cue.channel_values || {};
     const t = $('propType').value;
     let channels = fix.channels;
-    if (cue.cell) channels = channels.filter(ch => !ch.cell || ch.cell === cue.cell);
+    if (cue.cell) channels = channels.filter(ch => ch.cell === cue.cell || (!ch.cell && ['dimmer','strobe','speed','macro','other','reset','pan','pan_fine','tilt','tilt_fine','gobo','gobo_rotation','color_wheel','focus','zoom','prism','smoke','atmosphere'].includes(ch.type)));
     const moverTypes = new Set(['pan','tilt','gobo','gobo_rotation','speed']);
     const isMover = fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
     // Movement cues using presets: hide pan/tilt (preset controls position) but keep speed/gobo

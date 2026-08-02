@@ -432,6 +432,7 @@ function resolveMultiCellConflicts(cues, multiCellFixtures) {
 
     const toRemove = new Set();
     for (const mc of masterCues) {
+      if (mc.label === '_master_dimmer') continue;
       const mcStart = mc.start_ms;
       const mcEnd = mc.start_ms + mc.duration_ms;
       for (const [iStart, iEnd] of merged) {

@@ -214,14 +214,18 @@ function generateSequence(opts) {
   // ── Build fixture role map for per-fixture intensity curves ──────────
   const fixtureRoleMap = new Map();
   for (const f of movers) fixtureRoleMap.set(f.id, 'mover');
-  for (const f of ledBars) fixtureRoleMap.set(f.id, 'led_bar');
+  for (const f of ledBars) {
+    fixtureRoleMap.set(f.id, f.category === 'multi_cell' ? 'multi_cell' : 'led_bar');
+  }
   for (const f of colorWheelFixtures) fixtureRoleMap.set(f.id, 'color_wheel');
   for (const f of regularFixtures) {
     if (!fixtureRoleMap.has(f.id)) fixtureRoleMap.set(f.id, 'par');
   }
   // Multi-cell fixtures that aren't already tagged
   for (const f of multiCellFixtures) {
-    if (!fixtureRoleMap.has(f.id)) fixtureRoleMap.set(f.id, 'led_bar');
+    if (!fixtureRoleMap.has(f.id)) {
+      fixtureRoleMap.set(f.id, f.category === 'multi_cell' ? 'multi_cell' : 'led_bar');
+    }
   }
 
   const cues = [];
