@@ -599,6 +599,16 @@
             <div class="config-row"><label>Auto-Play Sequence</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoPlay" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Start playback immediately after the sequence is loaded</span></label></div>
             <div class="config-row"><label>Unload on Track Change</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoUnload" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Unload the current sequence from a deck when a new track is loaded</span></label></div>
             <div class="config-row"><label>Auto-Generate Sequence</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoGenerate" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Automatically generate a sequence when no existing sequence is found</span></label></div>
+            <div class="config-row"><label>Regenerate Outdated Sequences</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqAutoRegenerateStale" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">When new fixtures are added, regenerate linked sequences on track load (uses current rig)</span></label></div>
+          </div>
+          <div class="config-card" style="margin-top:16px">
+            <h4>Fixture changes</h4>
+            <p class="config-desc" style="margin-top:0">Sequences store which fixtures existed at generation time. If you add fixtures later, older sequences may not include them until regenerated.</p>
+            <div class="config-row" style="align-items:center;gap:12px;flex-wrap:wrap">
+              <span id="cfgStaleSeqSummary" style="font-size:12px;color:var(--text-dim)">Checking…</span>
+              <button type="button" class="btn btn-sm" id="btnRegenerateStaleSeqs" disabled>Re-sequence outdated tracks</button>
+              <span id="cfgStaleSeqRegenStatus" style="font-size:11px;color:var(--text-dim)"></span>
+            </div>
           </div>
           <div class="config-card" style="margin-top:16px">
             <h4>Generation Options</h4>

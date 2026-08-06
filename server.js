@@ -426,11 +426,54 @@ function handleOs2lSubscribed(data) {
       const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
       const seqAutoUnload = db.getConfig('seq_auto_unload') === '1';
       const seqAutoGenerate = db.getConfig('seq_auto_generate') === '1';
-      if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} auto-load=${seqAutoLoad} auto-unload=${seqAutoUnload} auto-gen=${seqAutoGenerate}`);
-      if (seqAutoLoad || seqAutoUnload || seqAutoGenerate) {
+      const seqAutoRegenerateStale = db.getConfig('seq_auto_regenerate_stale') === '1';
+      if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} auto-load=${seqAutoLoad} auto-unload=${seqAutoUnload} auto-gen=${seqAutoGenerate} stale-regen=${seqAutoRegenerateStale}`);
+      if (seqAutoLoad || seqAutoUnload || seqAutoGenerate || seqAutoRegenerateStale) {
         const track = db.getTrackByPath(value);
         let seq = track ? db.getSequenceByTrackId(track.id) : null;
         if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} track=${track ? track.id : 'null'} seq=${seq ? seq.id : 'null'}`);
+
+        const seqIsStale = seq && db.isSequenceFixtureStale(seq);
+        if (seq && seqIsStale && seqAutoRegenerateStale && track) {
+          (async () => {
+            try {
+              console.log(`[SEQ] Sequence for track ${track.id} is outdated (new fixtures) — regenerating...`);
+              const liveFirstbeat = state.decks[deck] && state.decks[deck].firstbeat;
+              let fbPos = track.beatgrid_pos || 0;
+              if (!fbPos && liveFirstbeat > 0) {
+                fbPos = liveFirstbeat > 60 ? liveFirstbeat / 1000 : liveFirstbeat;
+              }
+              const result = await sequenceRoutes.generateSequenceForTrack(track, {
+                overwrite: true,
+                beatgridPosOverride: fbPos,
+                filepathOverride: value,
+              });
+              if (!result.sequence) return;
+              const generatedSeq = result.sequence;
+              broadcast({ type: 'seq_generated', track_id: track.id, sequence: generatedSeq, reason: 'stale_fixtures' });
+              if (seqAutoLoad) {
+                touchOverrides.os2lOverrideFixtures.clear();
+                touchOverrides.colorOverrideFixtures.clear();
+                touchOverrides.movementOverrideFixtures.clear();
+                touchOverrides.smokeOverrideFixtures.clear();
+                touchOverrides.atmosphereOverrideFixtures.clear();
+                deactivateScene();
+                stopPlaybackTimer(deck);
+                blackoutDeckFixtures(deck);
+                activeSequences[deck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+                broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
+                activeSequences[deck].playing = true;
+                activeSequences[deck].vdjDriven = true;
+                startPlaybackTimer(deck);
+                broadcast({ type: 'seq_playing', deck, playing: true });
+              }
+            } catch (e) {
+              console.error(`[SEQ] Stale auto-regenerate failed for track ${track.id}:`, e.message);
+            }
+          })();
+          scheduleBroadcast();
+          return;
+        }
 
         // Auto-generate sequence if none exists and feature is enabled
         if (!seq && track && seqAutoGenerate) {
@@ -510,6 +553,7 @@ function handleOs2lSubscribed(data) {
                 duration_ms: genResult.durationMs,
               });
               if (genResult.cues.length > 0) db.bulkUpdateCues(newSeq.id, genResult.cues);
+              db.setSequenceGeneratorFixtureIds(newSeq.id, fixtures.filter(f => !f.exclude_from_sequence).map(f => f.id));
               const generatedSeq = db.getSequence(newSeq.id);
               generatedSeq.cues = db.getSequenceCues(newSeq.id);
               broadcast({ type: 'seq_generated', track_id: track.id, sequence: generatedSeq });

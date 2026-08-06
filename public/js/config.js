@@ -243,6 +243,21 @@ function connect() {
     else if (msg.type === 'audio_input_status') {
       updateAudioStatus(msg);
     }
+    else if (msg.type === 'seq_stale_regen_progress') {
+      const statusEl = document.getElementById('cfgStaleSeqRegenStatus');
+      if (statusEl) {
+        statusEl.textContent = `Re-sequencing… ${msg.regenerated + msg.failed}/${msg.total}`;
+      }
+    }
+    else if (msg.type === 'seq_stale_regen_complete') {
+      const statusEl = document.getElementById('cfgStaleSeqRegenStatus');
+      const btn = document.getElementById('btnRegenerateStaleSeqs');
+      if (statusEl) {
+        statusEl.textContent = `Finished: ${msg.regenerated} updated, ${msg.failed} failed.`;
+      }
+      if (typeof refreshStaleSequenceSummary === 'function') refreshStaleSequenceSummary();
+      else if (btn) btn.disabled = false;
+    }
     else if (msg.type === 'server_log') {
       logEvent({ evtType: 'server', raw: { level: msg.level, message: msg.message }, ts: msg.ts });
     }
@@ -696,12 +711,31 @@ window.addScannedDevice = function(preset) {
 // ═══════════════════════════════════════════════════════════════
 //  Sequencer Config
 // ═══════════════════════════════════════════════════════════════
+async function refreshStaleSequenceSummary() {
+  const summaryEl = document.getElementById('cfgStaleSeqSummary');
+  const btn = document.getElementById('btnRegenerateStaleSeqs');
+  if (!summaryEl || !btn) return;
+  try {
+    const data = await fetch('/api/sequences/stale-summary').then(r => r.json());
+    const n = data.count || 0;
+    summaryEl.textContent = n === 0
+      ? 'All linked sequences include the current fixture rig.'
+      : `${n} linked sequence(s) are missing fixtures added since they were generated.`;
+    btn.disabled = n === 0;
+  } catch {
+    summaryEl.textContent = 'Could not load outdated sequence count.';
+    btn.disabled = true;
+  }
+}
+
 async function loadSequencerConfig() {
   const config = await fetch('/api/config').then(r => r.json());
   document.getElementById('cfgSeqAutoLoad').checked = config.seq_auto_load === '1';
   document.getElementById('cfgSeqAutoPlay').checked = config.seq_auto_play === '1';
   document.getElementById('cfgSeqAutoUnload').checked = config.seq_auto_unload === '1';
   document.getElementById('cfgSeqAutoGenerate').checked = config.seq_auto_generate === '1';
+  const staleChk = document.getElementById('cfgSeqAutoRegenerateStale');
+  if (staleChk) staleChk.checked = config.seq_auto_regenerate_stale === '1';
   document.getElementById('cfgSeqNoStrobes').checked = config.seq_no_strobes === '1';
   document.getElementById('cfgSeqNoStems').checked = config.seq_no_stems === '1';
   document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
@@ -725,6 +759,32 @@ async function loadSequencerConfig() {
     tbody.appendChild(tr);
   }
   document.getElementById('linkedSeqCount').textContent = `${linked.length} sequence(s) linked to tracks`;
+  await refreshStaleSequenceSummary();
+}
+
+const btnRegenerateStaleSeqs = document.getElementById('btnRegenerateStaleSeqs');
+if (btnRegenerateStaleSeqs) {
+  btnRegenerateStaleSeqs.addEventListener('click', async () => {
+    const statusEl = document.getElementById('cfgStaleSeqRegenStatus');
+    btnRegenerateStaleSeqs.disabled = true;
+    if (statusEl) statusEl.textContent = 'Starting…';
+    try {
+      const res = await fetch('/api/sequences/regenerate-stale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      const data = await res.json();
+      if (statusEl) {
+        statusEl.textContent = data.message || (data.status === 'started'
+          ? `Regenerating ${data.count} track(s) in the background…`
+          : 'Done.');
+      }
+    } catch (e) {
+      if (statusEl) statusEl.textContent = 'Failed to start regeneration.';
+      btnRegenerateStaleSeqs.disabled = false;
+    }
+  });
 }
 
 document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
@@ -733,6 +793,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_auto_play', document.getElementById('cfgSeqAutoPlay').checked ? '1' : '0'],
     ['seq_auto_unload', document.getElementById('cfgSeqAutoUnload').checked ? '1' : '0'],
     ['seq_auto_generate', document.getElementById('cfgSeqAutoGenerate').checked ? '1' : '0'],
+    ['seq_auto_regenerate_stale', document.getElementById('cfgSeqAutoRegenerateStale')?.checked ? '1' : '0'],
     ['seq_no_strobes', document.getElementById('cfgSeqNoStrobes').checked ? '1' : '0'],
     ['seq_no_stems', document.getElementById('cfgSeqNoStems').checked ? '1' : '0'],
     ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],

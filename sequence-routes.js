@@ -60,6 +60,93 @@ async function ensureTrackAnalysis(track, analysisCfg) {
   return analysis;
 }
 
+function eligibleFixtureIdsFromMap(fixtures) {
+  return fixtures.filter((f) => !f.exclude_from_sequence).map((f) => f.id);
+}
+
+function resolveGenerateOptions(body) {
+  const { palette: palKey, genre: genKey, template_id } = body || {};
+  let effectivePalette = palKey || undefined;
+  let effectiveGenre = genKey || undefined;
+  let effectiveNoStrobes = _db.getConfig('seq_no_strobes') === '1';
+  let effectiveGenConfig = _db.getGeneratorConfig();
+
+  if (template_id) {
+    const tpl = _db.getSequenceTemplate(template_id);
+    if (tpl) {
+      if (!palKey && tpl.palette && tpl.palette !== 'random') effectivePalette = tpl.palette;
+      if (!genKey && tpl.genre && tpl.genre !== 'auto') effectiveGenre = tpl.genre;
+      if (tpl.no_strobes) effectiveNoStrobes = true;
+      if (tpl.generator_config && typeof tpl.generator_config === 'object') {
+        effectiveGenConfig = { ...effectiveGenConfig, ...tpl.generator_config };
+      }
+    }
+  }
+  return { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveGenConfig };
+}
+
+/**
+ * Generate (or overwrite) a track sequence using the current fixture rig.
+ * Shared by API routes, stale regeneration, and deck auto-regenerate.
+ */
+async function generateSequenceForTrack(track, opts = {}) {
+  if (!track) return { error: 'no_track' };
+
+  const {
+    overwrite = true,
+    palette,
+    genre,
+    template_id,
+    beatgridPosOverride,
+    filepathOverride,
+  } = opts;
+
+  const existing = _db.getSequenceByTrackId(track.id);
+  if (existing && !overwrite) {
+    return { error: 'exists', sequence_id: existing.id };
+  }
+  if (existing) _db.deleteSequence(existing.id);
+
+  const fixtures = _db.getFixtureChannelMap();
+  const analysisCfg = _getAnalysisConfig();
+  const trackForAnalysis = filepathOverride ? { ...track, filepath: filepathOverride } : track;
+  const analysis = await ensureTrackAnalysis(trackForAnalysis, analysisCfg);
+
+  const { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveGenConfig } =
+    resolveGenerateOptions({ palette, genre, template_id });
+
+  const trackForGen = beatgridPosOverride != null && beatgridPosOverride > 0
+    ? { ...track, beatgrid_pos: beatgridPosOverride }
+    : track;
+
+  const { cues, bpm, durationMs, palette: palUsed, genrePreset } = _sequenceGenerator.generateSequence({
+    track: trackForGen,
+    fixtures,
+    analysis,
+    palette: effectivePalette,
+    genre: effectiveGenre,
+    effects: _db.getEffects(),
+    moverPresets: _db.getMoverPresets(),
+    noStrobes: effectiveNoStrobes,
+    generatorConfig: effectiveGenConfig,
+  });
+
+  const seq = _db.createSequence({
+    name: track.title || track.filename || 'Untitled',
+    track_id: track.id,
+    bpm,
+    duration_ms: durationMs,
+  });
+  if (cues.length > 0) _db.bulkUpdateCues(seq.id, cues);
+  _db.setSequenceGeneratorFixtureIds(seq.id, eligibleFixtureIdsFromMap(fixtures));
+
+  const full = _db.getSequence(seq.id);
+  full.cues = _db.getSequenceCues(seq.id);
+  full.palette = palUsed;
+  full.genrePreset = genrePreset;
+  return { sequence: full };
+}
+
 // ─── Database Stats & Bulk Delete ───────────────────────────────────────────
 
 router.get('/api/db/stats', (req, res) => {
@@ -133,7 +220,52 @@ router.get('/api/sequences/generate-options', (req, res) => {
   const genres = Object.entries(_sequenceGenerator.genrePresets).map(([k, v]) => ({
     key: k, label: v.label,
   }));
-  res.json({ palettes, genres });
+  const stale = _db.getStaleSequenceSummaries();
+  res.json({ palettes, genres, stale_sequence_count: stale.length });
+});
+
+router.get('/api/sequences/stale-summary', (req, res) => {
+  const sequences = _db.getStaleSequenceSummaries();
+  res.json({ count: sequences.length, sequences });
+});
+
+router.post('/api/sequences/regenerate-stale', async (req, res) => {
+  const { track_ids, all } = req.body || {};
+  let trackIds = [];
+  if (all) {
+    trackIds = _db.getStaleSequenceSummaries().map((s) => s.track_id).filter(Boolean);
+  } else if (Array.isArray(track_ids) && track_ids.length) {
+    trackIds = track_ids.map((id) => +id).filter((id) => id > 0);
+  } else {
+    return res.status(400).json({ error: 'Provide track_ids array or all: true' });
+  }
+  if (!trackIds.length) {
+    return res.json({ status: 'done', regenerated: 0, failed: 0, message: 'No outdated sequences' });
+  }
+
+  res.json({ status: 'started', count: trackIds.length });
+
+  let regenerated = 0;
+  let failed = 0;
+  for (const trackId of trackIds) {
+    const track = _db.getTrack(trackId);
+    if (!track) { failed++; continue; }
+    const seq = _db.getSequenceByTrackId(trackId);
+    if (!seq || !_db.isSequenceFixtureStale(seq)) continue;
+    try {
+      const result = await generateSequenceForTrack(track, { overwrite: true });
+      if (result.sequence) {
+        regenerated++;
+        _broadcast({ type: 'seq_generated', track_id: track.id, sequence: result.sequence, reason: 'stale_fixtures' });
+      } else failed++;
+    } catch (e) {
+      failed++;
+      console.error(`[SEQ] Stale regenerate failed for track ${trackId}:`, e.message);
+    }
+    _broadcast({ type: 'seq_stale_regen_progress', regenerated, failed, total: trackIds.length, track_id: trackId });
+  }
+  console.log(`[SEQ] Stale regenerate complete: ${regenerated} ok, ${failed} failed`);
+  _broadcast({ type: 'seq_stale_regen_complete', regenerated, failed, total: trackIds.length });
 });
 
 router.get('/api/sequences/:id', (req, res) => {
@@ -201,68 +333,16 @@ router.post('/api/sequences/generate/:trackId', async (req, res) => {
   const track = _db.getTrack(+req.params.trackId);
   if (!track) return res.status(404).json({ error: 'Track not found' });
 
-  // Check if sequence already exists for this track
-  const existing = _db.getSequenceByTrackId(track.id);
-  if (existing && !req.body.overwrite) {
-    return res.status(409).json({ error: 'Sequence already exists', sequence_id: existing.id });
-  }
-  if (existing) {
-    _db.deleteSequence(existing.id);
-  }
-
-  const fixtures = _db.getFixtureChannelMap();
-  const analysisCfg = _getAnalysisConfig();
-  const analysis = await ensureTrackAnalysis(track, analysisCfg);
-
-  const { palette: palKey, genre: genKey, template_id } = req.body || {};
-
-  // If template specified, merge its settings
-  let effectivePalette = palKey || undefined;
-  let effectiveGenre = genKey || undefined;
-  let effectiveNoStrobes = _db.getConfig('seq_no_strobes') === '1';
-  let effectiveGenConfig = _db.getGeneratorConfig();
-
-  if (template_id) {
-    const tpl = _db.getSequenceTemplate(template_id);
-    if (tpl) {
-      if (!palKey && tpl.palette && tpl.palette !== 'random') effectivePalette = tpl.palette;
-      if (!genKey && tpl.genre && tpl.genre !== 'auto') effectiveGenre = tpl.genre;
-      if (tpl.no_strobes) effectiveNoStrobes = true;
-      if (tpl.generator_config && typeof tpl.generator_config === 'object') {
-        effectiveGenConfig = { ...effectiveGenConfig, ...tpl.generator_config };
-      }
-    }
-  }
-
-  const { cues, bpm, durationMs, palette, genrePreset } = _sequenceGenerator.generateSequence({
-    track,
-    fixtures,
-    analysis,
-    palette: effectivePalette,
-    genre: effectiveGenre,
-    effects: _db.getEffects(),
-    moverPresets: _db.getMoverPresets(),
-    noStrobes: effectiveNoStrobes,
-    generatorConfig: effectiveGenConfig,
+  const result = await generateSequenceForTrack(track, {
+    overwrite: !!req.body.overwrite,
+    palette: req.body.palette,
+    genre: req.body.genre,
+    template_id: req.body.template_id,
   });
-
-  // Create sequence
-  const seq = _db.createSequence({
-    name: track.title || track.filename || 'Untitled',
-    track_id: track.id,
-    bpm: bpm,
-    duration_ms: durationMs,
-  });
-
-  // Bulk insert generated cues
-  if (cues.length > 0) {
-    _db.bulkUpdateCues(seq.id, cues);
+  if (result.error === 'exists') {
+    return res.status(409).json({ error: 'Sequence already exists', sequence_id: result.sequence_id });
   }
-
-  const result = _db.getSequence(seq.id);
-  result.palette = palette;
-  result.genrePreset = genrePreset;
-  res.json(result);
+  res.json(result.sequence);
 });
 
 // Bulk generate sequences for multiple tracks
@@ -323,6 +403,7 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
           track_id: item.track.id, bpm, duration_ms: durationMs,
         });
         if (cues.length > 0) _db.bulkUpdateCues(seq.id, cues);
+        _db.setSequenceGeneratorFixtureIds(seq.id, eligibleFixtureIdsFromMap(fixtures));
 
         completed++;
         _broadcast({ type: 'seq_batch_progress', completed, failed, skipped, total: track_ids.length, track_id: item.trackId });
@@ -381,4 +462,4 @@ router.post('/api/sequence-templates/:id/set-default', (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { router, init };
+module.exports = { router, init, generateSequenceForTrack };

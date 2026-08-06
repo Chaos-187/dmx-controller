@@ -447,6 +447,14 @@ function init() {
     console.log('[DB] Migrated sequence_cues: added cell column');
   }
 
+  // Migrate: add generator_fixture_ids to light_sequences (fixture snapshot at generation time)
+  try {
+    db.prepare('SELECT generator_fixture_ids FROM light_sequences LIMIT 1').get();
+  } catch (e) {
+    db.exec('ALTER TABLE light_sequences ADD COLUMN generator_fixture_ids TEXT DEFAULT NULL');
+    console.log('[DB] Migrated light_sequences: added generator_fixture_ids column');
+  }
+
   // Migrate: add track column to sequence_cues if missing
   // (sub-track type: 'color', 'fx', 'move')
   try {
@@ -806,6 +814,13 @@ function init() {
 
   // Atomic Strobe is a pixel matrix — ensure category is multi_cell
   db.prepare("UPDATE fixture_types SET category = 'multi_cell' WHERE name = 'Generic Atomic LED Strobe' AND category != 'multi_cell'").run();
+
+  // Migration: 14pcs RGBW 4-in-1 par (4ch + 8ch DMX modes)
+  const has14pcsPar = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = '14pcs RGBW 4 in 1 Par Light'").get().c;
+  if (has14pcsPar === 0) {
+    create14pcsRgbwParFixtureType();
+    console.log('[DB] Added 14pcs RGBW 4 in 1 Par Light fixture type (4ch + 8ch modes)');
+  }
 
   // Seed default color wheel map for 60W Spot Moving Head
   seedDefaultColorWheelMap();
@@ -1187,6 +1202,56 @@ function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChann
     manufacturer: manufacturer || 'Generic',
     category: 'multi_cell',
     channels,
+  });
+}
+
+/**
+ * 14pcs RGBW 4-in-1 Par Light — 4-channel (RGBW) and 8-channel (dimmer, RGBW, strobe, programs) modes.
+ */
+function create14pcsRgbwParFixtureType() {
+  return createFixtureType({
+    name: '14pcs RGBW 4 in 1 Par Light',
+    manufacturer: '',
+    category: 'par',
+    modes: [
+      {
+        name: '8 Channel',
+        short_name: '8ch',
+        channels: [
+          { channel_number: 1, name: 'Total Dimmer', type: 'dimmer', default_value: 0 },
+          { channel_number: 2, name: 'Red', type: 'red', default_value: 0 },
+          { channel_number: 3, name: 'Green', type: 'green', default_value: 0 },
+          { channel_number: 4, name: 'Blue', type: 'blue', default_value: 0 },
+          { channel_number: 5, name: 'White', type: 'white', default_value: 0 },
+          { channel_number: 6, name: 'Total Strobe', type: 'strobe', default_value: 0 },
+          {
+            channel_number: 7,
+            name: 'Function Selection',
+            type: 'macro',
+            default_value: 0,
+            ranges: [
+              { min: 0, max: 3, label: 'DMX channel control', type: 'other' },
+              { min: 4, max: 127, label: '8 fixed colors', type: 'macro' },
+              { min: 128, max: 169, label: 'Jump', type: 'macro' },
+              { min: 170, max: 210, label: 'Gradient', type: 'macro' },
+              { min: 211, max: 229, label: 'Sound 1', type: 'macro' },
+              { min: 230, max: 255, label: 'Sound 2', type: 'macro' },
+            ],
+          },
+          { channel_number: 8, name: 'Function Speed', type: 'speed', default_value: 0 },
+        ],
+      },
+      {
+        name: '4 Channel',
+        short_name: '4ch',
+        channels: [
+          { channel_number: 1, name: 'Red', type: 'red', default_value: 0 },
+          { channel_number: 2, name: 'Green', type: 'green', default_value: 0 },
+          { channel_number: 3, name: 'Blue', type: 'blue', default_value: 0 },
+          { channel_number: 4, name: 'White', type: 'white', default_value: 0 },
+        ],
+      },
+    ],
   });
 }
 
@@ -3303,6 +3368,75 @@ function deleteSequence(id) {
   return { deleted: true };
 }
 
+// ─── Sequence fixture snapshots (detect stale sequences after rig changes) ───
+
+function getSequenceEligibleFixtureIds() {
+  return db.prepare(`
+    SELECT f.id FROM fixtures f
+    WHERE COALESCE(f.exclude_from_sequence, 0) = 0
+    ORDER BY f.id
+  `).all().map((r) => r.id);
+}
+
+function setSequenceGeneratorFixtureIds(sequenceId, fixtureIds) {
+  const ids = [...new Set(fixtureIds)].filter((id) => id > 0).sort((a, b) => a - b);
+  db.prepare('UPDATE light_sequences SET generator_fixture_ids = ? WHERE id = ?')
+    .run(JSON.stringify(ids), sequenceId);
+}
+
+function getSequenceSnapshotFixtureIds(seq) {
+  if (!seq) return [];
+  if (seq.generator_fixture_ids) {
+    try {
+      const parsed = JSON.parse(seq.generator_fixture_ids);
+      if (Array.isArray(parsed)) return parsed.map((id) => +id).filter((id) => id > 0);
+    } catch { /* fall through */ }
+  }
+  const rows = db.prepare(`
+    SELECT DISTINCT fixture_id AS id FROM sequence_cues
+    WHERE sequence_id = ? AND fixture_id IS NOT NULL AND fixture_id > 0
+  `).all(seq.id);
+  return rows.map((r) => r.id).sort((a, b) => a - b);
+}
+
+function isSequenceFixtureStale(seq) {
+  if (!seq) return false;
+  const current = getSequenceEligibleFixtureIds();
+  if (!current.length) return false;
+  const snapshot = new Set(getSequenceSnapshotFixtureIds(seq));
+  if (!snapshot.size) return current.length > 0;
+  return current.some((id) => !snapshot.has(id));
+}
+
+function getStaleSequenceSummaries() {
+  const rows = db.prepare(`
+    SELECT ls.id AS sequence_id, ls.name AS sequence_name, ls.track_id,
+           t.title AS track_title, t.filename AS track_filename
+    FROM light_sequences ls
+    LEFT JOIN tracks t ON t.id = ls.track_id
+    WHERE ls.track_id IS NOT NULL
+    ORDER BY ls.updated_at DESC
+  `).all();
+  const current = getSequenceEligibleFixtureIds();
+  const currentSet = new Set(current);
+  const out = [];
+  for (const row of rows) {
+    const seq = getSequence(row.sequence_id);
+    if (!seq || !isSequenceFixtureStale(seq)) continue;
+    const snapshot = new Set(getSequenceSnapshotFixtureIds(seq));
+    const missing = current.filter((id) => !snapshot.has(id));
+    out.push({
+      sequence_id: row.sequence_id,
+      track_id: row.track_id,
+      sequence_name: row.sequence_name,
+      track_title: row.track_title || row.track_filename || '',
+      missing_fixture_count: missing.length,
+      missing_fixture_ids: missing,
+    });
+  }
+  return out;
+}
+
 // ─── Sequence Cues CRUD ─────────────────────────────────────────────────────
 
 // ─── USB Devices CRUD ────────────────────────────────────────────────────────
@@ -4043,6 +4177,8 @@ module.exports = {
   getGeneratorConfig, getGeneratorConfigKey, setGeneratorConfigKey, resetGeneratorConfig, GENERATOR_CONFIG_DEFAULTS,
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,
+  getSequenceEligibleFixtureIds, setSequenceGeneratorFixtureIds, getSequenceSnapshotFixtureIds,
+  isSequenceFixtureStale, getStaleSequenceSummaries,
   getSequenceCues, getSequenceCuesLightweight, getCue, createCue, updateCue, deleteCue, bulkUpdateCues,
   getUsbDevices, getEnabledUsbDevices, getUsbDevice, createUsbDevice, updateUsbDevice, deleteUsbDevice, toggleUsbDevice,
   getTrackAnalysis, upsertTrackAnalysis, updateStemEnergy, deleteTrackAnalysis, deleteAllAnalysis,
