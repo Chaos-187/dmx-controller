@@ -4213,6 +4213,26 @@ function sortCuesByStart(cues) {
   return cues.slice().sort((a, b) => a.start_ms - b.start_ms || (a.cell ? 1 : 0) - (b.cell ? 1 : 0));
 }
 
+/** Reset DMX map for fixtures referenced by a sequence (used before preview scrub applies active cues). */
+function fillSequenceFixtureBaseline(channelUpdates, sequenceCues, allFixtures) {
+  const hasRigWide = sequenceCues.some(c => c.fixture_id === 0);
+  const fixtureIds = hasRigWide
+    ? allFixtures.map(f => f.id)
+    : [...new Set(sequenceCues.map(c => c.fixture_id).filter(id => id > 0))];
+  for (const fid of fixtureIds) {
+    const fixMap = getFixtureChannelMapByIdCached(fid);
+    if (!fixMap) continue;
+    const u = fixMap.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    for (const ch of fixMap.channels) {
+      let resetVal = 0;
+      if (ch.type === 'pan') resetVal = fixMap.home_pan ?? 128;
+      else if (ch.type === 'tilt') resetVal = fixMap.home_tilt ?? 128;
+      channelUpdates[u][ch.dmx_address] = resetVal;
+    }
+  }
+}
+
 /** Keep master dimmer up on multi-cell fixtures whenever they have active cues. */
 function ensureMulticellMasterDimmer(channelUpdates, activeCues, allFixtures) {
   const activeFixtureIds = new Set(activeCues.map(c => c.fixture_id).filter(Boolean));
@@ -4297,8 +4317,6 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
     : 1;
 
   // Find all active cues at this time position
-  const channelUpdates = {}; // { universe: { channel: value } }
-
   // Sort active cues so master cues (cell=null) are processed first,
   // then cell-specific cues overwrite. This ensures cell cues always
   // take priority over master cues on the same fixture.
@@ -4323,6 +4341,12 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
     }
   }
   activeCues.sort((a, b) => (a.cell ? 1 : 0) - (b.cell ? 1 : 0));
+
+  const channelUpdates = {}; // { universe: { channel: value } }
+  // Preview scrub: reset sequence fixtures each seek so gaps / past last cue go dark
+  if (opts.preview) {
+    fillSequenceFixtureBaseline(channelUpdates, cues, allFixtures);
+  }
 
   for (const cue of activeCues) {
 
