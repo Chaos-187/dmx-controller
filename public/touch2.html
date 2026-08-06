@@ -1029,6 +1029,11 @@ async function fetchTouchState() {
       document.getElementById('effectSpeedSlider').value = pct;
       document.getElementById('effectSpeedVal').textContent = s.effectSpeed.toFixed(1) + 'x';
     }
+    if (s.groupDimmers && typeof s.groupDimmers === 'object') {
+      for (const [gid, val] of Object.entries(s.groupDimmers)) {
+        groupDimmer[+gid] = val;
+      }
+    }
   } catch (e) {}
 }
 

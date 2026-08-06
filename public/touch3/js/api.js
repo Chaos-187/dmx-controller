@@ -45,6 +45,11 @@ async function fetchAllData() {
     S.blackoutActive = !!touchState.blackoutHold;
     if (touchState.masterDimmer !== undefined) S.masterDim = touchState.masterDimmer;
     if (touchState.effectSpeed !== undefined) S.effectSpeed = touchState.effectSpeed;
+    if (touchState.groupDimmers && typeof touchState.groupDimmers === 'object') {
+      for (const [gid, val] of Object.entries(touchState.groupDimmers)) {
+        S.groupDimmer[+gid] = val;
+      }
+    }
   }
 }
 

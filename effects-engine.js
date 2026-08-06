@@ -115,6 +115,34 @@ const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_ch
 const PAN_TILT = new Set(['pan','tilt']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
 
+/** Intensity-based multicell output; uses live palette on RGB when color_mode is palette. */
+function multicellColorOutput(channelType, brightness, baseValues, data, params, colorPhase) {
+  const b = Math.max(0, Math.min(1, brightness));
+  if (b <= 0) return 0;
+  if (channelType === 'dimmer') return Math.round(255 * b);
+  if (!COLOR_CHANNELS.has(channelType)) return null;
+
+  const palette = getEffectPaletteRgb(data, params);
+  if (usePaletteColors(data, params) && palette) {
+    if (channelType === 'red' || channelType === 'green' || channelType === 'blue') {
+      const phase = colorPhase != null ? ((colorPhase % 1) + 1) % 1 : 0;
+      const [r, g, bl] = rgbAtPalettePhase(phase, palette);
+      if (channelType === 'red') return Math.round(r * b);
+      if (channelType === 'green') return Math.round(g * b);
+      if (channelType === 'blue') return Math.round(bl * b);
+    }
+    if (channelType === 'white') return 0;
+  }
+
+  const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
+  return val * b;
+}
+
+function multicellMasterOutput(channelType, baseValues, data, params) {
+  if (!COLOR_CHANNELS.has(channelType)) return null;
+  return multicellColorOutput(channelType, 1, baseValues, data, params, 0);
+}
+
 /** Fixture-wide control channels — not per-cell RGB/white segments. */
 const GLOBAL_MASTER_CHANNEL_TYPES = new Set([
   'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
@@ -293,14 +321,16 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'chase': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
       const tail  = params.tail  || data.tail  || 0;
       const dir   = params.direction || data.direction || 'left';
       const halfW = width / 2;
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const cycle = (progress * speed) % 1;
+      const cellPhase = cellCount > 1 ? cellIndex / (cellCount - 1) : 0;
+      const colorPhase = (cellPhase + cycle) % 1;
+      const out = (br) => multicellColorOutput(channelType, br, baseValues, data, params, colorPhase);
 
       const bright = (dist) => {
         if (dist <= halfW) return 1;
@@ -311,36 +341,37 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (dir === 'center') {
         const mid = (cellCount - 1) / 2;
         const spread = cycle * mid;
-        return val * bright(Math.min(Math.abs(cellIndex - (mid - spread)), Math.abs(cellIndex - (mid + spread))));
+        return out(bright(Math.min(Math.abs(cellIndex - (mid - spread)), Math.abs(cellIndex - (mid + spread)))));
       }
       if (dir === 'outside') {
         const mid = (cellCount - 1) / 2;
         const spread = (1 - cycle) * mid;
-        return val * bright(Math.min(Math.abs(cellIndex - (mid - spread)), Math.abs(cellIndex - (mid + spread))));
+        return out(bright(Math.min(Math.abs(cellIndex - (mid - spread)), Math.abs(cellIndex - (mid + spread)))));
       }
       if (dir === 'bounce') {
         const headPos = cycle < 0.5
           ? cycle * 2 * (cellCount - 1)
           : (1 - cycle) * 2 * (cellCount - 1);
-        return val * bright(Math.abs(cellIndex - headPos));
+        return out(bright(Math.abs(cellIndex - headPos)));
       }
-      // left / right — wrapping chase
       const headPos = dir === 'right' ? (1 - cycle) * cellCount : cycle * cellCount;
       let dist = Math.abs(cellIndex - headPos);
       dist = Math.min(dist, cellCount - dist);
-      return val * bright(dist);
+      return out(bright(dist));
     }
 
     case 'comet': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const speed = params.speed || data.speed || 1;
       const tail  = params.tail  || data.tail  || 10;
       const dir   = params.direction || data.direction || 'left';
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const cycle = (progress * speed) % 1;
       const headPos = dir === 'right' ? (1 - cycle) * cellCount : cycle * cellCount;
+      const cellPhase = cellCount > 1 ? cellIndex / (cellCount - 1) : 0;
+      const colorPhase = (cellPhase + cycle) % 1;
+      const out = (br) => multicellColorOutput(channelType, br, baseValues, data, params, colorPhase);
 
       let behind;
       if (dir === 'right') {
@@ -350,39 +381,40 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
         behind = headPos - cellIndex;
         if (behind < 0) behind += cellCount;
       }
-      if (behind <= 1) return val;
-      if (behind <= tail + 1) return val * (1 - (behind - 1) / tail);
+      if (behind <= 1) return out(1);
+      if (behind <= tail + 1) return out(1 - (behind - 1) / tail);
       return 0;
     }
 
     case 'scanner': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 1;
       const tail  = params.tail  || data.tail  || 5;
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const halfW = width / 2;
 
       const cycle = (progress * speed) % 1;
       const headPos = cycle < 0.5
         ? cycle * 2 * (cellCount - 1)
         : (1 - cycle) * 2 * (cellCount - 1);
+      const cellPhase = cellCount > 1 ? cellIndex / (cellCount - 1) : 0;
+      const colorPhase = (cellPhase + headPos / Math.max(1, cellCount - 1)) % 1;
+      const out = (br) => multicellColorOutput(channelType, br, baseValues, data, params, colorPhase);
 
       const dist = Math.abs(cellIndex - headPos);
-      if (dist <= halfW) return val;
-      if (tail > 0 && dist <= halfW + tail) return val * (1 - (dist - halfW) / tail);
+      if (dist <= halfW) return out(1);
+      if (tail > 0 && dist <= halfW + tail) return out(1 - (dist - halfW) / tail);
       return 0;
     }
 
     case 'sparkle': {
       const { cellIndex, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const density  = params.density    || data.density    || 0.1;
       const fadeSpd  = params.fade_speed || data.fade_speed || 6;
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
 
       const t = progress * fadeSpd;
       const phase = pseudoRandom(cellIndex * 137);
@@ -390,7 +422,8 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const slot = Math.floor(t2);
       const frac = t2 - slot;
       const on = pseudoRandom(cellIndex * 9973 + slot) < density;
-      return on ? val * (1 - frac) : 0;
+      const colorPhase = pseudoRandom(cellIndex * 313);
+      return multicellColorOutput(channelType, on ? (1 - frac) : 0, baseValues, data, params, colorPhase);
     }
 
     case 'color_wave': {
@@ -450,47 +483,48 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'buildup': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const dir = params.direction || data.direction || 'left';
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
-
       const litCells = Math.round(progress * cellCount);
+      const cellPhase = cellCount > 1 ? cellIndex / (cellCount - 1) : 0;
+      const out = (on) => multicellColorOutput(channelType, on ? 1 : 0, baseValues, data, params, cellPhase);
+
       if (dir === 'center') {
         const mid = (cellCount - 1) / 2;
-        return Math.abs(cellIndex - mid) <= litCells / 2 ? val : 0;
+        return out(Math.abs(cellIndex - mid) <= litCells / 2);
       }
-      if (dir === 'right') return cellIndex >= cellCount - litCells ? val : 0;
-      return cellIndex < litCells ? val : 0;
+      if (dir === 'right') return out(cellIndex >= cellCount - litCells);
+      return out(cellIndex < litCells);
     }
 
     case 'segments': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const segSize = params.segment_size || data.segment_size || 2;
       const speed = params.offset_speed || data.offset_speed || 1;
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
       const offset = Math.floor(progress * speed * cellCount);
       const pos = (cellIndex + offset) % (segSize * 2);
-      return pos < segSize ? val : 0;
+      const cellPhase = cellCount > 1 ? cellIndex / (cellCount - 1) : 0;
+      return multicellColorOutput(channelType, pos < segSize ? 1 : 0, baseValues, data, params, cellPhase);
     }
 
     case 'ripple': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const speed = params.speed || data.speed || 1;
       const width = params.width || data.width || 3;
       const decay = params.decay || data.decay || 0.7;
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
 
       const center = (cellCount - 1) / 2;
       const dist = Math.abs(cellIndex - center);
       const waveFront = progress * speed * cellCount;
       const delta = Math.abs(dist - waveFront);
+      const cellPhase = cellCount > 1 ? dist / (cellCount - 1) : 0;
       if (delta < width) {
         const intensity = (1 - delta / width) * Math.pow(decay, Math.floor(waveFront / cellCount));
-        return val * Math.max(0, intensity);
+        return multicellColorOutput(channelType, Math.max(0, intensity), baseValues, data, params, cellPhase);
       }
       return 0;
     }
@@ -498,10 +532,9 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
     case 'cell_strobe': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const freq = params.frequency || data.frequency || 8;
       const pattern = params.pattern || data.pattern || 'sequential';
-      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
 
       const beat = Math.floor(progress * freq);
       let activeCell;
@@ -510,21 +543,31 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       } else {
         activeCell = beat % cellCount;
       }
-      return cellIndex === activeCell ? val : 0;
+      const cellPhase = cellCount > 1 ? cellIndex / (cellCount - 1) : 0;
+      return multicellColorOutput(channelType, cellIndex === activeCell ? 1 : 0, baseValues, data, params, cellPhase);
     }
 
     case 'gradient': {
       const { cellIndex, cellCount, isMaster, excluded } = resolveCellInfo();
       if (excluded) return null;
-      if (isMaster) return COLOR_CHANNELS.has(channelType) ? (baseValues[channelType] !== undefined ? baseValues[channelType] : 255) : null;
+      if (isMaster) return multicellMasterOutput(channelType, baseValues, data, params);
       const speed = params.speed || data.speed || 1;
-      const colors = data.colors || ['#ff0000', '#0000ff'];
       if (!['red', 'green', 'blue'].includes(channelType)) {
         if (channelType === 'dimmer') return 255;
         return null;
       }
 
       const pos = ((cellIndex / Math.max(1, cellCount - 1)) + progress * speed) % 1;
+      const palette = getEffectPaletteRgb(data, params);
+      if (usePaletteColors(data, params) && palette) {
+        const [r, g, b] = rgbAtPalettePhase(pos, palette);
+        if (channelType === 'red') return r;
+        if (channelType === 'green') return g;
+        if (channelType === 'blue') return b;
+        return null;
+      }
+
+      const colors = data.colors || ['#ff0000', '#0000ff'];
       const segmentCount = colors.length - 1;
       const segPos = pos * segmentCount;
       const segIdx = Math.min(Math.floor(segPos), segmentCount - 1);

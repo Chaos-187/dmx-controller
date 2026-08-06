@@ -1946,6 +1946,65 @@ const touchOverrides = {
   companionColorPushMode: true,
 };
 
+const TOUCH_GROUP_DIMMERS_CONFIG_KEY = 'touch_group_dimmers';
+
+function loadTouchGroupDimmers() {
+  try {
+    const raw = db.getConfig(TOUCH_GROUP_DIMMERS_CONFIG_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return;
+    for (const [k, v] of Object.entries(obj)) {
+      const groupId = +k;
+      if (!groupId) continue;
+      touchOverrides.groupDimmers[groupId] = Math.max(0, Math.min(255, Math.round(+v || 0)));
+    }
+    const n = Object.keys(touchOverrides.groupDimmers).length;
+    if (n) console.log(`[TOUCH] Restored ${n} persisted group dimmer level(s)`);
+  } catch (e) {
+    console.warn('[TOUCH] Could not load persisted group dimmers:', e.message);
+  }
+}
+
+function persistTouchGroupDimmers() {
+  try {
+    const out = {};
+    for (const [k, v] of Object.entries(touchOverrides.groupDimmers)) {
+      const groupId = +k;
+      if (!groupId) continue;
+      out[String(groupId)] = Math.max(0, Math.min(255, Math.round(+v || 0)));
+    }
+    db.setConfig(TOUCH_GROUP_DIMMERS_CONFIG_KEY, JSON.stringify(out));
+  } catch (e) {
+    console.warn('[TOUCH] Could not persist group dimmers:', e.message);
+  }
+}
+
+/** Push one group's dimmer level to fixture dimmer channels (idle / non-sequence). */
+function applyGroupDimmerLevelToDmx(groupId, val) {
+  if (!dmxOutputEnabled || isAnySequencePlaying()) return;
+  const channelUpdates = {};
+  for (const fix of getFixtureChannelMapCached()) {
+    if (!(fix.group_ids || []).includes(groupId)) continue;
+    if (isFixtureDisabled(fix.id)) continue;
+    const u = fix.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = [];
+    for (const ch of fix.channels) {
+      if (ch.type === 'dimmer') channelUpdates[u].push({ ch: ch.dmx_address, val });
+    }
+  }
+  for (const [u, channels] of Object.entries(channelUpdates)) {
+    artnetServer.setChannels(+u, channels);
+    dmxUsbServer.setChannels(+u, channels);
+  }
+}
+
+function applyAllPersistedGroupDimmersToDmx() {
+  for (const [gid, val] of Object.entries(touchOverrides.groupDimmers)) {
+    applyGroupDimmerLevelToDmx(+gid, val);
+  }
+}
+
 function normalizeFixtureId(id) {
   const n = Number(id);
   return Number.isFinite(n) ? n : id;
@@ -2077,6 +2136,7 @@ app.get('/api/touch/state', (req, res) => {
     masterDimmer: touchOverrides.masterDimmer,
     effectSpeed: touchOverrides.effectSpeed,
     companionColorPushMode: touchOverrides.companionColorPushMode,
+    groupDimmers: { ...touchOverrides.groupDimmers },
   });
 });
 
@@ -2129,24 +2189,9 @@ app.post('/api/touch/group-dimmer', (req, res) => {
   if (!groupId) return res.status(400).json({ error: 'groupId required' });
   const val = Math.max(0, Math.min(255, Math.round(+req.body.value || 0)));
   touchOverrides.groupDimmers[groupId] = val;
-  // During sequence playback the engine applies groupDimmers each frame; direct DMX would be overwritten.
-  if (dmxOutputEnabled && !isAnySequencePlaying()) {
-    const channelUpdates = {};
-    for (const fix of getFixtureChannelMapCached()) {
-      if (!(fix.group_ids || []).includes(groupId)) continue;
-      if (isFixtureDisabled(fix.id)) continue;
-      const u = fix.universe;
-      if (!channelUpdates[u]) channelUpdates[u] = [];
-      for (const ch of fix.channels) {
-        if (ch.type === 'dimmer') channelUpdates[u].push({ ch: ch.dmx_address, val });
-      }
-    }
-    for (const [u, channels] of Object.entries(channelUpdates)) {
-      artnetServer.setChannels(+u, channels);
-      dmxUsbServer.setChannels(+u, channels);
-    }
-  }
+  applyGroupDimmerLevelToDmx(groupId, val);
   broadcast({ type: 'groupDimmer', group_id: groupId, value: val });
+  persistTouchGroupDimmers();
   res.json({ ok: true, groupId, value: val });
 });
 
@@ -4712,6 +4757,8 @@ function startMdnsResponder() {
 // Initialise database
 db.init();
 
+loadTouchGroupDimmers();
+
 // Refresh cached mixer config now that DB is ready
 // (the inline call at declaration time fires before db.init() and silently fails)
 refreshMixerConfig();
@@ -4733,6 +4780,10 @@ artnetServer.start(artnetNodes, artnetRate);
 
 // Start DMX USB output server (multi-device manager)
 const dmxUsbServer = new DmxUsbServer();
+
+if (Object.keys(touchOverrides.groupDimmers).length && dmxOutputEnabled) {
+  applyAllPersistedGroupDimmersToDmx();
+}
 
 // Initialise OS2L module with all dependencies
 os2l.init({
@@ -4821,6 +4872,7 @@ midiController.init({
     if (!_cachedFixtureChannelMapById) getFixtureChannelMapCached();
     return _cachedFixtureChannelMapById;
   },
+  persistTouchGroupDimmers,
 });
 
 // Auto-start MIDI controller

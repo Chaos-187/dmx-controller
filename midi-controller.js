@@ -159,6 +159,7 @@ let applyInvert;
 let pauseAllSequences;
 let getFixtureChannelMapCached;
 let getFixtureChannelMapByIdMap;
+let persistTouchGroupDimmers;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -340,6 +341,7 @@ function init(deps) {
   pauseAllSequences        = deps.pauseAllSequences;
   getFixtureChannelMapCached = deps.getFixtureChannelMapCached;
   getFixtureChannelMapByIdMap = deps.getFixtureChannelMapByIdMap;
+  persistTouchGroupDimmers = deps.persistTouchGroupDimmers || null;
 }
 
 // ─── Device Discovery ───────────────────────────────────────────────────────
@@ -1515,6 +1517,8 @@ function executeFaderAction(mapping, value) {
         }
       }
       broadcast({ type: 'midi_fader_action', action: 'group_dimmer', group_id, value: dimVal });
+      broadcast({ type: 'groupDimmer', group_id, value: dimVal });
+      if (persistTouchGroupDimmers) persistTouchGroupDimmers();
       break;
     }
 

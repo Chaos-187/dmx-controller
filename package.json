@@ -6,7 +6,7 @@
   "bin": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "node scripts/dev-watch.js",
     "build": "node build.js",
     "rebuild:native": "npm rebuild better-sqlite3 ftdi-d2xx usb",
     "companion:config": "node companion/generate-config.cjs"
