@@ -53,7 +53,7 @@ const midiController = require('./midi-controller');
 const fixtureLibrary = require('./fixture-library');
 const { WebUSB } = require('usb');
 const {
-  pseudoRandom, hslToRgb, computeEffectValue, isFixtureCompatibleWithEffect,
+  pseudoRandom, hslToRgb, computeEffectValue, sequenceEffectProgress, isFixtureCompatibleWithEffect,
   shouldApplyCellCue, isAuxiliaryMulticellChannel,
   MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES,
   RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
@@ -435,10 +435,13 @@ function handleOs2lSubscribed(data) {
 
         const seqIsStale = seq && db.isSequenceFixtureStale(seq);
         if (seq && seqIsStale && seqAutoRegenerateStale && track) {
+          const regenTrackId = track.id;
+          const regenDeck = deck;
+          const regenFilePath = value;
           (async () => {
             try {
-              console.log(`[SEQ] Sequence for track ${track.id} is outdated (new fixtures) — regenerating...`);
-              const liveFirstbeat = state.decks[deck] && state.decks[deck].firstbeat;
+              console.log(`[SEQ] Sequence for track ${regenTrackId} is outdated — regenerating in background...`);
+              const liveFirstbeat = state.decks[regenDeck] && state.decks[regenDeck].firstbeat;
               let fbPos = track.beatgrid_pos || 0;
               if (!fbPos && liveFirstbeat > 0) {
                 fbPos = liveFirstbeat > 60 ? liveFirstbeat / 1000 : liveFirstbeat;
@@ -446,33 +449,45 @@ function handleOs2lSubscribed(data) {
               const result = await sequenceRoutes.generateSequenceForTrack(track, {
                 overwrite: true,
                 beatgridPosOverride: fbPos,
-                filepathOverride: value,
+                filepathOverride: regenFilePath,
               });
               if (!result.sequence) return;
               const generatedSeq = result.sequence;
-              broadcast({ type: 'seq_generated', track_id: track.id, sequence: generatedSeq, reason: 'stale_fixtures' });
+              broadcast({
+                type: 'seq_generated',
+                track_id: regenTrackId,
+                sequence: { ...generatedSeq, cues: undefined, cue_count: result.cue_count },
+                reason: 'stale_fixtures',
+              });
+              const deckTrack = state.decks[regenDeck]?.track_id;
+              if (deckTrack !== regenTrackId) return;
               if (seqAutoLoad) {
                 touchOverrides.os2lOverrideFixtures.clear();
                 touchOverrides.colorOverrideFixtures.clear();
                 touchOverrides.movementOverrideFixtures.clear();
                 touchOverrides.smokeOverrideFixtures.clear();
                 touchOverrides.atmosphereOverrideFixtures.clear();
+                clearSequenceColorOverride();
+                clearSequenceBlockingOverrides();
                 deactivateScene();
-                stopPlaybackTimer(deck);
-                blackoutDeckFixtures(deck);
-                activeSequences[deck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-                broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
-                activeSequences[deck].playing = true;
-                activeSequences[deck].vdjDriven = true;
-                startPlaybackTimer(deck);
-                broadcast({ type: 'seq_playing', deck, playing: true });
+                stopPlaybackTimer(regenDeck);
+                blackoutDeckFixtures(regenDeck);
+                activeSequences[regenDeck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
+                broadcast({ type: 'seq_loaded', deck: regenDeck, sequence: sequenceForClient(generatedSeq) });
+                const deckPlayState = state.decks[regenDeck] && state.decks[regenDeck].play;
+                const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
+                if (deckIsPlaying) {
+                  activeSequences[regenDeck].playing = true;
+                  activeSequences[regenDeck].vdjDriven = true;
+                  startPlaybackTimer(regenDeck);
+                  broadcast({ type: 'seq_playing', deck: regenDeck, playing: true });
+                }
               }
             } catch (e) {
-              console.error(`[SEQ] Stale auto-regenerate failed for track ${track.id}:`, e.message);
+              console.error(`[SEQ] Stale auto-regenerate failed for track ${regenTrackId}:`, e.message);
             }
           })();
-          scheduleBroadcast();
-          return;
+          // Continue — load existing sequence now; hot-swap when background regen completes
         }
 
         // Auto-generate sequence if none exists and feature is enabled
@@ -533,31 +548,30 @@ function handleOs2lSubscribed(data) {
                 }
               }
 
-              // Use live firstbeat from OS2L as fallback for beatgridPos
               const liveFirstbeat = state.decks[deck] && state.decks[deck].firstbeat;
               let fbPos = track.beatgrid_pos || 0;
               if (!fbPos && liveFirstbeat > 0) {
                 fbPos = liveFirstbeat > 60 ? liveFirstbeat / 1000 : liveFirstbeat;
               }
-              const genResult = sequenceGenerator.generateSequence({
-                track: { ...track, beatgrid_pos: fbPos }, fixtures, analysis,
-                effects: db.getEffects(),
-                moverPresets: db.getMoverPresets(),
-                noStrobes: db.getConfig('seq_no_strobes') === '1',
-                generatorConfig: db.getGeneratorConfig(),
-              });
-              const newSeq = db.createSequence({
-                name: track.title || track.filename || 'Untitled',
+
+              const result = await sequenceRoutes.generateSequenceForTrack(
+                { ...track, beatgrid_pos: fbPos },
+                {
+                  overwrite: true,
+                  filepathOverride: actualFilePath,
+                  fixtures,
+                  analysis,
+                  skipAnalysis: true,
+                },
+              );
+              if (!result.sequence) return;
+              const generatedSeq = result.sequence;
+              broadcast({
+                type: 'seq_generated',
                 track_id: track.id,
-                bpm: genResult.bpm,
-                duration_ms: genResult.durationMs,
+                sequence: { ...generatedSeq, cues: undefined, cue_count: result.cue_count },
               });
-              if (genResult.cues.length > 0) db.bulkUpdateCues(newSeq.id, genResult.cues);
-              db.setSequenceGeneratorFixtureIds(newSeq.id, fixtures.filter(f => !f.exclude_from_sequence).map(f => f.id));
-              const generatedSeq = db.getSequence(newSeq.id);
-              generatedSeq.cues = db.getSequenceCues(newSeq.id);
-              broadcast({ type: 'seq_generated', track_id: track.id, sequence: generatedSeq });
-              console.log(`[SEQ] Auto-generated sequence "${generatedSeq.name}" (${generatedSeq.cues.length} cues) for deck ${deck}`);
+              console.log(`[SEQ] Auto-generated sequence "${generatedSeq.name}" (${result.cue_count} cues) for deck ${deck}`);
 
               // Now auto-load if enabled
               if (seqAutoLoad) {
@@ -567,11 +581,13 @@ function handleOs2lSubscribed(data) {
                 touchOverrides.movementOverrideFixtures.clear();
                 touchOverrides.smokeOverrideFixtures.clear();
                 touchOverrides.atmosphereOverrideFixtures.clear();
+                clearSequenceColorOverride();
+                clearSequenceBlockingOverrides();
                 deactivateScene(); // Stop any scene effect loop from end-action
                 stopPlaybackTimer(deck);
                 blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
                 activeSequences[deck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-                broadcast({ type: 'seq_loaded', deck, sequence: generatedSeq });
+                broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
                 console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck} (duration=${generatedSeq.duration_ms}ms)`);
 
                 // Always start playback after auto-generation. The generation
@@ -603,11 +619,13 @@ function handleOs2lSubscribed(data) {
           touchOverrides.movementOverrideFixtures.clear();
           touchOverrides.smokeOverrideFixtures.clear();
           touchOverrides.atmosphereOverrideFixtures.clear();
+          clearSequenceColorOverride();
+          clearSequenceBlockingOverrides();
           deactivateScene(); // Stop any scene effect loop from end-action
           stopPlaybackTimer(deck);
           blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
           activeSequences[deck] = { sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-          broadcast({ type: 'seq_loaded', deck, sequence: seq });
+          broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(seq) });
           console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} (duration=${seq.duration_ms}ms)`);
 
           // Always start playback if the deck is currently playing
@@ -655,6 +673,7 @@ function handleOs2lSubscribed(data) {
       const deckNowPlaying = state.decks[deck].play;  // already normalized to 1/0
       if (deckNowPlaying && !activeSequences[deck].playing) {
         // Deck started playing — resume the sequence
+        clearSequenceBlockingOverrides();
         deactivateScene(); // Stop any scene effect loop from end-action
         activeSequences[deck].playing = true;
         activeSequences[deck]._endActionApplied = false; // Reset so next end-action can fire
@@ -910,6 +929,17 @@ app.post('/api/fixture-types', (req, res) => {
 app.post('/api/fixture-types/led-bar', (req, res) => {
   try {
     const result = db.createLedBarFixtureType(req.body);
+    invalidateFixtureChannelMapCache();
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Create a pixel tape fixture type (long 1D strip)
+app.post('/api/fixture-types/pixel-tape', (req, res) => {
+  try {
+    const result = db.createPixelTapeFixtureType(req.body);
     invalidateFixtureChannelMapCache();
     res.status(201).json(result);
   } catch (e) {
@@ -2034,12 +2064,22 @@ function applyGroupDimmerLevelToDmx(groupId, val) {
     const u = fix.universe;
     if (!channelUpdates[u]) channelUpdates[u] = [];
     for (const ch of fix.channels) {
-      if (ch.type === 'dimmer') channelUpdates[u].push({ ch: ch.dmx_address, val });
+      if (ch.type === 'dimmer') {
+        channelUpdates[u].push({ ch: ch.dmx_address, val: applyTouchDimmerChain(255, fix, 'dimmer') });
+      }
     }
   }
   for (const [u, channels] of Object.entries(channelUpdates)) {
     artnetServer.setChannels(+u, channels);
     dmxUsbServer.setChannels(+u, channels);
+  }
+  // Re-apply live color so RGB-only fixtures pick up the new group level
+  const ov = touchOverrides.activeColorOverride;
+  if (ov && !isAnySequencePlaying()) {
+    midiController.triggerAction('color', {
+      red: ov.red || 0, green: ov.green || 0, blue: ov.blue || 0, white: ov.white || 0,
+      group_id: ov.group_id,
+    }, { mode: 'on', key: 'group-dimmer-refresh' });
   }
 }
 
@@ -2097,6 +2137,57 @@ function clearFixtureOverrideTracking(fixtureId) {
   touchOverrides.smokeOverrideFixtures.delete(fixtureId);
   touchOverrides.atmosphereOverrideFixtures.delete(fid);
   touchOverrides.atmosphereOverrideFixtures.delete(fixtureId);
+}
+
+/** Drop full-on hold so sequence playback is not blocked. */
+function clearSequenceBlockingOverrides() {
+  touchOverrides.fullOnHold = false;
+}
+
+/** Clear latched Stream Deck / MIDI color (e.g. on track or sequence load). */
+function clearSequenceColorOverride() {
+  try {
+    midiController.clearCompanionColorOverride();
+  } catch (e) {
+    touchOverrides.activeColorOverride = null;
+    console.warn('[SEQ] Could not clear companion color override:', e.message);
+  }
+}
+
+function liveColorOverrideAppliesToFixture(fix, ov) {
+  if (!ov) return false;
+  if (ov.group_id && !(fix.group_ids || []).includes(ov.group_id)) return false;
+  return true;
+}
+
+/** Recolor multicell effect base values from live Stream Deck / MIDI override (patterns keep running). */
+function applyLiveColorOverrideForMulticell(fixMap, effectBaseVals, effectParams) {
+  const ov = touchOverrides.activeColorOverride;
+  if (!ov || (fixMap.cell_count || 0) <= 0) {
+    return { effectBaseVals, effectParams };
+  }
+  if (!liveColorOverrideAppliesToFixture(fixMap, ov)) {
+    return { effectBaseVals, effectParams };
+  }
+
+  const base = { ...effectBaseVals };
+  if (ov.red != null) base.red = ov.red;
+  if (ov.green != null) base.green = ov.green;
+  if (ov.blue != null) base.blue = ov.blue;
+  if (ov.white != null) base.white = ov.white;
+  if (base.dimmer === undefined) base.dimmer = effectBaseVals.dimmer ?? 255;
+
+  return {
+    effectBaseVals: base,
+    effectParams: { ...effectParams, live_color_override: true, color_mode: 'base' },
+  };
+}
+
+function sequenceForClient(seq) {
+  if (!seq) return null;
+  const cueCount = seq.cues?.length ?? seq.cue_count ?? 0;
+  const { cues, ...rest } = seq;
+  return { ...rest, cue_count: cueCount };
 }
 
 app.get('/api/dmx/output', (req, res) => {
@@ -2211,13 +2302,7 @@ app.post('/api/touch/fixture-disable', (req, res) => {
 
 app.post('/api/touch/blackout-hold', (req, res) => {
   const { active } = req.body;
-  touchOverrides.blackoutHold = !!active;
-  if (active) {
-    artnetServer.blackout();
-    dmxUsbServer.blackout();
-  }
-  broadcast({ type: 'touchBlackoutHold', active: !!active });
-  console.log(`[TOUCH] Blackout hold ${active ? 'ON' : 'OFF'}`);
+  setBlackoutHold(!!active);
   res.json({ ok: true, blackoutHold: !!active });
 });
 
@@ -2794,6 +2879,35 @@ let _audioEnergyCache = { trackId: null, levels: null, beats: null };
 let _lastAudioData = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper_mid: 0, beat: 0 };
 let _lastBeatTime = 0;
 
+function loadAudioEnergyCache(trackId) {
+  if (_audioEnergyCache.trackId === trackId) return;
+  try {
+    const analysis = db.getTrackAnalysis(trackId);
+    if (analysis && analysis.energy_levels) {
+      _audioEnergyCache = {
+        trackId,
+        levels: typeof analysis.energy_levels === 'string' ? JSON.parse(analysis.energy_levels) : analysis.energy_levels,
+        beats: analysis.beats ? (typeof analysis.beats === 'string' ? JSON.parse(analysis.beats) : analysis.beats) : [],
+      };
+    } else {
+      _audioEnergyCache = { trackId, levels: null, beats: null };
+    }
+  } catch {
+    _audioEnergyCache = { trackId, levels: null, beats: null };
+  }
+}
+
+function sampleEnergyLevelsAtTime(levels, timeMs) {
+  if (!levels?.length) return null;
+  let lo = 0, hi = levels.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((levels[mid].time_ms || mid * 50) < timeMs) lo = mid + 1;
+    else hi = mid;
+  }
+  return levels[lo] || null;
+}
+
 function getCurrentAudioData() {
   // Live audio input takes priority when it is running.
   // Use the heavily-smoothed DMX levels to avoid flickering lights.
@@ -2816,51 +2930,26 @@ function getCurrentAudioData() {
   const trackId = ds.track_id;
   if (!trackId) return _lastAudioData;
 
-  // Load/cache energy levels for the current track
-  if (_audioEnergyCache.trackId !== trackId) {
-    try {
-      const analysis = db.getTrackAnalysis(trackId);
-      if (analysis && analysis.energy_levels) {
-        _audioEnergyCache = {
-          trackId,
-          levels: typeof analysis.energy_levels === 'string' ? JSON.parse(analysis.energy_levels) : analysis.energy_levels,
-          beats: analysis.beats ? (typeof analysis.beats === 'string' ? JSON.parse(analysis.beats) : analysis.beats) : [],
-        };
-      } else {
-        _audioEnergyCache = { trackId, levels: null, beats: null };
-      }
-    } catch {
-      _audioEnergyCache = { trackId, levels: null, beats: null };
-    }
-  }
+  loadAudioEnergyCache(trackId);
 
   if (!_audioEnergyCache.levels || _audioEnergyCache.levels.length === 0) return _lastAudioData;
 
   const timeMs = ds.time || 0;
   const levels = _audioEnergyCache.levels;
 
-  // Binary search for the energy sample closest to current time
-  // Energy levels are sampled every 50ms with a time_ms field
-  let lo = 0, hi = levels.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if ((levels[mid].time_ms || mid * 50) < timeMs) lo = mid + 1;
-    else hi = mid;
-  }
-  const sample = levels[lo] || {};
+  const sample = sampleEnergyLevelsAtTime(levels, timeMs) || {};
 
   // Beat detection: check if we're near a beat
   let beat = 0;
   if (_audioEnergyCache.beats && _audioEnergyCache.beats.length > 0) {
     const beats = _audioEnergyCache.beats;
-    // Find nearest beat
     let nearest = Infinity;
-    for (let i = Math.max(0, lo - 5); i < Math.min(beats.length, lo + 5); i++) {
-      const beatMs = typeof beats[i] === 'number' ? beats[i] : (beats[i] && beats[i].time_ms) || 0;
+    for (const b of beats) {
+      const beatMs = typeof b === 'number' ? b : (b && b.time_ms) || 0;
       const dist = Math.abs(timeMs - beatMs);
       if (dist < nearest) nearest = dist;
+      if (beatMs > timeMs + 100) break;
     }
-    // Decay: 1.0 at beat, decays over ~100ms
     if (nearest < 100) beat = Math.max(0, 1 - nearest / 100);
   }
 
@@ -2975,7 +3064,7 @@ app.post('/api/effects/run', (req, res) => {
 
   const timer = setInterval(() => {
     if (!dmxOutputEnabled) return;
-    if (touchOverrides.fullOnHold) return;
+    if (touchOverrides.blackoutHold || touchOverrides.fullOnHold) return;
     const st = runningQaEffects[slot];
     if (!st) return;
     const eff = db.getEffect(st.effectId);
@@ -3012,14 +3101,7 @@ app.post('/api/effects/run', (req, res) => {
         if (value !== null && value !== undefined) {
           if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = {};
           let finalVal = Math.max(0, Math.min(255, Math.round(value)));
-          // Master dimmer: only scale dimmer channel on fixtures that have one,
-          // otherwise scale RGB directly (avoids double-dipping via hw dimmer)
-          const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
-          if (fixHasDimmer) {
-            if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
-          } else {
-            finalVal = applyMasterDimmer(finalVal, ch.type);
-          }
+          finalVal = applyTouchDimmerChain(finalVal, fix, ch.type);
           channelUpdates[fix.universe][ch.dmx_address] = applyInvert(finalVal, ch);
         }
       }
@@ -3243,6 +3325,25 @@ app.put('/api/touch-actions/:id', (req, res) => {
 app.delete('/api/touch-actions/:id', (req, res) => {
   db.deleteTouchAction(+req.params.id);
   res.json({ deleted: true });
+});
+
+const TOUCH3_FAV_KEY = 'touch3_favorites';
+
+app.get('/api/touch3/favorites', (req, res) => {
+  try {
+    const raw = db.getConfig(TOUCH3_FAV_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    res.json(Array.isArray(list) ? list : []);
+  } catch {
+    res.json([]);
+  }
+});
+
+app.put('/api/touch3/favorites', (req, res) => {
+  const list = req.body;
+  if (!Array.isArray(list)) return res.status(400).json({ error: 'Expected array' });
+  db.setConfig(TOUCH3_FAV_KEY, JSON.stringify(list));
+  res.json({ ok: true, count: list.length });
 });
 
 app.post('/api/touch-actions/auto-populate', (req, res) => {
@@ -3527,13 +3628,7 @@ function processSceneEffects(scene, startTime) {
           const u = fix.universe;
           if (!channelUpdates[u]) channelUpdates[u] = {};
           let finalVal = Math.max(0, Math.min(255, Math.round(value)));
-          // Master dimmer: only scale dimmer channel on fixtures that have one
-          const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
-          if (fixHasDimmer) {
-            if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
-          } else {
-            finalVal = applyMasterDimmer(finalVal, ch.type);
-          }
+          finalVal = applyTouchDimmerChain(finalVal, fix, ch.type);
           channelUpdates[u][ch.dmx_address] = applyInvert(finalVal, ch);
         }
       }
@@ -3560,19 +3655,13 @@ function resolveEntryFixtures(entry, fixMap) {
  * Apply channel_values to a fixture's channels in the update map.
  */
 function applyChannelValues(fix, channelValues, channelUpdates) {
-  const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
   for (const ch of fix.channels) {
     const val = channelValues[ch.type];
     if (val !== undefined && val !== null) {
       const u = fix.universe;
       if (!channelUpdates[u]) channelUpdates[u] = {};
       let mapped = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
-      // Master dimmer: only scale dimmer channel on fixtures that have one
-      if (fixHasDimmer) {
-        if (ch.type === 'dimmer') mapped = applyMasterDimmer(mapped, ch.type);
-      } else {
-        mapped = applyMasterDimmer(mapped, ch.type);
-      }
+      mapped = applyTouchDimmerChain(mapped, fix, ch.type);
       channelUpdates[u][ch.dmx_address] = applyInvert(mapped, ch);
     }
   }
@@ -3748,12 +3837,13 @@ const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... 
 const playbackTimers = {};   // { deckNum: intervalId }
 
 // Cached mixer integration settings (refreshed on config save / startup)
-let _cachedMixerConfig = { crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none' };
+let _cachedMixerConfig = { crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none', seqNoStrobes: false };
 function refreshMixerConfig() {
   _cachedMixerConfig.crossfaderGating = db.getConfig('seq_crossfader_gating') === '1';
   _cachedMixerConfig.crossfaderMode = db.getConfig('seq_crossfader_mode') || 'gate'; // gate | blend | off
   _cachedMixerConfig.deckFaderDimmer = db.getConfig('seq_deck_fader_dimmer') === '1';
   _cachedMixerConfig.endAction = db.getConfig('seq_end_action') || 'none'; // none | blackout | scene
+  _cachedMixerConfig.seqNoStrobes = db.getConfig('seq_no_strobes') === '1';
 }
 // Refresh on startup after DB is ready
 try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ }
@@ -3907,11 +3997,13 @@ function handleSequenceCommand(ws, msg) {
       seq.cues = db.getSequenceCues(sequenceId);
       // Clear any OS2L button overrides so the sequence controls all fixtures
       touchOverrides.os2lOverrideFixtures.clear();
+      clearSequenceColorOverride();
+      clearSequenceBlockingOverrides();
       deactivateScene(); // Stop any scene effect loop from end-action
       stopPlaybackTimer(deck);
       blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
       activeSequences[deck] = { sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-      broadcast({ type: 'seq_loaded', deck, sequence: seq });
+      broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(seq) });
       console.log(`[SEQ] Loaded sequence "${seq.name}" on deck ${deck}`);
       break;
     }
@@ -3924,6 +4016,7 @@ function handleSequenceCommand(ws, msg) {
       break;
     case 'play':
       if (activeSequences[deck]) {
+        clearSequenceBlockingOverrides();
         activeSequences[deck].playing = true;
         startPlaybackTimer(deck);
         broadcast({ type: 'seq_playing', deck, playing: true });
@@ -3973,7 +4066,7 @@ function handleSequenceCommand(ws, msg) {
         sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false,
         currentTimeMs: 0, vdjDriven: false, previewMode: true,
       };
-      broadcast({ type: 'seq_loaded', deck, sequence: seq });
+      broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(seq) });
       console.log(`[SEQ] Preview-loaded sequence "${seq.name}" on deck ${deck}`);
       break;
     }
@@ -4079,6 +4172,20 @@ function applyGroupDimmerToDimmerValue(value, fixMap) {
   return Math.max(0, Math.min(255, Math.round(value * s)));
 }
 
+/** Group submaster + master dimmer for live effects (touch QA, scenes, MIDI/OS2L). */
+function applyTouchDimmerChain(value, fixMap, channelType) {
+  const fixHasDimmer = fixMap.channels.some(c => c.type === 'dimmer');
+  if (fixHasDimmer) {
+    if (channelType === 'dimmer') {
+      value = applyGroupDimmerToDimmerValue(value, fixMap);
+      return applyMasterDimmer(value, channelType);
+    }
+    return value;
+  }
+  value = applyGroupDimmerToDimmerValue(value, fixMap);
+  return applyMasterDimmer(value, channelType);
+}
+
 /**
  * Called on each time update to drive the sequence engine.
  * Finds active cues at the current position and sends DMX values.
@@ -4138,7 +4245,10 @@ function buildChannelCtx(ch, fix) {
   };
   if (fix.cell_count > 0) {
     ctx.cell_count = fix.cell_count;
+    ctx.cell_rows = fix.cell_rows || 1;
+    ctx.cell_cols = fix.cell_cols || fix.cell_count;
     ctx.cell = ch.cell || null;
+    ctx.channel_name = ch.name || '';
     // Compute index of this channel within its cell (0-based)
     if (ch.cell) {
       const cellChannels = fix.channels.filter(c => c.cell === ch.cell);
@@ -4276,6 +4386,8 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   // ── Touch blackout hold: suppress all playback output ──
   if (touchOverrides.blackoutHold || touchOverrides.fullOnHold) return;
 
+  try {
+
   // ── Crossfader: gate, blend, or off ────────────────────────────────────
   let crossfaderLevel = 1; // 0–1 multiplier for crossfader blending
 
@@ -4369,7 +4481,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
     const fixMap = getFixtureChannelMapByIdCached(fixtureId);
     if (!fixMap) continue;
 
-    const progress = (timeMs - cue.start_ms) / cue.duration_ms; // 0..1
+    const progress = (timeMs - cue.start_ms) / cue.duration_ms; // 0..1 (movement presets, fades)
 
     const channelVals = cue.channel_values || {};
     const endVals = cue.end_channel_values;
@@ -4401,6 +4513,9 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           value = startVal;
         }
       } else if (cue.cue_type === 'strobe') {
+        if (_cachedMixerConfig.seqNoStrobes) {
+          value = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
+        } else {
         const strobeHz = channelVals.strobe_hz || 10;
         // Check if this channel has a hardware strobe range
         const strobeRange = ch.ranges ? ch.ranges.find(r => r.type === 'strobe') : null;
@@ -4428,6 +4543,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           } else {
             value = null;
           }
+        }
         }
       } else if (cue.cue_type === 'chase') {
         // Chase: cycle through fixtures in the group
@@ -4459,9 +4575,17 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
               }
             }
           }
-          const touchEffectParams = cue.effect_params || {};
+          const touchEffectParams = { ...(cue.effect_params || {}) };
+          if (_cachedMixerConfig.seqNoStrobes) touchEffectParams.no_strobes = true;
+          const withOverride = applyLiveColorOverrideForMulticell(fixMap, effectBaseVals, touchEffectParams);
+          effectBaseVals = withOverride.effectBaseVals;
+          Object.assign(touchEffectParams, withOverride.effectParams);
           if (SOUND_EFFECT_TYPES.has(effect.type) && !touchEffectParams.audio) touchEffectParams.audio = getCurrentAudioData();
-          value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, touchEffectParams, channelCtx);
+          const seqBpm = seq.bpm || (touchEffectParams.beat_ms ? 60000 / touchEffectParams.beat_ms : 128);
+          const effectProgress = sequenceEffectProgress(
+            effect.type, cue.start_ms, cue.duration_ms, timeMs, touchOverrides.effectSpeed, seqBpm,
+          );
+          value = computeEffectValue(effect, ch.type, effectProgress, effectBaseVals, touchEffectParams, channelCtx);
           if (value === null || value === undefined) {
             if (isAuxiliaryMulticellChannel(ch, fixMap)) {
               value = null;
@@ -4601,9 +4725,17 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           }
         }
 
-        const rigEffectParams = rigCue.effect_params || {};
+        const rigEffectParams = { ...(rigCue.effect_params || {}) };
+        if (_cachedMixerConfig.seqNoStrobes) rigEffectParams.no_strobes = true;
+        const withOverride = applyLiveColorOverrideForMulticell(fixMap, effectBaseVals, rigEffectParams);
+        effectBaseVals = withOverride.effectBaseVals;
+        Object.assign(rigEffectParams, withOverride.effectParams);
         if (SOUND_EFFECT_TYPES.has(effect.type) && !rigEffectParams.audio) rigEffectParams.audio = getCurrentAudioData();
-        let value = computeEffectValue(effect, ch.type, progress * touchOverrides.effectSpeed, effectBaseVals, rigEffectParams, channelCtx);
+        const seqBpm = seq.bpm || (rigEffectParams.beat_ms ? 60000 / rigEffectParams.beat_ms : 128);
+        const effectProgress = sequenceEffectProgress(
+          effect.type, rigCue.start_ms, rigCue.duration_ms, timeMs, touchOverrides.effectSpeed, seqBpm,
+        );
+        let value = computeEffectValue(effect, ch.type, effectProgress, effectBaseVals, rigEffectParams, channelCtx);
         if (value === null || value === undefined) {
           if (isAuxiliaryMulticellChannel(ch, fixMap)) {
             value = null;
@@ -4641,7 +4773,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
   // Send all channel updates
   ensureMulticellMasterDimmer(channelUpdates, activeCues, allFixtures);
-  applyActiveColorOverrideToUpdates(channelUpdates);
+  applyActiveColorOverrideToUpdates(channelUpdates, fixturesWithFx);
   for (const [u, chMap] of Object.entries(channelUpdates)) {
     const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
     if (channels.length > 0) {
@@ -4651,6 +4783,10 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   }
 
   deckSeq.lastTimeMs = timeMs;
+
+  } catch (e) {
+    console.error(`[SEQ] Playback error on deck ${deckNum} @ ${Math.round(timeMs)}ms:`, e.message);
+  }
 }
 
 /**
@@ -4658,17 +4794,20 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
  * (effects-engine import moved to top of file)
  */
 
-/** Overlay MIDI/OS2L color on top of sequence output (movement/effects already in channelUpdates). */
-function applyActiveColorOverrideToUpdates(channelUpdates) {
+/** Overlay MIDI/OS2L color on non-multicell output, or multicell gaps (no active FX cue). */
+function applyActiveColorOverrideToUpdates(channelUpdates, fixturesWithFx) {
   const ov = touchOverrides.activeColorOverride;
   if (!ov) return;
 
   const { red = 0, green = 0, blue = 0, white = 0, group_id } = ov;
   const fixtures = getFixtureChannelMapCached();
+  fixturesWithFx = fixturesWithFx || new Set();
 
   for (const fix of fixtures) {
     if (isFixtureDisabled(fix.id)) continue;
     if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+    // Multicell / pixel tape: keep pattern motion — recolor happens via effect base values.
+    if ((fix.cell_count || 0) > 0 && fixturesWithFx.has(fix.id)) continue;
     const u = fix.universe;
     if (!channelUpdates[u]) channelUpdates[u] = {};
     const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
@@ -4716,7 +4855,7 @@ wss.on('connection', (ws) => {
   // Send active sequence state
   for (const [deck, seqState] of Object.entries(activeSequences)) {
     if (seqState.sequence) {
-      ws.send(JSON.stringify({ type: 'seq_loaded', deck: +deck, sequence: seqState.sequence }));
+      ws.send(JSON.stringify({ type: 'seq_loaded', deck: +deck, sequence: sequenceForClient(seqState.sequence) }));
       if (seqState.playing) {
         ws.send(JSON.stringify({ type: 'seq_playing', deck: +deck, playing: true }));
       }
@@ -4849,8 +4988,58 @@ artnetServer.start(artnetNodes, artnetRate);
 // Start DMX USB output server (multi-device manager)
 const dmxUsbServer = new DmxUsbServer();
 
+/** Block all DMX writes while blackout hold is active (emergency stop). */
+function installBlackoutDmxGuard(server) {
+  const origSetChannel = server.setChannel.bind(server);
+  const origSetChannels = server.setChannels.bind(server);
+  const origSetFullUniverse = server.setFullUniverse?.bind(server);
+  server.setChannel = (localUniverse, channel, value) => {
+    if (touchOverrides.blackoutHold) return;
+    origSetChannel(localUniverse, channel, value);
+  };
+  server.setChannels = (localUniverse, channels) => {
+    if (touchOverrides.blackoutHold) return;
+    origSetChannels(localUniverse, channels);
+  };
+  if (origSetFullUniverse) {
+    server.setFullUniverse = (localUniverse, data) => {
+      if (touchOverrides.blackoutHold) return;
+      origSetFullUniverse(localUniverse, data);
+    };
+  }
+}
+installBlackoutDmxGuard(artnetServer);
+installBlackoutDmxGuard(dmxUsbServer);
+
 if (Object.keys(touchOverrides.groupDimmers).length && dmxOutputEnabled) {
   applyAllPersistedGroupDimmersToDmx();
+}
+
+/** Stop all live QA/scene/color output (blackout e-stop). */
+function emergencyStopLiveOutput() {
+  stopRunningEffect(undefined, false);
+  if (activeStaticScene) deactivateScene();
+  touchOverrides.activeColorOverride = null;
+  try { midiController.clearCompanionColorOverride(); } catch { /* ignore */ }
+  try { midiController.clearMidiRunningEffects(); } catch { /* ignore */ }
+  broadcast({ type: 'qa_effects_stopped' });
+}
+
+/** Blackout hold — emergency stop: kills live effects and zeros output until released. */
+function setBlackoutHold(active) {
+  touchOverrides.blackoutHold = !!active;
+  if (active) {
+    emergencyStopLiveOutput();
+    artnetServer.saveBuffers();
+    dmxUsbServer.saveBuffers();
+    artnetServer.blackout();
+    dmxUsbServer.blackout();
+  } else {
+    artnetServer.restoreBuffers();
+    dmxUsbServer.restoreBuffers();
+  }
+  broadcast({ type: 'touchBlackoutHold', active: !!active });
+  console.log(`[TOUCH] Blackout hold ${active ? 'ON' : 'OFF'}`);
 }
 
 // Initialise OS2L module with all dependencies
@@ -4871,8 +5060,11 @@ os2l.init({
   computeEffectValue,
   isFixtureCompatibleWithEffect,
   applyMasterDimmer,
+  applyTouchDimmerChain,
   applyInvert,
+  isAnySequencePlaying,
   onMessage: handleOs2lSubscribed,
+  setBlackoutHold,
 });
 
 // Auto-connect enabled USB devices
@@ -4933,6 +5125,7 @@ midiController.init({
   computeEffectValue,
   isFixtureCompatibleWithEffect,
   applyMasterDimmer,
+  applyTouchDimmerChain,
   applyInvert,
   pauseAllSequences,
   getFixtureChannelMapCached,
@@ -4941,6 +5134,7 @@ midiController.init({
     return _cachedFixtureChannelMapById;
   },
   persistTouchGroupDimmers,
+  setBlackoutHold,
 });
 
 // Auto-start MIDI controller
@@ -4962,8 +5156,8 @@ _applyAudioInputConfig();
 const bonjour = registerBonjour();
 startMdnsResponder();
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
+// Graceful shutdown (SIGINT = Ctrl+C, SIGTERM = node --watch restart)
+async function shutdown() {
   console.log('\nShutting down...');
   artnetServer.shutdown();
   await dmxUsbServer.shutdownAll();
@@ -4971,11 +5165,13 @@ process.on('SIGINT', async () => {
   if (mdnsResponder) mdnsResponder.destroy();
   if (bonjour) bonjour.destroy();
   midiController.stop();
-  const os2lSrv = os2l.getServer();
-  if (os2lSrv) os2lSrv.close();
+  os2l.stopServer();
   httpServer.close();
   process.exit(0);
-});
+}
+
+process.on('SIGINT', () => { shutdown().catch(console.error); });
+process.on('SIGTERM', () => { shutdown().catch(console.error); });
 
 console.log(`
 ╔══════════════════════════════════════════════╗

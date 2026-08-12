@@ -10,6 +10,7 @@ const S = {
   effects: [],
   touchActions: [],
   moverPresets: [],
+  favorites: [],
 
   fixtureEnabled: {},   // fixtureId → bool (mirrors server disabledFixtures)
   groupDimmer: {},      // groupId → 0-255
@@ -26,9 +27,15 @@ const S = {
 
   activeSceneId: null,
   activeEffectSlots: {},   // slot → effectId
-  fxTab: 'color',          // active effect category tab
+  activePanel: 'effects',   // actions | colors | scenes | effects | favorites
+  fxTab: 'multicell',       // active effect category tab
+  fxPaletteMode: 'hsl',    // 'hsl' | 'palette'
+  fxPalettePreset: 'hsl',
+  fxPaletteColors: ['#e94560', '#f39c12', '#27ae60', '#2980b9'],
   actionActiveStates: {},  // touch-action id → bool
   selectedMovers: new Set(), // empty = all movers
+  favEditMode: false,
+  favPickerTab: 'colors',
 
   ws: null,
 };
@@ -52,6 +59,7 @@ const EFFECT_CATEGORY_MAP = {
   pulse: 'color', rainbow: 'color', strobe: 'color', color_fade: 'color', sparkle: 'color', color_wave: 'color', fire: 'color',
   pan_sweep: 'motion', tilt_sweep: 'motion', circle: 'motion', figure_eight: 'motion', random_move: 'motion', fan: 'motion', nod: 'motion',
   chase: 'multicell', comet: 'multicell', scanner: 'multicell', buildup: 'multicell', segments: 'multicell', ripple: 'multicell', cell_strobe: 'multicell', gradient: 'multicell',
+  checker: 'multicell', matrix_alternate: 'multicell', diagonal: 'multicell', plasma: 'multicell', rain: 'multicell', fill_rows: 'multicell',
   rig_chase: 'rig', rig_color_wave: 'rig', rig_sweep: 'rig', rig_alternate: 'rig', rig_converge: 'rig', rig_rainbow: 'rig',
   rig_depth_chase: 'rig', rig_depth_wave: 'rig', rig_round_robin: 'rig',
   sound_pulse: 'sound', sound_strobe: 'sound', sound_chase: 'sound', sound_wave: 'sound', sound_flash: 'sound', sound_vu: 'sound',
@@ -64,6 +72,60 @@ const EFFECT_CATEGORIES = [
   { key: 'multicell', label: 'Multi-Cell', bg: 'rgba(167,139,250,.16)', border: 'rgba(167,139,250,.5)' },
   { key: 'sound',     label: 'Sound',      bg: 'rgba(251,113,133,.14)', border: 'rgba(251,113,133,.5)' },
 ];
+
+const FX_PALETTE_PRESETS = {
+  hsl:    { mode: 'hsl', label: 'Rainbow' },
+  warm:   { mode: 'palette', label: 'Warm',   colors: ['#ff4d00', '#ff9e00', '#ffd000', '#ff3366'] },
+  cool:   { mode: 'palette', label: 'Cool',   colors: ['#0066ff', '#00c6ff', '#5b4fcf', '#48d1cc'] },
+  neon:   { mode: 'palette', label: 'Neon',   colors: ['#ff00ff', '#00ffff', '#ffff00', '#ff0066'] },
+  ocean:  { mode: 'palette', label: 'Ocean',  colors: ['#001a4d', '#0066cc', '#00a8cc', '#66d9cc'] },
+  fire:   { mode: 'palette', label: 'Fire',   colors: ['#1a0000', '#ff3300', '#ff9900', '#ffcc00'] },
+  sunset: { mode: 'palette', label: 'Sunset', colors: ['#1a0533', '#ff6b35', '#f7c59f', '#ffcc02'] },
+  purple: { mode: 'palette', label: 'Purple', colors: ['#1a0033', '#6600cc', '#cc00ff', '#ff66ff'] },
+  gold:   { mode: 'palette', label: 'Gold',   colors: ['#1a1000', '#b8860b', '#ffd700', '#fff8dc'] },
+  ice:    { mode: 'palette', label: 'Ice',    colors: ['#001833', '#004466', '#66ccff', '#ffffff'] },
+  forest: { mode: 'palette', label: 'Forest', colors: ['#0a1f0a', '#1a661a', '#33cc33', '#a8e063'] },
+  party:  { mode: 'palette', label: 'Party',  colors: ['#ff0080', '#8000ff', '#00ff80', '#ff8000'] },
+  pastel: { mode: 'palette', label: 'Pastel', colors: ['#ffb3ba', '#ffdfba', '#ffffba', '#baffc9'] },
+  vapor:  { mode: 'palette', label: 'Vapor',  colors: ['#7117ea', '#ea17a7', '#17eae8', '#a717ea'] },
+  citrus: { mode: 'palette', label: 'Citrus', colors: ['#ff9900', '#ffcc00', '#66ff00', '#00cc66'] },
+  crimson:{ mode: 'palette', label: 'Crimson',colors: ['#1a0008', '#660019', '#cc0033', '#ff6666'] },
+  custom: { mode: 'palette', label: 'Custom' },
+};
+
+function getFxPaletteParams() {
+  if (S.fxPaletteMode === 'hsl') return { color_mode: 'hsl' };
+  const sw = S.fxPaletteColors.filter(Boolean);
+  if (sw.length < 2) return { color_mode: 'hsl' };
+  return { color_mode: 'palette', color_palette: sw.slice(0, 4) };
+}
+
+function usesFxPalette() {
+  return true;
+}
+
+/** Fixture IDs for live effect run — respects multicell / mover targets. */
+function getEffectFixtureIds(effect) {
+  const enabled = getEnabledFixtures();
+  const slot = effectSlot(effect.type);
+  if (slot === 'motion') {
+    return getSelectedMovers().map((f) => f.id);
+  }
+  const mc = enabled.filter((f) => (f.cell_count || 0) > 0);
+  if (slot === 'multicell' || effect.fixture_target === 'multicell'
+    || (MULTICELL_EFFECT_TYPES.has(effect.type) && mc.length)) {
+    if (mc.length) return mc.map((f) => f.id);
+  }
+  if (effect.fixture_target === 'moving_head' || effect.fixture_target === 'moving_head_wash' || effect.fixture_target === 'moving_head_spot') {
+    return getEnabledFixtures(getMoverFixtures()).map((f) => f.id);
+  }
+  return enabled.map((f) => f.id);
+}
+
+const MULTICELL_EFFECT_TYPES = new Set([
+  'chase', 'comet', 'scanner', 'buildup', 'segments', 'ripple', 'cell_strobe', 'gradient',
+  'checker', 'matrix_alternate', 'diagonal', 'plasma', 'rain', 'fill_rows',
+]);
 
 function effectSlot(type) {
   return EFFECT_CATEGORY_MAP[type] || 'color';

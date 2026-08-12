@@ -155,11 +155,13 @@ let buildChannelCtx;
 let computeEffectValue;
 let isFixtureCompatibleWithEffect;
 let applyMasterDimmer;
+let applyTouchDimmerChain;
 let applyInvert;
 let pauseAllSequences;
 let getFixtureChannelMapCached;
 let getFixtureChannelMapByIdMap;
 let persistTouchGroupDimmers;
+let setBlackoutHold;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -337,11 +339,20 @@ function init(deps) {
   computeEffectValue       = deps.computeEffectValue;
   isFixtureCompatibleWithEffect = deps.isFixtureCompatibleWithEffect;
   applyMasterDimmer        = deps.applyMasterDimmer;
+  applyTouchDimmerChain    = deps.applyTouchDimmerChain || ((v, fix, chType) => {
+    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+    if (fixHasDimmer) {
+      if (chType === 'dimmer') return applyMasterDimmer(v, chType);
+      return v;
+    }
+    return applyMasterDimmer(v, chType);
+  });
   applyInvert              = deps.applyInvert;
   pauseAllSequences        = deps.pauseAllSequences;
   getFixtureChannelMapCached = deps.getFixtureChannelMapCached;
   getFixtureChannelMapByIdMap = deps.getFixtureChannelMapByIdMap;
   persistTouchGroupDimmers = deps.persistTouchGroupDimmers || null;
+  setBlackoutHold          = deps.setBlackoutHold || null;
 }
 
 // ─── Device Discovery ───────────────────────────────────────────────────────
@@ -905,6 +916,7 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
 
   for (const fix of channelMap) {
     if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+    if (isAnySequencePlaying?.() && (fix.cell_count || 0) > 0) continue;
     if (touchOverrides?.disabledFixtures?.size) {
       const nid = Number(fix.id);
       if (touchOverrides.disabledFixtures.has(fix.id) || (Number.isFinite(nid) && touchOverrides.disabledFixtures.has(nid))) {
@@ -919,10 +931,8 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
       const colorMap = { red, green, blue, white };
       if (colorMap[ch.type] !== undefined) {
         let val = activate ? colorMap[ch.type] : 0;
-        if (activate) {
-          // Apply master dimmer: if fixture has a dedicated dimmer channel, only dim that;
-          // otherwise dim the color channels directly
-          if (!fixHasDimmer) val = applyMasterDimmer(val, ch.type);
+        if (activate && !fixHasDimmer) {
+          val = applyTouchDimmerChain(val, fix, ch.type);
         }
         channelUpdates[u].push({ ch: ch.dmx_address, val });
       } else if (ch.type === 'color_wheel' && fix.color_wheel_map && fix.color_wheel_map.length) {
@@ -942,7 +952,7 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
           channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
         }
       } else if (ch.type === 'dimmer' && activate) {
-        channelUpdates[u].push({ ch: ch.dmx_address, val: applyMasterDimmer(255, ch.type) });
+        channelUpdates[u].push({ ch: ch.dmx_address, val: applyTouchDimmerChain(255, fix, 'dimmer') });
       } else if (ch.type === 'dimmer' && !activate) {
         channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
       }
@@ -1053,18 +1063,22 @@ function executeMidiAction(mapping, isOn) {
       break;
 
     case 'blackout':
-      touchOverrides.blackoutHold = activate;
-      if (activate) {
-        artnetServer.saveBuffers();
-        dmxUsbServer.saveBuffers();
-        artnetServer.blackout();
-        dmxUsbServer.blackout();
+      if (setBlackoutHold) {
+        setBlackoutHold(activate);
       } else {
-        artnetServer.restoreBuffers();
-        dmxUsbServer.restoreBuffers();
+        touchOverrides.blackoutHold = activate;
+        if (activate) {
+          artnetServer.saveBuffers();
+          dmxUsbServer.saveBuffers();
+          artnetServer.blackout();
+          dmxUsbServer.blackout();
+        } else {
+          artnetServer.restoreBuffers();
+          dmxUsbServer.restoreBuffers();
+        }
+        broadcast({ type: 'touchBlackoutHold', active: activate });
       }
       broadcast({ type: 'midi_action', action: 'blackout', mapping: mapping.name, active: activate });
-      broadcast({ type: 'touchBlackoutHold', active: activate });
       break;
 
     case 'strobe': {
@@ -1207,7 +1221,9 @@ function executeMidiAction(mapping, isOn) {
       } else {
         activeColorOverride = null;
         touchOverrides.activeColorOverride = null;
-        sendColorToDmx(red, green, blue, white, group_id, false);
+        if (!isAnySequencePlaying()) {
+          sendColorToDmx(red, green, blue, white, group_id, false);
+        }
       }
       broadcast({ type: 'midi_action', action: 'color', mapping: mapping.name, active: activate });
       break;
@@ -1244,7 +1260,7 @@ function executeMidiAction(mapping, isOn) {
 
             const timer = setInterval(() => {
               if (!getDmxOutputEnabled()) return;
-              if (touchOverrides.fullOnHold) return;
+              if (touchOverrides.blackoutHold || touchOverrides.fullOnHold) return;
               const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
               const chUpdates = {};
               for (let fi = 0; fi < fixtureIds.length; fi++) {
@@ -1262,12 +1278,7 @@ function executeMidiAction(mapping, isOn) {
                   if (value !== null && value !== undefined) {
                     if (!chUpdates[fix.universe]) chUpdates[fix.universe] = {};
                     let finalVal = Math.max(0, Math.min(255, Math.round(value)));
-                    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
-                    if (fixHasDimmer) {
-                      if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
-                    } else {
-                      finalVal = applyMasterDimmer(finalVal, ch.type);
-                    }
+                    finalVal = applyTouchDimmerChain(finalVal, fix, ch.type);
                     chUpdates[fix.universe][ch.dmx_address] = applyInvert(finalVal, ch);
                   }
                 }
@@ -1443,8 +1454,8 @@ function executeMidiAction(mapping, isOn) {
         touchOverrides.masterDimmer = 255;
       }
       broadcast({ type: 'masterDimmer', value: touchOverrides.masterDimmer });
-      // Re-apply active color override with new master dimmer
-      if (activeColorOverride && dmxOutputEnabled) {
+      // Re-apply active color override with new master dimmer (non-multicell only during sequences)
+      if (activeColorOverride && dmxOutputEnabled && !isAnySequencePlaying()) {
         const { red, green, blue, white, group_id } = activeColorOverride;
         sendColorToDmx(red, green, blue, white, group_id, true);
       }
@@ -1476,8 +1487,8 @@ function executeFaderAction(mapping, value) {
       const dimVal = Math.round((value / 127) * 255);
       touchOverrides.masterDimmer = dimVal;
       broadcast({ type: 'masterDimmer', value: dimVal });
-      // Re-apply active color override with new master dimmer
-      if (activeColorOverride && dmxOutputEnabled) {
+      // Re-apply active color override with new master dimmer (non-multicell only during sequences)
+      if (activeColorOverride && dmxOutputEnabled && !isAnySequencePlaying()) {
         const { red, green, blue, white, group_id } = activeColorOverride;
         sendColorToDmx(red, green, blue, white, group_id, true);
       }
@@ -2211,6 +2222,14 @@ function releaseOtherCompanionColorToggles(currentKey) {
   }
 }
 
+function clearMidiRunningEffects() {
+  for (const slot of Object.keys(midiRunningEffects)) {
+    const entry = midiRunningEffects[slot];
+    if (entry?.timer) clearInterval(entry.timer);
+    delete midiRunningEffects[slot];
+  }
+}
+
 function clearCompanionColorOverride() {
   const ov = activeColorOverride || touchOverrides?.activeColorOverride;
   let cleared = 0;
@@ -2270,6 +2289,7 @@ module.exports = {
   registerRoutes,
   triggerAction,
   clearCompanionColorOverride,
+  clearMidiRunningEffects,
   PAGE_NAMES,
   PAGE_COUNT,
   listPorts,

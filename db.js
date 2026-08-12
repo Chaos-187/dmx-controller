@@ -468,35 +468,35 @@ function init() {
     console.log('[DB] Migrated sequence_cues: added track column');
   }
 
-  // Migrate: consolidate rig-wide effect cues (label starts with ⟷) into
-  // single fixture_id=0 master cues and mark as track='fx-rig'.
-  // Old generator emitted one cue per fixture for rig effects; new generator
-  // emits a single fixture_id=0 cue. Deduplicate by keeping one per group.
+  // Migrate: consolidate legacy per-fixture rig effect duplicates (⟷ label, fixture_id > 0)
+  // into single fixture_id=0 fx-rig cues. Skips multicell/pixel strip pairs (now use ⇶ prefix).
   {
-    const rigCues = db.prepare(
-      "SELECT * FROM sequence_cues WHERE cue_type='effect' AND label LIKE '⟷%'"
-    ).all();
-    if (rigCues.length > 0) {
-      // Group by sequence_id + start_ms + effect_id (same rig placement)
-      const groups = new Map();
-      for (const c of rigCues) {
-        const key = `${c.sequence_id}:${c.start_ms}:${c.effect_id}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(c);
-      }
-      const updateStmt = db.prepare("UPDATE sequence_cues SET fixture_id=0, track='fx-rig' WHERE id=?");
-      const deleteStmt = db.prepare("DELETE FROM sequence_cues WHERE id=?");
-      const consolidateTx = db.transaction(() => {
-        for (const [, group] of groups) {
-          // Keep the first cue, update it to master, delete the rest
-          updateStmt.run(group[0].id);
-          for (let i = 1; i < group.length; i++) {
-            deleteStmt.run(group[i].id);
-          }
+    const done = db.prepare("SELECT value FROM config WHERE key = 'rig_cue_consolidation_done'").get();
+    if (!done || done.value !== '1') {
+      const rigCues = db.prepare(
+        "SELECT * FROM sequence_cues WHERE cue_type='effect' AND label LIKE '⟷%' AND fixture_id > 0"
+      ).all();
+      if (rigCues.length > 0) {
+        const groups = new Map();
+        for (const c of rigCues) {
+          const key = `${c.sequence_id}:${c.start_ms}:${c.effect_id}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(c);
         }
-      });
-      consolidateTx();
-      console.log(`[DB] Consolidated ${rigCues.length} rig-wide cues into ${groups.size} master cues`);
+        const updateStmt = db.prepare("UPDATE sequence_cues SET fixture_id=0, track='fx-rig' WHERE id=?");
+        const deleteStmt = db.prepare("DELETE FROM sequence_cues WHERE id=?");
+        const consolidateTx = db.transaction(() => {
+          for (const [, group] of groups) {
+            updateStmt.run(group[0].id);
+            for (let i = 1; i < group.length; i++) {
+              deleteStmt.run(group[i].id);
+            }
+          }
+        });
+        consolidateTx();
+        console.log(`[DB] Consolidated ${rigCues.length} legacy rig-wide cues into ${groups.size} master cues`);
+      }
+      db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('rig_cue_consolidation_done', '1')").run();
     }
   }
 
@@ -673,6 +673,15 @@ function init() {
     console.log('[DB] Migrated fixtures: added cell_path column');
   }
 
+  // Migrate: matrix layout metadata on fixture types (rows × cols for multi_cell)
+  try {
+    db.prepare('SELECT cell_rows FROM fixture_types LIMIT 1').get();
+  } catch (e) {
+    db.exec("ALTER TABLE fixture_types ADD COLUMN cell_rows INTEGER NOT NULL DEFAULT 1");
+    db.exec("ALTER TABLE fixture_types ADD COLUMN cell_cols INTEGER NOT NULL DEFAULT 1");
+    console.log('[DB] Migrated fixture_types: added cell_rows, cell_cols columns');
+  }
+
   // Migrate: add image_url column to gobo_wheel_slots if missing
   try {
     db.prepare('SELECT image_url FROM gobo_wheel_slots LIMIT 1').get();
@@ -739,6 +748,9 @@ function init() {
   seedNewEffectsV4();
   seedNewEffectsV5();
   seedNewEffectsV6();
+  seedNewEffectsV7();
+  seedNewEffectsV8();
+  seedNewEffectsV9();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -746,7 +758,7 @@ function init() {
   // chase/comet/scanner/buildup work on ALL fixtures (virtual cells via channels_per_cell heuristic)
   db.exec("UPDATE effects SET fixture_target = 'all' WHERE type IN ('chase','comet','scanner','buildup')");
   // Only truly multicell-specific effects are restricted
-  db.exec("UPDATE effects SET fixture_target = 'multicell' WHERE fixture_target = 'all' AND type IN ('segments','ripple','cell_strobe','gradient')");
+  db.exec("UPDATE effects SET fixture_target = 'multicell' WHERE fixture_target = 'all' AND type IN ('segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows')");
   db.exec("UPDATE effects SET fixture_target = 'moving_head' WHERE fixture_target = 'all' AND type IN ('pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod')");
   // Rig-wide spatial effects target all fixtures with color channels
   db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin')");
@@ -812,8 +824,10 @@ function init() {
     console.log('[DB] Added Generic Atomic LED Strobe fixture type (154ch point control)');
   }
 
-  // Atomic Strobe is a pixel matrix — ensure category is multi_cell
+  // Atomic Strobe — 4×12 cell grid per unit; paired units form one 4×24 wide matrix
   db.prepare("UPDATE fixture_types SET category = 'multi_cell' WHERE name = 'Generic Atomic LED Strobe' AND category != 'multi_cell'").run();
+  migrateAtomicStrobeLayout();
+  migrateAtomicStrobeModes();
 
   // Migration: 14pcs RGBW 4-in-1 par (4ch + 8ch DMX modes)
   const has14pcsPar = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = '14pcs RGBW 4 in 1 Par Light'").get().c;
@@ -1129,6 +1143,146 @@ function seedNewEffectsV6() {
   if (added > 0) console.log(`[DB] Added ${added} new effects (v6 — depth chase, depth wave, round robin)`);
 }
 
+// ─── Seed V7: Multicell pixel / bar presets (runtime effects, not per-cell cues) ─
+
+function seedNewEffectsV7() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // ── Chase variants (small + large bars) ─────────────────────────────
+    ['Pixel Chase L→R',       'chase', 'color', 'multicell', J({ direction:'left',  speed:1,   width:3, tail:2 }), 4],
+    ['Pixel Chase R→L',       'chase', 'color', 'multicell', J({ direction:'right', speed:1,   width:3, tail:2 }), 4],
+    ['Pixel Chase Bounce',    'chase', 'color', 'multicell', J({ direction:'bounce', speed:1, width:3, tail:2 }), 8],
+    ['Pixel Fast Chase',      'chase', 'color', 'multicell', J({ direction:'left',  speed:2.5, width:2, tail:1 }), 2],
+    ['Pixel Wide Chase',      'chase', 'color', 'multicell', J({ direction:'left',  speed:0.8, width:6, tail:4 }), 8],
+    ['Pixel Center Build',    'chase', 'color', 'multicell', J({ direction:'center', speed:1, width:4, tail:2 }), 4],
+    ['Pixel Outside In',      'chase', 'color', 'multicell', J({ direction:'outside', speed:1, width:4, tail:2 }), 4],
+
+    // ── Comet / scanner ─────────────────────────────────────────────────
+    ['Pixel Comet',           'comet', 'color', 'multicell', J({ direction:'left', speed:1, tail:8 }), 4],
+    ['Pixel Fast Comet',      'comet', 'color', 'multicell', J({ direction:'left', speed:2, tail:6 }), 2],
+    ['Pixel Scanner',         'scanner', 'color', 'multicell', J({ speed:1.5, width:0.3 }), 4],
+    ['Pixel Fast Scanner',    'scanner', 'color', 'multicell', J({ speed:3, width:0.2 }), 2],
+
+    // ── Large-pixel patterns ────────────────────────────────────────────
+    ['Pixel Blocks',          'segments', 'color', 'multicell', J({ segment_size:3, offset_speed:1 }), 4],
+    ['Pixel Wide Blocks',     'segments', 'color', 'multicell', J({ segment_size:5, offset_speed:1.5 }), 4],
+    ['Pixel Ripple',          'ripple', 'color', 'multicell', J({ speed:1, width:4, decay:0.7 }), 4],
+    ['Pixel Fast Ripple',     'ripple', 'color', 'multicell', J({ speed:2.5, width:3, decay:0.5 }), 2],
+    ['Pixel Gradient',        'gradient', 'color', 'multicell', J({ speed:1 }), 8],
+    ['Pixel RGB Gradient',    'gradient', 'color', 'multicell', J({ speed:0.8, colors:['#ff0044','#00ff88','#0088ff'] }), 8],
+
+    // ── Energy / accents ────────────────────────────────────────────────
+    ['Pixel Sparkle',         'sparkle', 'color', 'multicell', J({ density:0.25, speed:1 }), 4],
+    ['Pixel Buildup',         'buildup', 'intensity', 'multicell', J({ direction:'left' }), 8],
+    ['Pixel Drop Strobe',     'cell_strobe', 'intensity', 'multicell', J({ frequency:12, pattern:'sequential' }), 2],
+    ['Pixel Random Strobe',   'cell_strobe', 'intensity', 'multicell', J({ frequency:10, pattern:'random' }), 2],
+    ['Pixel Color Wave',      'color_wave', 'color', 'multicell', J({ speed:1 }), 8],
+    ['Pixel Breathe',         'pulse', 'color', 'multicell', J({ frequency:0.3 }), 8],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v7 — multicell pixel presets)`);
+}
+
+// ─── Seed V8: Unified strip presets (patterns across paired pixel fixtures) ─
+
+function seedNewEffectsV8() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    ['Pixel Strip Sweep',      'chase', 'color', 'multicell', J({ direction:'left',  speed:1,   width:6, tail:4 }), 8],
+    ['Pixel Strip Bounce',     'chase', 'color', 'multicell', J({ direction:'bounce', speed:1,   width:5, tail:3 }), 8],
+    ['Pixel Strip Comet',      'comet', 'color', 'multicell', J({ direction:'left',  speed:1.2, tail:14 }), 4],
+    ['Pixel Strip Ripple',     'ripple', 'color', 'multicell', J({ speed:1.2, width:6, decay:0.65 }), 8],
+    ['Pixel Strip Segments',   'segments', 'color', 'multicell', J({ segment_size:4, offset_speed:1.5 }), 8],
+    ['Pixel Strip Gradient',   'gradient', 'color', 'multicell', J({ speed:0.9 }), 8],
+    ['Pixel Strip Build',      'buildup', 'intensity', 'multicell', J({ direction:'left' }), 8],
+    ['Pixel Strip Scanner',    'scanner', 'color', 'multicell', J({ speed:1.2, width:2, tail:8 }), 4],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v8 — unified pixel strip)`);
+}
+
+// ─── Seed V9: 2D matrix effects for Atomic / multi-cell panels ───────────────
+
+function seedNewEffectsV9() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    // Checkerboard
+    ['Matrix Checker',           'checker',           'color', 'multicell', J({ block_size: 2, speed: 1 }), 4],
+    ['Matrix Fast Checker',      'checker',           'color', 'multicell', J({ block_size: 2, speed: 2.5 }), 2],
+    ['Atomic 2×2 Checker',       'checker',           'color', 'multicell', J({ block_size: 2, speed: 1.2 }), 4],
+    ['Atomic 3×3 Checker',       'checker',           'color', 'multicell', J({ block_size: 3, speed: 1 }), 4],
+    // Row / column alternate
+    ['Matrix Row Alternate',     'matrix_alternate',  'color', 'multicell', J({ axis: 'rows', speed: 1 }), 4],
+    ['Matrix Col Alternate',     'matrix_alternate',  'color', 'multicell', J({ axis: 'cols', speed: 1 }), 4],
+    ['Matrix Fast Alternate',    'matrix_alternate',  'color', 'multicell', J({ axis: 'both', speed: 3 }), 2],
+    // Diagonal sweeps
+    ['Matrix Diagonal ↘',        'diagonal',          'color', 'multicell', J({ direction: 'down_right', speed: 1, width: 3 }), 4],
+    ['Matrix Diagonal ↙',        'diagonal',          'color', 'multicell', J({ direction: 'down_left', speed: 1, width: 3 }), 4],
+    ['Matrix Fast Diagonal',     'diagonal',          'color', 'multicell', J({ direction: 'down_right', speed: 2.5, width: 2 }), 2],
+    // Plasma
+    ['Matrix Plasma',            'plasma',            'color', 'multicell', J({ speed: 0.8, scale: 0.85 }), 8],
+    ['Matrix Fast Plasma',       'plasma',            'color', 'multicell', J({ speed: 1.8, scale: 1.0 }), 4],
+    ['Atomic Slow Plasma',       'plasma',            'color', 'multicell', J({ speed: 0.5, scale: 0.7 }), 8],
+    // Rain
+    ['Matrix Rain',              'rain',              'color', 'multicell', J({ speed: 1, tail: 3, density: 0.4 }), 4],
+    ['Matrix Heavy Rain',        'rain',              'color', 'multicell', J({ speed: 1.5, tail: 4, density: 0.55 }), 4],
+    ['Atomic Rain',              'rain',              'color', 'multicell', J({ speed: 1.2, tail: 2, density: 0.35 }), 4],
+    // Row fill
+    ['Matrix Row Fill ↓',        'fill_rows',         'intensity', 'multicell', J({ direction: 'down', speed: 0.8 }), 8],
+    ['Matrix Row Fill ↑',        'fill_rows',         'intensity', 'multicell', J({ direction: 'up', speed: 0.8 }), 8],
+    ['Matrix Fast Row Fill',     'fill_rows',         'intensity', 'multicell', J({ direction: 'down', speed: 2 }), 4],
+    // Wide-strip presets (paired Atomix → 4×24)
+    ['Atomic Strip Checker',     'checker',           'color', 'multicell', J({ block_size: 3, speed: 1 }), 8],
+    ['Atomic Strip Diagonal',    'diagonal',          'color', 'multicell', J({ direction: 'down_right', speed: 0.9, width: 4 }), 8],
+    ['Atomic Strip Plasma',      'plasma',            'color', 'multicell', J({ speed: 0.7, scale: 0.6 }), 8],
+    ['Atomic Strip Rain',        'rain',              'color', 'multicell', J({ speed: 1, tail: 4, density: 0.3 }), 8],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const [name, type, cat, target, data, beats] of allNew) {
+      if (!existing.has(name)) {
+        ins.run(name, type, cat, target, data, beats);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v9 — 2D matrix / Atomic)`);
+}
+
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
 
 /**
@@ -1154,6 +1308,40 @@ function createLedBarFixtureType({ name, manufacturer, cellCount, channelPattern
     name: name || `LED Bar ${cellCount} Cell`,
     manufacturer: manufacturer || 'Generic',
     category: 'led_bar',
+    cell_rows: 1,
+    cell_cols: cellCount,
+    channels,
+  });
+}
+
+// ─── Pixel Tape Fixture Type Helper ─────────────────────────────────────────
+
+/**
+ * Create a long 1D pixel tape fixture type (WS2812-style strips).
+ * @param {Object} opts
+ * @param {string}   opts.name           - Fixture type name
+ * @param {string}   opts.manufacturer   - Manufacturer
+ * @param {number}   opts.pixelCount     - Number of pixels along the strip (required)
+ * @param {string[]} opts.channelPattern - Channel types per pixel (default: ['red','green','blue'])
+ */
+function createPixelTapeFixtureType({ name, manufacturer, pixelCount, cellCount, channelPattern }) {
+  const count = pixelCount || cellCount;
+  if (!count || count < 1) throw new Error('pixelCount is required and must be >= 1');
+  const pattern = channelPattern || ['red', 'green', 'blue'];
+  const channels = [];
+  let chNum = 1;
+  for (let cell = 1; cell <= count; cell++) {
+    for (const type of pattern) {
+      const label = type.charAt(0).toUpperCase() + type.slice(1);
+      channels.push({ channel_number: chNum++, name: `Pixel ${cell} ${label}`, type, default_value: 0, cell });
+    }
+  }
+  return createFixtureType({
+    name: name || `Pixel Tape ${count}`,
+    manufacturer: manufacturer || 'Generic',
+    category: 'pixel_tape',
+    cell_rows: 1,
+    cell_cols: count,
     channels,
   });
 }
@@ -1169,8 +1357,11 @@ function createLedBarFixtureType({ name, manufacturer, cellCount, channelPattern
  * @param {Array}    opts.masterChannels    - Global channels [{name, type}] (optional)
  * @param {string[]} opts.cellChannelPattern - Channel types per cell (default: ['red','green','blue'])
  */
-function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChannels, cellChannelPattern }) {
-  if (!cellCount || cellCount < 1) throw new Error('cellCount is required and must be >= 1');
+function createMultiCellFixtureType({ name, manufacturer, cellCount, cellRows, cellCols, masterChannels, cellChannelPattern }) {
+  const rows = cellRows || 1;
+  const cols = cellCols || cellCount || 1;
+  const totalCells = cellCount || (rows * cols);
+  if (!totalCells || totalCells < 1) throw new Error('cellCount is required and must be >= 1');
   const pattern = cellChannelPattern || ['red', 'green', 'blue'];
   const channels = [];
 
@@ -1190,7 +1381,7 @@ function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChann
   }
 
   // Per-cell channels
-  for (let cell = 1; cell <= cellCount; cell++) {
+  for (let cell = 1; cell <= totalCells; cell++) {
     for (const type of pattern) {
       const label = type.charAt(0).toUpperCase() + type.slice(1);
       channels.push({ channel_number: chNum++, name: `Cell ${cell} ${label}`, type, default_value: 0, cell });
@@ -1198,9 +1389,11 @@ function createMultiCellFixtureType({ name, manufacturer, cellCount, masterChann
   }
 
   return createFixtureType({
-    name: name || `Multi-Cell ${cellCount}`,
+    name: name || `Multi-Cell ${rows}×${cols}`,
     manufacturer: manufacturer || 'Generic',
     category: 'multi_cell',
+    cell_rows: rows,
+    cell_cols: cols,
     channels,
   });
 }
@@ -1255,38 +1448,204 @@ function create14pcsRgbwParFixtureType() {
   });
 }
 
+/** All DMX modes for Generic Atomic LED Strobe (per manufacturer manual). */
+function buildAtomic4ChMode() {
+  return [
+    { channel_number: 1, name: 'Red', type: 'red', default_value: 0, cell: null },
+    { channel_number: 2, name: 'Green', type: 'green', default_value: 0, cell: null },
+    { channel_number: 3, name: 'Blue', type: 'blue', default_value: 0, cell: null },
+    { channel_number: 4, name: 'White', type: 'white', default_value: 0, cell: null },
+  ];
+}
+
+function buildAtomic6ChMode() {
+  return [
+    { channel_number: 1, name: 'Total Dimmer', type: 'dimmer', default_value: 0, cell: null },
+    { channel_number: 2, name: 'Total Strobe', type: 'strobe', default_value: 0, cell: null },
+    { channel_number: 3, name: 'Red', type: 'red', default_value: 0, cell: null },
+    { channel_number: 4, name: 'Green', type: 'green', default_value: 0, cell: null },
+    { channel_number: 5, name: 'Blue', type: 'blue', default_value: 0, cell: null },
+    { channel_number: 6, name: 'White', type: 'white', default_value: 0, cell: null },
+  ];
+}
+
+const ATOMIC_12CH_STROBE_RANGES = [
+  { min: 0, max: 4, label: 'Off', type: 'other' },
+  { min: 5, max: 255, label: 'Strobe slow to fast', type: 'strobe' },
+];
+
+const ATOMIC_12CH_MODE_RANGES = [
+  { min: 0, max: 5, label: 'RGB dimming (CH9–11)', type: 'other' },
+  { min: 6, max: 10, label: 'Static color (CH4 select)', type: 'macro' },
+  { min: 11, max: 15, label: 'Breathing effect', type: 'macro' },
+  { min: 16, max: 20, label: 'Jump change', type: 'macro' },
+  { min: 21, max: 25, label: 'Gradient change', type: 'macro' },
+  { min: 26, max: 30, label: 'Pulse change', type: 'macro' },
+  { min: 31, max: 202, label: 'Autorun effects 1–86', type: 'macro' },
+  { min: 203, max: 204, label: 'Autorun effect 87', type: 'macro' },
+  { min: 205, max: 229, label: 'Autorun effect 88 (full color)', type: 'macro' },
+  { min: 230, max: 233, label: 'Sound mode 1', type: 'macro' },
+  { min: 234, max: 237, label: 'Sound mode 2', type: 'macro' },
+  { min: 238, max: 245, label: 'Sound modes 3–4', type: 'macro' },
+  { min: 246, max: 249, label: 'Sound mode 5', type: 'macro' },
+  { min: 250, max: 255, label: 'Sound mode 6', type: 'macro' },
+];
+
+const ATOMIC_12CH_COLOR_RANGES = [
+  { min: 0, max: 31, label: 'Default color', type: 'other' },
+  { min: 32, max: 63, label: 'Red', type: 'macro' },
+  { min: 64, max: 95, label: 'Green', type: 'macro' },
+  { min: 96, max: 127, label: 'Blue', type: 'macro' },
+  { min: 128, max: 159, label: 'Yellow', type: 'macro' },
+  { min: 160, max: 191, label: 'Purple', type: 'macro' },
+  { min: 192, max: 223, label: 'Cyan', type: 'macro' },
+  { min: 224, max: 255, label: 'White', type: 'macro' },
+];
+
+const ATOMIC_12CH_W_EFFECT_RANGES = [
+  { min: 0, max: 5, label: 'W dimming (CH12)', type: 'other' },
+  { min: 6, max: 10, label: 'W effect 1 (cycle)', type: 'macro' },
+  { min: 11, max: 15, label: 'W effect 2 (static)', type: 'macro' },
+  { min: 16, max: 205, label: 'W effects 3–40', type: 'macro' },
+  { min: 206, max: 210, label: 'W effect 41', type: 'macro' },
+  { min: 211, max: 255, label: 'W effect 42', type: 'macro' },
+];
+
+function buildAtomic12ChMode() {
+  return [
+    { channel_number: 1, name: 'Total Dimmer', type: 'dimmer', default_value: 0, cell: null },
+    { channel_number: 2, name: 'RGB Strobe', type: 'strobe', default_value: 0, cell: null, ranges: ATOMIC_12CH_STROBE_RANGES },
+    { channel_number: 3, name: 'Mode', type: 'macro', default_value: 0, cell: null, ranges: ATOMIC_12CH_MODE_RANGES },
+    { channel_number: 4, name: 'Speed / Sensitivity', type: 'speed', default_value: 0, cell: null },
+    { channel_number: 5, name: 'Color Select', type: 'macro', default_value: 0, cell: null, ranges: ATOMIC_12CH_COLOR_RANGES },
+    { channel_number: 6, name: 'White Strobe', type: 'strobe', default_value: 0, cell: null, ranges: ATOMIC_12CH_STROBE_RANGES },
+    { channel_number: 7, name: 'White Effect', type: 'macro', default_value: 0, cell: null, ranges: ATOMIC_12CH_W_EFFECT_RANGES },
+    { channel_number: 8, name: 'White Effect Speed', type: 'speed', default_value: 0, cell: null },
+    { channel_number: 9, name: 'Red', type: 'red', default_value: 0, cell: null },
+    { channel_number: 10, name: 'Green', type: 'green', default_value: 0, cell: null },
+    { channel_number: 11, name: 'Blue', type: 'blue', default_value: 0, cell: null },
+    { channel_number: 12, name: 'White', type: 'white', default_value: 0, cell: null },
+  ];
+}
+
+function buildAtomic144ChMode() {
+  const channels = [];
+  for (let seg = 1; seg <= 48; seg++) {
+    const base = 1 + (seg - 1) * 3;
+    channels.push(
+      { channel_number: base, name: `Seg ${seg} Red`, type: 'red', default_value: 0, cell: seg },
+      { channel_number: base + 1, name: `Seg ${seg} Green`, type: 'green', default_value: 0, cell: seg },
+      { channel_number: base + 2, name: `Seg ${seg} Blue`, type: 'blue', default_value: 0, cell: seg },
+    );
+  }
+  return channels;
+}
+
 /**
- * Generic Atomic LED Strobe — 154-channel point-control mode.
- * CH1  master dimmer, CH2 master strobe,
- * CH3–146  48× RGB segments (3ch each),
- * CH147–154  8× independent white segments.
+ * 154ch point control — CH1–2 masters, CH3–146 RGB grid (48×3), CH147–154 white segments.
  */
-function createAtomicLedStrobeFixtureType() {
+function buildAtomic154ChMode() {
   const channels = [
-    { channel_number: 1, name: 'Master Dimmer', type: 'dimmer', default_value: 0, cell: null },
-    { channel_number: 2, name: 'Master Strobe', type: 'strobe', default_value: 0, cell: null },
+    { channel_number: 1, name: 'Total Dimmer', type: 'dimmer', default_value: 0, cell: null },
+    { channel_number: 2, name: 'Total Strobe', type: 'strobe', default_value: 0, cell: null },
   ];
   for (let seg = 1; seg <= 48; seg++) {
     const base = 3 + (seg - 1) * 3;
     channels.push(
-      { channel_number: base,     name: `Seg ${seg} Red`,   type: 'red',   default_value: 0, cell: seg },
+      { channel_number: base, name: `Seg ${seg} Red`, type: 'red', default_value: 0, cell: seg },
       { channel_number: base + 1, name: `Seg ${seg} Green`, type: 'green', default_value: 0, cell: seg },
-      { channel_number: base + 2, name: `Seg ${seg} Blue`,  type: 'blue',  default_value: 0, cell: seg },
+      { channel_number: base + 2, name: `Seg ${seg} Blue`, type: 'blue', default_value: 0, cell: seg },
     );
   }
   for (let w = 1; w <= 8; w++) {
     channels.push({ channel_number: 146 + w, name: `White ${w}`, type: 'white', default_value: 0, cell: null });
   }
+  return channels;
+}
+
+function getAtomicStrobeModes() {
+  return [
+    { name: '4 Channel (Whole Lamp)', short_name: '4ch', channels: buildAtomic4ChMode() },
+    { name: '6 Channel (Whole Lamp)', short_name: '6ch', channels: buildAtomic6ChMode() },
+    { name: '12 Channel (Basic Function)', short_name: '12ch', channels: buildAtomic12ChMode() },
+    { name: '144 Channel (Point Control)', short_name: '144ch', channels: buildAtomic144ChMode() },
+    { name: '154 Channel (Point Control)', short_name: '154ch', channels: buildAtomic154ChMode() },
+  ];
+}
+
+function createAtomicLedStrobeFixtureType() {
   return createFixtureType({
     name: 'Generic Atomic LED Strobe',
     manufacturer: 'Generic',
     category: 'multi_cell',
-    modes: [{
-      name: '154 Channel (Point Control)',
-      short_name: '154ch',
-      channels,
-    }],
+    cell_rows: 4,
+    cell_cols: 12,
+    modes: getAtomicStrobeModes(),
   });
+}
+
+/** One-time: correct Atomic matrix layout (was 3×16, physical grid is 4×12). */
+function migrateAtomicStrobeLayout() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'atomic_strobe_layout_v2'").get();
+  if (done?.value === '1') return;
+  db.prepare(
+    "UPDATE fixture_types SET cell_rows = 4, cell_cols = 12 WHERE name = 'Generic Atomic LED Strobe'",
+  ).run();
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('atomic_strobe_layout_v2', '1')").run();
+  console.log('[DB] Generic Atomic LED Strobe matrix layout set to 4×12');
+}
+
+/** Ensure all Atomic DMX modes exist and 154ch matches manual channel order. */
+function migrateAtomicStrobeModes() {
+  const type = db.prepare("SELECT id FROM fixture_types WHERE name = 'Generic Atomic LED Strobe'").get();
+  if (!type) return;
+
+  const oldModes = db.prepare(
+    'SELECT id, short_name, name FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order',
+  ).all(type.id);
+  const oldModeById = new Map(oldModes.map(m => [m.id, m.short_name || '']));
+
+  const expected = getAtomicStrobeModes();
+  const existingNames = new Set(oldModes.map(m => m.name));
+  const hasAll = expected.every(m => existingNames.has(m.name));
+
+  let needs154Fix = false;
+  const mode154 = oldModes.find(m => m.short_name === '154ch');
+  if (mode154) {
+    const firstWhite = db.prepare(
+      'SELECT channel_number FROM fixture_type_channels WHERE mode_id = ? AND type = ? AND cell IS NULL ORDER BY channel_number LIMIT 1',
+    ).get(mode154.id, 'white');
+    needs154Fix = firstWhite && firstWhite.channel_number <= 10;
+  }
+
+  if (hasAll && !needs154Fix) return;
+
+  const fixtures = db.prepare(
+    'SELECT id, mode_id FROM fixtures WHERE fixture_type_id = ?',
+  ).all(type.id);
+
+  updateFixtureType(type.id, {
+    name: 'Generic Atomic LED Strobe',
+    manufacturer: 'Generic',
+    category: 'multi_cell',
+    cell_rows: 4,
+    cell_cols: 12,
+    modes: expected,
+  });
+
+  const newModes = db.prepare(
+    'SELECT id, short_name FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order',
+  ).all(type.id);
+  const newByShort = new Map(newModes.map(m => [m.short_name, m.id]));
+  const defaultModeId = newByShort.get('154ch') || newModes[newModes.length - 1]?.id;
+
+  for (const fix of fixtures) {
+    const short = oldModeById.get(fix.mode_id);
+    const newModeId = (short && newByShort.get(short)) || defaultModeId;
+    if (newModeId) db.prepare('UPDATE fixtures SET mode_id = ? WHERE id = ?').run(newModeId, fix.id);
+  }
+
+  console.log('[DB] Updated Generic Atomic LED Strobe with all DMX modes (4/6/12/144/154ch)');
 }
 
 // ─── Seed Default Subscriptions ─────────────────────────────────────────────
@@ -1768,16 +2127,18 @@ function getFixtureType(id) {
   return _attachModes(t);
 }
 
-function createFixtureType({ name, manufacturer, category, channels, modes }) {
+function createFixtureType({ name, manufacturer, category, channels, modes, cell_rows, cell_cols }) {
   // Support both modes-based and legacy channels-only creation
   const modesData = modes && modes.length > 0
     ? modes
     : [{ name: 'Default', short_name: '', channels: channels || [] }];
 
   const channel_count = modesData[0].channels ? modesData[0].channels.length : 0;
+  const rows = cell_rows != null ? cell_rows : 1;
+  const cols = cell_cols != null ? cell_cols : 1;
   const r = db.prepare(
-    `INSERT INTO fixture_types (name, manufacturer, category, channel_count) VALUES (?, ?, ?, ?)`
-  ).run(name, manufacturer || '', category || 'other', channel_count);
+    `INSERT INTO fixture_types (name, manufacturer, category, channel_count, cell_rows, cell_cols) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(name, manufacturer || '', category || 'other', channel_count, rows, cols);
   const typeId = r.lastInsertRowid;
 
   const insModeStmt = db.prepare(
@@ -1810,7 +2171,7 @@ function createFixtureType({ name, manufacturer, category, channels, modes }) {
   return getFixtureType(typeId);
 }
 
-function updateFixtureType(id, { name, manufacturer, category, channels, modes }) {
+function updateFixtureType(id, { name, manufacturer, category, channels, modes, cell_rows, cell_cols }) {
   const existing = db.prepare('SELECT * FROM fixture_types WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -1825,9 +2186,11 @@ function updateFixtureType(id, { name, manufacturer, category, channels, modes }
     const channel_count = modesData
       ? (modesData[0].channels ? modesData[0].channels.length : 0)
       : existing.channel_count;
+    const rows = cell_rows != null ? cell_rows : (existing.cell_rows ?? 1);
+    const cols = cell_cols != null ? cell_cols : (existing.cell_cols ?? 1);
     db.prepare(
-      `UPDATE fixture_types SET name=?, manufacturer=?, category=?, channel_count=?, updated_at=datetime('now') WHERE id=?`
-    ).run(name || existing.name, manufacturer ?? existing.manufacturer, category || existing.category, channel_count, id);
+      `UPDATE fixture_types SET name=?, manufacturer=?, category=?, channel_count=?, cell_rows=?, cell_cols=?, updated_at=datetime('now') WHERE id=?`
+    ).run(name || existing.name, manufacturer ?? existing.manufacturer, category || existing.category, channel_count, rows, cols, id);
 
     if (modesData) {
       // Get existing mode IDs so we can update fixtures that referenced them
@@ -1963,6 +2326,7 @@ function createFixture({ name, fixture_type_id, mode_id, universe, address, outp
     `INSERT INTO fixtures (name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(name, fixture_type_id, resolvedModeId, universe || 1, address, otype, notes || '', invert_pan ? 1 : 0, invert_tilt ? 1 : 0, home_pan ?? 128, home_tilt ?? 128, rig_x ?? 0.5, rig_y ?? 0.5, rig_z ?? 0.5, resolvedRigOrder, exclude_from_sequence ? 1 : 0);
 
+  invalidateFixtureChannelMapCache();
   return getFixture(r.lastInsertRowid);
 }
 
@@ -2018,6 +2382,7 @@ function createFixtureBatch(baseFixture, quantity) {
     return { error: e.message };
   }
 
+  invalidateFixtureChannelMapCache();
   return { created: created.length, fixtures: created.map(id => getFixture(id)) };
 }
 
@@ -2055,11 +2420,13 @@ function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, 
     `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_z=?, rig_order=?, exclude_from_sequence=?, updated_at=datetime('now') WHERE id=?`
   ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_z ?? existing.rig_z ?? 0.5, rig_order ?? existing.rig_order ?? 0, exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0), id);
 
+  invalidateFixtureChannelMapCache();
   return getFixture(id);
 }
 
 function deleteFixture(id) {
   db.prepare('DELETE FROM fixtures WHERE id = ?').run(id);
+  invalidateFixtureChannelMapCache();
   return { deleted: true };
 }
 
@@ -2696,13 +3063,23 @@ function clearTracks() {
 
 // ─── Fixture Channel Map (for Quick Actions) ────────────────────────────────
 
+let _fixtureChannelMapCache = null;
+let _eligibleFixtureIdsCache = null;
+
+function invalidateFixtureChannelMapCache() {
+  _fixtureChannelMapCache = null;
+  _eligibleFixtureIdsCache = null;
+}
+
 function getFixtureChannelMap() {
+  if (_fixtureChannelMapCache) return _fixtureChannelMapCache;
+
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
            f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
            f.rig_x, f.rig_y, f.rig_order, f.exclude_from_sequence, f.cell_path,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
-           ft.name as type_name, ft.category,
+           ft.name as type_name, ft.category, ft.cell_rows, ft.cell_cols,
            ftm.name as mode_name
     FROM fixtures f
     JOIN fixture_types ft ON f.fixture_type_id = ft.id
@@ -2713,7 +3090,7 @@ function getFixtureChannelMap() {
   // Pre-load all color wheel maps (keyed by fixture_type_id)
   const cwMaps = getAllColorWheelMaps();
 
-  return fixtures.map(f => {
+  const mapped = fixtures.map(f => {
     // Get channels from the mode (or fall back to fixture_type_id)
     const channels = f.mode_id
       ? db.prepare(
@@ -2751,6 +3128,8 @@ function getFixtureChannelMap() {
       }),
     };
   });
+  _fixtureChannelMapCache = mapped;
+  return mapped;
 }
 
 // ─── Color Wheel Maps ───────────────────────────────────────────────────────
@@ -3122,19 +3501,20 @@ const GENERATOR_CONFIG_DEFAULTS = {
     outro:     { regular: ['color_fade', 'pulse'],            cellAware: ['fire', 'color_wave'] },
   },
   gen_cell_patterns: {
-    intro:     ['fill_sweep', 'color_wave', 'breathe', 'sparkle_field', 'center_pulse'],
-    verse:     ['chase_slow', 'alternate', 'color_wave', 'fill_sweep', 'chase', 'sparkle_field', 'checker', 'split_wipe'],
-    chorus:    ['chase', 'alternate', 'scatter', 'all_flash', 'split_wipe', 'sparkle_field'],
-    bridge:    ['color_wave', 'alternate', 'chase_slow', 'center_pulse', 'checker'],
-    breakdown: ['fill_sweep', 'breathe', 'center_pulse', 'sparkle_field'],
-    buildup:   ['build_reveal', 'chase_accel', 'split_wipe'],
-    drop:      ['chase_fast', 'scatter_strobe', 'alternate_fast', 'all_flash', 'sparkle_field'],
-    outro:     ['fill_sweep', 'color_wave', 'breathe', 'center_pulse'],
+    intro:     ['chase', 'color_wave', 'pulse', 'sparkle', 'checker', 'plasma'],
+    verse:     ['chase', 'scanner', 'color_wave', 'comet', 'sparkle', 'segments', 'diagonal', 'matrix_alternate'],
+    chorus:    ['chase', 'scanner', 'sparkle', 'comet', 'ripple', 'gradient', 'plasma', 'rain', 'checker'],
+    bridge:    ['color_wave', 'scanner', 'chase', 'ripple', 'matrix_alternate', 'fill_rows'],
+    breakdown: ['pulse', 'color_wave', 'ripple', 'sparkle', 'plasma', 'checker'],
+    buildup:   ['buildup', 'chase', 'comet', 'segments', 'fill_rows', 'diagonal'],
+    drop:      ['chase', 'cell_strobe', 'scanner', 'comet', 'sparkle', 'segments', 'rain', 'matrix_alternate'],
+    outro:     ['chase', 'color_wave', 'pulse', 'ripple', 'plasma', 'fill_rows'],
   },
   gen_fixture_intensity: {
     par:         { intro: 0.90, verse: 0.85, chorus: 0.95, bridge: 0.80, breakdown: 0.70, buildup: 0.85, drop: 1.00, outro: 0.90 },
     mover:       { intro: 0.55, verse: 0.70, chorus: 0.90, bridge: 0.65, breakdown: 0.45, buildup: 0.75, drop: 1.00, outro: 0.50 },
     led_bar:     { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
+    pixel_tape:  { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
     multi_cell:  { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
     color_wheel: { intro: 0.70, verse: 0.80, chorus: 1.00, bridge: 0.70, breakdown: 0.50, buildup: 0.85, drop: 1.00, outro: 0.60 },
   },
@@ -3371,11 +3751,13 @@ function deleteSequence(id) {
 // ─── Sequence fixture snapshots (detect stale sequences after rig changes) ───
 
 function getSequenceEligibleFixtureIds() {
-  return db.prepare(`
+  if (_eligibleFixtureIdsCache) return _eligibleFixtureIdsCache;
+  _eligibleFixtureIdsCache = db.prepare(`
     SELECT f.id FROM fixtures f
     WHERE COALESCE(f.exclude_from_sequence, 0) = 0
     ORDER BY f.id
   `).all().map((r) => r.id);
+  return _eligibleFixtureIdsCache;
 }
 
 function setSequenceGeneratorFixtureIds(sequenceId, fixtureIds) {
@@ -3399,32 +3781,67 @@ function getSequenceSnapshotFixtureIds(seq) {
   return rows.map((r) => r.id).sort((a, b) => a - b);
 }
 
-function isSequenceFixtureStale(seq) {
+function isSequenceFixtureStale(seq, eligibleIds) {
   if (!seq) return false;
-  const current = getSequenceEligibleFixtureIds();
+  const current = eligibleIds || getSequenceEligibleFixtureIds();
   if (!current.length) return false;
   const snapshot = new Set(getSequenceSnapshotFixtureIds(seq));
   if (!snapshot.size) return current.length > 0;
-  return current.some((id) => !snapshot.has(id));
+  if (current.some((id) => !snapshot.has(id))) return true;
+
+  // Snapshotted fixture has zero cues (e.g. multicell FX stripped by bad migration).
+  const cueFixtureIds = new Set(
+    db.prepare(
+      'SELECT DISTINCT fixture_id AS id FROM sequence_cues WHERE sequence_id = ? AND fixture_id > 0',
+    ).all(seq.id).map((r) => r.id),
+  );
+  for (const id of snapshot) {
+    if (id > 0 && !cueFixtureIds.has(id)) return true;
+  }
+
+  // Multicell matrix effects wrongly stored as rig-wide master cues.
+  const corrupt = db.prepare(`
+    SELECT COUNT(*) AS c FROM sequence_cues sc
+    JOIN effects e ON e.id = sc.effect_id
+    WHERE sc.sequence_id = ? AND sc.fixture_id = 0 AND sc.track = 'fx-rig'
+      AND (e.fixture_target = 'multicell' OR e.type IN ('segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows'))
+  `).get(seq.id);
+  if (corrupt.c > 0) return true;
+
+  return false;
 }
 
 function getStaleSequenceSummaries() {
+  const current = getSequenceEligibleFixtureIds();
+  if (!current.length) return [];
   const rows = db.prepare(`
     SELECT ls.id AS sequence_id, ls.name AS sequence_name, ls.track_id,
+           ls.generator_fixture_ids,
            t.title AS track_title, t.filename AS track_filename
     FROM light_sequences ls
     LEFT JOIN tracks t ON t.id = ls.track_id
     WHERE ls.track_id IS NOT NULL
     ORDER BY ls.updated_at DESC
   `).all();
-  const current = getSequenceEligibleFixtureIds();
-  const currentSet = new Set(current);
   const out = [];
   for (const row of rows) {
-    const seq = getSequence(row.sequence_id);
-    if (!seq || !isSequenceFixtureStale(seq)) continue;
-    const snapshot = new Set(getSequenceSnapshotFixtureIds(seq));
-    const missing = current.filter((id) => !snapshot.has(id));
+    if (!isSequenceFixtureStale(row, current)) continue;
+    let snapshotSet = new Set();
+    if (row.generator_fixture_ids) {
+      try {
+        snapshotSet = new Set(JSON.parse(row.generator_fixture_ids).map((id) => +id).filter((id) => id > 0));
+      } catch { /* fall through */ }
+    }
+    if (!snapshotSet.size) {
+      const ids = db.prepare(`
+        SELECT DISTINCT fixture_id AS id FROM sequence_cues
+        WHERE sequence_id = ? AND fixture_id IS NOT NULL AND fixture_id > 0
+      `).all(row.sequence_id).map((r) => r.id);
+      snapshotSet = new Set(ids);
+    }
+    const missing = snapshotSet.size
+      ? current.filter((id) => !snapshotSet.has(id))
+      : [...current];
     out.push({
       sequence_id: row.sequence_id,
       track_id: row.track_id,
@@ -3633,7 +4050,8 @@ function deleteCue(id) {
   return { deleted: true };
 }
 
-function bulkUpdateCues(sequenceId, cues) {
+function bulkUpdateCues(sequenceId, cues, opts = {}) {
+  const { reload = true } = opts;
   const txn = db.transaction(() => {
     // Delete existing cues
     db.prepare('DELETE FROM sequence_cues WHERE sequence_id = ?').run(sequenceId);
@@ -3660,6 +4078,7 @@ function bulkUpdateCues(sequenceId, cues) {
     db.prepare("UPDATE light_sequences SET updated_at=datetime('now') WHERE id=?").run(sequenceId);
   });
   txn();
+  if (!reload) return { count: cues.length };
   return getSequenceCues(sequenceId);
 }
 
@@ -4158,6 +4577,7 @@ module.exports = {
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
   getFixtureTypeSummaries, searchFixtureTypes,
   createLedBarFixtureType,
+  createPixelTapeFixtureType,
   createMultiCellFixtureType,
   createAtomicLedStrobeFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,

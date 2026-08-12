@@ -87,7 +87,8 @@ const OFL_CATEGORY_MAP = {
   'Smoke':          'fog',
   'Laser':          'laser',
   'Matrix':         'multi_cell',
-  'Pixel Bar':      'led_bar',
+  'Pixel Bar':      'pixel_tape',
+  'LED Strip':      'pixel_tape',
 };
 
 // ─── Determine Channel Type from OFL capabilities ───────────────────────────

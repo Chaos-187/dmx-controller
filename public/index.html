@@ -397,13 +397,23 @@
       <h3>Live color palette</h3>
       <p class="config-desc" style="margin-bottom:8px">Same presets as the Effects tab. Use while a palette effect runs; changes apply immediately.</p>
       <span class="fx-pal-label">Look</span>
-      <div id="dmxLivePresets" class="fx-pal-grid" style="margin-bottom:8px">
+      <div id="dmxLivePresets" class="fx-pal-grid fx-pal-grid-scroll" style="margin-bottom:8px">
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="hsl">Full spectrum</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="warm">Warm</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="cool">Cool</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="neon">Neon</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="ocean">Ocean</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="fire">Fire</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="sunset">Sunset</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="purple">Purple</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="gold">Gold</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="ice">Ice</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="forest">Forest</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="party">Party</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="pastel">Pastel</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="vapor">Vapor</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="citrus">Citrus</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="dmx" data-pal="crimson">Crimson</button>
         <button type="button" class="btn btn-sm btn-secondary fx-pal-preset" data-fxpre="dmx" data-pal="custom">Custom…</button>
       </div>
       <div id="dmxLiveCustomRow" class="fx-pal-custom">
@@ -486,18 +496,29 @@
 <div class="tab-page" id="page-effectslab">
   <div class="effects-lab-page" style="width:100%;max-width:100%;box-sizing:border-box;margin:0;padding:0 clamp(8px,2vw,28px)">
     <h2 style="margin-bottom:6px">Effects</h2>
-    <p class="config-desc" style="margin-bottom:12px">Effects are grouped by <strong>fixture target</strong> (color, movers, rig, etc.). Set defaults in <a href="config.html" style="color:var(--accent)">Config → Effects</a>. Use the palette row to change color looks <em>live</em> while an effect is running.</p>
-    <div class="qa-section" style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px;border:1px solid var(--panel-border);margin-bottom:16px;position:relative;width:100%;box-sizing:border-box">
+    <p class="config-desc" style="margin-bottom:12px">Effects are grouped by <strong>fixture target</strong>. On the <strong>Multicell</strong> tab, set a color palette before or while running matrix effects (Atomic, pixel strips, etc.).</p>
+    <div class="effects-lib-tabs" id="efxEngineTabs" style="display:flex;gap:0;border-bottom:2px solid var(--panel-border);margin-bottom:12px;flex-wrap:wrap"></div>
+    <div class="qa-section" id="engFxPaletteWrap" style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px;border:1px solid var(--panel-border);margin-bottom:16px;position:relative;width:100%;box-sizing:border-box">
       <h3 style="margin:0 0 6px">Live color palette</h3>
-      <p class="config-desc" style="margin-bottom:8px">Choose a preset look, or <strong>Custom</strong> to edit four stops. Applies to any running effect that uses color palettes (same controls are under DMX Control).</p>
+      <p class="config-desc" id="engFxPaletteHint" style="margin-bottom:8px">Applies to all running palette-aware effects (multicell, rig, color). Choose a preset or <strong>Custom</strong> for four color stops — changes apply immediately.</p>
       <span class="fx-pal-label">Look</span>
-      <div id="engLivePresets" class="fx-pal-grid" style="margin-bottom:8px">
+      <div id="engLivePresets" class="fx-pal-grid fx-pal-grid-scroll" style="margin-bottom:8px">
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="hsl">Full spectrum</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="warm">Warm</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="cool">Cool</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="neon">Neon</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="ocean">Ocean</button>
         <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="fire">Fire</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="sunset">Sunset</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="purple">Purple</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="gold">Gold</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="ice">Ice</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="forest">Forest</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="party">Party</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="pastel">Pastel</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="vapor">Vapor</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="citrus">Citrus</button>
+        <button type="button" class="btn btn-sm fx-pal-preset" data-fxpre="eng" data-pal="crimson">Crimson</button>
         <button type="button" class="btn btn-sm btn-secondary fx-pal-preset" data-fxpre="eng" data-pal="custom">Custom…</button>
       </div>
       <div id="engLiveCustomRow" class="fx-pal-custom">
@@ -1376,7 +1397,7 @@
           <!-- Cell Patterns -->
           <div class="config-card" style="margin-top:16px">
             <div class="gen-card-header"><h4>Multi-Cell Patterns</h4><button class="btn btn-sm gen-json-toggle" data-editor="genCellPatternsEditor" data-key="gen_cell_patterns">{ }</button></div>
-            <p class="config-desc">Per-section multi-cell pattern names for LED bars and multi-cell fixtures.</p>
+            <p class="config-desc">Per-section effect types for multi-cell / pixel fixtures (runtime effects — not stored as per-pixel cues).</p>
             <div id="genCellPatternsEditor"></div>
             <textarea id="genCellPatternsRaw" rows="10" style="display:none;width:100%;font-family:monospace;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:4px;padding:8px;resize:vertical"></textarea>
           </div>
@@ -1472,6 +1493,12 @@
                     <option value="ripple">Ripple</option>
                     <option value="cell_strobe">Cell Strobe</option>
                     <option value="gradient">Gradient</option>
+                    <option value="checker">Checkerboard</option>
+                    <option value="matrix_alternate">Row/Col Alternate</option>
+                    <option value="diagonal">Diagonal Sweep</option>
+                    <option value="plasma">Plasma</option>
+                    <option value="rain">Matrix Rain</option>
+                    <option value="fill_rows">Row Fill</option>
                   </optgroup>
                   <optgroup label="Rig-wide Spatial">
                     <option value="rig_chase">Rig Chase (L/R)</option>
@@ -2360,8 +2387,9 @@
           <option value="laser">Laser</option>
           <option value="fog">Fog / Haze</option>
           <option value="dimmer">Dimmer</option>
-          <option value="led_bar">LED Bar</option>
-          <option value="multi_cell">Multi-Cell</option>
+          <option value="led_bar">LED Bar (legacy)</option>
+          <option value="pixel_tape">Pixel Tape</option>
+          <option value="multi_cell">Multi-Cell Matrix</option>
           <option value="effect">Effect</option>
           <option value="other">Other</option>
         </select>
@@ -2391,11 +2419,17 @@
         <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
       </div>
       <div class="form-group" id="tMultiCellGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
-        <label>Multi-Cell Builder</label>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Quickly build a multi-cell fixture: define master channels above, then set the per-cell pattern and count below.</div>
+        <label id="tMultiCellBuilderLabel">Cell Builder</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px" id="tMultiCellBuilderDesc">Build per-pixel or per-cell channel layout.</div>
+        <div id="tMatrixRowsRow" style="display:none;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Rows:</label>
+          <input type="number" id="tCellRows" value="6" min="1" max="64" style="width:60px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Cols:</label>
+          <input type="number" id="tCellCols" value="8" min="1" max="64" style="width:60px">
+        </div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
-          <label style="font-size:12px;color:var(--text-dim);margin:0">Cells:</label>
-          <input type="number" id="tMultiCellCount" value="4" min="1" max="64" style="width:60px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0" id="tMultiCellCountLabel">Cells:</label>
+          <input type="number" id="tMultiCellCount" value="4" min="1" max="512" style="width:60px">
           <label style="font-size:12px;color:var(--text-dim);margin:0">Pattern:</label>
           <select id="tMultiCellPattern" style="width:auto">
             <option value="rgb">RGB (3ch)</option>
@@ -2966,7 +3000,7 @@ const CHANNEL_TYPES = [
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',
   strobe:'Strobe', laser:'Laser',
-  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
+  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', pixel_tape:'Pixel Tape', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -4845,12 +4879,41 @@ document.getElementById('btnAddChannel').addEventListener('click', () => {
   renderModeTabs();
 });
 
-/* Category change — show/hide multi-cell builder */
+/* Category change — show/hide cell builder */
 function updateMultiCellVisibility() {
   const cat = document.getElementById('tCategory').value;
-  document.getElementById('tMultiCellGroup').style.display = (cat === 'multi_cell' || cat === 'led_bar') ? '' : 'none';
+  const show = (cat === 'multi_cell' || cat === 'led_bar' || cat === 'pixel_tape');
+  document.getElementById('tMultiCellGroup').style.display = show ? '' : 'none';
+  const matrixRow = document.getElementById('tMatrixRowsRow');
+  if (matrixRow) matrixRow.style.display = (cat === 'multi_cell') ? 'flex' : 'none';
+  const label = document.getElementById('tMultiCellBuilderLabel');
+  const desc = document.getElementById('tMultiCellBuilderDesc');
+  const countLabel = document.getElementById('tMultiCellCountLabel');
+  if (cat === 'pixel_tape' || cat === 'led_bar') {
+    if (label) label.textContent = 'Pixel Tape Builder';
+    if (desc) desc.textContent = 'Long 1D pixel strip — set pixel count and RGB pattern. Multiple tapes of the same type run as one continuous strip in sequences.';
+    if (countLabel) countLabel.textContent = 'Pixels:';
+  } else if (cat === 'multi_cell') {
+    if (label) label.textContent = 'Multi-Cell Matrix Builder';
+    if (desc) desc.textContent = 'Matrix / panel fixture — set rows × cols (or cell count). Master channels above stay global.';
+    if (countLabel) countLabel.textContent = 'Cells (if not using rows×cols):';
+  }
 }
 document.getElementById('tCategory').addEventListener('change', updateMultiCellVisibility);
+
+function getCellLayoutFromForm() {
+  const cat = document.getElementById('tCategory').value;
+  if (cat === 'multi_cell') {
+    const rows = Math.max(1, +document.getElementById('tCellRows').value || 1);
+    const cols = Math.max(1, +document.getElementById('tCellCols').value || 1);
+    return { cell_rows: rows, cell_cols: cols };
+  }
+  if (cat === 'pixel_tape' || cat === 'led_bar') {
+    const pixels = Math.max(1, +document.getElementById('tMultiCellCount').value || 1);
+    return { cell_rows: 1, cell_cols: pixels };
+  }
+  return null;
+}
 
 /* Multi-Cell Builder */
 const MULTI_CELL_PATTERNS = {
@@ -4861,13 +4924,37 @@ const MULTI_CELL_PATTERNS = {
   rgbwd: ['red', 'green', 'blue', 'white', 'dimmer'],
 };
 
+/** Global fixture controls — not part of the cell grid (matches effects-engine.js). */
+const MULTI_CELL_GLOBAL_MASTER_TYPES = new Set([
+  'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
+  'pan', 'pan_fine', 'tilt', 'tilt_fine',
+  'gobo', 'gobo_rotation', 'color_wheel', 'focus', 'zoom', 'prism',
+  'smoke', 'atmosphere',
+]);
+
+function partitionMultiCellPreservedChannels(channels) {
+  const globalMasters = [];
+  const auxiliary = [];
+  for (const ch of channels) {
+    if (ch.cell) continue;
+    if (MULTI_CELL_GLOBAL_MASTER_TYPES.has(ch.type)) globalMasters.push(ch);
+    else auxiliary.push(ch);
+  }
+  return { globalMasters, auxiliary };
+}
+
 document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
-  const cellCount = Math.max(1, +document.getElementById('tMultiCellCount').value || 4);
+  const cat = document.getElementById('tCategory').value;
+  let cellCount = Math.max(1, +document.getElementById('tMultiCellCount').value || 4);
+  if (cat === 'multi_cell') {
+    const rows = Math.max(1, +document.getElementById('tCellRows').value || 1);
+    const cols = Math.max(1, +document.getElementById('tCellCols').value || 1);
+    if (rows > 1 || cols > 1) cellCount = rows * cols;
+  }
   const patternKey = document.getElementById('tMultiCellPattern').value;
   const pattern = MULTI_CELL_PATTERNS[patternKey] || MULTI_CELL_PATTERNS.rgb;
 
-  // Keep existing channels with cell=null as master channels
-  const masterChannels = typeChannels.filter(ch => !ch.cell);
+  const { globalMasters, auxiliary } = partitionMultiCellPreservedChannels(typeChannels);
 
   // Build cell channels
   const cellChannels = [];
@@ -4887,7 +4974,7 @@ document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
     }
   }
 
-  typeChannels = [...masterChannels, ...cellChannels];
+  typeChannels = [...globalMasters, ...cellChannels, ...auxiliary];
   typeChannels.forEach((ch, i) => { ch.channel_number = i + 1; });
   renderChannelsEditor();
   updateDuplicateHint();
@@ -4895,7 +4982,8 @@ document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
   renderModeTabs();
 
   const hint = document.getElementById('tMultiCellHint');
-  hint.textContent = `Built ${masterChannels.length} master + ${cellChannels.length} cell channels (${cellCount} cells × ${pattern.length}ch)`;
+  const auxNote = auxiliary.length ? ` + ${auxiliary.length} auxiliary (after cells)` : '';
+  hint.textContent = `Built ${globalMasters.length} master + ${cellChannels.length} cell${auxNote} channels (${cellCount} cells × ${pattern.length}ch)`;
   hint.style.color = 'var(--accent)';
 });
 
@@ -5020,6 +5108,8 @@ async function openTypeModal(typeId) {
     document.getElementById('tName').value = t.name;
     document.getElementById('tManufacturer').value = t.manufacturer || '';
     document.getElementById('tCategory').value = t.category;
+    if (document.getElementById('tCellRows')) document.getElementById('tCellRows').value = t.cell_rows || 1;
+    if (document.getElementById('tCellCols')) document.getElementById('tCellCols').value = t.cell_cols || 1;
     if (t.modes && t.modes.length > 0) {
       typeModes = t.modes.map(m => ({
         name: m.name,
@@ -5101,6 +5191,8 @@ document.getElementById('btnSaveType').addEventListener('click', async () => {
     category: document.getElementById('tCategory').value,
     modes,
   };
+  const cellLayout = getCellLayoutFromForm();
+  if (cellLayout) Object.assign(body, cellLayout);
   if (!body.name) return showError('typeError', 'Name is required');
   if (modes.every(m => m.channels.length === 0)) return showError('typeError', 'Add at least one channel to at least one mode');
 
@@ -5163,7 +5255,7 @@ document.getElementById('btnDuplicateChannels').addEventListener('click', () => 
   if (typeChannels.length === 0) return showError('typeError', 'Add at least one channel first');
   if (count <= 1) return showError('typeError', 'Set repeat to more than 1');
   const cat = document.getElementById('tCategory').value;
-  const assignCells = (cat === 'multi_cell' || cat === 'led_bar');
+  const assignCells = (cat === 'multi_cell' || cat === 'led_bar' || cat === 'pixel_tape');
   // Snapshot the current pattern as the base template
   const pattern = typeChannels.map(ch => ({ name: ch.name, type: ch.type, default_value: ch.default_value, min_value: ch.min_value, max_value: ch.max_value, ranges: ch.ranges || null }));
   // Rename existing channels as group 1
@@ -6068,7 +6160,7 @@ function renderRigLayout() {
     node.title = `${f.name}\nU${f.universe} Ch${f.address}\nx:${(f.rig_x||0).toFixed(2)} depth:${(f.rig_y||0).toFixed(2)} h:${(f.rig_z||0).toFixed(2)}`;
 
     const isMovingHead = f.category === 'moving_head' || f.category === 'moving_head_wash' || f.category === 'moving_head_spot';
-    const iconText  = isMovingHead ? '◎' : (f.category === 'led_bar' || f.category === 'multi_cell') ? '▥' : '●';
+    const iconText  = isMovingHead ? '◎' : (f.category === 'led_bar' || f.category === 'pixel_tape' || f.category === 'multi_cell') ? '▥' : '●';
     const iconSize  = Math.max(8, Math.round(14 * scale));
     node.innerHTML = `
       <span style="font-size:${iconSize}px">${iconText}</span>
@@ -8038,7 +8130,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
 let genConfig = {};
 const GEN_SECS = ['intro','verse','chorus','bridge','breakdown','buildup','drop','outro'];
 const GEN_REG_FX = ['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire'];
-const GEN_CELL_FX = ['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','sparkle','color_wave','fire'];
+const GEN_CELL_FX = ['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','sparkle','color_wave','fire','checker','matrix_alternate','diagonal','plasma','rain','fill_rows'];
 const GEN_CELL_PATS = ['fill_sweep','color_wave','breathe','chase_slow','alternate','chase','scatter','all_flash','build_reveal','chase_accel','chase_fast','scatter_strobe','alternate_fast'];
 const GEN_RAW = {}; // track raw-JSON mode per editor
 let genActivePal = null;
@@ -8355,8 +8447,8 @@ function renderCellPatternsEditor() {
 }
 
 // ─── Fixture Intensity Editor ───
-const _FI_ROLES = ['par','mover','led_bar','color_wheel'];
-const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', color_wheel: 'Color Wheel' };
+const _FI_ROLES = ['par','mover','led_bar','pixel_tape','multi_cell','color_wheel'];
+const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', pixel_tape: 'Pixel Tape', multi_cell: 'Multi-Cell', color_wheel: 'Color Wheel' };
 const _FI_SECTIONS = ['intro','verse','chorus','bridge','breakdown','buildup','drop','outro'];
 const _FI_SEC_COLORS = { intro:'#78909c', verse:'#42a5f5', chorus:'#ef5350', bridge:'#ab47bc', breakdown:'#26a69a', buildup:'#ffa726', drop:'#e53935', outro:'#78909c' };
 
@@ -8588,11 +8680,34 @@ function renderCfgEffectsList() {
 }
 
 // Effect types that show optional Color spectrum (HSL vs custom palette) in the editor
+const MULTICELL_PALETTE_EFFECT_TYPES = [
+  'chase', 'comet', 'scanner', 'sparkle', 'color_wave', 'fire', 'buildup',
+  'segments', 'ripple', 'cell_strobe', 'gradient',
+  'checker', 'matrix_alternate', 'diagonal', 'plasma', 'rain', 'fill_rows',
+];
 const EFFECT_EDITOR_PALETTE_TYPES = new Set([
   'rainbow', 'color_wave', 'fire',
+  'rig_chase', 'rig_sweep', 'rig_alternate', 'rig_converge', 'rig_round_robin', 'rig_depth_chase',
   'rig_color_wave', 'rig_rainbow', 'rig_depth_wave',
   'sound_wave', 'sound_vu', 'sound_vu_tb', 'sound_vu_lr',
+  ...MULTICELL_PALETTE_EFFECT_TYPES,
 ]);
+const FX_LAB_PALETTE_TABS = new Set(['multicell', 'color', 'rig', 'motion', 'sound', 'all']);
+let efxEngineActiveTab = 'multicell';
+
+function updateEngFxPaletteVisibility() {
+  const wrap = document.getElementById('engFxPaletteWrap');
+  if (!wrap) return;
+  wrap.style.display = FX_LAB_PALETTE_TABS.has(efxEngineActiveTab) ? '' : 'none';
+  const hint = document.getElementById('engFxPaletteHint');
+  if (!hint) return;
+  hint.textContent = 'Applies to all running palette-aware effects. Choose a preset or Custom for four color stops — changes apply immediately.';
+}
+
+function effectMatchesEngineTab(eff, tabKey) {
+  if (tabKey === 'all') return true;
+  return mapFixtureTargetToCategory(eff) === tabKey;
+}
 
 function cfgColorSpectrumRow(data) {
   const hasPal = data.color_mode === 'palette' && data.color_palette && data.color_palette.length >= 2;
@@ -8852,7 +8967,7 @@ document.getElementById('effSaveBtn').addEventListener('click', cfgSaveEffect);
 document.getElementById('effType').addEventListener('change', (e) => {
   cfgRenderEffectParams(e.target.value, {});
   const movingTypes = ['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod'];
-  const multicellOnlyTypes = ['segments','ripple','cell_strobe','gradient'];
+  const multicellOnlyTypes = ['segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows'];
   const colorTypes = ['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire'];
   const sel = document.getElementById('effFixtureTarget');
   if (movingTypes.includes(e.target.value)) sel.value = 'moving_head';
@@ -10618,7 +10733,7 @@ function buildQaGrid(gridId, items) {
 
 // ─── Effects Library Grid for Quick Actions ───────────────────────────
 const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod']);
-const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient']);
+const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows']);
 const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
 function getEffectSlot(type) {
@@ -10661,6 +10776,16 @@ const LIVE_FX_PRESET_DATA = {
   neon: { mode: 'palette', colors: ['#ff00ff', '#00ffff', '#ffff00', '#ff0066'] },
   ocean: { mode: 'palette', colors: ['#001a4d', '#0066cc', '#00a8cc', '#66d9cc'] },
   fire: { mode: 'palette', colors: ['#1a0000', '#ff3300', '#ff9900', '#ffcc00'] },
+  sunset: { mode: 'palette', colors: ['#1a0533', '#ff6b35', '#f7c59f', '#ffcc02'] },
+  purple: { mode: 'palette', colors: ['#1a0033', '#6600cc', '#cc00ff', '#ff66ff'] },
+  gold: { mode: 'palette', colors: ['#1a1000', '#b8860b', '#ffd700', '#fff8dc'] },
+  ice: { mode: 'palette', colors: ['#001833', '#004466', '#66ccff', '#ffffff'] },
+  forest: { mode: 'palette', colors: ['#0a1f0a', '#1a661a', '#33cc33', '#a8e063'] },
+  party: { mode: 'palette', colors: ['#ff0080', '#8000ff', '#00ff80', '#ff8000'] },
+  pastel: { mode: 'palette', colors: ['#ffb3ba', '#ffdfba', '#ffffba', '#baffc9'] },
+  vapor: { mode: 'palette', colors: ['#7117ea', '#ea17a7', '#17eae8', '#a717ea'] },
+  citrus: { mode: 'palette', colors: ['#ff9900', '#ffcc00', '#66ff00', '#00cc66'] },
+  crimson: { mode: 'palette', colors: ['#1a0008', '#660019', '#cc0033', '#ff6666'] },
   custom: { mode: 'palette' },
 };
 
@@ -10785,7 +10910,7 @@ function mapFixtureTargetToCategory(eff) {
   return 'color';
 }
 
-function appendEffectsByFixtureCategory(container, effectList, ctx) {
+function appendEffectsByFixtureCategory(container, effectList, ctx, filterKey) {
   const byCat = new Map();
   for (const e of effectList) {
     const k = mapFixtureTargetToCategory(e);
@@ -10795,6 +10920,7 @@ function appendEffectsByFixtureCategory(container, effectList, ctx) {
   const renderCat = (k, label) => {
     const list = byCat.get(k);
     if (!list || !list.length) return;
+    if (filterKey && filterKey !== 'all' && k !== filterKey) return;
     list.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     const group = document.createElement('div');
     group.className = 'efx-cat-group';
@@ -10840,6 +10966,12 @@ const EFFECT_STYLE = {
   ripple:       { bg: 'linear-gradient(135deg,#0097a7,#80deea)', fg: '#fff', border: '#0097a7', icon: '◎' },
   cell_strobe:  { bg: 'linear-gradient(135deg,#f9a825,#fff176)', fg: '#000', border: '#f9a825', icon: '⚡' },
   gradient:     { bg: 'linear-gradient(135deg,#d81b60,#7b1fa2,#1565c0)', fg: '#fff', border: '#d81b60', icon: '🌅' },
+  checker:      { bg: 'linear-gradient(135deg,#546e7a,#90a4ae)', fg: '#fff', border: '#546e7a', icon: '♟' },
+  matrix_alternate: { bg: 'linear-gradient(135deg,#006064,#4dd0e1)', fg: '#fff', border: '#006064', icon: '▦' },
+  diagonal:     { bg: 'linear-gradient(135deg,#e65100,#ffb74d)', fg: '#fff', border: '#e65100', icon: '↘' },
+  plasma:       { bg: 'linear-gradient(135deg,#4a148c,#ce93d8,#7b1fa2)', fg: '#fff', border: '#4a148c', icon: '🫧' },
+  rain:         { bg: 'linear-gradient(135deg,#01579b,#4fc3f7)', fg: '#fff', border: '#01579b', icon: '🌧' },
+  fill_rows:    { bg: 'linear-gradient(135deg,#2e7d32,#a5d6a7)', fg: '#fff', border: '#2e7d32', icon: '⬇' },
   // Rig-wide effects
   rig_chase:       { bg: 'linear-gradient(135deg,#ff6d00,#ff3d00)', fg: '#fff', border: '#ff6d00', icon: '🏃' },
   rig_color_wave:  { bg: 'linear-gradient(135deg,#00bfa5,#1de9b6)', fg: '#fff', border: '#00bfa5', icon: '🌊' },
@@ -10891,7 +11023,11 @@ function createQaEffectLibButton(effect, ctx) {
   btn.title = `${effect.type} effect (${target.replace('_', ' ')})`;
   btn.dataset.effectId = effect.id;
 
-  const targetIds = ctx.getTargetFixtureIds(target);
+  let targetIds = ctx.getTargetFixtureIds(target);
+  if (MULTICELL_TYPES.has(effect.type)) {
+    const mcIds = ctx.getTargetFixtureIds('multicell');
+    if (mcIds.length) targetIds = mcIds;
+  }
   if (targetIds.length === 0) {
     btn.style.opacity = '0.3';
     btn.title = target === 'moving_head' ? 'No moving head fixtures available'
@@ -10936,6 +11072,7 @@ function createQaEffectLibButton(effect, ctx) {
 async function buildEffectsEnginePage() {
   const grid = document.getElementById('efxEngineGrid');
   const toolbar = document.getElementById('efxEngineToolbar');
+  const tabsHost = document.getElementById('efxEngineTabs');
   if (!grid || !toolbar) return;
   toolbar.innerHTML = '';
   grid.innerHTML = '<span style="color:var(--text-dim)">Loading…</span>';
@@ -10947,6 +11084,27 @@ async function buildEffectsEnginePage() {
     grid.textContent = 'Could not load effects.';
     return;
   }
+
+  const engineTabs = [
+    { key: 'multicell', label: '▓ Multicell' },
+    { key: 'color', label: '🎨 Color' },
+    { key: 'rig', label: '🎪 Rig' },
+    { key: 'moving_head', label: '🔦 Motion' },
+    { key: 'sound', label: '🔊 Sound' },
+    { key: 'all', label: '🎛️ All' },
+  ];
+  if (tabsHost) {
+    tabsHost.innerHTML = engineTabs.map((t) =>
+      `<button type="button" class="efx-lib-tab${efxEngineActiveTab === t.key ? ' active' : ''}" data-efxeng="${t.key}">${t.label}</button>`,
+    ).join('');
+    tabsHost.querySelectorAll('[data-efxeng]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        efxEngineActiveTab = btn.dataset.efxeng;
+        buildEffectsEnginePage();
+      });
+    });
+  }
+  updateEngFxPaletteVisibility();
 
   const stopAll = document.createElement('button');
   stopAll.type = 'button';
@@ -10969,8 +11127,19 @@ async function buildEffectsEnginePage() {
     return;
   }
 
+  const tabEffects = effects.filter((e) => effectMatchesEngineTab(e, efxEngineActiveTab));
+  if (!tabEffects.length) {
+    grid.innerHTML = `<p class="config-desc">No effects in this category. Try another tab or create multicell effects in <a href="config.html" style="color:var(--accent)">Config → Effects</a>.</p>`;
+    wireLivePalettePanels();
+    return;
+  }
+
   const ctx = getQaEffectLibContext();
-  appendEffectsByFixtureCategory(grid, effects, ctx);
+  if (efxEngineActiveTab === 'all') {
+    appendEffectsByFixtureCategory(grid, tabEffects, ctx);
+  } else {
+    appendEffectsByFixtureCategory(grid, tabEffects, ctx, efxEngineActiveTab);
+  }
   wireLivePalettePanels();
 }
 

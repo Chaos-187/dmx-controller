@@ -741,7 +741,7 @@
       <div class="seq-tab-panel" id="seqtab-effects">
         <div class="config-section">
           <h3>Effects &amp; Cell Patterns</h3>
-          <p class="config-desc">Configure which effect types are allowed per section and multi-cell pattern assignments.</p>
+          <p class="config-desc">Configure which effect types are allowed per section and multi-cell effect types for pixel fixtures.</p>
           <div class="config-card">
             <div class="gen-card-header"><h4>Section Effect Types</h4><button class="btn btn-sm gen-json-toggle" data-editor="genSectionEffectsEditor" data-key="gen_section_effects">{ }</button></div>
             <div id="genSectionEffectsEditor"></div>
@@ -1398,7 +1398,7 @@
       <div class="form-group"><label>Type</label>
         <select id="effType">
           <optgroup label="Color / Intensity"><option value="pulse">Pulse</option><option value="rainbow">Rainbow</option><option value="strobe">Strobe</option><option value="color_fade">Color Fade</option><option value="sparkle">Sparkle</option><option value="color_wave">Color Wave</option><option value="fire">Fire</option></optgroup>
-          <optgroup label="Multicell"><option value="chase">Chase</option><option value="comet">Comet</option><option value="scanner">Scanner</option><option value="buildup">Buildup</option><option value="segments">Segments</option><option value="ripple">Ripple</option><option value="cell_strobe">Cell Strobe</option><option value="gradient">Gradient</option></optgroup>
+          <optgroup label="Multicell"><option value="chase">Chase</option><option value="comet">Comet</option><option value="scanner">Scanner</option><option value="buildup">Buildup</option><option value="segments">Segments</option><option value="ripple">Ripple</option><option value="cell_strobe">Cell Strobe</option><option value="gradient">Gradient</option><option value="checker">Checkerboard</option><option value="matrix_alternate">Row/Col Alternate</option><option value="diagonal">Diagonal Sweep</option><option value="plasma">Plasma</option><option value="rain">Matrix Rain</option><option value="fill_rows">Row Fill</option></optgroup>
           <optgroup label="Moving Head"><option value="pan_sweep">Pan Sweep</option><option value="tilt_sweep">Tilt Sweep</option><option value="circle">Circle</option><option value="figure_eight">Figure Eight</option><option value="random_move">Random Movement</option><option value="fan">Fan</option><option value="nod">Nod / Shake</option></optgroup>
         </select>
       </div>
@@ -1486,8 +1486,9 @@
           <option value="laser">Laser</option>
           <option value="fog">Fog / Haze</option>
           <option value="dimmer">Dimmer</option>
-          <option value="led_bar">LED Bar</option>
-          <option value="multi_cell">Multi-Cell</option>
+          <option value="led_bar">LED Bar (legacy)</option>
+          <option value="pixel_tape">Pixel Tape</option>
+          <option value="multi_cell">Multi-Cell Matrix</option>
           <option value="effect">Effect</option>
           <option value="other">Other</option>
         </select>
@@ -1517,11 +1518,17 @@
         <button class="btn btn-secondary btn-sm ch-add" id="btnAddChannel">+ Add Channel</button>
       </div>
       <div class="form-group" id="tMultiCellGroup" style="background:var(--input-bg);padding:10px 12px;border-radius:6px;border:1px solid var(--input-border);display:none">
-        <label>Multi-Cell Builder</label>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">Quickly build a multi-cell fixture: define master channels above, then set the per-cell pattern and count below.</div>
+        <label id="tMultiCellBuilderLabel">Cell Builder</label>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px" id="tMultiCellBuilderDesc">Build per-pixel or per-cell channel layout.</div>
+        <div id="tMatrixRowsRow" style="display:none;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Rows:</label>
+          <input type="number" id="tCellRows" value="6" min="1" max="64" style="width:60px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0">Cols:</label>
+          <input type="number" id="tCellCols" value="8" min="1" max="64" style="width:60px">
+        </div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
-          <label style="font-size:12px;color:var(--text-dim);margin:0">Cells:</label>
-          <input type="number" id="tMultiCellCount" value="4" min="1" max="64" style="width:60px">
+          <label style="font-size:12px;color:var(--text-dim);margin:0" id="tMultiCellCountLabel">Cells:</label>
+          <input type="number" id="tMultiCellCount" value="4" min="1" max="512" style="width:60px">
           <label style="font-size:12px;color:var(--text-dim);margin:0">Pattern:</label>
           <select id="tMultiCellPattern" style="width:auto">
             <option value="rgb">RGB (3ch)</option>

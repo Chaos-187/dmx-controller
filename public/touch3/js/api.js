@@ -39,6 +39,7 @@ async function fetchAllData() {
   if (effects) S.effects = effects;
   if (touchActions) S.touchActions = touchActions;
   if (moverPresets) S.moverPresets = moverPresets;
+  await Favorites.load();
   if (output) S.outputEnabled = output.enabled;
   if (touchState) {
     (touchState.disabledFixtures || []).forEach((id) => { S.fixtureEnabled[id] = false; });
@@ -78,7 +79,22 @@ function connectWebSocket() {
         break;
       case 'touchBlackoutHold':
         S.blackoutActive = msg.active;
+        if (msg.active) {
+          S.activeEffectSlots = {};
+          S.activeSceneId = null;
+          S.selectedColor = null;
+          UI.renderEffects();
+          UI.renderScenes();
+          UI.renderColors();
+          UI.renderActionsGrid();
+          UI.renderPanelNav();
+        }
         UI.renderTopButtons();
+        break;
+      case 'qa_effects_stopped':
+        S.activeEffectSlots = {};
+        UI.renderEffects();
+        UI.renderPanelNav();
         break;
       case 'touchFixtureDisable':
         S.fixtureEnabled[msg.fixtureId] = !msg.disabled;

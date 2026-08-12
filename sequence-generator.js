@@ -27,6 +27,7 @@ const { generateColorWheelCues }   = require('./gen/color-wheel');
 const { MOVEMENT_STYLES, DEFAULT_MOVEMENT, SPEED_DMX, generateMoverMovement } = require('./gen/mover-movement');
 const { SECTION_EFFECT_TYPES, generateEffectCues } = require('./gen/effects');
 const { CELL_PATTERN_MAP, generateMultiCellPatterns } = require('./gen/multi-cell');
+const { generatePixelTapePatterns } = require('./gen/pixel-tape');
 const { buildGroupMap } = require('./gen/group-coordination');
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
@@ -89,14 +90,16 @@ function suppressCuesDuringRigEffects(cues) {
     return false;
   }
 
-  // Walk backwards so splice doesn't shift indices
+  // Walk backwards so splice doesn't shift indices.
+  // Keep per-fixture FX (multicell/tape) — rig-wide effects skip those fixtures at playback.
+  // Only remove color cues so pars don't double up with rig washes.
   for (let i = cues.length - 1; i >= 0; i--) {
     const c = cues[i];
     if (c.track === 'fx-rig') continue;
     if (c.fixture_id === 0) continue;
     if (!insideRig(c.start_ms)) continue;
 
-    if (c.track === 'fx' || c.track === 'color') {
+    if (c.track === 'color') {
       cues.splice(i, 1);
     }
   }
@@ -202,29 +205,34 @@ function generateSequence(opts) {
   const nonMoverFixtures = rgbFixtures.filter(fix => !moverIds.has(fix.id));
 
   const ledBars = nonMoverFixtures.filter(fix => {
-    if (fix.category === 'led_bar' || fix.category === 'multi_cell') return true;
+    if (fix.category === 'pixel_tape' || fix.category === 'led_bar' || fix.category === 'multi_cell') return true;
     const rgbCount = fix.channels.filter(ch => ch.type === 'red' || ch.type === 'green' || ch.type === 'blue').length;
     return rgbCount >= 6;
   });
   const ledBarIds = new Set(ledBars.map(b => b.id));
 
-  const multiCellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0);
+  const cellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0);
+  const pixelTapeFixtures = cellFixtures.filter(fix => fix.category === 'pixel_tape' || fix.category === 'led_bar');
+  const matrixFixtures = cellFixtures.filter(fix => fix.category === 'multi_cell');
   const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
 
   // ── Build fixture role map for per-fixture intensity curves ──────────
   const fixtureRoleMap = new Map();
   for (const f of movers) fixtureRoleMap.set(f.id, 'mover');
   for (const f of ledBars) {
-    fixtureRoleMap.set(f.id, f.category === 'multi_cell' ? 'multi_cell' : 'led_bar');
+    if (f.category === 'multi_cell') fixtureRoleMap.set(f.id, 'multi_cell');
+    else if (f.category === 'pixel_tape') fixtureRoleMap.set(f.id, 'pixel_tape');
+    else fixtureRoleMap.set(f.id, 'led_bar');
   }
   for (const f of colorWheelFixtures) fixtureRoleMap.set(f.id, 'color_wheel');
   for (const f of regularFixtures) {
     if (!fixtureRoleMap.has(f.id)) fixtureRoleMap.set(f.id, 'par');
   }
-  // Multi-cell fixtures that aren't already tagged
-  for (const f of multiCellFixtures) {
+  for (const f of cellFixtures) {
     if (!fixtureRoleMap.has(f.id)) {
-      fixtureRoleMap.set(f.id, f.category === 'multi_cell' ? 'multi_cell' : 'led_bar');
+      if (f.category === 'multi_cell') fixtureRoleMap.set(f.id, 'multi_cell');
+      else if (f.category === 'pixel_tape') fixtureRoleMap.set(f.id, 'pixel_tape');
+      else fixtureRoleMap.set(f.id, 'led_bar');
     }
   }
 
@@ -240,12 +248,11 @@ function generateSequence(opts) {
     bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
     activePalettes, activeSectionStyles, activeMovementStyles, activeSpeedDmx,
     activeSectionEffects, activeCellPatterns, activeFixtureIntensity, fixtureRoleMap,
-    stemEnergy, groupMap,
+    stemEnergy, energyLevels, groupMap, effects: effects || [],
   };
 
-  // Multi-cell fixtures get dedicated per-cell patterns, so exclude them
-  // from the main section/bar generator to avoid master cues competing.
-  const colorFixtures = (multiCellFixtures.length > 0 && sections.length > 0)
+  // Cell fixtures get dedicated effect patterns — exclude from main color generator.
+  const colorFixtures = (cellFixtures.length > 0 && sections.length > 0)
     ? rgbFixtures.filter(f => f.cell_count <= 0 && !moverIds.has(f.id))
     : rgbFixtures.filter(f => !moverIds.has(f.id));
 
@@ -261,9 +268,14 @@ function generateSequence(opts) {
     }
   }
 
-  // ── Multi-cell pattern generation ─────────────────────────────────────
-  if (multiCellFixtures.length > 0 && sections.length > 0) {
-    generateMultiCellPatterns(cues, multiCellFixtures, sections, ctx);
+  // ── Pixel tape pattern generation (1D strips) ─────────────────────────
+  if (pixelTapeFixtures.length > 0 && sections.length > 0) {
+    generatePixelTapePatterns(cues, pixelTapeFixtures, sections, ctx);
+  }
+
+  // ── Multi-cell matrix pattern generation ──────────────────────────────
+  if (matrixFixtures.length > 0 && sections.length > 0) {
+    generateMultiCellPatterns(cues, matrixFixtures, sections, ctx);
   }
 
   // ── Mover movement generation (all movers — RGB and color-wheel) ────
@@ -277,16 +289,16 @@ function generateSequence(opts) {
   }
 
   // ── Effects generation (non-movers only) ──────────────────────────────
-  const multiCellIds = new Set(multiCellFixtures.map(f => f.id));
-  const effectLedBars = ledBars.filter(f => !multiCellIds.has(f.id));
-  const effectRegulars = regularFixtures.filter(f => !multiCellIds.has(f.id));
+  const cellFixtureIds = new Set(cellFixtures.map(f => f.id));
+  const effectLedBars = ledBars.filter(f => !cellFixtureIds.has(f.id));
+  const effectRegulars = regularFixtures.filter(f => !cellFixtureIds.has(f.id));
   if (effects && effects.length > 0 && (effectRegulars.length > 0 || effectLedBars.length > 0)) {
     generateEffectCues(cues, effectRegulars, effectLedBars, effects, sections, ctx);
   }
 
   // ── Resolve master ↔ cell cue conflicts ─────────────────────────────
-  if (multiCellFixtures.length > 0) {
-    resolveMultiCellConflicts(cues, multiCellFixtures);
+  if (cellFixtures.length > 0) {
+    resolveMultiCellConflicts(cues, cellFixtures);
   }
 
   // ── Suppress competing cue layers ─────────────────────────────────────

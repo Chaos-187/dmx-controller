@@ -58,15 +58,17 @@
   </div>
 </header>
 
-<!-- ══════ Main Content (single scrollable page) ══════ -->
+<!-- ══════ Main — one panel at a time, scrolls internally ══════ -->
 <main class="content">
 
-  <section class="card">
+  <section class="card panel-page" data-panel="actions">
     <div class="card-head"><h2>Quick Actions</h2></div>
-    <div class="actions-grid" id="actionsGrid"></div>
+    <div class="card-scroll touch-scroll">
+      <div class="actions-grid" id="actionsGrid"></div>
+    </div>
   </section>
 
-  <section class="card">
+  <section class="card panel-page" data-panel="colors">
     <div class="card-head">
       <h2>Colors</h2>
       <div class="seg" id="colorModeSwitch">
@@ -75,59 +77,124 @@
       </div>
     </div>
     <div class="chip-row" id="colorTargetGroups"></div>
-    <div class="slider-row">
-      <span class="s-label">Intensity</span>
+    <div class="slider-row compact">
+      <span class="s-label">Int</span>
       <input type="range" id="colorIntensity" min="0" max="255" value="255">
       <span class="s-val" id="colorIntVal">255</span>
     </div>
-    <div class="color-grid" id="colorGrid"></div>
+    <div class="card-scroll touch-scroll">
+      <div class="color-grid" id="colorGrid"></div>
+    </div>
   </section>
 
-  <section class="card">
-    <div class="card-head">
-      <h2>Effects</h2>
-      <button class="mini-btn danger" id="btnStopAllFx">&#9632; Stop All</button>
-    </div>
-    <div class="slider-row">
-      <span class="s-label">Speed</span>
-      <input type="range" id="effectSpeed" min="10" max="300" value="100">
-      <span class="s-val" id="effectSpeedVal">1.0x</span>
-    </div>
-    <div class="fx-tabs" id="fxTabs"></div>
-    <div class="fx-grid" id="fxGrid"></div>
-  </section>
-
-  <section class="card">
+  <section class="card panel-page" data-panel="scenes">
     <div class="card-head">
       <h2>Scenes</h2>
       <div id="sceneActiveStatus"></div>
     </div>
-    <div class="scene-grid" id="scenesList"></div>
+    <div class="card-scroll touch-scroll">
+      <div class="scene-grid" id="scenesList"></div>
+    </div>
   </section>
 
-  <section class="card" id="moversCard" style="display:none">
+  <section class="card panel-page card-fx" data-panel="effects">
     <div class="card-head">
-      <h2>Movers</h2>
-      <button class="mini-btn" id="btnClearMove">Clear Override</button>
+      <h2>Effects</h2>
+      <button class="mini-btn danger" id="btnStopAllFx">&#9632; Stop</button>
     </div>
-    <div class="chip-row" id="moverChips"></div>
-    <div class="preset-grid" id="moverPresetGrid"></div>
-    <div class="mover-sliders">
-      <div class="slider-row"><span class="s-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="s-val" id="panVal">128</span></div>
-      <div class="slider-row"><span class="s-label">Tilt</span><input type="range" id="manualTilt" min="0" max="255" value="128"><span class="s-val" id="tiltVal">128</span></div>
-      <div class="slider-row"><span class="s-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="s-val" id="speedVal">128</span></div>
+    <div class="slider-row compact">
+      <span class="s-label">Speed</span>
+      <input type="range" id="effectSpeed" min="10" max="300" value="100">
+      <span class="s-val" id="effectSpeedVal">1.0x</span>
+    </div>
+    <div class="fx-palette" id="fxPalettePanel">
+      <div class="fx-pal-head">
+        <span class="section-label">Effect colors</span>
+      </div>
+      <div class="fx-pal-presets touch-scroll-h" id="fxPalPresets"></div>
+      <div class="fx-pal-custom" id="fxPalCustomRow">
+        <input type="color" id="fxPalC0" value="#e94560" aria-label="Palette stop 1">
+        <input type="color" id="fxPalC1" value="#f39c12" aria-label="Palette stop 2">
+        <input type="color" id="fxPalC2" value="#27ae60" aria-label="Palette stop 3">
+        <input type="color" id="fxPalC3" value="#2980b9" aria-label="Palette stop 4">
+      </div>
+    </div>
+    <div class="fx-tabs touch-scroll-h" id="fxTabs"></div>
+    <div class="card-scroll touch-scroll fx-scroll">
+      <div class="fx-grid" id="fxGrid"></div>
+    </div>
+  </section>
+
+  <section class="card panel-page" data-panel="favorites">
+    <div class="card-head">
+      <h2>Favorites</h2>
+      <div class="card-head-actions">
+        <button type="button" class="mini-btn" id="btnFavEdit" title="Remove favorites">Edit</button>
+        <button type="button" class="mini-btn" id="btnFavAdd">+ Add</button>
+      </div>
+    </div>
+    <p class="fav-hint">Double-tap any color, effect, scene, or action elsewhere to add it here.</p>
+    <div class="card-scroll touch-scroll">
+      <div class="fav-grid" id="favoritesGrid"></div>
     </div>
   </section>
 
 </main>
 
-<!-- ══════ Bottom Bar: master dimmer + Lights button ══════ -->
+<!-- ══════ Panel navigation ══════ -->
+<nav class="panel-nav" id="panelNav" aria-label="Sections">
+  <button type="button" class="panel-nav-btn" data-panel="actions">
+    <span class="pn-icon">&#9889;</span>
+    <span class="pn-label">Actions</span>
+  </button>
+  <button type="button" class="panel-nav-btn" data-panel="colors">
+    <span class="pn-icon">&#127912;</span>
+    <span class="pn-label">Colors</span>
+  </button>
+  <button type="button" class="panel-nav-btn" data-panel="scenes">
+    <span class="pn-icon">&#127916;</span>
+    <span class="pn-label">Scenes</span>
+  </button>
+  <button type="button" class="panel-nav-btn" data-panel="effects">
+    <span class="pn-icon">&#10024;</span>
+    <span class="pn-label">Effects</span>
+  </button>
+  <button type="button" class="panel-nav-btn" data-panel="favorites">
+    <span class="pn-icon">&#11088;</span>
+    <span class="pn-label">Favs</span>
+  </button>
+</nav>
+
+<!-- ══════ Bottom Bar ══════ -->
 <footer class="bottombar">
   <span class="s-label">Master</span>
   <input type="range" id="masterDim" min="0" max="255" value="255">
   <span class="s-val" id="masterDimVal">255</span>
+  <button class="lights-btn" id="btnMovers" style="display:none">&#127919; Movers</button>
   <button class="lights-btn" id="btnLights">&#128161; Lights</button>
 </footer>
+
+<!-- ══════ Movers Modal ══════ -->
+<div class="modal" id="moversModal">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>&#127919; Movers</h2>
+      <div class="modal-head-actions">
+        <button class="mini-btn" id="btnClearMove">Clear Override</button>
+        <button class="modal-close" id="btnCloseMovers">&#10005;</button>
+      </div>
+    </div>
+    <div class="modal-body touch-scroll" id="moversCard">
+      <div class="chip-row" id="moverChips"></div>
+      <div class="preset-grid" id="moverPresetGrid"></div>
+      <div class="mover-sliders">
+        <div class="slider-row"><span class="s-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="s-val" id="panVal">128</span></div>
+        <div class="slider-row"><span class="s-label">Tilt</span><input type="range" id="manualTilt" min="0" max="255" value="128"><span class="s-val" id="tiltVal">128</span></div>
+        <div class="slider-row"><span class="s-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="s-val" id="speedVal">128</span></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ══════ Lights Modal ══════ -->
 <div class="modal" id="lightsModal">
@@ -140,7 +207,7 @@
         <button class="modal-close" id="btnCloseLights">&#10005;</button>
       </div>
     </div>
-    <div class="modal-body">
+    <div class="modal-body touch-scroll">
       <div class="section-label" id="groupTogglesLabel">Groups &mdash; tap to toggle</div>
       <div class="fixture-grid" id="groupToggles"></div>
       <div class="section-label" id="groupDimLabel">Group Dimmers</div>
@@ -151,7 +218,22 @@
   </div>
 </div>
 
+<div class="toast" id="touchToast" aria-live="polite"></div>
+
+<!-- ══════ Add Favorite Modal ══════ -->
+<div class="modal modal-center" id="favAddModal">
+  <div class="modal-sheet modal-sheet-center">
+    <div class="modal-head">
+      <h2>Add Favorite</h2>
+      <button type="button" class="modal-close" id="btnCloseFavAdd">&#10005;</button>
+    </div>
+    <div class="fav-picker-tabs touch-scroll-h" id="favPickerTabs"></div>
+    <div class="modal-body touch-scroll" id="favPickerBody"></div>
+  </div>
+</div>
+
 <script src="js/state.js"></script>
+<script src="js/favorites.js"></script>
 <script src="js/api.js"></script>
 <script src="js/actions.js"></script>
 <script src="js/ui.js"></script>

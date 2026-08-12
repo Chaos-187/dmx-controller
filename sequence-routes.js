@@ -10,6 +10,17 @@ const router = express.Router();
 
 let _db, _audioAnalyzer, _sequenceGenerator, _broadcast, _getAnalysisConfig, _getAnchorPoints;
 
+/** Yield so DMX playback / OS2L timers can run during long generation. */
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function sequenceBroadcastPayload(seq, cueCount) {
+  if (!seq) return seq;
+  const { cues, ...rest } = seq;
+  return { ...rest, cue_count: cueCount != null ? cueCount : (cues ? cues.length : 0) };
+}
+
 /**
  * Initialise the router with shared dependencies from server.js.
  * Call once at startup before mounting.
@@ -99,18 +110,25 @@ async function generateSequenceForTrack(track, opts = {}) {
     template_id,
     beatgridPosOverride,
     filepathOverride,
+    fixtures: fixturesOverride,
+    analysis: analysisOverride,
+    skipAnalysis = false,
   } = opts;
 
   const existing = _db.getSequenceByTrackId(track.id);
   if (existing && !overwrite) {
     return { error: 'exists', sequence_id: existing.id };
   }
-  if (existing) _db.deleteSequence(existing.id);
 
-  const fixtures = _db.getFixtureChannelMap();
-  const analysisCfg = _getAnalysisConfig();
-  const trackForAnalysis = filepathOverride ? { ...track, filepath: filepathOverride } : track;
-  const analysis = await ensureTrackAnalysis(trackForAnalysis, analysisCfg);
+  const fixtures = fixturesOverride || _db.getFixtureChannelMap();
+  let analysis = analysisOverride;
+  if (!analysis && !skipAnalysis) {
+    const analysisCfg = _getAnalysisConfig();
+    const trackForAnalysis = filepathOverride ? { ...track, filepath: filepathOverride } : track;
+    analysis = await ensureTrackAnalysis(trackForAnalysis, analysisCfg);
+  }
+
+  await yieldToEventLoop();
 
   const { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveGenConfig } =
     resolveGenerateOptions({ palette, genre, template_id });
@@ -119,6 +137,7 @@ async function generateSequenceForTrack(track, opts = {}) {
     ? { ...track, beatgrid_pos: beatgridPosOverride }
     : track;
 
+  const genStart = Date.now();
   const { cues, bpm, durationMs, palette: palUsed, genrePreset } = _sequenceGenerator.generateSequence({
     track: trackForGen,
     fixtures,
@@ -130,6 +149,14 @@ async function generateSequenceForTrack(track, opts = {}) {
     noStrobes: effectiveNoStrobes,
     generatorConfig: effectiveGenConfig,
   });
+  const genMs = Date.now() - genStart;
+  if (genMs > 1000 || cues.length > 5000) {
+    console.log(`[SEQ] Generated ${cues.length} cues in ${genMs}ms for track ${track.id}`);
+  }
+
+  await yieldToEventLoop();
+
+  if (existing) _db.deleteSequence(existing.id);
 
   const seq = _db.createSequence({
     name: track.title || track.filename || 'Untitled',
@@ -137,14 +164,16 @@ async function generateSequenceForTrack(track, opts = {}) {
     bpm,
     duration_ms: durationMs,
   });
-  if (cues.length > 0) _db.bulkUpdateCues(seq.id, cues);
+  if (cues.length > 0) _db.bulkUpdateCues(seq.id, cues, { reload: false });
   _db.setSequenceGeneratorFixtureIds(seq.id, eligibleFixtureIdsFromMap(fixtures));
+
+  await yieldToEventLoop();
 
   const full = _db.getSequence(seq.id);
   full.cues = _db.getSequenceCues(seq.id);
   full.palette = palUsed;
   full.genrePreset = genrePreset;
-  return { sequence: full };
+  return { sequence: full, cue_count: cues.length };
 }
 
 // ─── Database Stats & Bulk Delete ───────────────────────────────────────────
@@ -245,18 +274,25 @@ router.post('/api/sequences/regenerate-stale', async (req, res) => {
 
   res.json({ status: 'started', count: trackIds.length });
 
+  const fixtures = _db.getFixtureChannelMap();
   let regenerated = 0;
   let failed = 0;
   for (const trackId of trackIds) {
+    await yieldToEventLoop();
     const track = _db.getTrack(trackId);
     if (!track) { failed++; continue; }
     const seq = _db.getSequenceByTrackId(trackId);
     if (!seq || !_db.isSequenceFixtureStale(seq)) continue;
     try {
-      const result = await generateSequenceForTrack(track, { overwrite: true });
+      const result = await generateSequenceForTrack(track, { overwrite: true, fixtures });
       if (result.sequence) {
         regenerated++;
-        _broadcast({ type: 'seq_generated', track_id: track.id, sequence: result.sequence, reason: 'stale_fixtures' });
+        _broadcast({
+          type: 'seq_generated',
+          track_id: track.id,
+          sequence: sequenceBroadcastPayload(result.sequence, result.cue_count),
+          reason: 'stale_fixtures',
+        });
       } else failed++;
     } catch (e) {
       failed++;
@@ -383,8 +419,9 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
     const batch = workItems.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map(item => analyzeOne(item)));
 
-    // Phase 2: Generate sequences from analysis results (fast, serial)
+    // Phase 2: Generate sequences from analysis results (yield between tracks for playback)
     for (const { item, analysis } of results) {
+      await yieldToEventLoop();
       try {
         if (item.existingSeq) _db.deleteSequence(item.existingSeq.id);
 
@@ -398,15 +435,17 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
           generatorConfig: _db.getGeneratorConfig(),
         });
 
+        await yieldToEventLoop();
+
         const seq = _db.createSequence({
           name: item.track.title || item.track.filename || 'Untitled',
           track_id: item.track.id, bpm, duration_ms: durationMs,
         });
-        if (cues.length > 0) _db.bulkUpdateCues(seq.id, cues);
+        if (cues.length > 0) _db.bulkUpdateCues(seq.id, cues, { reload: false });
         _db.setSequenceGeneratorFixtureIds(seq.id, eligibleFixtureIdsFromMap(fixtures));
 
         completed++;
-        _broadcast({ type: 'seq_batch_progress', completed, failed, skipped, total: track_ids.length, track_id: item.trackId });
+        _broadcast({ type: 'seq_batch_progress', completed, failed, skipped, total: track_ids.length, track_id: item.trackId, cue_count: cues.length });
       } catch (e) {
         failed++;
         console.error(`[BulkGen] Error for track ${item.trackId}: ${e.message}`);

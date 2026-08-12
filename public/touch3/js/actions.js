@@ -48,6 +48,16 @@ Actions.toggleOutput = function () {
 Actions.setBlackout = function (active) {
   S.blackoutActive = active;
   post('/api/touch/blackout-hold', { active });
+  if (active) {
+    S.activeEffectSlots = {};
+    S.activeSceneId = null;
+    S.selectedColor = null;
+    UI.renderEffects();
+    UI.renderScenes();
+    UI.renderColors();
+    UI.renderActionsGrid();
+    UI.renderPanelNav();
+  }
 };
 
 /* ── Dimmers / speed ── */
@@ -72,13 +82,44 @@ Actions.setFixtureEnabled = function (id, enabled) {
 };
 
 /* ── Effects ── */
+Actions.applyFxPalettePreset = function (key) {
+  const preset = FX_PALETTE_PRESETS[key];
+  if (!preset) return;
+  S.fxPalettePreset = key;
+  if (preset.mode === 'hsl') {
+    S.fxPaletteMode = 'hsl';
+  } else {
+    S.fxPaletteMode = 'palette';
+    if (preset.colors) S.fxPaletteColors = preset.colors.slice(0, 4);
+  }
+  Actions.pushFxPaletteParams();
+  UI.renderFxPalette();
+};
+
+let _fxPalDebounce = null;
+Actions.pushFxPaletteParams = function () {
+  clearTimeout(_fxPalDebounce);
+  _fxPalDebounce = setTimeout(async () => {
+    const payload = getFxPaletteParams();
+    for (const slot of ['color', 'motion', 'multicell', 'rig', 'sound']) {
+      if (!S.activeEffectSlots[slot]) continue;
+      await post('/api/effects/params', { slot, effect_params: payload });
+    }
+  }, 80);
+};
+
 Actions.toggleEffect = function (effectId, effectType) {
+  const effect = S.effects.find((e) => e.id === effectId) || { id: effectId, type: effectType };
   const slot = effectSlot(effectType);
   if (S.activeEffectSlots[slot] === effectId) {
     post('/api/effects/stop', { slot });
     delete S.activeEffectSlots[slot];
   } else {
-    post('/api/effects/run', { effectId, fixtureIds: getEnabledFixtures().map((f) => f.id) });
+    post('/api/effects/run', {
+      effectId,
+      fixtureIds: getEffectFixtureIds(effect),
+      effect_params: getFxPaletteParams(),
+    });
     S.activeEffectSlots[slot] = effectId;
   }
 };

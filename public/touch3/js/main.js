@@ -128,6 +128,7 @@ function initControls() {
   document.getElementById('btnStopAllFx').addEventListener('click', () => {
     Actions.stopAllEffects();
     UI.renderEffects();
+    UI.renderFxPalette();
   });
 
   bindSlider('masterDim', 'masterDimVal', (v) => Actions.setMasterDimmer(v));
@@ -153,6 +154,14 @@ function initControls() {
   document.getElementById('btnLights').addEventListener('click', () => modal.classList.add('open'));
   document.getElementById('btnCloseLights').addEventListener('click', () => modal.classList.remove('open'));
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+
+  const moversModal = document.getElementById('moversModal');
+  const btnMovers = document.getElementById('btnMovers');
+  if (btnMovers && moversModal) {
+    btnMovers.addEventListener('click', () => moversModal.classList.add('open'));
+    document.getElementById('btnCloseMovers').addEventListener('click', () => moversModal.classList.remove('open'));
+    moversModal.addEventListener('click', (e) => { if (e.target === moversModal) moversModal.classList.remove('open'); });
+  }
   document.getElementById('btnAllOn').addEventListener('click', () => {
     S.fixtures.forEach((f) => Actions.setFixtureEnabled(f.id, true));
     UI.renderFixtureGrid();
@@ -162,6 +171,19 @@ function initControls() {
     S.fixtures.forEach((f) => Actions.setFixtureEnabled(f.id, false));
     UI.renderFixtureGrid();
     UI.renderGroupToggles();
+  });
+
+  document.querySelectorAll('.panel-nav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => UI.setPanel(btn.dataset.panel));
+  });
+
+  const favAddModal = document.getElementById('favAddModal');
+  document.getElementById('btnFavAdd').addEventListener('click', () => UI.openFavAddModal());
+  document.getElementById('btnCloseFavAdd').addEventListener('click', () => favAddModal.classList.remove('open'));
+  favAddModal.addEventListener('click', (e) => { if (e.target === favAddModal) favAddModal.classList.remove('open'); });
+  document.getElementById('btnFavEdit').addEventListener('click', () => {
+    S.favEditMode = !S.favEditMode;
+    UI.renderFavorites();
   });
 }
 

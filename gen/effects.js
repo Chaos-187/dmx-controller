@@ -253,6 +253,9 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
       if (vocalsActive === true) {
         desiredTypes = desiredTypes.filter(t => t !== 'strobe');
       }
+      if (ctx.noStrobes) {
+        desiredTypes = desiredTypes.filter(t => t !== 'strobe');
+      }
 
       // One effect for the whole section — all fixture groups share the moment
       const effect = pickEffect(desiredTypes, `fx-type-${label}-${sectionStart}`);

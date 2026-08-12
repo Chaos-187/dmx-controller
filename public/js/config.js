@@ -50,7 +50,7 @@ const CHANNEL_TYPES = [
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',
   strobe:'Strobe', laser:'Laser',
-  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
+  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', pixel_tape:'Pixel Tape', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -809,7 +809,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
 let genConfig = {};
 const GEN_SECS = ['intro','verse','chorus','bridge','breakdown','buildup','drop','outro'];
 const GEN_REG_FX = ['pulse','rainbow','strobe','color_fade','chase','comet','scanner','buildup','sparkle','color_wave','fire'];
-const GEN_CELL_FX = ['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','sparkle','color_wave','fire'];
+const GEN_CELL_FX = ['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','sparkle','color_wave','fire','checker','matrix_alternate','diagonal','plasma','rain','fill_rows'];
 const GEN_CELL_PATS = ['fill_sweep','color_wave','breathe','chase_slow','alternate','chase','scatter','all_flash','build_reveal','chase_accel','chase_fast','scatter_strobe','alternate_fast'];
 const GEN_RAW = {};
 let genActivePal = null;
@@ -1119,8 +1119,8 @@ function renderCellPatternsEditor() {
 }
 
 // ─── Fixture Intensity Editor ───
-const _FI_ROLES = ['par','mover','led_bar','color_wheel'];
-const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', color_wheel: 'Color Wheel' };
+const _FI_ROLES = ['par','mover','led_bar','pixel_tape','multi_cell','color_wheel'];
+const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', pixel_tape: 'Pixel Tape', multi_cell: 'Multi-Cell', color_wheel: 'Color Wheel' };
 const _FI_SECTIONS = ['intro','verse','chorus','bridge','breakdown','buildup','drop','outro'];
 const _FI_SEC_COLORS = { intro:'#78909c', verse:'#42a5f5', chorus:'#ef5350', bridge:'#ab47bc', breakdown:'#26a69a', buildup:'#ffa726', drop:'#e53935', outro:'#78909c' };
 
@@ -1347,6 +1347,9 @@ const EFFECT_EDITOR_PALETTE_TYPES = new Set([
   'rainbow', 'color_wave', 'fire',
   'rig_color_wave', 'rig_rainbow', 'rig_depth_wave',
   'sound_wave', 'sound_vu', 'sound_vu_tb', 'sound_vu_lr',
+  'chase', 'comet', 'scanner', 'sparkle', 'buildup',
+  'segments', 'ripple', 'cell_strobe', 'gradient',
+  'checker', 'matrix_alternate', 'diagonal', 'plasma', 'rain', 'fill_rows',
 ]);
 
 function cfgColorSpectrumRow(data) {
@@ -1573,7 +1576,7 @@ document.getElementById('effSaveBtn').addEventListener('click', cfgSaveEffect);
 document.getElementById('effType').addEventListener('change', (e) => {
   cfgRenderEffectParams(e.target.value, {});
   const movingTypes = ['pan_sweep','tilt_sweep','circle','figure_eight','random_move','fan','nod'];
-  const multicellOnlyTypes = ['segments','ripple','cell_strobe','gradient'];
+  const multicellOnlyTypes = ['segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows'];
   const colorTypes = ['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire'];
   const sel = document.getElementById('effFixtureTarget');
   if (movingTypes.includes(e.target.value)) sel.value = 'moving_head';
@@ -4260,9 +4263,38 @@ if (document.getElementById('btnAddChannel')) document.getElementById('btnAddCha
 
 function updateMultiCellVisibility() {
   const cat = document.getElementById('tCategory').value;
-  document.getElementById('tMultiCellGroup').style.display = (cat === 'multi_cell' || cat === 'led_bar') ? '' : 'none';
+  const show = (cat === 'multi_cell' || cat === 'led_bar' || cat === 'pixel_tape');
+  document.getElementById('tMultiCellGroup').style.display = show ? '' : 'none';
+  const matrixRow = document.getElementById('tMatrixRowsRow');
+  if (matrixRow) matrixRow.style.display = (cat === 'multi_cell') ? 'flex' : 'none';
+  const label = document.getElementById('tMultiCellBuilderLabel');
+  const desc = document.getElementById('tMultiCellBuilderDesc');
+  const countLabel = document.getElementById('tMultiCellCountLabel');
+  if (cat === 'pixel_tape' || cat === 'led_bar') {
+    if (label) label.textContent = 'Pixel Tape Builder';
+    if (desc) desc.textContent = 'Long 1D pixel strip — set pixel count and RGB pattern. Multiple tapes of the same type run as one continuous strip in sequences.';
+    if (countLabel) countLabel.textContent = 'Pixels:';
+  } else if (cat === 'multi_cell') {
+    if (label) label.textContent = 'Multi-Cell Matrix Builder';
+    if (desc) desc.textContent = 'Matrix / panel fixture — set rows × cols (or cell count). Master channels above stay global.';
+    if (countLabel) countLabel.textContent = 'Cells (if not using rows×cols):';
+  }
 }
 if (document.getElementById('tCategory')) document.getElementById('tCategory').addEventListener('change', updateMultiCellVisibility);
+
+function getCellLayoutFromForm() {
+  const cat = document.getElementById('tCategory').value;
+  if (cat === 'multi_cell') {
+    const rows = Math.max(1, +document.getElementById('tCellRows').value || 1);
+    const cols = Math.max(1, +document.getElementById('tCellCols').value || 1);
+    return { cell_rows: rows, cell_cols: cols };
+  }
+  if (cat === 'pixel_tape' || cat === 'led_bar') {
+    const pixels = Math.max(1, +document.getElementById('tMultiCellCount').value || 1);
+    return { cell_rows: 1, cell_cols: pixels };
+  }
+  return null;
+}
 
 const MULTI_CELL_PATTERNS = {
   rgb: ['red', 'green', 'blue'], rgbw: ['red', 'green', 'blue', 'white'],
@@ -4270,22 +4302,48 @@ const MULTI_CELL_PATTERNS = {
   rgbwd: ['red', 'green', 'blue', 'white', 'dimmer'],
 };
 
+/** Global fixture controls — not part of the cell grid (matches effects-engine.js). */
+const MULTI_CELL_GLOBAL_MASTER_TYPES = new Set([
+  'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
+  'pan', 'pan_fine', 'tilt', 'tilt_fine',
+  'gobo', 'gobo_rotation', 'color_wheel', 'focus', 'zoom', 'prism',
+  'smoke', 'atmosphere',
+]);
+
+function partitionMultiCellPreservedChannels(channels) {
+  const globalMasters = [];
+  const auxiliary = [];
+  for (const ch of channels) {
+    if (ch.cell) continue;
+    if (MULTI_CELL_GLOBAL_MASTER_TYPES.has(ch.type)) globalMasters.push(ch);
+    else auxiliary.push(ch);
+  }
+  return { globalMasters, auxiliary };
+}
+
 if (document.getElementById('btnBuildMultiCell')) document.getElementById('btnBuildMultiCell').addEventListener('click', () => {
-  const cellCount = Math.max(1, +document.getElementById('tMultiCellCount').value || 4);
+  const cat = document.getElementById('tCategory').value;
+  let cellCount = Math.max(1, +document.getElementById('tMultiCellCount').value || 4);
+  if (cat === 'multi_cell') {
+    const rows = Math.max(1, +document.getElementById('tCellRows').value || 1);
+    const cols = Math.max(1, +document.getElementById('tCellCols').value || 1);
+    if (rows > 1 || cols > 1) cellCount = rows * cols;
+  }
   const patternKey = document.getElementById('tMultiCellPattern').value;
   const pattern = MULTI_CELL_PATTERNS[patternKey] || MULTI_CELL_PATTERNS.rgb;
-  const masterChannels = typeChannels.filter(ch => !ch.cell);
+  const { globalMasters, auxiliary } = partitionMultiCellPreservedChannels(typeChannels);
   const cellChannels = [];
   for (let cell = 1; cell <= cellCount; cell++) {
     for (const type of pattern) {
       cellChannels.push({ channel_number: 0, name: `Cell ${cell} ${type.charAt(0).toUpperCase() + type.slice(1)}`, type, default_value: 0, min_value: 0, max_value: 255, ranges: null, cell });
     }
   }
-  typeChannels = [...masterChannels, ...cellChannels];
+  typeChannels = [...globalMasters, ...cellChannels, ...auxiliary];
   typeChannels.forEach((ch, i) => { ch.channel_number = i + 1; });
   renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs();
   const hint = document.getElementById('tMultiCellHint');
-  hint.textContent = `Built ${masterChannels.length} master + ${cellChannels.length} cell channels (${cellCount} cells \u00D7 ${pattern.length}ch)`;
+  const auxNote = auxiliary.length ? ` + ${auxiliary.length} auxiliary (after cells)` : '';
+  hint.textContent = `Built ${globalMasters.length} master + ${cellChannels.length} cell${auxNote} channels (${cellCount} cells \u00D7 ${pattern.length}ch)`;
   hint.style.color = 'var(--accent)';
 });
 
@@ -4405,6 +4463,8 @@ async function openTypeModal(typeId) {
     document.getElementById('tName').value = t.name;
     document.getElementById('tManufacturer').value = t.manufacturer || '';
     document.getElementById('tCategory').value = t.category;
+    if (document.getElementById('tCellRows')) document.getElementById('tCellRows').value = t.cell_rows || 1;
+    if (document.getElementById('tCellCols')) document.getElementById('tCellCols').value = t.cell_cols || 1;
     if (t.modes && t.modes.length > 0) {
       typeModes = t.modes.map(m => ({ name: m.name, short_name: m.short_name || '', channels: (m.channels || []).map(c => ({...c})) }));
     } else {
@@ -4466,6 +4526,8 @@ if (document.getElementById('btnSaveType')) document.getElementById('btnSaveType
     return { name: m.name || 'Default', short_name: m.short_name || '', channels };
   });
   const body = { name: document.getElementById('tName').value.trim(), manufacturer: document.getElementById('tManufacturer').value.trim(), category: document.getElementById('tCategory').value, modes };
+  const cellLayout = getCellLayoutFromForm();
+  if (cellLayout) Object.assign(body, cellLayout);
   if (!body.name) return showError('typeError', 'Name is required');
   if (modes.every(m => m.channels.length === 0)) return showError('typeError', 'Add at least one channel to at least one mode');
   const url = editId ? `/api/fixture-types/${editId}` : '/api/fixture-types';
@@ -4512,7 +4574,7 @@ if (document.getElementById('btnDuplicateChannels')) document.getElementById('bt
   if (typeChannels.length === 0) return showError('typeError', 'Add at least one channel first');
   if (count <= 1) return showError('typeError', 'Set repeat to more than 1');
   const cat = document.getElementById('tCategory').value;
-  const assignCells = (cat === 'multi_cell' || cat === 'led_bar');
+  const assignCells = (cat === 'multi_cell' || cat === 'led_bar' || cat === 'pixel_tape');
   const pattern = typeChannels.map(ch => ({ name: ch.name, type: ch.type, default_value: ch.default_value, min_value: ch.min_value, max_value: ch.max_value, ranges: ch.ranges || null }));
   typeChannels.forEach((ch, i) => { ch.name = `${pattern[i].name} 1`; if (assignCells) ch.cell = 1; });
   for (let g = 2; g <= count; g++) {

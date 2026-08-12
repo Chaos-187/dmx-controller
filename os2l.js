@@ -33,7 +33,10 @@ let buildChannelCtx;
 let computeEffectValue;
 let isFixtureCompatibleWithEffect;
 let applyMasterDimmer;
+let applyTouchDimmerChain;
 let applyInvert;
+let isAnySequencePlaying;
+let setBlackoutHold;
 
 // Message handler callback (provided by server.js for trigger processing)
 let onMessage;
@@ -67,7 +70,17 @@ function init(deps) {
   computeEffectValue = deps.computeEffectValue;
   isFixtureCompatibleWithEffect = deps.isFixtureCompatibleWithEffect;
   applyMasterDimmer = deps.applyMasterDimmer;
+  applyTouchDimmerChain = deps.applyTouchDimmerChain || ((v, fix, chType) => {
+    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+    if (fixHasDimmer) {
+      if (chType === 'dimmer') return applyMasterDimmer(v, chType);
+      return v;
+    }
+    return applyMasterDimmer(v, chType);
+  });
   applyInvert = deps.applyInvert;
+  isAnySequencePlaying = deps.isAnySequencePlaying || (() => false);
+  setBlackoutHold = deps.setBlackoutHold || null;
   onMessage = deps.onMessage;
 }
 
@@ -114,12 +127,24 @@ function parseTrigger(trigger) {
 
 // ─── TCP Server ─────────────────────────────────────────────────────────────
 
+function stopServer() {
+  if (!os2lServer) return;
+  try {
+    os2lServer.close();
+  } catch (e) {
+    // ignore — may already be closed
+  }
+  os2lServer = null;
+}
+
 /**
  * Create and start the OS2L TCP server.
  * @param {number} port
  * @returns {net.Server}
  */
 function startServer(port) {
+  stopServer();
+
   os2lServer = net.createServer((socket) => {
     const addr = `${socket.remoteAddress}:${socket.remotePort}`;
     console.log(`[OS2L] VirtualDJ connected from ${addr}`);
@@ -175,6 +200,16 @@ function startServer(port) {
     socket.on('error', (err) => {
       console.error(`[OS2L] Socket error: ${err.message}`);
     });
+  });
+
+  os2lServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[OS2L] Port ${port} already in use — retrying in 1s (stop the other server or free the port)`);
+      stopServer();
+      setTimeout(() => startServer(port), 1000);
+      return;
+    }
+    console.error(`[OS2L] Server error: ${err.message}`);
   });
 
   os2lServer.listen(port, '0.0.0.0', () => {
@@ -330,18 +365,22 @@ function executeMapAction(map, activate) {
 
   switch (map.action_type) {
     case 'blackout':
-      touchOverrides.blackoutHold = activate;
-      if (activate) {
-        artnetServer.saveBuffers();
-        dmxUsbServer.saveBuffers();
-        artnetServer.blackout();
-        dmxUsbServer.blackout();
+      if (setBlackoutHold) {
+        setBlackoutHold(activate);
       } else {
-        artnetServer.restoreBuffers();
-        dmxUsbServer.restoreBuffers();
+        touchOverrides.blackoutHold = activate;
+        if (activate) {
+          artnetServer.saveBuffers();
+          dmxUsbServer.saveBuffers();
+          artnetServer.blackout();
+          dmxUsbServer.blackout();
+        } else {
+          artnetServer.restoreBuffers();
+          dmxUsbServer.restoreBuffers();
+        }
+        broadcast({ type: 'touchBlackoutHold', active: activate });
       }
       broadcast({ type: 'os2l_action', action: 'blackout', map: map.name, active: activate });
-      broadcast({ type: 'touchBlackoutHold', active: activate });
       break;
 
     case 'set_channels': {
@@ -447,6 +486,11 @@ function executeMapAction(map, activate) {
       } else {
         touchOverrides.activeColorOverride = null;
       }
+      // During sequence playback, recolor is applied in processSequenceAtTime (multicell patterns keep running).
+      if (isAnySequencePlaying?.()) {
+        broadcast({ type: 'os2l_action', action: 'color', map: map.name, active: activate });
+        break;
+      }
       const channelMap = db.getFixtureChannelMap();
       const channelUpdates = {};
       const colorFixtureIds = [];
@@ -520,6 +564,7 @@ function executeMapAction(map, activate) {
 
             const timer = setInterval(() => {
               if (!getDmxOutputEnabled()) return;
+              if (touchOverrides.blackoutHold || touchOverrides.fullOnHold) return;
               const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
               const chUpdates = {};
               for (let fi = 0; fi < fixtureIds.length; fi++) {
@@ -537,13 +582,7 @@ function executeMapAction(map, activate) {
                   if (value !== null && value !== undefined) {
                     if (!chUpdates[fix.universe]) chUpdates[fix.universe] = {};
                     let finalVal = Math.max(0, Math.min(255, Math.round(value)));
-                    // Master dimmer: only scale dimmer channel on fixtures that have one
-                    const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
-                    if (fixHasDimmer) {
-                      if (ch.type === 'dimmer') finalVal = applyMasterDimmer(finalVal, ch.type);
-                    } else {
-                      finalVal = applyMasterDimmer(finalVal, ch.type);
-                    }
+                    finalVal = applyTouchDimmerChain(finalVal, fix, ch.type);
                     chUpdates[fix.universe][ch.dmx_address] = applyInvert(finalVal, ch);
                   }
                 }
@@ -715,6 +754,7 @@ function registerRoutes(app) {
 module.exports = {
   init,
   startServer,
+  stopServer,
   sendSubscription,
   parseTrigger,
   handleButtonAction,

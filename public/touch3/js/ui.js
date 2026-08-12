@@ -90,6 +90,7 @@ UI.renderActionsGrid = function () {
         () => S.colorHoldMode,
       );
     }
+    bindFavoriteDblTap(btn, () => Favorites.buildAction(action));
   });
 };
 
@@ -127,20 +128,70 @@ UI.renderColors = function () {
         S.selectedColor = idx;
         Actions.colorOn(COLORS[idx]);
         if (!S.colorHoldMode) UI.renderColors();
-        else el.classList.add('active');
+        else { el.classList.add('active'); UI.renderPanelNav(); }
       },
       () => {
         S.selectedColor = null;
         Actions.colorOff();
         if (!S.colorHoldMode) UI.renderColors();
-        else el.classList.remove('active');
+        else { el.classList.remove('active'); UI.renderPanelNav(); }
       },
       () => S.colorHoldMode,
     );
+    bindFavoriteDblTap(el, () => Favorites.buildColor(idx));
   });
+  UI.renderPanelNav();
 };
 
 /* ── Effects (tabbed by category) ── */
+UI.renderFxPalette = function () {
+  const presets = document.getElementById('fxPalPresets');
+  if (!presets || presets.dataset.wired !== '1') return;
+
+  presets.querySelectorAll('.fx-pal-btn').forEach((btn) => {
+    const key = btn.dataset.pal;
+    const active = (key === 'custom' && S.fxPaletteMode === 'palette' && S.fxPalettePreset === 'custom')
+      || (key === 'hsl' && S.fxPaletteMode === 'hsl')
+      || (key !== 'custom' && key !== 'hsl' && S.fxPalettePreset === key);
+    btn.classList.toggle('active', !!active);
+  });
+
+  const customRow = document.getElementById('fxPalCustomRow');
+  if (customRow) customRow.style.display = S.fxPaletteMode === 'palette' ? 'flex' : 'none';
+
+  for (let i = 0; i < 4; i++) {
+    const el = document.getElementById('fxPalC' + i);
+    if (el && S.fxPaletteColors[i]) el.value = S.fxPaletteColors[i];
+  }
+};
+
+UI.wireFxPalette = function () {
+  const presets = document.getElementById('fxPalPresets');
+  if (!presets || presets.dataset.wired === '1') return;
+  presets.dataset.wired = '1';
+
+  presets.innerHTML = Object.entries(FX_PALETTE_PRESETS).map(([key, p]) =>
+    '<button type="button" class="fx-pal-btn" data-pal="' + key + '">' + esc(p.label) + '</button>',
+  ).join('');
+
+  presets.querySelectorAll('.fx-pal-btn').forEach((btn) => {
+    btn.addEventListener('click', () => Actions.applyFxPalettePreset(btn.dataset.pal));
+    bindFavoriteDblTap(btn, () => Favorites.buildFxPalette(btn.dataset.pal));
+  });
+
+  for (let i = 0; i < 4; i++) {
+    const el = document.getElementById('fxPalC' + i);
+    if (!el) continue;
+    el.addEventListener('input', () => {
+      S.fxPaletteColors[i] = el.value;
+      S.fxPaletteMode = 'palette';
+      S.fxPalettePreset = 'custom';
+      Actions.pushFxPaletteParams();
+      UI.renderFxPalette();
+    });
+  }
+};
+
 UI.renderEffects = function () {
   const tabs = document.getElementById('fxTabs');
   const grid = document.getElementById('fxGrid');
@@ -153,9 +204,12 @@ UI.renderEffects = function () {
   if (!cats.length) {
     tabs.innerHTML = '';
     grid.innerHTML = '<div class="scene-empty">No effects saved. Create effects in the main UI.</div>';
+    UI.renderFxPalette();
     return;
   }
-  if (!cats.some((c) => c.key === S.fxTab)) S.fxTab = cats[0].key;
+  if (!cats.some((c) => c.key === S.fxTab)) {
+    S.fxTab = cats.find((c) => c.key === 'multicell') ? 'multicell' : cats[0].key;
+  }
 
   tabs.innerHTML = cats.map((c) => {
     const active = S.fxTab === c.key ? ' active' : '';
@@ -163,21 +217,32 @@ UI.renderEffects = function () {
     return '<button class="fx-tab' + active + '" data-cat="' + c.key + '">' + c.label + running + '</button>';
   }).join('');
   tabs.querySelectorAll('.fx-tab').forEach((el) => {
-    el.addEventListener('click', () => { S.fxTab = el.dataset.cat; UI.renderEffects(); });
+    el.addEventListener('click', () => { S.fxTab = el.dataset.cat; UI.renderEffects(); UI.renderFxPalette(); });
   });
 
   const cat = cats.find((c) => c.key === S.fxTab);
-  grid.innerHTML = byCat[cat.key].map((e) => {
-    const active = S.activeEffectSlots[cat.key] === e.id ? ' active' : '';
-    return '<button class="fx-tile' + active + '" data-eid="' + e.id + '" ' +
-      'style="background:' + cat.bg + ';border-color:' + cat.border + ';color:var(--text)">' + esc(e.name) + '</button>';
-  }).join('');
-  grid.querySelectorAll('.fx-tile').forEach((el) => {
-    el.addEventListener('click', () => {
-      const eff = S.effects.find((e) => e.id === +el.dataset.eid);
-      if (eff) { Actions.toggleEffect(eff.id, eff.type); UI.renderEffects(); }
+  const list = byCat[cat.key] || [];
+  if (!list.length) {
+    grid.innerHTML = '<div class="scene-empty">No effects in this category.</div>';
+  } else {
+    grid.innerHTML = list.map((e) => {
+      const active = S.activeEffectSlots[cat.key] === e.id ? ' active' : '';
+      return '<button class="fx-tile' + active + '" data-eid="' + e.id + '" ' +
+        'style="background:' + cat.bg + ';border-color:' + cat.border + ';color:var(--text)">' + esc(e.name) + '</button>';
+    }).join('');
+    grid.querySelectorAll('.fx-tile').forEach((el) => {
+      el.addEventListener('click', () => {
+        const eff = S.effects.find((e) => e.id === +el.dataset.eid);
+        if (eff) { Actions.toggleEffect(eff.id, eff.type); UI.renderEffects(); UI.renderFxPalette(); }
+      });
+      bindFavoriteDblTap(el, () => {
+        const eff = S.effects.find((e) => e.id === +el.dataset.eid);
+        return Favorites.buildEffect(eff);
+      });
     });
-  });
+  }
+  UI.renderFxPalette();
+  UI.renderPanelNav();
 };
 
 UI.syncEffectSpeed = function () {
@@ -219,15 +284,23 @@ UI.renderScenes = function () {
       else Actions.activateScene(sid);
       UI.renderScenes();
     });
+    bindFavoriteDblTap(el, () => {
+      const sc = S.scenes.find((s) => s.id === +el.dataset.sid);
+      return Favorites.buildScene(sc);
+    });
   });
+  UI.renderPanelNav();
 };
 
 /* ── Movers ── */
 UI.renderMovers = function () {
-  const card = document.getElementById('moversCard');
   const movers = getMoverFixtures();
-  if (!movers.length) { card.style.display = 'none'; return; }
-  card.style.display = '';
+  const btn = document.getElementById('btnMovers');
+  if (!movers.length) {
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+  if (btn) btn.style.display = '';
 
   const chips = document.getElementById('moverChips');
   chips.innerHTML = movers.map((f) => {
@@ -259,6 +332,10 @@ UI.renderMovers = function () {
   grid.querySelectorAll('.preset-btn').forEach((el) => {
     el.addEventListener('click', () => {
       Actions.applyMoverPreset(+el.dataset.pid, getSelectedMovers().map((f) => f.id));
+    });
+    bindFavoriteDblTap(el, () => {
+      const p = S.moverPresets.find((mp) => mp.id === +el.dataset.pid);
+      return Favorites.buildMoverPreset(p);
     });
   });
 };
@@ -355,12 +432,202 @@ UI.renderFixtureGrid = function () {
   });
 };
 
+/* ── Toast ── */
+let _toastTimer = null;
+UI.showToast = function (msg) {
+  const el = document.getElementById('touchToast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+};
+
+const FAV_KIND_LABELS = {
+  color: 'Color', effect: 'Effect', scene: 'Scene', action: 'Action',
+  mover_preset: 'Mover', fx_palette: 'Palette',
+};
+
+function isFavoriteActive(fav) {
+  const p = fav.payload || {};
+  switch (fav.kind) {
+    case 'color': return S.selectedColor === p.colorIndex;
+    case 'scene': return S.activeSceneId === p.sceneId;
+    case 'effect': {
+      const eff = S.effects.find((e) => e.id === p.effectId);
+      if (!eff) return false;
+      return S.activeEffectSlots[effectSlot(eff.type)] === p.effectId;
+    }
+    case 'fx_palette': return S.fxPalettePreset === p.presetKey;
+    default: return false;
+  }
+}
+
+UI.renderFavorites = function () {
+  const grid = document.getElementById('favoritesGrid');
+  const editBtn = document.getElementById('btnFavEdit');
+  if (!grid) return;
+  if (editBtn) {
+    editBtn.textContent = S.favEditMode ? 'Done' : 'Edit';
+    editBtn.classList.toggle('active', S.favEditMode);
+  }
+  grid.classList.toggle('edit-mode', S.favEditMode);
+
+  if (!S.favorites.length) {
+    grid.innerHTML = '<div class="scene-empty">No favorites yet.<br>Double-tap items on other tabs, or tap + Add.</div>';
+    return;
+  }
+
+  grid.innerHTML = S.favorites.map((fav) => {
+    const active = isFavoriteActive(fav) ? ' active-fav' : '';
+    const bg = fav.color ? ' style="background:' + fav.color + '"' : '';
+    const cls = fav.color ? ' has-color' : '';
+    const light = fav.color && (fav.color.toLowerCase() === '#ffffff' || fav.color.toLowerCase() === '#fff8dc');
+    return '<div class="fav-tile' + cls + active + (light ? ' on-light' : '') + '" data-fid="' + fav.id + '"' + bg + '>' +
+      '<button type="button" class="fav-del" data-fid="' + fav.id + '" aria-label="Remove">&#10005;</button>' +
+      (fav.icon ? '<span class="fav-icon">' + fav.icon + '</span>' : '') +
+      '<span class="fav-label">' + esc(fav.label) + '</span>' +
+      '<span class="fav-kind">' + (FAV_KIND_LABELS[fav.kind] || fav.kind) + '</span></div>';
+  }).join('');
+
+  grid.querySelectorAll('.fav-tile').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.fav-del')) return;
+      const fav = S.favorites.find((f) => f.id === el.dataset.fid);
+      Favorites.run(fav);
+    });
+  });
+  grid.querySelectorAll('.fav-del').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      Favorites.remove(el.dataset.fid);
+    });
+  });
+};
+
+UI.renderFavPicker = function () {
+  const tabs = document.getElementById('favPickerTabs');
+  const body = document.getElementById('favPickerBody');
+  if (!tabs || !body) return;
+
+  const tabDefs = [
+    { key: 'colors', label: 'Colors' },
+    { key: 'effects', label: 'Effects' },
+    { key: 'scenes', label: 'Scenes' },
+    { key: 'actions', label: 'Actions' },
+    { key: 'palettes', label: 'Palettes' },
+  ];
+  if (S.moverPresets.length) tabDefs.push({ key: 'movers', label: 'Movers' });
+
+  tabs.innerHTML = tabDefs.map((t) =>
+    '<button type="button" class="fav-picker-tab' + (S.favPickerTab === t.key ? ' active' : '') +
+    '" data-tab="' + t.key + '">' + t.label + '</button>',
+  ).join('');
+  tabs.querySelectorAll('.fav-picker-tab').forEach((el) => {
+    el.addEventListener('click', () => {
+      S.favPickerTab = el.dataset.tab;
+      UI.renderFavPicker();
+    });
+  });
+
+  let html = '<div class="fav-picker-grid">';
+  const tab = S.favPickerTab;
+
+  if (tab === 'colors') {
+    COLORS.forEach((c, i) => {
+      const item = Favorites.buildColor(i);
+      const cls = Favorites.has(item) ? ' is-fav' : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="color" data-idx="' + i + '" style="background:' + c.hex + ';color:#fff">' + esc(c.name) + '</button>';
+    });
+  } else if (tab === 'effects') {
+    S.effects.forEach((e) => {
+      const item = Favorites.buildEffect(e);
+      const cls = Favorites.has(item) ? ' is-fav' : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="effect" data-eid="' + e.id + '">' + esc(e.name) + '</button>';
+    });
+  } else if (tab === 'scenes') {
+    S.scenes.forEach((sc) => {
+      const item = Favorites.buildScene(sc);
+      const cls = Favorites.has(item) ? ' is-fav' : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="scene" data-sid="' + sc.id + '">' + esc(sc.name) + '</button>';
+    });
+  } else if (tab === 'actions') {
+    S.touchActions.filter((a) => a.enabled).forEach((a) => {
+      const item = Favorites.buildAction(a);
+      const cls = Favorites.has(item) ? ' is-fav' : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="action" data-aid="' + a.id + '">' + esc(a.label) + '</button>';
+    });
+  } else if (tab === 'palettes') {
+    Object.keys(FX_PALETTE_PRESETS).forEach((key) => {
+      if (key === 'custom') return;
+      const item = Favorites.buildFxPalette(key);
+      const cls = Favorites.has(item) ? ' is-fav' : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="fx_palette" data-pal="' + key + '">' + esc(FX_PALETTE_PRESETS[key].label) + '</button>';
+    });
+  } else if (tab === 'movers') {
+    S.moverPresets.forEach((p) => {
+      const item = Favorites.buildMoverPreset(p);
+      const cls = Favorites.has(item) ? ' is-fav' : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="mover_preset" data-pid="' + p.id + '">' + esc(p.name) + '</button>';
+    });
+  }
+  html += '</div>';
+  body.innerHTML = html;
+
+  body.querySelectorAll('.fav-picker-item:not(.is-fav)').forEach((el) => {
+    el.addEventListener('click', () => {
+      let item = null;
+      if (el.dataset.kind === 'color') item = Favorites.buildColor(+el.dataset.idx);
+      else if (el.dataset.kind === 'effect') item = Favorites.buildEffect(S.effects.find((e) => e.id === +el.dataset.eid));
+      else if (el.dataset.kind === 'scene') item = Favorites.buildScene(S.scenes.find((s) => s.id === +el.dataset.sid));
+      else if (el.dataset.kind === 'action') item = Favorites.buildAction(S.touchActions.find((a) => a.id === +el.dataset.aid));
+      else if (el.dataset.kind === 'fx_palette') item = Favorites.buildFxPalette(el.dataset.pal);
+      else if (el.dataset.kind === 'mover_preset') item = Favorites.buildMoverPreset(S.moverPresets.find((p) => p.id === +el.dataset.pid));
+      if (item && Favorites.add(item)) UI.renderFavPicker();
+    });
+  });
+};
+
+UI.openFavAddModal = function () {
+  const modal = document.getElementById('favAddModal');
+  if (!modal) return;
+  UI.renderFavPicker();
+  modal.classList.add('open');
+};
+
+/* ── Panel navigation ── */
+UI.setPanel = function (key) {
+  S.activePanel = key;
+  if (key !== 'favorites') S.favEditMode = false;
+  document.querySelectorAll('.panel-page').forEach((el) => {
+    el.classList.toggle('active', el.dataset.panel === key);
+  });
+  document.querySelectorAll('.panel-nav-btn').forEach((el) => {
+    el.classList.toggle('active', el.dataset.panel === key);
+  });
+  if (key === 'favorites') UI.renderFavorites();
+};
+
+UI.renderPanelNav = function () {
+  const fxRunning = Object.values(S.activeEffectSlots).some(Boolean);
+  const sceneActive = S.activeSceneId != null;
+  const colorActive = S.selectedColor !== null;
+  document.querySelectorAll('.panel-nav-btn').forEach((el) => {
+    const p = el.dataset.panel;
+    el.classList.toggle('has-activity',
+      (p === 'effects' && fxRunning) ||
+      (p === 'scenes' && sceneActive) ||
+      (p === 'colors' && colorActive));
+  });
+};
+
 /* ── Render everything ── */
 UI.renderAll = function () {
   UI.renderTopButtons();
   UI.renderActionsGrid();
   UI.renderColorTargets();
   UI.renderColors();
+  UI.wireFxPalette();
   UI.renderEffects();
   UI.syncEffectSpeed();
   UI.renderScenes();
@@ -369,4 +636,7 @@ UI.renderAll = function () {
   UI.renderGroupToggles();
   UI.renderGroupDimmers();
   UI.renderFixtureGrid();
+  UI.renderFavorites();
+  UI.setPanel(S.activePanel);
+  UI.renderPanelNav();
 };
