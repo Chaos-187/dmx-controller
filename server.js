@@ -479,10 +479,7 @@ function handleOs2lSubscribed(data) {
                 const deckPlayState = state.decks[regenDeck] && state.decks[regenDeck].play;
                 const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
                 if (deckIsPlaying) {
-                  activeSequences[regenDeck].playing = true;
-                  activeSequences[regenDeck].vdjDriven = true;
-                  startPlaybackTimer(regenDeck);
-                  broadcast({ type: 'seq_playing', deck: regenDeck, playing: true });
+                  startSequencePlayback(regenDeck);
                 }
               }
             } catch (e) {
@@ -602,10 +599,7 @@ function handleOs2lSubscribed(data) {
                 // Play state may be stale (VDJ sent play:0 for the old track
                 // during async generation). If the deck truly isn't playing,
                 // the play sync handler will pause on the next play:0 event.
-                activeSequences[deck].playing = true;
-                activeSequences[deck].vdjDriven = true;
-                startPlaybackTimer(deck);
-                broadcast({ type: 'seq_playing', deck, playing: true });
+                startSequencePlayback(deck);
                 console.log(`[SEQ] Auto-playing generated sequence on deck ${deck}`);
               }
             } catch (ge) {
@@ -640,10 +634,7 @@ function handleOs2lSubscribed(data) {
           const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
           console.log(`[SEQ] Deck ${deck} play state: ${JSON.stringify(deckPlayState)} → deckIsPlaying=${deckIsPlaying}`);
           if (deckIsPlaying) {
-            activeSequences[deck].playing = true;
-            activeSequences[deck].vdjDriven = true;
-            startPlaybackTimer(deck);
-            broadcast({ type: 'seq_playing', deck, playing: true });
+            startSequencePlayback(deck);
             console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
           } else {
             console.log(`[SEQ] Deck ${deck} is not playing — sequence loaded but not started`);
@@ -682,10 +673,7 @@ function handleOs2lSubscribed(data) {
         // Deck started playing — resume the sequence
         clearSequenceBlockingOverrides();
         deactivateScene(); // Stop any scene effect loop from end-action
-        activeSequences[deck].playing = true;
-        activeSequences[deck]._endActionApplied = false; // Reset so next end-action can fire
-        startPlaybackTimer(deck);
-        broadcast({ type: 'seq_playing', deck, playing: true });
+        startSequencePlayback(deck);
         console.log(`[SEQ] Deck ${deck} playing — resuming sequence`);
       } else if (!deckNowPlaying && activeSequences[deck].playing) {
         // Deck stopped — check if this is a natural track end or a manual pause.
@@ -717,6 +705,7 @@ function handleOs2lSubscribed(data) {
 
     // Drive sequence playback engine on VDJ time updates (VDJ sends time in ms)
     if (key === 'time' && typeof value === 'number') {
+      vdjTimeLastAt[deck] = Date.now();
       if (activeSequences[deck]) {
         activeSequences[deck].vdjDriven = true;
         activeSequences[deck].currentTimeMs = value;
@@ -3899,6 +3888,7 @@ function isAnySequencePlaying() {
 
 const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... } }
 const playbackTimers = {};   // { deckNum: intervalId }
+const vdjTimeLastAt = {};    // { deckNum: timestamp } — last OS2L time event per deck
 
 // Cached mixer integration settings (refreshed on config save / startup)
 let _cachedMixerConfig = { crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none', seqNoStrobes: false };
@@ -3911,6 +3901,23 @@ function refreshMixerConfig() {
 }
 // Refresh on startup after DB is ready
 try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ }
+
+/** Begin sequence playback after load/generation — seeds playhead and emits DMX immediately. */
+function startSequencePlayback(deck) {
+  const ds = activeSequences[deck];
+  if (!ds) return;
+
+  const deckTime = state.decks[deck]?.time;
+  const timeMs = typeof deckTime === 'number' && deckTime >= 0 ? deckTime : (ds.currentTimeMs || 0);
+  ds.currentTimeMs = timeMs;
+  ds.playing = true;
+  ds.vdjDriven = false; // standalone timer until OS2L time events take over
+  ds._endActionApplied = false;
+
+  startPlaybackTimer(deck);
+  processSequenceAtTime(deck, timeMs);
+  broadcast({ type: 'seq_playing', deck, playing: true });
+}
 
 // Start a standalone playback timer for a deck (runs when VDJ isn't driving time)
 function startPlaybackTimer(deck) {
@@ -3928,7 +3935,14 @@ function startPlaybackTimer(deck) {
     if (!ds || !ds.playing) { stopPlaybackTimer(deck); return; }
 
     // If VDJ is actively sending time for this deck, skip internal timer
-    if (ds.vdjDriven) return;
+    if (ds.vdjDriven) {
+      const lastAt = vdjTimeLastAt[deck] || 0;
+      if (Date.now() - lastAt < 500) return;
+      // No recent VDJ time (e.g. satellite OS2L gap) — fall back to internal clock
+      ds.vdjDriven = false;
+      ds.startWall = Date.now();
+      ds.startOffset = ds.currentTimeMs || 0;
+    }
 
     const elapsedMs = Date.now() - ds.startWall;
     ds.currentTimeMs = ds.startOffset + elapsedMs;
@@ -5073,10 +5087,7 @@ function autoLoadSequenceForTrack(trackId, generatedSeq) {
     const deckPlayState = state.decks[deck]?.play;
     const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
     if (deckIsPlaying) {
-      activeSequences[deck].playing = true;
-      activeSequences[deck].vdjDriven = true;
-      startPlaybackTimer(deck);
-      broadcast({ type: 'seq_playing', deck, playing: true });
+      startSequencePlayback(deck);
     }
   }
 }
