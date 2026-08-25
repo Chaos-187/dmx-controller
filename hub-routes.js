@@ -15,6 +15,8 @@ let handleOs2lButton;
 let broadcast;
 let getAnalysisConfig;
 let getAnchorPoints;
+let generateSequenceForTrack;
+let onSequenceGenerated;
 let requireHubAdminAuth = (_req, _res, next) => next();
 
 function init(deps) {
@@ -25,6 +27,8 @@ function init(deps) {
   broadcast = deps.broadcast;
   getAnalysisConfig = deps.getAnalysisConfig;
   getAnchorPoints = deps.getAnchorPoints;
+  generateSequenceForTrack = deps.generateSequenceForTrack;
+  onSequenceGenerated = deps.onSequenceGenerated;
   requireHubAdminAuth = deps.requireAuth || requireHubAdminAuth;
   ensureSatelliteToken();
 
@@ -84,6 +88,49 @@ function publicDevice(device) {
   if (!device) return null;
   const { token, ...rest } = device;
   return rest;
+}
+
+/** Auto-generate a sequence when analysis arrives and seq_auto_generate is enabled. */
+async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
+  if (!generateSequenceForTrack) return null;
+  if (db.getConfig('seq_auto_generate') !== '1') return null;
+
+  const track = db.getTrack(trackId);
+  if (!track) return null;
+
+  const existing = db.getSequenceByTrackId(trackId);
+  if (existing) return { sequence: existing, cue_count: db.getSequenceCues(existing.id)?.length || 0, skipped: 'exists' };
+
+  const analysis = db.getTrackAnalysis(trackId);
+  if (!analysis) return null;
+
+  try {
+    const fixtures = db.getFixtureChannelMap();
+    const result = await generateSequenceForTrack(track, {
+      overwrite: true,
+      fixtures,
+      analysis,
+      skipAnalysis: true,
+    });
+    if (result?.sequence) {
+      console.log(`[Hub] Auto-generated sequence "${result.sequence.name}" (${result.cue_count} cues) for track ${trackId} (${source})`);
+      broadcast?.({
+        type: 'seq_generated',
+        track_id: trackId,
+        sequence: {
+          ...result.sequence,
+          cues: undefined,
+          cue_count: result.cue_count,
+        },
+        source,
+      });
+      onSequenceGenerated?.(trackId, result);
+    }
+    return result;
+  } catch (e) {
+    console.error(`[Hub] Auto-generate sequence failed for track ${trackId}: ${e.message}`);
+    return null;
+  }
 }
 
 /** Hub discovery */
@@ -251,7 +298,7 @@ router.post('/tracks/sync', (req, res) => {
   });
 });
 
-router.post('/tracks/:id/analysis', (req, res) => {
+router.post('/tracks/:id/analysis', async (req, res) => {
   const trackId = +req.params.id;
   const track = db.getTrack(trackId);
   if (!track) return res.status(404).json({ error: 'Track not found' });
@@ -269,7 +316,17 @@ router.post('/tracks/:id/analysis', (req, res) => {
     source: 'satellite',
   });
 
-  res.json({ track_id: trackId, analyzed_at: saved?.analyzed_at || null });
+  const seqResult = await maybeAutoGenerateSequence(trackId, { source: 'satellite' });
+  const seq = seqResult?.sequence || db.getSequenceByTrackId(trackId);
+
+  res.json({
+    track_id: trackId,
+    analyzed_at: saved?.analyzed_at || null,
+    has_sequence: !!seq,
+    sequence_id: seq?.id || null,
+    sequence_generated: !!(seqResult?.sequence && !seqResult?.skipped),
+    cue_count: seqResult?.cue_count || null,
+  });
 });
 
 router.post('/tracks/:id/stems', (req, res) => {
@@ -315,7 +372,16 @@ router.post('/tracks/:id/analyze', async (req, res) => {
       config: getAnalysisConfig(),
     });
     const saved = db.upsertTrackAnalysis(trackId, result);
-    res.json({ track_id: trackId, peak_count: result.peak_count, analyzed_at: saved?.analyzed_at });
+    const seqResult = await maybeAutoGenerateSequence(trackId, { source: 'hub' });
+    const seq = seqResult?.sequence || db.getSequenceByTrackId(trackId);
+    res.json({
+      track_id: trackId,
+      peak_count: result.peak_count,
+      analyzed_at: saved?.analyzed_at,
+      has_sequence: !!seq,
+      sequence_id: seq?.id || null,
+      sequence_generated: !!(seqResult?.sequence && !seqResult?.skipped),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

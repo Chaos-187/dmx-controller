@@ -1,4 +1,5 @@
 data/
 config.json
+hubs.json
 node_modules/
 package-lock.json

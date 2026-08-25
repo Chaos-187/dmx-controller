@@ -11,6 +11,10 @@ Lightweight node for the **VirtualDJ laptop**. Connects to VirtualDJ via OS2L, a
 
 Status UI: **http://localhost:8788**
 
+### Multiple venues
+
+Save a hub pairing for each venue in the status UI (**Saved hubs**). Switch the **active** hub when you move between locations — OS2L and track sync always go to the active hub only. Pairings are stored in `data/hubs.json`.
+
 ## Windows service (VDJ laptop)
 
 Run Thaluxis Satellite in the background and start automatically with Windows.

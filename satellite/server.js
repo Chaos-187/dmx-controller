@@ -23,11 +23,13 @@ const os2l = require(path.join(ROOT, 'os2l'));
 const audioAnalyzer = require(path.join(ROOT, 'audio-analyzer'));
 const vdjParser = require(path.join(ROOT, 'vdj-parser'));
 const HubClient = require('./lib/hub-client');
+const { HubRegistry, normalizeUrl } = require('./lib/hub-registry');
 const brand = require(path.join(ROOT, 'thaluxis-brand'));
 const crypto = require('crypto');
 const os = require('os');
 
 const DEVICE_ID_PATH = path.join(DATA_DIR, 'device.json');
+const HUBS_PATH = path.join(DATA_DIR, 'hubs.json');
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -42,8 +44,6 @@ function loadConfig() {
   }
 
   return {
-    hub_url: process.env.DMX_HUB_URL || file.hub_url || '',
-    satellite_token: process.env.DMX_SATELLITE_TOKEN || file.satellite_token || '',
     satellite_name: process.env.DMX_SATELLITE_NAME || file.satellite_name || `${brand.SATELLITE_DEFAULT_NAME} (${os.hostname()})`,
     web_port: parseInt(process.env.DMX_SATELLITE_WEB_PORT || file.web_port || '8788', 10),
     os2l_port: parseInt(process.env.DMX_SATELLITE_OS2L_PORT || file.os2l_port || '8787', 10),
@@ -51,6 +51,9 @@ function loadConfig() {
     vdj_db_path: process.env.DMX_VDJ_DB_PATH || file.vdj_db_path || '',
     ping_interval_ms: parseInt(file.ping_interval_ms || '10000', 10),
     pair_interval_ms: parseInt(file.pair_interval_ms || '3000', 10),
+    // Legacy — migrated into hubs.json on first run
+    hub_url: process.env.DMX_HUB_URL || file.hub_url || '',
+    satellite_token: process.env.DMX_SATELLITE_TOKEN || file.satellite_token || '',
   };
 }
 
@@ -68,9 +71,10 @@ function loadOrCreateDeviceId() {
 }
 
 function saveConfigFile() {
+  const legacy = hubRegistry.getLegacyConfigFields();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
-    hub_url: config.hub_url,
-    satellite_token: config.satellite_token,
+    hub_url: legacy.hub_url,
+    satellite_token: legacy.satellite_token,
     satellite_name: config.satellite_name,
     web_port: config.web_port,
     os2l_port: config.os2l_port,
@@ -81,25 +85,51 @@ function saveConfigFile() {
   }, null, 2));
 }
 
+function getActiveHubEntry() {
+  return hubRegistry.getActive();
+}
+
 function rebuildHubClient() {
+  const active = getActiveHubEntry();
   hub = new HubClient({
-    baseUrl: config.hub_url,
-    token: config.satellite_token,
+    baseUrl: active?.hub_url || '',
+    token: active?.token || '',
     name: config.satellite_name,
     deviceId: config.device_id,
   });
 }
 
+function applyEnvHubOverrides() {
+  const envUrl = process.env.DMX_HUB_URL;
+  const envToken = process.env.DMX_SATELLITE_TOKEN;
+  if (!envUrl && !envToken) return;
+
+  let active = getActiveHubEntry();
+  if (!active && envUrl) {
+    active = hubRegistry.add({ hub_url: envUrl, name: 'Environment hub' });
+    hubRegistry.setActive(active.id);
+  }
+  if (!active) return;
+
+  if (envUrl) hubRegistry.update(active.id, { hub_url: envUrl });
+  if (envToken) hubRegistry.setPairStatus(active.id, 'approved', envToken);
+  rebuildHubClient();
+  saveConfigFile();
+}
+
 let config = loadConfig();
 config.device_id = loadOrCreateDeviceId();
+
+let hubRegistry = new HubRegistry({
+  dataPath: HUBS_PATH,
+  legacyConfig: { hub_url: config.hub_url, satellite_token: config.satellite_token },
+});
+applyEnvHubOverrides();
+
 let hub;
 rebuildHubClient();
 
-const pairState = {
-  status: config.satellite_token ? 'approved' : 'unpaired',
-  last_request_at: null,
-  message: '',
-};
+const pairMessages = new Map(); // hub id → message
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -270,19 +300,22 @@ async function analyzeAndPush(localTrack, filePath, deckNum) {
 }
 
 async function syncTrackToHub(localTrack, filePath, deckNum) {
-  if (!config.hub_url) return;
-  if (!config.satellite_token && pairState.status !== 'approved') return;
+  const active = getActiveHubEntry();
+  if (!active?.hub_url) return;
+  if (!active.token && active.pair_status !== 'approved') return;
 
   const res = await hub.syncTrack(localTrack);
   if (!res.ok) {
     state.hub_connected = false;
     state.hub_last_error = res.data?.error || 'Sync failed';
+    hubRegistry.setRuntime(active.id, { connected: false, last_error: state.hub_last_error });
     console.warn(`[Satellite] Hub track sync failed: ${state.hub_last_error}`);
     return;
   }
 
   state.hub_connected = true;
   state.hub_last_error = null;
+  hubRegistry.setRuntime(active.id, { connected: true, last_error: null, last_seen_at: Date.now() });
   state.stats.tracks_synced++;
 
   const hubTrackId = res.data.track_id;
@@ -298,7 +331,8 @@ async function syncTrackToHub(localTrack, filePath, deckNum) {
 // ─── OS2L handler ───────────────────────────────────────────────────────────
 
 function handleOs2lSubscribed(data) {
-  if (config.satellite_token || pairState.status === 'approved') {
+  const active = getActiveHubEntry();
+  if (active?.token || active?.pair_status === 'approved') {
     hub.forwardOs2l(data).then((res) => {
       if (res.ok) state.stats.os2l_forwarded++;
       else state.hub_last_error = res.data?.error;
@@ -342,16 +376,20 @@ const app = express();
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/status', (req, res) => {
+  const active = getActiveHubEntry();
+  const activePublic = active ? hubRegistry._publicHub(active) : null;
   res.json({
     role: 'thaluxis_satellite',
     product: brand.SATELLITE_DEFAULT_NAME,
     name: config.satellite_name,
     device_id: config.device_id,
-    hub_url: config.hub_url,
-    hub_connected: hub.connected,
+    active_hub: activePublic,
+    hubs: hubRegistry.getAll(),
+    hub_url: active?.hub_url || '',
+    hub_connected: state.hub_connected,
     hub_last_error: state.hub_last_error || hub.lastError,
-    pair_status: pairState.status,
-    pair_message: pairState.message,
+    pair_status: activePublic?.pair_status || 'unpaired',
+    pair_message: active ? (pairMessages.get(active.id) || '') : '',
     vdj_connected: state.connected,
     auto_analyze: config.auto_analyze,
     stats: state.stats,
@@ -360,30 +398,114 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+app.get('/api/hubs', (req, res) => {
+  res.json({ hubs: hubRegistry.getAll(), active_hub_id: hubRegistry.activeHubId });
+});
+
+app.post('/api/hubs', (req, res) => {
+  try {
+    const { hub_url, name } = req.body || {};
+    const hubEntry = hubRegistry.add({ hub_url, name });
+    saveConfigFile();
+    rebuildHubClient();
+    pairHubEntry(hubEntry);
+    res.json({ ok: true, hub: hubRegistry._publicHub(hubEntry) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/hubs/discover', async (req, res) => {
+  const found = await discoverHubs();
+  res.json({ hubs: found });
+});
+
+app.put('/api/hubs/:id', (req, res) => {
+  try {
+    const hubEntry = hubRegistry.update(req.params.id, req.body || {});
+    if (hubEntry.id === hubRegistry.activeHubId) {
+      rebuildHubClient();
+      saveConfigFile();
+    }
+    res.json({ ok: true, hub: hubRegistry._publicHub(hubEntry) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/hubs/:id', (req, res) => {
+  try {
+    const wasActive = hubRegistry.activeHubId === req.params.id;
+    hubRegistry.remove(req.params.id);
+    pairMessages.delete(req.params.id);
+    if (wasActive) {
+      hubTrackIds.clear();
+      rebuildHubClient();
+      saveConfigFile();
+    }
+    res.json({ ok: true, hubs: hubRegistry.getAll() });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/hubs/:id/activate', (req, res) => {
+  try {
+    const hubEntry = hubRegistry.setActive(req.params.id);
+    hubTrackIds.clear();
+    rebuildHubClient();
+    saveConfigFile();
+    state.hub_connected = false;
+    state.hub_last_error = null;
+    pairHubEntry(hubEntry);
+    pingHubEntry(hubEntry);
+    res.json({ ok: true, hub: hubRegistry._publicHub(hubEntry), hubs: hubRegistry.getAll() });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/hubs/:id/ping', async (req, res) => {
+  const hubEntry = hubRegistry.getById(req.params.id);
+  if (!hubEntry) return res.status(404).json({ error: 'Hub not found' });
+  const result = await pingHubEntry(hubEntry);
+  res.json({
+    ok: result.ok,
+    hub: hubRegistry._publicHub(hubEntry),
+    error: result.ok ? null : result.data?.error,
+  });
+});
+
 app.get('/api/config', (req, res) => {
+  const legacy = hubRegistry.getLegacyConfigFields();
   res.json({
     ...config,
-    satellite_token: config.satellite_token ? '••••••••' : '',
+    hub_url: legacy.hub_url,
+    satellite_token: legacy.satellite_token ? '••••••••' : '',
+    active_hub_id: hubRegistry.activeHubId,
+    hubs: hubRegistry.getAll(),
   });
 });
 
 app.put('/api/config', (req, res) => {
   const next = { ...config, ...req.body };
-  if (req.body.satellite_token === '••••••••' || req.body.satellite_token === '') {
-    next.satellite_token = config.satellite_token;
-  }
+  delete next.hub_url;
+  delete next.satellite_token;
+  delete next.hubs;
+  delete next.active_hub_id;
   config = next;
   saveConfigFile();
   rebuildHubClient();
-
   res.json({ ok: true });
 });
 
 app.post('/api/hub/ping', async (req, res) => {
-  const result = await hub.ping();
+  const active = getActiveHubEntry();
+  if (!active) return res.status(400).json({ error: 'No active hub configured' });
+  const result = await pingHubEntry(active);
   state.hub_connected = result.ok;
   state.hub_last_error = result.ok ? null : result.data?.error;
-  res.json({ ok: result.ok, hub: result.data, error: state.hub_last_error });
+  res.json({ ok: result.ok, hub: hubRegistry._publicHub(active), error: state.hub_last_error });
 });
 
 app.post('/api/tracks/import', (req, res) => {
@@ -402,7 +524,8 @@ app.post('/api/tracks/import', (req, res) => {
 });
 
 app.post('/api/library/sync-to-hub', async (req, res) => {
-  if (!config.hub_url) return res.status(400).json({ error: 'Hub URL not configured' });
+  const active = getActiveHubEntry();
+  if (!active?.hub_url) return res.status(400).json({ error: 'No active hub configured' });
 
   const limit = Math.min(parseInt(req.body?.limit || '500', 10), 5000);
   const all = db.getTracks({ limit });
@@ -488,13 +611,13 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-async function discoverHubUrl() {
+async function discoverHubs() {
   return new Promise((resolve) => {
-    let resolved = false;
-    const finish = (url) => {
-      if (resolved) return;
-      resolved = true;
-      resolve(url || null);
+    const found = [];
+    const seen = new Set();
+
+    const finish = () => {
+      resolve(found);
     };
 
     try {
@@ -503,49 +626,67 @@ async function discoverHubUrl() {
         const nets = service.addresses || [];
         const ip = nets.find(a => a.includes('.') && !a.startsWith('127.')) || nets[0] || service.host;
         const port = service.port || 80;
-        if (ip) {
-          b.destroy();
-          finish(`http://${ip}${port !== 80 ? ':' + port : ''}`);
-        }
+        if (!ip) return;
+        const url = normalizeUrl(`http://${ip}${port !== 80 ? ':' + port : ''}`);
+        const key = url.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        found.push({
+          hub_url: url,
+          name: service.name || service.txt?.name || 'Thaluxis Hub',
+          bonjour_name: service.name,
+        });
       });
-      setTimeout(() => { try { b.destroy(); } catch { /* ignore */ } finish(null); }, 4000);
+      setTimeout(() => {
+        try { b.destroy(); } catch { /* ignore */ }
+        finish();
+      }, 4000);
     } catch {
-      finish(null);
+      finish();
     }
   });
 }
 
-async function ensureHubUrl() {
-  if (config.hub_url) return config.hub_url;
-  const found = await discoverHubUrl();
-  if (found) {
-    config.hub_url = found;
-    saveConfigFile();
-    rebuildHubClient();
-    console.log(`[Satellite] Discovered hub at ${found}`);
-    pairState.message = `Discovered hub at ${found}`;
-  }
-  return config.hub_url;
+function clientForHubEntry(hubEntry) {
+  return new HubClient({
+    baseUrl: hubEntry.hub_url,
+    token: hubEntry.token || '',
+    name: config.satellite_name,
+    deviceId: config.device_id,
+  });
 }
 
-async function runPairingLoop() {
-  await ensureHubUrl();
+async function pingHubEntry(hubEntry) {
+  const client = hubEntry.id === hubRegistry.activeHubId
+    ? hub
+    : clientForHubEntry(hubEntry);
+  const res = await client.ping();
+  hubRegistry.setRuntime(hubEntry.id, {
+    connected: res.ok,
+    last_error: res.ok ? null : (res.data?.error || client.lastError),
+    last_seen_at: res.ok ? Date.now() : null,
+    hub_product_name: res.data?.name || hubEntry.hub_product_name,
+  });
+  if (res.ok && res.data?.name) {
+    hubRegistry.setHubInfo(hubEntry.id, { hub_product_name: res.data.name });
+  }
+  if (hubEntry.id === hubRegistry.activeHubId) {
+    state.hub_connected = res.ok;
+    state.hub_last_error = res.ok ? null : (res.data?.error || client.lastError);
+  }
+  return res;
+}
 
-  if (!config.hub_url) {
-    pairState.status = 'no_hub';
-    pairState.message = 'No hub found on LAN — set hub URL manually';
-    setTimeout(runPairingLoop, config.pair_interval_ms);
+async function pairHubEntry(hubEntry) {
+  if (!hubEntry?.hub_url) return;
+  if (hubEntry.token && hubEntry.pair_status === 'approved') {
+    pairMessages.set(hubEntry.id, 'Connected to hub');
     return;
   }
 
-  if (config.satellite_token) {
-    pairState.status = 'approved';
-    pairState.message = 'Connected to hub';
-    return;
-  }
-
+  const client = clientForHubEntry(hubEntry);
   const ip = getLocalIp();
-  const req = await hub.requestPairing({
+  const req = await client.requestPairing({
     deviceId: config.device_id,
     ip,
     webPort: config.web_port,
@@ -553,44 +694,79 @@ async function runPairingLoop() {
   });
 
   if (req.ok) {
-    pairState.status = req.data.status || 'pending';
-    pairState.last_request_at = Date.now();
-    pairState.message = req.data.status === 'approved'
+    const status = req.data.status || 'pending';
+    hubRegistry.setPairStatus(hubEntry.id, status);
+    pairMessages.set(hubEntry.id, status === 'approved'
       ? 'Already approved on hub'
-      : 'Waiting for approval on hub (Config → Thaluxis Satellites)';
+      : 'Waiting for approval on hub (Config → Thaluxis Satellites)');
 
-    if (req.data.status === 'approved') {
-      const st = await hub.pairStatus(config.device_id);
+    if (status === 'approved') {
+      const st = await client.pairStatus(config.device_id);
       if (st.ok && st.data.token) {
-        config.satellite_token = st.data.token;
-        saveConfigFile();
-        rebuildHubClient();
-        pairState.status = 'approved';
-        pairState.message = 'Approved — connected to hub';
-        console.log('[Satellite] Paired with hub');
+        hubRegistry.setPairStatus(hubEntry.id, 'approved', st.data.token);
+        pairMessages.set(hubEntry.id, 'Approved — connected to hub');
+        if (hubEntry.id === hubRegistry.activeHubId) {
+          rebuildHubClient();
+          saveConfigFile();
+          broadcast({ type: 'paired', hub_id: hubEntry.id, hub_url: hubEntry.hub_url });
+        }
+        console.log(`[Satellite] Paired with hub ${hubEntry.hub_url}`);
         return;
       }
     }
   } else {
-    pairState.status = 'error';
-    pairState.message = req.data?.error || 'Pairing request failed';
+    hubRegistry.setPairStatus(hubEntry.id, 'error');
+    pairMessages.set(hubEntry.id, req.data?.error || 'Pairing request failed');
+    return;
   }
 
-  const poll = await hub.pairStatus(config.device_id);
+  const poll = await client.pairStatus(config.device_id);
   if (poll.ok && poll.data.status === 'approved' && poll.data.token) {
-    config.satellite_token = poll.data.token;
-    saveConfigFile();
-    rebuildHubClient();
-    pairState.status = 'approved';
-    pairState.message = 'Approved — connected to hub';
-    console.log('[Satellite] Paired with hub');
-    broadcast({ type: 'paired', hub_url: config.hub_url });
+    hubRegistry.setPairStatus(hubEntry.id, 'approved', poll.data.token);
+    pairMessages.set(hubEntry.id, 'Approved — connected to hub');
+    if (hubEntry.id === hubRegistry.activeHubId) {
+      rebuildHubClient();
+      saveConfigFile();
+      broadcast({ type: 'paired', hub_id: hubEntry.id, hub_url: hubEntry.hub_url });
+    }
+    console.log(`[Satellite] Paired with hub ${hubEntry.hub_url}`);
     return;
   }
 
   if (poll.ok && poll.data.status === 'rejected') {
-    pairState.status = 'rejected';
-    pairState.message = 'Connection rejected on hub';
+    hubRegistry.setPairStatus(hubEntry.id, 'rejected');
+    pairMessages.set(hubEntry.id, 'Connection rejected on hub');
+  }
+}
+
+async function runPairingLoop() {
+  let hubs = hubRegistry.hubs;
+
+  if (hubs.length === 0) {
+    const found = await discoverHubs();
+    if (found.length) {
+      for (const item of found) {
+        const existing = hubRegistry.findByUrl(item.hub_url);
+        if (!existing) {
+          hubRegistry.add({ hub_url: item.hub_url, name: item.name });
+          console.log(`[Satellite] Discovered hub at ${item.hub_url}`);
+        }
+      }
+      saveConfigFile();
+      rebuildHubClient();
+      hubs = hubRegistry.hubs;
+    }
+  }
+
+  if (hubs.length === 0) {
+    setTimeout(runPairingLoop, config.pair_interval_ms);
+    return;
+  }
+
+  for (const hubEntry of hubs) {
+    if (!hubEntry.token || hubEntry.pair_status !== 'approved') {
+      await pairHubEntry(hubEntry);
+    }
   }
 
   setTimeout(runPairingLoop, config.pair_interval_ms);
@@ -626,12 +802,15 @@ try {
 }
 
 async function hubPingLoop() {
-  if (config.satellite_token && config.hub_url) {
-    const res = await hub.ping();
-    state.hub_connected = res.ok;
-    state.hub_last_error = res.ok ? null : res.data?.error;
-    broadcast({ type: 'hub_status', connected: res.ok, error: state.hub_last_error });
+  for (const hubEntry of hubRegistry.hubs) {
+    await pingHubEntry(hubEntry);
   }
+  broadcast({
+    type: 'hub_status',
+    connected: state.hub_connected,
+    error: state.hub_last_error,
+    hubs: hubRegistry.getAll(),
+  });
   setTimeout(hubPingLoop, config.ping_interval_ms);
 }
 
@@ -655,10 +834,11 @@ hubPingLoop();
 })();
 
 console.log(`[Satellite] OS2L listening on port ${config.os2l_port}`);
-if (!config.hub_url) {
-  console.log('[Satellite] Hub URL not set — open the status UI to configure');
+const activeAtStart = getActiveHubEntry();
+if (!activeAtStart) {
+  console.log('[Satellite] No hubs configured — open the status UI to add venues');
 } else {
-  console.log(`[Satellite] Hub target: ${config.hub_url}`);
+  console.log(`[Satellite] Active hub: ${activeAtStart.hub_url} (${hubRegistry.hubs.length} saved)`);
 }
 
 process.on('SIGINT', () => {

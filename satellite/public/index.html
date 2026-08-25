@@ -6,20 +6,25 @@
   <title>Thaluxis Satellite</title>
   <style>
     :root { font-family: system-ui, sans-serif; background: #0f1117; color: #e8eaed; }
-    body { max-width: 720px; margin: 0 auto; padding: 24px; }
+    body { max-width: 820px; margin: 0 auto; padding: 24px; }
     h1 { font-size: 1.4rem; margin: 0 0 4px; }
     h1 span { color: #818cf8; font-weight: 600; }
-    .sub { color: #9aa0a6; margin-bottom: 24px; }
+    .sub { color: #9aa0a6; margin-bottom: 16px; }
     .card { background: #1a1d27; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; align-items: flex-end; }
     label { display: block; font-size: 0.85rem; color: #9aa0a6; margin-bottom: 4px; }
     input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #0f1117; color: #fff; }
     .field { flex: 1; min-width: 200px; }
-    button { padding: 8px 14px; border-radius: 6px; border: none; background: #4c8bf5; color: #fff; cursor: pointer; }
+    button { padding: 8px 14px; border-radius: 6px; border: none; background: #4c8bf5; color: #fff; cursor: pointer; font-size: 0.9rem; }
     button.secondary { background: #333; }
+    button.danger { background: #7f1d1d; }
+    button.small { padding: 4px 10px; font-size: 0.8rem; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.8rem; }
     .ok { background: #1e4620; color: #81c995; }
     .bad { background: #5c1a1a; color: #f28b82; }
+    .warn { background: #4a3f1a; color: #fdd663; }
+    .muted { background: #2a2d3a; color: #9aa0a6; }
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
     .stat { background: #0f1117; border-radius: 8px; padding: 10px; }
     .stat b { display: block; font-size: 1.2rem; }
@@ -36,6 +41,54 @@
     }
     .footer a { color: #818cf8; text-decoration: none; }
     .footer a:hover { text-decoration: underline; }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #2a2d3a;
+      padding-bottom: 0;
+    }
+    .tab-btn {
+      background: transparent;
+      color: #9aa0a6;
+      border: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 6px 6px 0 0;
+      padding: 10px 16px;
+      margin-bottom: -1px;
+      font-size: 0.9rem;
+    }
+    .tab-btn:hover { color: #e8eaed; background: #1a1d27; }
+    .tab-btn.active {
+      color: #818cf8;
+      border-bottom-color: #818cf8;
+      background: #1a1d27;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .hub-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+    .hub-item {
+      background: #0f1117;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .hub-item.active { border-color: #818cf8; }
+    .hub-item-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+    .hub-item-title { font-weight: 600; }
+    .hub-item-url { color: #9aa0a6; font-size: 0.85rem; word-break: break-all; }
+    .hub-item-meta { color: #9aa0a6; font-size: 0.8rem; margin-bottom: 8px; }
+    .hub-item-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .discovered { margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a2d3a; }
+    .discovered-item { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 6px 0; font-size: 0.85rem; }
+    .active-hub-summary {
+      background: #0f1117;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+    }
+    .active-hub-summary .label { color: #9aa0a6; font-size: 0.8rem; margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -43,35 +96,70 @@
   <h1>Thaluxis <span>Satellite</span></h1>
   <p class="sub">VirtualDJ OS2L + track analysis → Thaluxis Hub</p>
 
-  <div class="card">
-    <div class="row">
-      <div>Hub: <span id="hubStatus" class="pill bad">unknown</span></div>
-      <div>Pairing: <span id="pairStatus" class="pill bad">—</span></div>
-      <div>VirtualDJ: <span id="vdjStatus" class="pill bad">disconnected</span></div>
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="status" role="tab" aria-selected="true">Status</button>
+    <button class="tab-btn" data-tab="hubs" role="tab" aria-selected="false">Hubs</button>
+    <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+  </nav>
+
+  <div class="tab-panel active" id="tab-status" role="tabpanel">
+    <div class="card">
+      <div class="row">
+        <div>Active hub: <span id="hubStatus" class="pill bad">unknown</span></div>
+        <div>Pairing: <span id="pairStatus" class="pill bad">—</span></div>
+        <div>VirtualDJ: <span id="vdjStatus" class="pill bad">disconnected</span></div>
+      </div>
+      <p id="pairMessage" style="color:#9aa0a6;font-size:0.85rem;margin:8px 0 0"></p>
+      <div id="activeHubSummary" class="active-hub-summary" style="display:none"></div>
+      <div class="stats" id="stats"></div>
     </div>
-    <p id="pairMessage" style="color:#9aa0a6;font-size:0.85rem;margin:8px 0 0"></p>
-    <div class="stats" id="stats"></div>
+
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1rem;">Decks</h2>
+      <pre id="decks">Loading…</pre>
+    </div>
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0;font-size:1rem;">Connection</h2>
-    <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">The Thaluxis Hub is usually discovered automatically. Accept this device on the hub under <strong>Config → Thaluxis Satellites</strong>.</p>
-    <div class="row">
-      <div class="field"><label>Hub URL (optional override)</label><input id="hubUrl" placeholder="auto-discovered"></div>
-      <div class="field"><label>Satellite name</label><input id="satelliteName" placeholder="Thaluxis Satellite (VDJ-Laptop)"></div>
+  <div class="tab-panel" id="tab-hubs" role="tabpanel">
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1rem;">Saved hubs</h2>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Pair with each venue's Thaluxis Hub once, then switch the active hub when you move between locations. OS2L and track sync go to the <strong>active</strong> hub only.</p>
+      <div id="hubList" class="hub-list"></div>
+      <h3 style="font-size:0.95rem;margin:20px 0 8px;">Add hub</h3>
+      <div class="row">
+        <div class="field"><label>Venue name</label><input id="newHubName" placeholder="Club XYZ"></div>
+        <div class="field"><label>Hub URL</label><input id="newHubUrl" placeholder="http://192.168.1.10"></div>
+      </div>
+      <div class="row">
+        <button id="addHubBtn">Add hub</button>
+        <button class="secondary" id="discoverBtn">Scan LAN</button>
+      </div>
+      <div id="discovered" class="discovered" style="display:none"></div>
+      <p id="hubMsg" style="color:#9aa0a6;font-size:0.85rem;"></p>
     </div>
-    <div class="row">
-      <button id="saveBtn">Save</button>
-      <button class="secondary" id="pingBtn">Test hub</button>
-      <button class="secondary" id="importBtn">Import VDJ library</button>
-      <button class="secondary" id="syncBtn">Sync unanalyzed to hub</button>
-    </div>
-    <p id="msg" style="color:#9aa0a6;font-size:0.85rem;"></p>
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0;font-size:1rem;">Decks</h2>
-    <pre id="decks">Loading…</pre>
+  <div class="tab-panel" id="tab-settings" role="tabpanel">
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1rem;">Satellite</h2>
+      <div class="row">
+        <div class="field"><label>Satellite name</label><input id="satelliteName" placeholder="Thaluxis Satellite (VDJ-Laptop)"></div>
+      </div>
+      <div class="row">
+        <button id="saveBtn">Save</button>
+      </div>
+      <p id="msg" style="color:#9aa0a6;font-size:0.85rem;"></p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1rem;">Library</h2>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Import tracks from VirtualDJ and push unanalyzed tracks to the active hub.</p>
+      <div class="row">
+        <button class="secondary" id="importBtn">Import VDJ library</button>
+        <button class="secondary" id="syncBtn">Sync unanalyzed to active hub</button>
+      </div>
+      <p id="libMsg" style="color:#9aa0a6;font-size:0.85rem;"></p>
+    </div>
   </div>
   </main>
 
@@ -81,53 +169,213 @@
   </footer>
 
   <script>
+    const TAB_KEY = 'thaluxis-satellite-tab';
+
+    function pillClass(hub, active) {
+      if (active) return hub.connected ? 'ok' : (hub.pair_status === 'approved' ? 'warn' : 'bad');
+      return hub.connected ? 'ok' : 'muted';
+    }
+
+    function pairPillClass(status) {
+      if (status === 'approved') return 'ok';
+      if (status === 'pending') return 'warn';
+      return 'bad';
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn.dataset.tab === tabId;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.id === 'tab-' + tabId);
+      });
+      try { localStorage.setItem(TAB_KEY, tabId); } catch { /* ignore */ }
+      if (location.hash !== '#' + tabId) history.replaceState(null, '', '#' + tabId);
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    (function initTab() {
+      const fromHash = (location.hash || '').replace(/^#/, '');
+      const valid = ['status', 'hubs', 'settings'];
+      let tab = valid.includes(fromHash) ? fromHash : null;
+      if (!tab) {
+        try { tab = localStorage.getItem(TAB_KEY); } catch { /* ignore */ }
+      }
+      if (valid.includes(tab) && tab !== 'status') switchTab(tab);
+    })();
+
+    function renderHubs(hubs) {
+      if (!hubs.length) {
+        hubList.innerHTML = '<p style="color:#9aa0a6;font-size:0.85rem;margin:0">No hubs saved yet. Scan the LAN or add a hub URL manually.</p>';
+        return;
+      }
+      hubList.innerHTML = hubs.map(h => `
+        <div class="hub-item ${h.active ? 'active' : ''}">
+          <div class="hub-item-head">
+            <div>
+              <div class="hub-item-title">${escapeHtml(h.name)} ${h.active ? '<span class="pill ok">active</span>' : ''}</div>
+              <div class="hub-item-url">${escapeHtml(h.hub_url)}</div>
+            </div>
+            <span class="pill ${pillClass(h, h.active)}">${h.connected ? 'online' : 'offline'}</span>
+          </div>
+          <div class="hub-item-meta">
+            Pairing: <span class="pill ${pairPillClass(h.pair_status)}">${h.pair_status}</span>
+            ${h.hub_product_name ? ' · ' + escapeHtml(h.hub_product_name) : ''}
+            ${h.last_error ? ' · ' + escapeHtml(h.last_error) : ''}
+          </div>
+          <div class="hub-item-actions">
+            ${h.active ? '' : '<button class="secondary small" data-action="activate" data-id="' + h.id + '">Use this hub</button>'}
+            <button class="secondary small" data-action="ping" data-id="${h.id}">Test</button>
+            <button class="danger small" data-action="remove" data-id="${h.id}">Remove</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderActiveHubSummary(active, hubConnected) {
+      const el = document.getElementById('activeHubSummary');
+      if (!active) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      el.style.display = 'block';
+      el.innerHTML = `
+        <div class="label">Active hub</div>
+        <strong>${escapeHtml(active.name)}</strong>
+        <div style="color:#9aa0a6;font-size:0.85rem;margin-top:4px">${escapeHtml(active.hub_url)}</div>
+        <div style="margin-top:8px">
+          <button class="secondary small" type="button" onclick="switchTab('hubs')">Manage hubs</button>
+        </div>
+      `;
+    }
+
     async function load() {
       const res = await fetch('/api/status');
       const s = await res.json();
-      document.getElementById('hubStatus').textContent = s.hub_connected ? 'connected' : 'offline';
+      const active = s.active_hub;
+      document.getElementById('hubStatus').textContent = active
+        ? (s.hub_connected ? 'connected' : 'offline')
+        : 'none';
       document.getElementById('hubStatus').className = 'pill ' + (s.hub_connected ? 'ok' : 'bad');
       document.getElementById('pairStatus').textContent = s.pair_status || '—';
-      document.getElementById('pairStatus').className = 'pill ' + (s.pair_status === 'approved' ? 'ok' : 'bad');
+      document.getElementById('pairStatus').className = 'pill ' + pairPillClass(s.pair_status);
       document.getElementById('pairMessage').textContent = s.pair_message || '';
       document.getElementById('vdjStatus').textContent = s.vdj_connected ? 'connected' : 'disconnected';
       document.getElementById('vdjStatus').className = 'pill ' + (s.vdj_connected ? 'ok' : 'bad');
       document.getElementById('decks').textContent = JSON.stringify(s.decks, null, 2);
       document.getElementById('stats').innerHTML = Object.entries(s.stats || {}).map(([k,v]) =>
         `<div class="stat"><span>${k.replace(/_/g,' ')}</span><b>${v}</b></div>`).join('');
+      renderActiveHubSummary(active, s.hub_connected);
+      renderHubs(s.hubs || []);
     }
 
     async function loadConfig() {
       const c = await (await fetch('/api/config')).json();
-      hubUrl.value = c.hub_url || '';
       satelliteName.value = c.satellite_name || '';
     }
 
+    hubList.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      hubMsg.textContent = '';
+      if (action === 'activate') {
+        await fetch('/api/hubs/' + id + '/activate', { method: 'POST' });
+        hubMsg.textContent = 'Active hub changed.';
+      } else if (action === 'ping') {
+        const r = await (await fetch('/api/hubs/' + id + '/ping', { method: 'POST' })).json();
+        hubMsg.textContent = r.ok ? 'Hub reachable.' : ('Error: ' + (r.error || 'failed'));
+      } else if (action === 'remove') {
+        if (!confirm('Remove this hub pairing? You will need to accept the satellite again on that hub.')) return;
+        await fetch('/api/hubs/' + id, { method: 'DELETE' });
+        hubMsg.textContent = 'Hub removed.';
+      }
+      load();
+    });
+
+    addHubBtn.onclick = async () => {
+      const hub_url = newHubUrl.value.trim();
+      const name = newHubName.value.trim();
+      if (!hub_url) { hubMsg.textContent = 'Hub URL required.'; return; }
+      const r = await (await fetch('/api/hubs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hub_url, name: name || undefined }),
+      })).json();
+      if (r.error) hubMsg.textContent = r.error;
+      else {
+        hubMsg.textContent = 'Hub added. Accept this device on the hub if pairing is pending.';
+        newHubUrl.value = '';
+        newHubName.value = '';
+      }
+      load();
+    };
+
+    discoverBtn.onclick = async () => {
+      discoverBtn.disabled = true;
+      hubMsg.textContent = 'Scanning LAN for Thaluxis hubs…';
+      const r = await (await fetch('/api/hubs/discover')).json();
+      discoverBtn.disabled = false;
+      const found = r.hubs || [];
+      if (!found.length) {
+        discovered.style.display = 'none';
+        hubMsg.textContent = 'No hubs found on the LAN.';
+        return;
+      }
+      discovered.style.display = 'block';
+      discovered.innerHTML = '<div style="color:#9aa0a6;font-size:0.85rem;margin-bottom:6px">Discovered on LAN:</div>' +
+        found.map((h, i) => `
+          <div class="discovered-item">
+            <span>${escapeHtml(h.name)} — ${escapeHtml(h.hub_url)}</span>
+            <button class="secondary small" data-discover-index="${i}">Add</button>
+          </div>
+        `).join('');
+      hubMsg.textContent = `Found ${found.length} hub(s).`;
+      discovered.querySelectorAll('button[data-discover-index]').forEach(btn => {
+        btn.onclick = async () => {
+          const h = found[parseInt(btn.dataset.discoverIndex, 10)];
+          await fetch('/api/hubs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hub_url: h.hub_url, name: h.name }),
+          });
+          hubMsg.textContent = 'Hub added from discovery.';
+          load();
+        };
+      });
+    };
+
     saveBtn.onclick = async () => {
-      const body = {
-        hub_url: hubUrl.value.trim(),
-        satellite_name: satelliteName.value.trim(),
-      };
-      await fetch('/api/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      await fetch('/api/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ satellite_name: satelliteName.value.trim() }),
+      });
       msg.textContent = 'Saved.';
       load();
     };
 
-    pingBtn.onclick = async () => {
-      const r = await (await fetch('/api/hub/ping', { method:'POST' })).json();
-      msg.textContent = r.ok ? 'Hub reachable.' : ('Hub error: ' + (r.error || 'failed'));
-      load();
-    };
-
     importBtn.onclick = async () => {
-      msg.textContent = 'Importing…';
-      const r = await (await fetch('/api/tracks/import', { method:'POST' })).json();
-      msg.textContent = r.error ? r.error : `Imported ${r.total} tracks.`;
+      libMsg.textContent = 'Importing…';
+      const r = await (await fetch('/api/tracks/import', { method: 'POST' })).json();
+      libMsg.textContent = r.error ? r.error : `Imported ${r.total} tracks.`;
     };
 
     syncBtn.onclick = async () => {
-      msg.textContent = 'Starting background sync…';
-      const r = await (await fetch('/api/library/sync-to-hub', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })).json();
-      msg.textContent = `Syncing ${r.count} tracks in background.`;
+      libMsg.textContent = 'Starting background sync…';
+      const r = await (await fetch('/api/library/sync-to-hub', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+      libMsg.textContent = r.error ? r.error : `Syncing ${r.count} tracks in background.`;
     };
 
     loadConfig();

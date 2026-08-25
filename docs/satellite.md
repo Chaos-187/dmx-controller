@@ -69,9 +69,32 @@ cd satellite
 npm start
 ```
 
-Status UI: **http://localhost:8788** — shows pairing status.
+Status UI: **http://localhost:8788** — shows pairing status, saved hubs, and lets you switch active venue.
+
+### Multiple venues
+
+The satellite can store **multiple hub pairings** (one per venue). Only the **active** hub receives OS2L events and track sync.
+
+1. Open the status UI → **Saved hubs**
+2. **Scan LAN** or **Add hub** with the venue name and hub URL
+3. Accept the device on each hub (Config → Thaluxis Satellites)
+4. At a new venue, click **Use this hub** to switch the active connection
+
+Pairings and tokens are stored in `data/hubs.json` (created automatically; legacy `config.json` hub fields are migrated on first run).
 
 Point VirtualDJ OS2L at this laptop, port **8787**.
+
+### Satellite API (status UI)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/hubs` | List saved hubs with online/pairing status |
+| POST | `/api/hubs` | Add hub `{ hub_url, name? }` |
+| PUT | `/api/hubs/:id` | Update venue name or URL |
+| DELETE | `/api/hubs/:id` | Remove saved pairing |
+| POST | `/api/hubs/:id/activate` | Set active hub for sync/OS2L |
+| POST | `/api/hubs/:id/ping` | Test reachability |
+| GET | `/api/hubs/discover` | mDNS scan for hubs on LAN |
 
 ## Track matching across machines
 

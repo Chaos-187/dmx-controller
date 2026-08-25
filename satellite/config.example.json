@@ -1,10 +1,9 @@
 {
-  "hub_url": "http://192.168.1.10",
-  "satellite_token": "paste-token-from-main-hub-here",
   "satellite_name": "VDJ-Laptop",
   "web_port": 8788,
   "os2l_port": 8787,
   "auto_analyze": true,
   "vdj_db_path": "",
-  "ping_interval_ms": 10000
+  "ping_interval_ms": 10000,
+  "pair_interval_ms": 3000
 }
