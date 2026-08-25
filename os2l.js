@@ -40,6 +40,7 @@ let setBlackoutHold;
 
 // Message handler callback (provided by server.js for trigger processing)
 let onMessage;
+let onButton;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ function init(deps) {
   isAnySequencePlaying = deps.isAnySequencePlaying || (() => false);
   setBlackoutHold = deps.setBlackoutHold || null;
   onMessage = deps.onMessage;
+  onButton = deps.onButton || null;
 }
 
 // ─── VDJ Subscription Builder ───────────────────────────────────────────────
@@ -239,7 +241,8 @@ function handleMessage(data) {
     broadcast({ type: 'beat', data });
   } else if (evt === 'btn') {
     broadcast({ type: 'btn', data });
-    handleButtonAction(data);
+    if (onButton) onButton(data);
+    else handleButtonAction(data);
   } else if (evt === 'cmd') {
     broadcast({ type: 'cmd', data });
   } else {

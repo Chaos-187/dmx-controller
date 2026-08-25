@@ -1,0 +1,19 @@
+{
+  "name": "thaluxis-satellite",
+  "version": "1.0.0",
+  "description": "Thaluxis Satellite — VirtualDJ OS2L + track analysis node for the Thaluxis DMX hub.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "service:install": "node scripts/windows-service.js install",
+    "service:uninstall": "node scripts/windows-service.js uninstall"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "node-windows": "^1.0.0-beta.8"
+  }
+}

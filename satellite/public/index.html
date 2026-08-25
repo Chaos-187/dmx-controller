@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thaluxis Satellite</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; background: #0f1117; color: #e8eaed; }
+    body { max-width: 720px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    h1 span { color: #818cf8; font-weight: 600; }
+    .sub { color: #9aa0a6; margin-bottom: 24px; }
+    .card { background: #1a1d27; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    label { display: block; font-size: 0.85rem; color: #9aa0a6; margin-bottom: 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #0f1117; color: #fff; }
+    .field { flex: 1; min-width: 200px; }
+    button { padding: 8px 14px; border-radius: 6px; border: none; background: #4c8bf5; color: #fff; cursor: pointer; }
+    button.secondary { background: #333; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.8rem; }
+    .ok { background: #1e4620; color: #81c995; }
+    .bad { background: #5c1a1a; color: #f28b82; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    .stat { background: #0f1117; border-radius: 8px; padding: 10px; }
+    .stat b { display: block; font-size: 1.2rem; }
+    pre { background: #0f1117; padding: 10px; border-radius: 8px; overflow: auto; font-size: 0.8rem; }
+    body { min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
+    main { flex: 1; }
+    .footer {
+      text-align: center;
+      margin-top: 32px;
+      padding: 20px 0 8px;
+      font-size: 11px;
+      color: #6b7280;
+      border-top: 1px solid #2a2d3a;
+    }
+    .footer a { color: #818cf8; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <main>
+  <h1>Thaluxis <span>Satellite</span></h1>
+  <p class="sub">VirtualDJ OS2L + track analysis → Thaluxis Hub</p>
+
+  <div class="card">
+    <div class="row">
+      <div>Hub: <span id="hubStatus" class="pill bad">unknown</span></div>
+      <div>Pairing: <span id="pairStatus" class="pill bad">—</span></div>
+      <div>VirtualDJ: <span id="vdjStatus" class="pill bad">disconnected</span></div>
+    </div>
+    <p id="pairMessage" style="color:#9aa0a6;font-size:0.85rem;margin:8px 0 0"></p>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;font-size:1rem;">Connection</h2>
+    <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">The Thaluxis Hub is usually discovered automatically. Accept this device on the hub under <strong>Config → Thaluxis Satellites</strong>.</p>
+    <div class="row">
+      <div class="field"><label>Hub URL (optional override)</label><input id="hubUrl" placeholder="auto-discovered"></div>
+      <div class="field"><label>Satellite name</label><input id="satelliteName" placeholder="Thaluxis Satellite (VDJ-Laptop)"></div>
+    </div>
+    <div class="row">
+      <button id="saveBtn">Save</button>
+      <button class="secondary" id="pingBtn">Test hub</button>
+      <button class="secondary" id="importBtn">Import VDJ library</button>
+      <button class="secondary" id="syncBtn">Sync unanalyzed to hub</button>
+    </div>
+    <p id="msg" style="color:#9aa0a6;font-size:0.85rem;"></p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;font-size:1rem;">Decks</h2>
+    <pre id="decks">Loading…</pre>
+  </div>
+  </main>
+
+  <footer class="footer">
+    &copy; <a href="https://eyup.events" target="_blank" rel="noopener">Eyup Events</a>
+    &mdash; Thaluxis Satellite &middot; VirtualDJ OS2L &amp; track analysis for Thaluxis DMX
+  </footer>
+
+  <script>
+    async function load() {
+      const res = await fetch('/api/status');
+      const s = await res.json();
+      document.getElementById('hubStatus').textContent = s.hub_connected ? 'connected' : 'offline';
+      document.getElementById('hubStatus').className = 'pill ' + (s.hub_connected ? 'ok' : 'bad');
+      document.getElementById('pairStatus').textContent = s.pair_status || '—';
+      document.getElementById('pairStatus').className = 'pill ' + (s.pair_status === 'approved' ? 'ok' : 'bad');
+      document.getElementById('pairMessage').textContent = s.pair_message || '';
+      document.getElementById('vdjStatus').textContent = s.vdj_connected ? 'connected' : 'disconnected';
+      document.getElementById('vdjStatus').className = 'pill ' + (s.vdj_connected ? 'ok' : 'bad');
+      document.getElementById('decks').textContent = JSON.stringify(s.decks, null, 2);
+      document.getElementById('stats').innerHTML = Object.entries(s.stats || {}).map(([k,v]) =>
+        `<div class="stat"><span>${k.replace(/_/g,' ')}</span><b>${v}</b></div>`).join('');
+    }
+
+    async function loadConfig() {
+      const c = await (await fetch('/api/config')).json();
+      hubUrl.value = c.hub_url || '';
+      satelliteName.value = c.satellite_name || '';
+    }
+
+    saveBtn.onclick = async () => {
+      const body = {
+        hub_url: hubUrl.value.trim(),
+        satellite_name: satelliteName.value.trim(),
+      };
+      await fetch('/api/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      msg.textContent = 'Saved.';
+      load();
+    };
+
+    pingBtn.onclick = async () => {
+      const r = await (await fetch('/api/hub/ping', { method:'POST' })).json();
+      msg.textContent = r.ok ? 'Hub reachable.' : ('Hub error: ' + (r.error || 'failed'));
+      load();
+    };
+
+    importBtn.onclick = async () => {
+      msg.textContent = 'Importing…';
+      const r = await (await fetch('/api/tracks/import', { method:'POST' })).json();
+      msg.textContent = r.error ? r.error : `Imported ${r.total} tracks.`;
+    };
+
+    syncBtn.onclick = async () => {
+      msg.textContent = 'Starting background sync…';
+      const r = await (await fetch('/api/library/sync-to-hub', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })).json();
+      msg.textContent = `Syncing ${r.count} tracks in background.`;
+    };
+
+    loadConfig();
+    load();
+    setInterval(load, 3000);
+  </script>
+</body>
+</html>

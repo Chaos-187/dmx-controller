@@ -12,7 +12,9 @@ const path = require('path');
 
 // In pkg mode, __dirname points to the read-only snapshot; use the exe directory instead
 const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
-const DB_PATH = path.join(APP_DIR, 'dmx-controller.db');
+const DB_PATH = process.env.DMX_DB_PATH
+  ? path.resolve(process.env.DMX_DB_PATH)
+  : path.join(APP_DIR, 'dmx-controller.db');
 
 let db;
 
@@ -690,6 +692,27 @@ function init() {
     console.log('[DB] Migrated gobo_wheel_slots: added image_url column');
   }
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS satellite_devices (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id   TEXT    NOT NULL UNIQUE,
+      name        TEXT    NOT NULL DEFAULT 'Thaluxis Satellite',
+      ip          TEXT    DEFAULT '',
+      web_port    INTEGER DEFAULT 8788,
+      os2l_port   INTEGER DEFAULT 8787,
+      token       TEXT    DEFAULT NULL,
+      status      TEXT    NOT NULL DEFAULT 'pending',
+      first_seen  TEXT    DEFAULT (datetime('now')),
+      last_seen   TEXT    DEFAULT (datetime('now')),
+      approved_at TEXT    DEFAULT NULL,
+      rejected_at TEXT    DEFAULT NULL
+    )
+  `);
+
+  if (!db.prepare("SELECT value FROM config WHERE key = 'hub_name'").get()) {
+    db.prepare("INSERT INTO config (key, value) VALUES ('hub_name', 'Thaluxis Hub')").run();
+  }
+
   // Migrate: fixture_type_modes — create default modes for existing fixture types
   // and link channels and fixtures to their modes
   migrateToModes();
@@ -834,6 +857,16 @@ function init() {
   if (has14pcsPar === 0) {
     create14pcsRgbwParFixtureType();
     console.log('[DB] Added 14pcs RGBW 4 in 1 Par Light fixture type (4ch + 8ch modes)');
+  }
+
+  // Migration: Generic LED Smoke Machine (7ch)
+  const hasLedSmoke = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = 'Generic LED Smoke Machine'").get().c;
+  if (hasLedSmoke === 0) {
+    createLedSmokeMachineFixtureType();
+    db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('led_smoke_profile_v2', '1')").run();
+    console.log('[DB] Added Generic LED Smoke Machine fixture type (7ch)');
+  } else {
+    migrateLedSmokeMachine();
   }
 
   // Seed default color wheel map for 60W Spot Moving Head
@@ -1446,6 +1479,83 @@ function create14pcsRgbwParFixtureType() {
       },
     ],
   });
+}
+
+const LED_SMOKE_FOG_RANGES = [
+  { min: 0, max: 24, label: 'Fog off', type: 'other' },
+  { min: 25, max: 255, label: 'Fog on', type: 'smoke' },
+];
+
+const LED_SMOKE_STROBE_RANGES = [
+  { min: 0, max: 9, label: 'Strobe off', type: 'other' },
+  { min: 10, max: 255, label: 'Strobe slow to fast', type: 'strobe' },
+];
+
+const LED_SMOKE_MACRO_RANGES = [
+  { min: 0, max: 9, label: 'Manual RGB (CH2–4)', type: 'other' },
+  { min: 10, max: 59, label: 'Color jump / gradual 1', type: 'macro' },
+  { min: 60, max: 109, label: 'Color jump / gradual 2', type: 'macro' },
+  { min: 110, max: 159, label: 'Color pulse / fade', type: 'macro' },
+  { min: 160, max: 209, label: 'Multi-color strobe', type: 'macro' },
+  { min: 210, max: 255, label: 'Sound active', type: 'macro' },
+];
+
+function getLedSmokeMachineModes() {
+  return [{
+    name: '7 Channel',
+    short_name: '7ch',
+    channels: [
+      { channel_number: 1, name: 'Fog Output', type: 'smoke', default_value: 0, ranges: LED_SMOKE_FOG_RANGES },
+      { channel_number: 2, name: 'Red LED', type: 'red', default_value: 0 },
+      { channel_number: 3, name: 'Green LED', type: 'green', default_value: 0 },
+      { channel_number: 4, name: 'Blue LED', type: 'blue', default_value: 0 },
+      { channel_number: 5, name: 'LED Strobe', type: 'strobe', default_value: 0, ranges: LED_SMOKE_STROBE_RANGES },
+      { channel_number: 6, name: 'Color Change / Macros', type: 'macro', default_value: 0, ranges: LED_SMOKE_MACRO_RANGES },
+      { channel_number: 7, name: 'Macro Speed', type: 'speed', default_value: 0 },
+    ],
+  }];
+}
+
+/**
+ * Generic LED Smoke Machine — 7-channel fog + RGB + strobe + macros.
+ */
+function createLedSmokeMachineFixtureType() {
+  return createFixtureType({
+    name: 'Generic LED Smoke Machine',
+    manufacturer: 'Generic',
+    category: 'fog',
+    modes: getLedSmokeMachineModes(),
+  });
+}
+
+/** Update existing LED smoke fixture type to match manufacturer 7ch profile. */
+function migrateLedSmokeMachine() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'led_smoke_profile_v2'").get();
+  if (done?.value === '1') return;
+
+  const type = db.prepare("SELECT id FROM fixture_types WHERE name = 'Generic LED Smoke Machine'").get();
+  if (!type) return;
+
+  const fixtures = db.prepare('SELECT id, mode_id FROM fixtures WHERE fixture_type_id = ?').all(type.id);
+
+  updateFixtureType(type.id, {
+    name: 'Generic LED Smoke Machine',
+    manufacturer: 'Generic',
+    category: 'fog',
+    modes: getLedSmokeMachineModes(),
+  });
+
+  const newMode = db.prepare(
+    'SELECT id FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order LIMIT 1',
+  ).get(type.id);
+  if (newMode) {
+    for (const fix of fixtures) {
+      db.prepare('UPDATE fixtures SET mode_id = ? WHERE id = ?').run(newMode.id, fix.id);
+    }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('led_smoke_profile_v2', '1')").run();
+  console.log('[DB] Updated Generic LED Smoke Machine to 7ch profile');
 }
 
 /** All DMX modes for Generic Atomic LED Strobe (per manufacturer manual). */
@@ -4569,6 +4679,88 @@ function toggleMidiMapping(id) {
   return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
 }
 
+// ─── Satellite Devices ───────────────────────────────────────────────────────
+
+function getSatelliteDevices(status) {
+  if (status) {
+    return db.prepare('SELECT id, device_id, name, ip, web_port, os2l_port, status, first_seen, last_seen, approved_at, rejected_at FROM satellite_devices WHERE status = ? ORDER BY last_seen DESC').all(status);
+  }
+  return db.prepare('SELECT id, device_id, name, ip, web_port, os2l_port, status, first_seen, last_seen, approved_at, rejected_at FROM satellite_devices ORDER BY last_seen DESC').all();
+}
+
+function getSatelliteDevice(id) {
+  return db.prepare('SELECT id, device_id, name, ip, web_port, os2l_port, status, first_seen, last_seen, approved_at, rejected_at FROM satellite_devices WHERE id = ?').get(id) || null;
+}
+
+function getSatelliteDeviceByDeviceId(deviceId) {
+  return db.prepare('SELECT * FROM satellite_devices WHERE device_id = ?').get(deviceId) || null;
+}
+
+function upsertSatellitePairRequest({ device_id, name, ip, web_port, os2l_port }) {
+  const existing = getSatelliteDeviceByDeviceId(device_id);
+  if (existing) {
+    if (existing.status === 'approved') {
+      db.prepare(`
+        UPDATE satellite_devices SET name=?, ip=?, web_port=?, os2l_port=?, last_seen=datetime('now') WHERE device_id=?
+      `).run(name || existing.name, ip || existing.ip, web_port || existing.web_port, os2l_port || existing.os2l_port, device_id);
+      return getSatelliteDeviceByDeviceId(device_id);
+    }
+    const nextStatus = existing.status === 'revoked' || existing.status === 'rejected' ? 'pending' : existing.status;
+    db.prepare(`
+      UPDATE satellite_devices SET name=?, ip=?, web_port=?, os2l_port=?, status=?, last_seen=datetime('now'),
+        rejected_at=CASE WHEN ?= 'pending' THEN NULL ELSE rejected_at END
+      WHERE device_id=?
+    `).run(name || existing.name, ip || '', web_port || 8788, os2l_port || 8787, nextStatus, nextStatus, device_id);
+    return getSatelliteDeviceByDeviceId(device_id);
+  }
+
+  db.prepare(`
+    INSERT INTO satellite_devices (device_id, name, ip, web_port, os2l_port, status)
+    VALUES (?, ?, ?, ?, ?, 'pending')
+  `).run(device_id, name || 'Thaluxis Satellite', ip || '', web_port || 8788, os2l_port || 8787);
+  return getSatelliteDeviceByDeviceId(device_id);
+}
+
+function approveSatelliteDevice(id) {
+  const crypto = require('crypto');
+  const device = getSatelliteDevice(id);
+  if (!device) return null;
+  const token = crypto.randomBytes(24).toString('hex');
+  db.prepare(`
+    UPDATE satellite_devices SET status='approved', token=?, approved_at=datetime('now'), rejected_at=NULL, last_seen=datetime('now')
+    WHERE id=?
+  `).run(token, id);
+  return getSatelliteDeviceByDeviceId(device.device_id);
+}
+
+function rejectSatelliteDevice(id) {
+  db.prepare(`
+    UPDATE satellite_devices SET status='rejected', token=NULL, rejected_at=datetime('now'), last_seen=datetime('now')
+    WHERE id=?
+  `).run(id);
+  return getSatelliteDevice(id);
+}
+
+function revokeSatelliteDevice(id) {
+  db.prepare(`
+    UPDATE satellite_devices SET status='revoked', token=NULL, last_seen=datetime('now')
+    WHERE id=?
+  `).run(id);
+  return getSatelliteDevice(id);
+}
+
+function validateSatelliteDeviceAuth(deviceId, token) {
+  if (!deviceId || !token) return null;
+  const device = getSatelliteDeviceByDeviceId(deviceId);
+  if (!device || device.status !== 'approved' || device.token !== token) return null;
+  return device;
+}
+
+function touchSatelliteDevice(deviceId, ip) {
+  db.prepare(`UPDATE satellite_devices SET last_seen=datetime('now'), ip=COALESCE(?, ip) WHERE device_id=?`)
+    .run(ip || null, deviceId);
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -4580,6 +4772,7 @@ module.exports = {
   createPixelTapeFixtureType,
   createMultiCellFixtureType,
   createAtomicLedStrobeFixtureType,
+  createLedSmokeMachineFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
   getGoboWheelMap, getAllGoboWheelMaps, setGoboWheelMap, deleteGoboWheelMap,
   getFixtures, getFixture, createFixture, createFixtureBatch, updateFixture, deleteFixture, updateFixtureRigPositions,
@@ -4608,4 +4801,7 @@ module.exports = {
   getTouchActions, getTouchAction, createTouchAction, updateTouchAction, deleteTouchAction, bulkUpdateTouchActions,
   getSequenceTemplates, getSequenceTemplate, createSequenceTemplate, updateSequenceTemplate, deleteSequenceTemplate, setDefaultSequenceTemplate,
   getMidiMappings, getEnabledMidiMappings, getMidiMapping, createMidiMapping, updateMidiMapping, deleteMidiMapping, toggleMidiMapping,
+  getSatelliteDevices, getSatelliteDevice, getSatelliteDeviceByDeviceId,
+  upsertSatellitePairRequest, approveSatelliteDevice, rejectSatelliteDevice, revokeSatelliteDevice,
+  validateSatelliteDeviceAuth, touchSatelliteDevice,
 };
