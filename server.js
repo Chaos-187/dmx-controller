@@ -127,8 +127,9 @@ function requireAuth(req, res, next) {
 
 const OS2L_PORT = 8787;
 const WEB_PORT = 80;
-const SERVICE_NAME = 'DMX-Controller';
-const MDNS_HOSTNAME_DEFAULT = 'dmxcontrol';
+const SERVICE_NAME = 'Thaluxis-Hub';
+const MDNS_HOSTNAME_DEFAULT = 'thaluxis';
+const brand = require('./thaluxis-brand');
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -817,6 +818,7 @@ const configProtectedPrefixes = [
   '/api/audio-input',
   '/api/fixture-types',
   '/api/fixture-library',
+  '/api/hub',
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET') return next(); // reads are open
@@ -3501,6 +3503,10 @@ const sequenceRoutes = require('./sequence-routes');
 sequenceRoutes.init({ db, audioAnalyzer, sequenceGenerator, broadcast, getAnalysisConfig, getAnchorPoints });
 app.use(sequenceRoutes.router);
 
+// ─── Satellite Hub API ───────────────────────────────────────────────────────
+const hubRoutes = require('./hub-routes');
+app.use('/api/hub', hubRoutes.router);
+
 // ─── Static Scene Engine ────────────────────────────────────────────────────
 
 let activeStaticScene = null;    // The currently active scene object (with entries)
@@ -4890,28 +4896,48 @@ function getLocalIPv4() {
   return '127.0.0.1';
 }
 
+function isHubOs2lLocal() {
+  return db.getConfig('hub_os2l_local') !== '0';
+}
+
 function registerBonjour() {
   try {
     const bonjour = new Bonjour();
-    // Advertise OS2L service for VirtualDJ discovery
-    bonjour.publish({
-      name: SERVICE_NAME,
-      type: 'os2l',
-      protocol: 'tcp',
-      port: OS2L_PORT,
-      txt: { txtvers: '1' },
-    });
-    console.log(`[mDNS] Registered "${SERVICE_NAME}" as _os2l._tcp on port ${OS2L_PORT}`);
+    const os2lLocal = isHubOs2lLocal();
+    const bonjourName = brand.getHubBonjourName(db);
 
-    // Advertise HTTP service
+    if (os2lLocal) {
+      bonjour.publish({
+        name: bonjourName,
+        type: 'os2l',
+        protocol: 'tcp',
+        port: OS2L_PORT,
+        txt: { txtvers: '1', product: 'Thaluxis DMX' },
+      });
+      console.log(`[mDNS] Registered "${bonjourName}" as _os2l._tcp on port ${OS2L_PORT}`);
+    } else {
+      console.log('[mDNS] Local _os2l._tcp skipped (hub_os2l_local=0 — use Thaluxis Satellite OS2L)');
+    }
+
     bonjour.publish({
-      name: SERVICE_NAME,
+      name: bonjourName,
       type: 'http',
       protocol: 'tcp',
       port: WEB_PORT,
-      txt: { path: '/' },
+      txt: { path: '/', product: 'Thaluxis DMX' },
     });
-    console.log(`[mDNS] Registered "${SERVICE_NAME}" as _http._tcp on port ${WEB_PORT}`);
+    console.log(`[mDNS] Registered "${bonjourName}" as _http._tcp on port ${WEB_PORT}`);
+
+    if (db.getConfig('satellite_enabled') !== '0') {
+      bonjour.publish({
+        name: bonjourName,
+        type: 'dmx-hub',
+        protocol: 'tcp',
+        port: WEB_PORT,
+        txt: { path: '/api/hub/status', role: 'hub', product: brand.getHubDisplayName(db) },
+      });
+      console.log(`[mDNS] Registered "${bonjourName}" as _dmx-hub._tcp on port ${WEB_PORT}`);
+    }
 
     return bonjour;
   } catch (err) {
@@ -4963,6 +4989,17 @@ function startMdnsResponder() {
 
 // Initialise database
 db.init();
+
+hubRoutes.init({
+  db,
+  audioAnalyzer,
+  handleOs2lSubscribed,
+  handleOs2lButton: os2l.handleButtonAction,
+  broadcast,
+  getAnalysisConfig,
+  getAnchorPoints,
+  requireAuth,
+});
 
 loadTouchGroupDimmers();
 
@@ -5104,7 +5141,11 @@ os2l.init({
   }
 })();
 
-os2l.startServer(OS2L_PORT);
+if (isHubOs2lLocal()) {
+  os2l.startServer(OS2L_PORT);
+} else {
+  console.log('[OS2L] Local TCP server disabled — deck data expected from satellite via /api/hub/os2l');
+}
 
 // Initialise MIDI controller module with same dependencies as OS2L
 midiController.init({

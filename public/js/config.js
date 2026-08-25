@@ -264,6 +264,13 @@ function connect() {
     else if (msg.type === 'log') {
       logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
     }
+    else if (msg.type === 'satellite_pair_request' || msg.type === 'satellite_device_approved'
+      || msg.type === 'satellite_device_rejected' || msg.type === 'satellite_device_revoked'
+      || msg.type === 'satellite_discovered') {
+      if (document.getElementById('cfgpage-satellites')?.classList.contains('active')) {
+        loadSatelliteConfig();
+      }
+    }
   };
 
   ws.onclose = () => {
@@ -477,6 +484,43 @@ document.getElementById('cfgpage-sequencer').addEventListener('click', async (e)
 // ═══════════════════════════════════════════════════════════════
 //  Config — Load All Settings
 // ═══════════════════════════════════════════════════════════════
+function syncOs2lEnabledCheckboxes(enabled) {
+  const on = enabled !== false && enabled !== '0';
+  const vdj = document.getElementById('cfgVdjOs2lEnabled');
+  const hub = document.getElementById('cfgHubOs2lLocal');
+  if (vdj) vdj.checked = on;
+  if (hub) hub.checked = on;
+}
+
+function readOs2lEnabledCheckbox() {
+  const vdj = document.getElementById('cfgVdjOs2lEnabled');
+  const hub = document.getElementById('cfgHubOs2lLocal');
+  if (vdj) return vdj.checked;
+  if (hub) return hub.checked;
+  return true;
+}
+
+async function loadVdjConfig() {
+  try {
+    const config = await fetch('/api/config').then(r => r.json());
+    document.getElementById('cfgOs2lPort').value = config.os2l_port || 8787;
+    document.getElementById('cfgOs2lServiceName').value = config.os2l_service_name || 'DMX-Controller';
+    document.getElementById('cfgWebPort').value = config.web_port || 80;
+    document.getElementById('cfgFrequency').value = config.subscription_frequency || 25;
+    document.getElementById('cfgVdjDbPath').value = config.vdj_db_path || '';
+    document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
+    document.getElementById('cfgVdjAutoMeta').checked = config.vdj_auto_meta === '1';
+    document.getElementById('cfgVdjDecks').value = config.vdj_deck_count || '4';
+    document.getElementById('cfgNowPlayingEnabled').checked = config.now_playing_enabled === '1';
+    document.getElementById('cfgNowPlayingBaseUrl').value = config.now_playing_base_url || '';
+    document.getElementById('cfgNowPlayingEventId').value = config.now_playing_event_id || '';
+    document.getElementById('cfgNowPlayingArtwork').checked = config.now_playing_artwork !== '0';
+    syncOs2lEnabledCheckboxes(config.hub_os2l_local !== '0');
+  } catch (e) {
+    console.error('Failed to load VDJ config:', e);
+  }
+}
+
 async function loadConfigPage() {
   try {
     const config = await fetch('/api/config').then(r => r.json());
@@ -493,6 +537,7 @@ async function loadConfigPage() {
     document.getElementById('cfgNowPlayingBaseUrl').value = config.now_playing_base_url || '';
     document.getElementById('cfgNowPlayingEventId').value = config.now_playing_event_id || '';
     document.getElementById('cfgNowPlayingArtwork').checked = config.now_playing_artwork !== '0';
+    syncOs2lEnabledCheckboxes(config.hub_os2l_local !== '0');
   } catch (e) {
     console.error('Failed to load config:', e);
   }
@@ -514,6 +559,7 @@ function loadActiveTabData() {
       if (dt && dt.dataset.devtab === 'audio')    loadAudioInputConfig();
     },
     os2l:            () => { loadSubscriptions(); loadButtonMaps(); },
+    vdj:             () => loadVdjConfig(),
     lighting:        () => loadLightingConfig(),
     movers:          () => loadMoverConfig(),
     sequencer:       () => { loadSequencerConfig(); const st = document.querySelector('.seq-tab-btn.active'); if (st && _seqGenTabs.has(st.dataset.seqtab)) loadGeneratorConfig(); },
@@ -525,6 +571,7 @@ function loadActiveTabData() {
     about:           () => loadAboutInfo(),
     midi:            () => { loadMidiStatus(); loadMidiMappings(); },
     companion:       () => loadCompanionExportDefaults(),
+    satellites:      () => loadSatelliteConfig(),
   };
   if (loaders[tab]) loaders[tab]();
 }
@@ -2507,7 +2554,9 @@ document.getElementById('btnSaveArtnetRate').addEventListener('click', () => {
 });
 
 document.getElementById('btnSaveVdj').addEventListener('click', () => {
+  const os2lOn = readOs2lEnabledCheckbox();
   saveConfigBatch([
+    ['hub_os2l_local', os2lOn ? '1' : '0'],
     ['os2l_port', document.getElementById('cfgOs2lPort').value],
     ['os2l_service_name', document.getElementById('cfgOs2lServiceName').value],
     ['web_port', document.getElementById('cfgWebPort').value],
@@ -4586,6 +4635,164 @@ if (document.getElementById('btnDuplicateChannels')) document.getElementById('bt
   renderChannelsEditor(); updateDuplicateHint(); saveModeChannels(); renderModeTabs();
   document.getElementById('tDuplicateCount').value = '1';
   document.getElementById('typeError').textContent = '';
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Satellites — discovery, pairing, device approval
+// ═══════════════════════════════════════════════════════════════
+
+function _satStatusPill(status) {
+  const colors = { pending: '#f59e0b', approved: '#22c55e', rejected: '#ef4444', revoked: '#6b7280' };
+  const c = colors[status] || '#6b7280';
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;background:${c}22;color:${c}">${esc(status)}</span>`;
+}
+
+function _renderSatDeviceList(elId, items, emptyMsg) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!items?.length) {
+    showEmpty(el, emptyMsg);
+    return;
+  }
+  el.innerHTML = items.map(d => {
+    const ip = d.ip || d.host || '—';
+    const ports = [d.web_port && `web ${d.web_port}`, d.os2l_port && `os2l ${d.os2l_port}`].filter(Boolean).join(' · ');
+    const actions = d.id ? `
+      <div style="display:flex;gap:6px;margin-top:8px">
+        ${d.status === 'pending' ? `<button class="btn btn-primary btn-sm" data-sat-action="approve" data-sat-id="${d.id}">Accept</button><button class="btn btn-secondary btn-sm" data-sat-action="reject" data-sat-id="${d.id}">Reject</button>` : ''}
+        ${d.status === 'approved' ? `<button class="btn btn-secondary btn-sm" data-sat-action="revoke" data-sat-id="${d.id}">Revoke</button>` : ''}
+      </div>` : '<p style="margin:8px 0 0;font-size:11px;color:var(--text-dim)">Not paired yet — waiting for satellite to request connection</p>';
+    return `<div class="config-card" style="margin:0 0 10px;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <strong>${esc(d.name || 'Thaluxis Satellite')}</strong>
+          ${d.status ? _satStatusPill(d.status) : ''}
+          <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(ip)}${ports ? ' · ' + esc(ports) : ''}</div>
+          ${d.device_id ? `<div style="font-size:10px;color:var(--text-dim);margin-top:2px;font-family:monospace">${esc(d.device_id.slice(0, 18))}…</div>` : ''}
+        </div>
+      </div>
+      ${actions}
+    </div>`;
+  }).join('');
+}
+
+async function loadSatelliteConfig() {
+  try {
+    const [settings, discover, mdns] = await Promise.all([
+      authFetch('/api/hub/settings').then(r => r.json()),
+      authFetch('/api/hub/discover').then(r => r.json()),
+      fetch('/api/mdns/status').then(r => r.json()),
+    ]);
+
+    const hubNameEl = document.getElementById('cfgHubName');
+    const mdnsEl = document.getElementById('cfgHubMdnsHostname');
+    if (hubNameEl) hubNameEl.value = settings.hub_name || 'Thaluxis Hub';
+    if (mdnsEl) mdnsEl.value = settings.mdns_hostname || 'thaluxis';
+
+    const fqdn = (mdnsEl?.value || 'thaluxis').replace(/\.local$/i, '') + '.local';
+    const fqdnPreview = document.getElementById('cfgHubFqdnPreview');
+    if (fqdnPreview) fqdnPreview.textContent = fqdn;
+
+    const hubUrlEl = document.getElementById('cfgHubUrl');
+    if (hubUrlEl && mdns.ip) {
+      const port = mdns.web_port && mdns.web_port !== 80 ? `:${mdns.web_port}` : '';
+      hubUrlEl.textContent = `http://${mdns.ip}${port}`;
+    }
+
+    const bonjourEl = document.getElementById('cfgHubBonjourName');
+    if (bonjourEl) bonjourEl.textContent = settings.bonjour_name || 'Thaluxis-Hub';
+
+    const tokenEl = document.getElementById('cfgHubLegacyToken');
+    if (tokenEl) tokenEl.value = settings.legacy_token || '';
+
+    document.getElementById('cfgSatelliteEnabled').checked = settings.satellite_enabled !== false;
+    syncOs2lEnabledCheckboxes(settings.hub_os2l_local !== false);
+
+    const pending = discover.pending || [];
+    const approved = discover.approved || [];
+    const discovered = (discover.discovered || []).filter(d =>
+      !pending.some(p => p.device_id && p.device_id === d.device_id)
+      && !approved.some(a => a.device_id && a.device_id === d.device_id)
+    );
+
+    const pendingEl = document.getElementById('satPendingCount');
+    if (pendingEl) pendingEl.textContent = pending.length ? `(${pending.length})` : '';
+
+    _renderSatDeviceList('satPendingList', pending, 'No pending connection requests');
+    _renderSatDeviceList('satDiscoveredList', discovered, 'No Thaluxis Satellites discovered on the network');
+    _renderSatDeviceList('satApprovedList', approved, 'No approved Thaluxis Satellites yet');
+  } catch (e) {
+    console.error('Satellite config load failed:', e);
+  }
+}
+
+document.getElementById('cfgHubMdnsHostname')?.addEventListener('input', (e) => {
+  const host = e.target.value.trim().replace(/\.local$/i, '') || 'thaluxis';
+  const fqdnPreview = document.getElementById('cfgHubFqdnPreview');
+  if (fqdnPreview) fqdnPreview.textContent = host + '.local';
+});
+
+['cfgVdjOs2lEnabled', 'cfgHubOs2lLocal'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('change', (e) => {
+    syncOs2lEnabledCheckboxes(e.target.checked);
+  });
+});
+
+document.getElementById('btnSaveSatelliteSettings')?.addEventListener('click', async () => {
+  const statusEl = document.getElementById('cfgHubSaveStatus');
+  try {
+    const res = await authFetch('/api/hub/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        hub_name: document.getElementById('cfgHubName')?.value.trim() || 'Thaluxis Hub',
+        mdns_hostname: document.getElementById('cfgHubMdnsHostname')?.value.trim() || 'thaluxis',
+        satellite_enabled: document.getElementById('cfgSatelliteEnabled').checked,
+        hub_os2l_local: readOs2lEnabledCheckbox(),
+      }),
+    });
+    const data = await res.json();
+    await fetch('/api/mdns/restart', { method: 'POST' });
+    if (statusEl) {
+      statusEl.textContent = data.restart_required || 'Saved';
+      statusEl.style.color = data.restart_required ? 'var(--amber, #f59e0b)' : 'var(--green)';
+    }
+    loadSatelliteConfig();
+    setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Save failed';
+    alert('Failed to save hub settings');
+  }
+});
+
+document.getElementById('btnRegenerateHubToken')?.addEventListener('click', async () => {
+  if (!confirm('Regenerate the legacy fallback token? Existing manual satellite configs using the old token will stop working.')) return;
+  try {
+    const data = await authFetch('/api/hub/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ regenerate_token: true }),
+    }).then(r => r.json());
+    const tokenEl = document.getElementById('cfgHubLegacyToken');
+    if (tokenEl) tokenEl.value = data.legacy_token || '';
+  } catch (e) {
+    alert('Failed to regenerate token');
+  }
+});
+
+document.getElementById('btnRefreshSatellites')?.addEventListener('click', () => loadSatelliteConfig());
+
+document.getElementById('cfgpage-satellites')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-sat-action]');
+  if (!btn) return;
+  const id = btn.dataset.satId;
+  const action = btn.dataset.satAction;
+  try {
+    if (action === 'approve') await authFetch(`/api/hub/devices/${id}/approve`, { method: 'POST' });
+    else if (action === 'reject') await authFetch(`/api/hub/devices/${id}/reject`, { method: 'POST' });
+    else if (action === 'revoke') await authFetch(`/api/hub/devices/${id}`, { method: 'DELETE' });
+    loadSatelliteConfig();
+  } catch (err) {
+    alert('Action failed: ' + err.message);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

@@ -7,6 +7,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node scripts/dev-watch.js",
+    "satellite": "node satellite/server.js",
+    "satellite:dev": "node --watch satellite/server.js",
+    "satellite:service:install": "npm run service:install --prefix satellite",
+    "satellite:service:uninstall": "npm run service:uninstall --prefix satellite",
     "build": "node build.js",
     "rebuild:native": "npm rebuild better-sqlite3 ftdi-d2xx usb",
     "companion:config": "node companion/generate-config.cjs"

@@ -12,7 +12,9 @@ const path = require('path');
 
 // In pkg mode, __dirname points to the read-only snapshot; use the exe directory instead
 const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
-const DB_PATH = path.join(APP_DIR, 'dmx-controller.db');
+const DB_PATH = process.env.DMX_DB_PATH
+  ? path.resolve(process.env.DMX_DB_PATH)
+  : path.join(APP_DIR, 'dmx-controller.db');
 
 let db;
 
@@ -688,6 +690,27 @@ function init() {
   } catch (e) {
     db.exec("ALTER TABLE gobo_wheel_slots ADD COLUMN image_url TEXT DEFAULT ''");
     console.log('[DB] Migrated gobo_wheel_slots: added image_url column');
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS satellite_devices (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id   TEXT    NOT NULL UNIQUE,
+      name        TEXT    NOT NULL DEFAULT 'Thaluxis Satellite',
+      ip          TEXT    DEFAULT '',
+      web_port    INTEGER DEFAULT 8788,
+      os2l_port   INTEGER DEFAULT 8787,
+      token       TEXT    DEFAULT NULL,
+      status      TEXT    NOT NULL DEFAULT 'pending',
+      first_seen  TEXT    DEFAULT (datetime('now')),
+      last_seen   TEXT    DEFAULT (datetime('now')),
+      approved_at TEXT    DEFAULT NULL,
+      rejected_at TEXT    DEFAULT NULL
+    )
+  `);
+
+  if (!db.prepare("SELECT value FROM config WHERE key = 'hub_name'").get()) {
+    db.prepare("INSERT INTO config (key, value) VALUES ('hub_name', 'Thaluxis Hub')").run();
   }
 
   // Migrate: fixture_type_modes — create default modes for existing fixture types
@@ -4656,6 +4679,88 @@ function toggleMidiMapping(id) {
   return db.prepare('SELECT * FROM midi_mappings WHERE id = ?').get(id);
 }
 
+// ─── Satellite Devices ───────────────────────────────────────────────────────
+
+function getSatelliteDevices(status) {
+  if (status) {
+    return db.prepare('SELECT id, device_id, name, ip, web_port, os2l_port, status, first_seen, last_seen, approved_at, rejected_at FROM satellite_devices WHERE status = ? ORDER BY last_seen DESC').all(status);
+  }
+  return db.prepare('SELECT id, device_id, name, ip, web_port, os2l_port, status, first_seen, last_seen, approved_at, rejected_at FROM satellite_devices ORDER BY last_seen DESC').all();
+}
+
+function getSatelliteDevice(id) {
+  return db.prepare('SELECT id, device_id, name, ip, web_port, os2l_port, status, first_seen, last_seen, approved_at, rejected_at FROM satellite_devices WHERE id = ?').get(id) || null;
+}
+
+function getSatelliteDeviceByDeviceId(deviceId) {
+  return db.prepare('SELECT * FROM satellite_devices WHERE device_id = ?').get(deviceId) || null;
+}
+
+function upsertSatellitePairRequest({ device_id, name, ip, web_port, os2l_port }) {
+  const existing = getSatelliteDeviceByDeviceId(device_id);
+  if (existing) {
+    if (existing.status === 'approved') {
+      db.prepare(`
+        UPDATE satellite_devices SET name=?, ip=?, web_port=?, os2l_port=?, last_seen=datetime('now') WHERE device_id=?
+      `).run(name || existing.name, ip || existing.ip, web_port || existing.web_port, os2l_port || existing.os2l_port, device_id);
+      return getSatelliteDeviceByDeviceId(device_id);
+    }
+    const nextStatus = existing.status === 'revoked' || existing.status === 'rejected' ? 'pending' : existing.status;
+    db.prepare(`
+      UPDATE satellite_devices SET name=?, ip=?, web_port=?, os2l_port=?, status=?, last_seen=datetime('now'),
+        rejected_at=CASE WHEN ?= 'pending' THEN NULL ELSE rejected_at END
+      WHERE device_id=?
+    `).run(name || existing.name, ip || '', web_port || 8788, os2l_port || 8787, nextStatus, nextStatus, device_id);
+    return getSatelliteDeviceByDeviceId(device_id);
+  }
+
+  db.prepare(`
+    INSERT INTO satellite_devices (device_id, name, ip, web_port, os2l_port, status)
+    VALUES (?, ?, ?, ?, ?, 'pending')
+  `).run(device_id, name || 'Thaluxis Satellite', ip || '', web_port || 8788, os2l_port || 8787);
+  return getSatelliteDeviceByDeviceId(device_id);
+}
+
+function approveSatelliteDevice(id) {
+  const crypto = require('crypto');
+  const device = getSatelliteDevice(id);
+  if (!device) return null;
+  const token = crypto.randomBytes(24).toString('hex');
+  db.prepare(`
+    UPDATE satellite_devices SET status='approved', token=?, approved_at=datetime('now'), rejected_at=NULL, last_seen=datetime('now')
+    WHERE id=?
+  `).run(token, id);
+  return getSatelliteDeviceByDeviceId(device.device_id);
+}
+
+function rejectSatelliteDevice(id) {
+  db.prepare(`
+    UPDATE satellite_devices SET status='rejected', token=NULL, rejected_at=datetime('now'), last_seen=datetime('now')
+    WHERE id=?
+  `).run(id);
+  return getSatelliteDevice(id);
+}
+
+function revokeSatelliteDevice(id) {
+  db.prepare(`
+    UPDATE satellite_devices SET status='revoked', token=NULL, last_seen=datetime('now')
+    WHERE id=?
+  `).run(id);
+  return getSatelliteDevice(id);
+}
+
+function validateSatelliteDeviceAuth(deviceId, token) {
+  if (!deviceId || !token) return null;
+  const device = getSatelliteDeviceByDeviceId(deviceId);
+  if (!device || device.status !== 'approved' || device.token !== token) return null;
+  return device;
+}
+
+function touchSatelliteDevice(deviceId, ip) {
+  db.prepare(`UPDATE satellite_devices SET last_seen=datetime('now'), ip=COALESCE(?, ip) WHERE device_id=?`)
+    .run(ip || null, deviceId);
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -4696,4 +4801,7 @@ module.exports = {
   getTouchActions, getTouchAction, createTouchAction, updateTouchAction, deleteTouchAction, bulkUpdateTouchActions,
   getSequenceTemplates, getSequenceTemplate, createSequenceTemplate, updateSequenceTemplate, deleteSequenceTemplate, setDefaultSequenceTemplate,
   getMidiMappings, getEnabledMidiMappings, getMidiMapping, createMidiMapping, updateMidiMapping, deleteMidiMapping, toggleMidiMapping,
+  getSatelliteDevices, getSatelliteDevice, getSatelliteDeviceByDeviceId,
+  upsertSatellitePairRequest, approveSatelliteDevice, rejectSatelliteDevice, revokeSatelliteDevice,
+  validateSatelliteDeviceAuth, touchSatelliteDevice,
 };

@@ -64,6 +64,9 @@
     <button class="config-sidebar-btn" data-cfgtab="os2l">
       <span class="sidebar-icon">&#9889;</span> OS2L
     </button>
+    <button class="config-sidebar-btn" data-cfgtab="satellites">
+      <span class="sidebar-icon">&#128225;</span> Thaluxis Satellites
+    </button>
 
     <span class="sidebar-group-label">Lighting</span>
     <button class="config-sidebar-btn" data-cfgtab="lighting">
@@ -412,6 +415,11 @@
         <p class="config-desc">Settings for the VirtualDJ connection, OS2L integration, and database paths.</p>
         <div class="config-card">
           <h4>OS2L Connection</h4>
+          <div class="config-row">
+            <label>Enable VirtualDJ link</label>
+            <input type="checkbox" id="cfgVdjOs2lEnabled" style="width:16px;height:16px;accent-color:var(--accent)" checked>
+            <span class="config-hint">Accept OS2L from VirtualDJ on this machine. Uncheck if using a <strong>Thaluxis Satellite</strong> on another laptop. Restart required.</span>
+          </div>
           <div class="config-row"><label>OS2L TCP Port</label><input type="number" id="cfgOs2lPort" value="8787" style="width:100px"><span class="config-hint">Default: 8787</span></div>
           <div class="config-row"><label>Service Name</label><input type="text" id="cfgOs2lServiceName" value="DMX-Controller" style="width:200px"><span class="config-hint">mDNS/Bonjour service name</span></div>
           <div class="config-row"><label>Web UI Port</label><input type="number" id="cfgWebPort" value="80" style="width:100px"><span class="config-hint">Restart required on change</span></div>
@@ -499,6 +507,77 @@
             </tr></thead>
             <tbody id="btnMapsTableBody"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Thaluxis Satellites ═══ -->
+    <div class="config-sub-page" id="cfgpage-satellites">
+      <div class="config-section">
+        <h3><span class="section-icon">&#128225;</span> Thaluxis Hub &amp; Satellites</h3>
+        <p class="config-desc">Configure this machine as the <strong>Thaluxis Hub</strong> and manage <strong>Thaluxis Satellite</strong> nodes on VirtualDJ laptops. Satellites analyze tracks locally and sync to this hub over the LAN.</p>
+
+        <div class="config-card">
+          <h4>Thaluxis Hub</h4>
+          <div class="config-row">
+            <label>Hub name</label>
+            <input type="text" id="cfgHubName" placeholder="Thaluxis Hub" style="width:100%;max-width:320px">
+            <span class="config-hint">Display name shown to satellites (Bonjour name updates after restart)</span>
+          </div>
+          <div class="config-row">
+            <label>mDNS hostname</label>
+            <input type="text" id="cfgHubMdnsHostname" placeholder="thaluxis" style="width:160px">
+            <span class="config-hint">LAN hostname — e.g. <code id="cfgHubFqdnPreview">thaluxis.local</code></span>
+          </div>
+          <div class="config-row">
+            <label>Hub URL</label>
+            <span id="cfgHubUrl" style="font-size:12px;font-family:monospace;color:var(--accent)">—</span>
+            <span class="config-hint">Used by satellites if manual setup is needed</span>
+          </div>
+          <div class="config-row">
+            <label>Bonjour name</label>
+            <span id="cfgHubBonjourName" style="font-size:12px;color:var(--text-dim)">—</span>
+          </div>
+          <div class="config-row">
+            <label>Enable Thaluxis Satellites</label>
+            <input type="checkbox" id="cfgSatelliteEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span class="config-hint">Allow satellite nodes to pair and sync</span>
+          </div>
+          <div class="config-row">
+            <label>Local OS2L on hub</label>
+            <input type="checkbox" id="cfgHubOs2lLocal" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span class="config-hint">Same as <strong>VirtualDJ → Enable VirtualDJ link</strong>. Uncheck if VDJ connects to a Thaluxis Satellite. Restart required.</span>
+          </div>
+          <div class="config-row">
+            <label>Legacy fallback token</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="cfgHubLegacyToken" readonly style="width:100%;max-width:420px;font-family:monospace;font-size:11px">
+              <button class="btn btn-secondary btn-sm" id="btnRegenerateHubToken" type="button">Regenerate</button>
+            </div>
+            <span class="config-hint">Optional shared token — normal setup uses per-device pairing instead</span>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary btn-sm" id="btnSaveSatelliteSettings">Save hub settings</button>
+            <button class="btn btn-secondary btn-sm" id="btnRefreshSatellites">Refresh devices</button>
+            <span id="cfgHubSaveStatus" style="font-size:11px;color:var(--text-dim)"></span>
+          </div>
+        </div>
+
+        <div class="config-card" style="margin-top:16px">
+          <h4>Pending connections <span id="satPendingCount" style="font-size:12px;color:var(--text-dim)"></span></h4>
+          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellite nodes waiting for approval. Click <strong>Accept</strong> to authorize analysis sync and OS2L forwarding.</p>
+          <div id="satPendingList" class="sat-device-list"></div>
+        </div>
+
+        <div class="config-card" style="margin-top:16px">
+          <h4>Discovered on network</h4>
+          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellites seen via mDNS that may not have requested pairing yet.</p>
+          <div id="satDiscoveredList" class="sat-device-list"></div>
+        </div>
+
+        <div class="config-card" style="margin-top:16px">
+          <h4>Approved Thaluxis Satellites</h4>
+          <div id="satApprovedList" class="sat-device-list"></div>
         </div>
       </div>
     </div>
