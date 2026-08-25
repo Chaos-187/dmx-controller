@@ -84,6 +84,16 @@ function usePaletteColors(data, params) {
   return getEffectPaletteRgb(data, params) != null;
 }
 
+function useHslColors(data, params) {
+  const mode = params.color_mode != null ? params.color_mode : data.color_mode;
+  return mode === 'hsl';
+}
+
+/** Palette stops or full HSL spectrum (Touch3 / live "Rainbow" preset). */
+function useSpectrumColors(data, params) {
+  return usePaletteColors(data, params) || useHslColors(data, params);
+}
+
 /** phase in [0,1): linear blend along palette stops (wraps last → first). */
 function rgbAtPalettePhase(phase, palette) {
   const n = palette.length;
@@ -130,16 +140,24 @@ function multicellColorOutput(channelType, brightness, baseValues, data, params,
   if (channelType === 'dimmer') return Math.round(255 * b);
   if (!COLOR_CHANNELS.has(channelType)) return null;
 
+  const phase = colorPhase != null ? ((colorPhase % 1) + 1) % 1 : 0;
   const palette = getEffectPaletteRgb(data, params);
   if (usePaletteColors(data, params) && palette) {
     if (channelType === 'red' || channelType === 'green' || channelType === 'blue') {
-      const phase = colorPhase != null ? ((colorPhase % 1) + 1) % 1 : 0;
       const [r, g, bl] = rgbAtPalettePhase(phase, palette);
       if (channelType === 'red') return Math.round(r * b);
       if (channelType === 'green') return Math.round(g * b);
       if (channelType === 'blue') return Math.round(bl * b);
     }
     if (channelType === 'white') return Math.round(255 * b);
+  } else if (useHslColors(data, params)) {
+    if (channelType === 'red' || channelType === 'green' || channelType === 'blue') {
+      const [r, g, bl] = hslToRgb(phase, 1, 0.5);
+      if (channelType === 'red') return Math.round(r * b);
+      if (channelType === 'green') return Math.round(g * b);
+      if (channelType === 'blue') return Math.round(bl * b);
+    }
+    if (channelType === 'white') return 0;
   }
 
   const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 255;
@@ -815,6 +833,13 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
         if (channelType === 'blue') return b;
         return null;
       }
+      if (useHslColors(data, params)) {
+        const [r, g, b] = hslToRgb(gradPos, 1, 0.5);
+        if (channelType === 'red') return r;
+        if (channelType === 'green') return g;
+        if (channelType === 'blue') return b;
+        return null;
+      }
 
       const colors = data.colors || ['#ff0000', '#0000ff'];
       const segmentCount = colors.length - 1;
@@ -980,7 +1005,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (dist <= halfW) brightness = 1;
       else if (tail > 0 && dist <= halfW + tail) brightness = 1 - (dist - halfW) / tail;
 
-      if (usePaletteColors(data, params)) {
+      if (useSpectrumColors(data, params)) {
         const out = rigSpatialColorOutput(channelType, brightness, baseValues, data, params, pos);
         if (out !== null) return out;
       }
@@ -1037,7 +1062,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const intensity = Math.max(0, 1 - dist / width);
       const smooth = intensity > 0 ? (Math.cos((1 - intensity) * Math.PI) + 1) / 2 : 0;
 
-      if (usePaletteColors(data, params)) {
+      if (useSpectrumColors(data, params)) {
         const out = rigSpatialColorOutput(channelType, smooth, baseValues, data, params, rigPos);
         if (out !== null) return out;
       }
@@ -1060,7 +1085,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const brightness = active ? 1 : 0;
       const colorPhase = fixtureCount > 1 ? rigOrder / (fixtureCount - 1) : 0;
 
-      if (usePaletteColors(data, params)) {
+      if (useSpectrumColors(data, params)) {
         const out = rigSpatialColorOutput(channelType, brightness, baseValues, data, params, colorPhase);
         if (out !== null) return out;
       }
@@ -1092,7 +1117,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (dist <= width / 2) brightness = 1;
       else if (dist <= width) brightness = 1 - (dist - width / 2) / (width / 2);
 
-      if (usePaletteColors(data, params)) {
+      if (useSpectrumColors(data, params)) {
         const out = rigSpatialColorOutput(channelType, brightness, baseValues, data, params, rigPos);
         if (out !== null) return out;
       }
@@ -1149,7 +1174,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       if (dist <= halfW) brightness = 1;
       else if (tail > 0 && dist <= halfW + tail) brightness = 1 - (dist - halfW) / tail;
 
-      if (usePaletteColors(data, params)) {
+      if (useSpectrumColors(data, params)) {
         const out = rigSpatialColorOutput(channelType, brightness, baseValues, data, params, depth);
         if (out !== null) return out;
       }
@@ -1212,7 +1237,7 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       else if (tail > 0 && dist <= halfW + tail) brightness = 1 - (dist - halfW) / tail;
 
       const colorPhase = N > 1 ? orderToUse / (N - 1) : 0;
-      if (usePaletteColors(data, params)) {
+      if (useSpectrumColors(data, params)) {
         const out = rigSpatialColorOutput(channelType, brightness, baseValues, data, params, colorPhase);
         if (out !== null) return out;
       }
