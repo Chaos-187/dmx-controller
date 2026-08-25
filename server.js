@@ -464,23 +464,7 @@ function handleOs2lSubscribed(data) {
               const deckTrack = state.decks[regenDeck]?.track_id;
               if (deckTrack !== regenTrackId) return;
               if (seqAutoLoad) {
-                touchOverrides.os2lOverrideFixtures.clear();
-                touchOverrides.colorOverrideFixtures.clear();
-                touchOverrides.movementOverrideFixtures.clear();
-                touchOverrides.smokeOverrideFixtures.clear();
-                touchOverrides.atmosphereOverrideFixtures.clear();
-                clearSequenceColorOverride();
-                clearSequenceBlockingOverrides();
-                deactivateScene();
-                stopPlaybackTimer(regenDeck);
-                blackoutDeckFixtures(regenDeck);
-                activeSequences[regenDeck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-                broadcast({ type: 'seq_loaded', deck: regenDeck, sequence: sequenceForClient(generatedSeq) });
-                const deckPlayState = state.decks[regenDeck] && state.decks[regenDeck].play;
-                const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
-                if (deckIsPlaying) {
-                  startSequencePlayback(regenDeck);
-                }
+                loadGeneratedSequenceOntoDeck(regenDeck, generatedSeq, regenTrackId);
               }
             } catch (e) {
               console.error(`[SEQ] Stale auto-regenerate failed for track ${regenTrackId}:`, e.message);
@@ -491,6 +475,16 @@ function handleOs2lSubscribed(data) {
 
         // Auto-generate sequence if none exists and feature is enabled
         if (!seq && track && seqAutoGenerate) {
+          // Only pause/unload when the deck is not playing (avoid interrupting live output)
+          if (!isDeckPlaying(deck)) {
+            pauseSequenceOutput(deck);
+            if (seqAutoUnload && activeSequences[deck]) {
+              stopPlaybackTimer(deck);
+              blackoutDeckFixtures(deck);
+              delete activeSequences[deck];
+              broadcast({ type: 'seq_unloaded', deck });
+            }
+          }
           (async () => {
             try {
               console.log(`[SEQ] Auto-generating sequence for track ${track.id} ("${track.title || track.filename}")...`);
@@ -569,6 +563,7 @@ function handleOs2lSubscribed(data) {
                 },
               );
               if (!result.sequence) return;
+              if (state.decks[deck]?.track_id !== track.id) return;
               const generatedSeq = result.sequence;
               broadcast({
                 type: 'seq_generated',
@@ -579,28 +574,8 @@ function handleOs2lSubscribed(data) {
 
               // Now auto-load if enabled
               if (seqAutoLoad) {
-                // Clear any OS2L button overrides so the new sequence controls all fixtures
-                touchOverrides.os2lOverrideFixtures.clear();
-                touchOverrides.colorOverrideFixtures.clear();
-                touchOverrides.movementOverrideFixtures.clear();
-                touchOverrides.smokeOverrideFixtures.clear();
-                touchOverrides.atmosphereOverrideFixtures.clear();
-                clearSequenceColorOverride();
-                clearSequenceBlockingOverrides();
-                deactivateScene(); // Stop any scene effect loop from end-action
-                stopPlaybackTimer(deck);
-                blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
-                activeSequences[deck] = { sequence: generatedSeq, cuesByStart: sortCuesByStart(generatedSeq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-                broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+                loadGeneratedSequenceOntoDeck(deck, generatedSeq, track.id);
                 console.log(`[SEQ] Auto-loaded generated sequence on deck ${deck} (duration=${generatedSeq.duration_ms}ms)`);
-
-                // Always start playback after auto-generation. The generation
-                // was triggered by a track-load event, so the deck is active.
-                // Play state may be stale (VDJ sent play:0 for the old track
-                // during async generation). If the deck truly isn't playing,
-                // the play sync handler will pause on the next play:0 event.
-                startSequencePlayback(deck);
-                console.log(`[SEQ] Auto-playing generated sequence on deck ${deck}`);
               }
             } catch (ge) {
               console.error(`[SEQ] Auto-generate failed for track ${track ? track.id : '?'}: ${ge.message}`);
@@ -612,33 +587,9 @@ function handleOs2lSubscribed(data) {
         }
 
         if (seq && seqAutoLoad) {
-          // Auto-load the matched sequence onto this deck
-          // Clear any OS2L button overrides so the new sequence controls all fixtures
           seq.cues = db.getSequenceCues(seq.id);
-          touchOverrides.os2lOverrideFixtures.clear();
-          touchOverrides.colorOverrideFixtures.clear();
-          touchOverrides.movementOverrideFixtures.clear();
-          touchOverrides.smokeOverrideFixtures.clear();
-          touchOverrides.atmosphereOverrideFixtures.clear();
-          clearSequenceColorOverride();
-          clearSequenceBlockingOverrides();
-          deactivateScene(); // Stop any scene effect loop from end-action
-          stopPlaybackTimer(deck);
-          blackoutDeckFixtures(deck); // Zero all old fixture channels before swapping sequence
-          activeSequences[deck] = { sequence: seq, cuesByStart: sortCuesByStart(seq.cues), lastTimeMs: -1, playing: false, currentTimeMs: 0, vdjDriven: false };
-          broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(seq) });
+          loadGeneratedSequenceOntoDeck(deck, seq, track?.id);
           console.log(`[SEQ] Auto-loaded sequence "${seq.name}" on deck ${deck} (duration=${seq.duration_ms}ms)`);
-
-          // Always start playback if the deck is currently playing
-          const deckPlayState = state.decks[deck] && state.decks[deck].play;
-          const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
-          console.log(`[SEQ] Deck ${deck} play state: ${JSON.stringify(deckPlayState)} → deckIsPlaying=${deckIsPlaying}`);
-          if (deckIsPlaying) {
-            startSequencePlayback(deck);
-            console.log(`[SEQ] Auto-playing sequence on deck ${deck}`);
-          } else {
-            console.log(`[SEQ] Deck ${deck} is not playing — sequence loaded but not started`);
-          }
         } else if (seqAutoUnload && activeSequences[deck]) {
           // No matching sequence — unload the current one
           stopPlaybackTimer(deck);
@@ -706,9 +657,22 @@ function handleOs2lSubscribed(data) {
     // Drive sequence playback engine on VDJ time updates (VDJ sends time in ms)
     if (key === 'time' && typeof value === 'number') {
       vdjTimeLastAt[deck] = Date.now();
-      if (activeSequences[deck]) {
-        activeSequences[deck].vdjDriven = true;
-        activeSequences[deck].currentTimeMs = value;
+      const ds = activeSequences[deck];
+      if (ds) {
+        ds.vdjDriven = true;
+        ds.currentTimeMs = value;
+        const seqDur = ds.sequence?.duration_ms;
+        // Seeked back before sequence end — allow playback to resume
+        if (ds._endActionApplied && typeof seqDur === 'number' && seqDur > 0 && value < seqDur - 2000) {
+          ds._endActionApplied = false;
+        }
+        // Resume output if sequence was loaded but not yet playing — never restart after end
+        const pastEnd = typeof seqDur === 'number' && seqDur > 0 && value >= seqDur;
+        if (!ds.playing && isDeckPlaying(deck) && !ds._endActionApplied && !pastEnd) {
+          ds.playing = true;
+          if (!shouldUseVdjTime(deck)) startPlaybackTimer(deck);
+          broadcast({ type: 'seq_playing', deck, playing: true });
+        }
       }
       processSequenceAtTime(deck, value);
     }
@@ -3902,6 +3866,126 @@ function refreshMixerConfig() {
 // Refresh on startup after DB is ready
 try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ }
 
+function isDeckPlaying(deck) {
+  const ps = state.decks[deck]?.play;
+  return ps === 1 || ps === true || ps === 'on';
+}
+
+/** True when this deck has received OS2L time recently (local VDJ or satellite forward). */
+function os2lTimeIsActive(deck) {
+  return Date.now() - (vdjTimeLastAt[deck] || 0) < 2000;
+}
+
+/** Prefer VDJ playhead when hub has local OS2L or time is actively flowing. */
+function shouldUseVdjTime(deck) {
+  return isHubOs2lLocal() || os2lTimeIsActive(deck);
+}
+
+function normalizeTrackPath(p) {
+  return String(p || '').replace(/\//g, '\\').toLowerCase();
+}
+
+function deckPathMatchesTrack(deck, trackId) {
+  if (!trackId) return false;
+  const deckPath = state.decks[deck]?.filepath;
+  if (!deckPath) return false;
+  const track = db.getTrack(trackId);
+  if (!track?.filepath) return false;
+  return normalizeTrackPath(deckPath) === normalizeTrackPath(track.filepath);
+}
+
+function deckHasTrack(deck, trackId) {
+  if (state.decks[deck]?.track_id === trackId) return true;
+  return deckPathMatchesTrack(deck, trackId);
+}
+
+/** Stop sequence output on a deck without unloading (e.g. while generating a new sequence). */
+function pauseSequenceOutput(deck) {
+  const ds = activeSequences[deck];
+  if (!ds || !ds.playing) return;
+  ds.playing = false;
+  stopPlaybackTimer(deck);
+  blackoutDeckFixtures(deck);
+  broadcast({ type: 'seq_playing', deck, playing: false });
+}
+
+/**
+ * Defer playback start briefly so a stale play=1 from the previous track
+ * can clear before we output DMX (avoids stutter on cued/unplayed decks).
+ */
+function scheduleSequencePlaybackIfPlaying(deck, trackId, delayMs = 250) {
+  setTimeout(() => {
+    if (trackId != null && state.decks[deck]?.track_id !== trackId) return;
+    if (!isDeckPlaying(deck)) return;
+    const ds = activeSequences[deck];
+    if (!ds || ds.playing) return;
+    startSequencePlayback(deck);
+  }, delayMs);
+}
+
+/**
+ * Load a generated sequence onto a deck.
+ * Playing decks hot-swap without blackout or pausing playback.
+ */
+function loadGeneratedSequenceOntoDeck(deck, generatedSeq, trackId) {
+  touchOverrides.os2lOverrideFixtures.clear();
+  touchOverrides.colorOverrideFixtures.clear();
+  touchOverrides.movementOverrideFixtures.clear();
+  touchOverrides.smokeOverrideFixtures.clear();
+  touchOverrides.atmosphereOverrideFixtures.clear();
+  clearSequenceColorOverride();
+  clearSequenceBlockingOverrides();
+
+  const deckIsPlaying = isDeckPlaying(deck);
+  const existing = activeSequences[deck];
+  // Satellite forwards OS2L after sync — treat matching filepath as live even before play sync
+  const satelliteDeckLive = !isHubOs2lLocal() && deckPathMatchesTrack(deck, trackId);
+  const keepOutput = deckIsPlaying || satelliteDeckLive;
+
+  if (keepOutput) {
+    if (existing) {
+      existing.sequence = generatedSeq;
+      existing.cuesByStart = sortCuesByStart(generatedSeq.cues);
+      existing.lastTimeMs = -1;
+      existing._endActionApplied = false;
+    } else {
+      const timeMs = typeof state.decks[deck]?.time === 'number' && state.decks[deck].time >= 0
+        ? state.decks[deck].time : 0;
+      activeSequences[deck] = {
+        sequence: generatedSeq,
+        cuesByStart: sortCuesByStart(generatedSeq.cues),
+        lastTimeMs: -1,
+        playing: false,
+        currentTimeMs: timeMs,
+        vdjDriven: shouldUseVdjTime(deck),
+      };
+    }
+    broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+    const ds = activeSequences[deck];
+    if (ds.playing) {
+      processSequenceAtTime(deck, ds.currentTimeMs ?? state.decks[deck]?.time ?? 0);
+    } else if (deckIsPlaying && (os2lTimeIsActive(deck) || shouldUseVdjTime(deck))) {
+      startSequencePlayback(deck);
+    } else if (deckIsPlaying || satelliteDeckLive) {
+      scheduleSequencePlaybackIfPlaying(deck, trackId, satelliteDeckLive ? 500 : 250);
+    }
+    return;
+  }
+
+  deactivateScene();
+  stopPlaybackTimer(deck);
+  blackoutDeckFixtures(deck);
+  activeSequences[deck] = {
+    sequence: generatedSeq,
+    cuesByStart: sortCuesByStart(generatedSeq.cues),
+    lastTimeMs: -1,
+    playing: false,
+    currentTimeMs: 0,
+    vdjDriven: false,
+  };
+  broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+}
+
 /** Begin sequence playback after load/generation — seeds playhead and emits DMX immediately. */
 function startSequencePlayback(deck) {
   const ds = activeSequences[deck];
@@ -3911,7 +3995,7 @@ function startSequencePlayback(deck) {
   const timeMs = typeof deckTime === 'number' && deckTime >= 0 ? deckTime : (ds.currentTimeMs || 0);
   ds.currentTimeMs = timeMs;
   ds.playing = true;
-  ds.vdjDriven = false; // standalone timer until OS2L time events take over
+  ds.vdjDriven = shouldUseVdjTime(deck);
   ds._endActionApplied = false;
 
   startPlaybackTimer(deck);
@@ -3938,7 +4022,9 @@ function startPlaybackTimer(deck) {
     if (ds.vdjDriven) {
       const lastAt = vdjTimeLastAt[deck] || 0;
       if (Date.now() - lastAt < 500) return;
-      // No recent VDJ time (e.g. satellite OS2L gap) — fall back to internal clock
+      // Local OS2L always waits for VDJ — never advance an internal clock
+      if (isHubOs2lLocal()) return;
+      // No recent VDJ time (satellite OS2L gap) — fall back to internal clock
       ds.vdjDriven = false;
       ds.startWall = Date.now();
       ds.startOffset = ds.currentTimeMs || 0;
@@ -5060,35 +5146,11 @@ function autoLoadSequenceForTrack(trackId, generatedSeq) {
   if (!seqAutoLoad || !generatedSeq) return;
 
   for (let deck = 1; deck <= 4; deck++) {
-    if (state.decks[deck]?.track_id !== trackId) continue;
+    if (!deckHasTrack(deck, trackId)) continue;
+    if (!state.decks[deck]?.track_id) state.decks[deck].track_id = trackId;
 
-    touchOverrides.os2lOverrideFixtures.clear();
-    touchOverrides.colorOverrideFixtures.clear();
-    touchOverrides.movementOverrideFixtures.clear();
-    touchOverrides.smokeOverrideFixtures.clear();
-    touchOverrides.atmosphereOverrideFixtures.clear();
-    clearSequenceColorOverride();
-    clearSequenceBlockingOverrides();
-    deactivateScene();
-    stopPlaybackTimer(deck);
-    blackoutDeckFixtures(deck);
-
-    activeSequences[deck] = {
-      sequence: generatedSeq,
-      cuesByStart: sortCuesByStart(generatedSeq.cues),
-      lastTimeMs: -1,
-      playing: false,
-      currentTimeMs: 0,
-      vdjDriven: false,
-    };
-    broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+    loadGeneratedSequenceOntoDeck(deck, generatedSeq, trackId);
     console.log(`[SEQ] Auto-loaded sequence on deck ${deck} after satellite analysis`);
-
-    const deckPlayState = state.decks[deck]?.play;
-    const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
-    if (deckIsPlaying) {
-      startSequencePlayback(deck);
-    }
   }
 }
 

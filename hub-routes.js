@@ -100,9 +100,15 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   if (!track) return null;
 
   const existing = db.getSequenceByTrackId(trackId);
-  const overwrite = source === 'satellite' || !existing;
-  if (existing && !overwrite) {
-    return { sequence: existing, cue_count: db.getSequenceCues(existing.id)?.length || 0, skipped: 'exists' };
+  if (existing) {
+    const regenStale = db.getConfig('seq_auto_regenerate_stale') === '1';
+    const stale = regenStale && db.isSequenceFixtureStale(existing);
+    if (!stale) {
+      const cue_count = db.getSequenceCues(existing.id)?.length || 0;
+      console.log(`[Hub] Sequence already exists for track ${trackId} "${existing.name}" (${cue_count} cues) — skipping auto-generate (${source})`);
+      onSequenceGenerated?.(trackId, { sequence: existing, cue_count, skipped: 'exists' });
+      return { sequence: existing, cue_count, skipped: 'exists' };
+    }
   }
 
   const analysis = db.getTrackAnalysis(trackId);
@@ -111,7 +117,7 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   try {
     const fixtures = db.getFixtureChannelMap();
     const result = await generateSequenceForTrack(track, {
-      overwrite,
+      overwrite: !!existing,
       fixtures,
       analysis,
       skipAnalysis: true,
@@ -352,6 +358,7 @@ router.post('/tracks/sync', (req, res) => {
   const seq = db.getSequenceByTrackId(hubTrack.id);
   const currentVersion = audioAnalyzer?.ANALYSIS_VERSION || 0;
   const hasAnalysis = analysis && (analysis.analysis_version || 0) >= currentVersion;
+  const cueCount = seq ? (db.getSequenceCues(seq.id)?.length || 0) : 0;
 
   res.json({
     track_id: hubTrack.id,
@@ -361,6 +368,8 @@ router.post('/tracks/sync', (req, res) => {
     needs_analysis: !hasAnalysis,
     has_sequence: !!seq,
     sequence_id: seq?.id || null,
+    sequence_name: seq?.name || null,
+    sequence_cue_count: cueCount,
   });
 });
 
@@ -391,7 +400,8 @@ router.post('/tracks/:id/analysis', async (req, res) => {
     has_sequence: !!seq,
     sequence_id: seq?.id || null,
     sequence_generated: !!(seqResult?.sequence && !seqResult?.skipped),
-    cue_count: seqResult?.cue_count || null,
+    sequence_skipped: seqResult?.skipped || null,
+    cue_count: seqResult?.cue_count || (seq ? db.getSequenceCues(seq.id)?.length : null),
   });
 });
 

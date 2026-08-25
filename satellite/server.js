@@ -231,14 +231,15 @@ async function resyncHubAfterReconnect() {
     });
   }
 
-  for (const item of items) {
-    await syncTrackToHub(item.localTrack, item.filePath, item.deckNum, { resync: true });
-  }
-
+  // Forward play/time/filepath first so hub can load sequences without blacking out
   for (let deck = 1; deck <= 4; deck++) {
     if (state.decks[deck]?.filepath) {
       await forwardDeckStateToHub(deck);
     }
+  }
+
+  for (const item of items) {
+    await syncTrackToHub(item.localTrack, item.filePath, item.deckNum, { resync: true });
   }
 
   console.log(`[Satellite] Hub resync complete (${items.length} track(s), deck state forwarded)`);
@@ -433,7 +434,9 @@ async function analyzeAndPush(localTrack, filePath, deckNum) {
         state.stats.analyses_pushed++;
         const seqNote = push.data?.sequence_generated
           ? `, sequence generated (${push.data.cue_count || '?'} cues)`
-          : (push.data?.has_sequence ? ', sequence already on hub' : '');
+          : (push.data?.sequence_skipped === 'exists'
+            ? `, sequence already on hub (${push.data.cue_count || '?'} cues)`
+            : (push.data?.has_sequence ? ', sequence already on hub' : ''));
         console.log(`[Satellite] Pushed analysis to hub for track ${hubTrackId}${seqNote}`);
       } else {
         state.stats.analyze_errors++;
@@ -485,8 +488,11 @@ async function syncTrackToHub(localTrack, filePath, deckNum, { resync = false } 
 
   if (res.data.needs_analysis) {
     await analyzeAndPush(localTrack, filePath, deckNum);
-  } else if (resync) {
+  } else if (resync && !res.data.has_sequence && res.data.has_analysis) {
+    // Hub has analysis but no sequence yet — push to trigger generation
     await pushLocalAnalysisToHub(localTrack, hubTrackId);
+  } else if (res.data.has_sequence) {
+    console.log(`[Satellite] Hub already has sequence for track ${hubTrackId}${res.data.sequence_name ? ` ("${res.data.sequence_name}")` : ''}${res.data.sequence_cue_count ? ` (${res.data.sequence_cue_count} cues)` : ''}`);
   }
 }
 
