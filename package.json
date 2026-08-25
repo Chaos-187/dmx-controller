@@ -13,6 +13,7 @@
     "satellite:service:uninstall": "npm run service:uninstall --prefix satellite",
     "build": "node build.js",
     "rebuild:native": "npm rebuild better-sqlite3 ftdi-d2xx usb",
+    "rebuild:native:dev": "node scripts/rebuild-native-dev.js",
     "companion:config": "node companion/generate-config.cjs"
   },
   "pkg": {
@@ -40,6 +41,9 @@
       "node24-win-x64"
     ],
     "outputPath": "dist"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
