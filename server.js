@@ -51,6 +51,7 @@ const stemSeparator  = require('./stem-separator');
 const os2l = require('./os2l');
 const midiController = require('./midi-controller');
 const fixtureLibrary = require('./fixture-library');
+const networkUtils = require('./network-utils');
 const { WebUSB } = require('usb');
 const {
   pseudoRandom, hslToRgb, computeEffectValue, sequenceEffectProgress, isFixtureCompatibleWithEffect,
@@ -553,6 +554,11 @@ function handleOs2lSubscribed(data) {
               let fbPos = track.beatgrid_pos || 0;
               if (!fbPos && liveFirstbeat > 0) {
                 fbPos = liveFirstbeat > 60 ? liveFirstbeat / 1000 : liveFirstbeat;
+              }
+
+              if (!analysis && !fileExists) {
+                console.log(`[SEQ] No analysis and no local audio for "${track.title || track.filename}" — waiting for satellite analysis`);
+                return;
               }
 
               const result = await sequenceRoutes.generateSequenceForTrack(
@@ -1656,36 +1662,88 @@ app.post('/api/generator-config/reset', (req, res) => {
 
 app.get('/api/mdns/status', (req, res) => {
   const hostname = getMdnsHostname();
+  const getNetCfg = (k) => db.getConfig(k);
+  const advertiseIface = networkUtils.getAdvertiseInterface(getNetCfg);
   res.json({
     enabled: db.getConfig('mdns_enabled') !== '0',
     hostname: hostname,
     fqdn: hostname + '.local',
-    ip: getLocalIPv4(),
+    ip: networkUtils.getLocalIPv4(getNetCfg),
+    network_interface: db.getConfig('network_interface') || 'auto',
+    network_bind: db.getConfig('network_bind') || '0.0.0.0',
+    interface_name: advertiseIface.name,
+    interface_address: advertiseIface.address,
+    bind_host: networkUtils.getBindHost(getNetCfg),
     web_port: WEB_PORT,
     os2l_port: OS2L_PORT,
     responder_active: !!mdnsResponder,
   });
 });
 
-app.post('/api/mdns/restart', (req, res) => {
+app.get('/api/network/interfaces', (req, res) => {
+  res.json({ interfaces: networkUtils.listNetworkInterfaces() });
+});
+
+function applyNetworkSettings() {
+  const getNetCfg = (k) => db.getConfig(k);
+  const bindHost = networkUtils.getBindHost(getNetCfg);
+  const ip = networkUtils.getLocalIPv4(getNetCfg);
+
+  if (mdnsResponder) {
+    mdnsResponder.destroy();
+    mdnsResponder = null;
+  }
+  startMdnsResponder();
+
+  if (bonjourInstance) {
+    try { bonjourInstance.destroy(); } catch { /* ignore */ }
+    bonjourInstance = null;
+  }
+  if (db.getConfig('mdns_enabled') !== '0') {
+    bonjourInstance = registerBonjour();
+  }
+
+  return new Promise((resolve, reject) => {
+    httpServer.close((err) => {
+      if (err) return reject(err);
+      httpServer.listen(WEB_PORT, bindHost, () => {
+        const label = bindHost === '0.0.0.0' ? 'all interfaces' : bindHost;
+        console.log(`[HTTP] Web UI listening on ${label}:${WEB_PORT} (advertised as ${ip})`);
+        if (isHubOs2lLocal()) os2l.startServer(OS2L_PORT, bindHost);
+        resolve({ bind_host: bindHost, ip });
+      });
+    });
+  });
+}
+
+app.post('/api/mdns/restart', async (req, res) => {
   try {
-    // Stop existing responder
-    if (mdnsResponder) {
-      mdnsResponder.destroy();
-      mdnsResponder = null;
-    }
     const enabled = db.getConfig('mdns_enabled') !== '0';
-    if (enabled) {
-      startMdnsResponder();
-      const hostname = getMdnsHostname();
-      console.log(`[mDNS] Restarted — responding to ${hostname}.local`);
-      res.json({ ok: true, hostname: hostname + '.local', ip: getLocalIPv4() });
-    } else {
-      console.log('[mDNS] Disabled — responder stopped');
-      res.json({ ok: true, hostname: null, ip: null });
+    if (!enabled) {
+      if (mdnsResponder) {
+        mdnsResponder.destroy();
+        mdnsResponder = null;
+      }
+      if (bonjourInstance) {
+        try { bonjourInstance.destroy(); } catch { /* ignore */ }
+        bonjourInstance = null;
+      }
     }
-  } catch(e) {
-    console.error('[mDNS] Restart failed:', e.message);
+    const result = await applyNetworkSettings();
+    const hostname = getMdnsHostname();
+    if (enabled) {
+      console.log(`[Network] Applied — ${hostname}.local → ${result.ip}, bind ${result.bind_host}`);
+    } else {
+      console.log(`[Network] Applied bind ${result.bind_host} (mDNS disabled)`);
+    }
+    res.json({
+      ok: true,
+      hostname: enabled ? hostname + '.local' : null,
+      ip: result.ip,
+      bind_host: result.bind_host,
+    });
+  } catch (e) {
+    console.error('[Network] Apply failed:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -4885,26 +4943,17 @@ wss.on('connection', (ws) => {
 
 // ─── Bonjour/mDNS Registration ─────────────────────────────────────────────
 
-function getLocalIPv4() {
-  const os = require('os');
-  const nets = os.networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) return net.address;
-    }
-  }
-  return '127.0.0.1';
-}
-
-function isHubOs2lLocal() {
-  return db.getConfig('hub_os2l_local') !== '0';
+function getNetConfig(key) {
+  return db.getConfig(key);
 }
 
 function registerBonjour() {
   try {
-    const bonjour = new Bonjour();
+    const mdnsOpts = networkUtils.getMdnsOpts(getNetConfig);
+    const bonjour = new Bonjour(mdnsOpts);
     const os2lLocal = isHubOs2lLocal();
     const bonjourName = brand.getHubBonjourName(db);
+    const advertiseIp = networkUtils.getLocalIPv4(getNetConfig);
 
     if (os2lLocal) {
       bonjour.publish({
@@ -4914,7 +4963,7 @@ function registerBonjour() {
         port: OS2L_PORT,
         txt: { txtvers: '1', product: 'Thaluxis DMX' },
       });
-      console.log(`[mDNS] Registered "${bonjourName}" as _os2l._tcp on port ${OS2L_PORT}`);
+      console.log(`[mDNS] Registered "${bonjourName}" as _os2l._tcp on port ${OS2L_PORT} (${advertiseIp})`);
     } else {
       console.log('[mDNS] Local _os2l._tcp skipped (hub_os2l_local=0 — use Thaluxis Satellite OS2L)');
     }
@@ -4926,7 +4975,7 @@ function registerBonjour() {
       port: WEB_PORT,
       txt: { path: '/', product: 'Thaluxis DMX' },
     });
-    console.log(`[mDNS] Registered "${bonjourName}" as _http._tcp on port ${WEB_PORT}`);
+    console.log(`[mDNS] Registered "${bonjourName}" as _http._tcp on port ${WEB_PORT} (${advertiseIp})`);
 
     if (db.getConfig('satellite_enabled') !== '0') {
       bonjour.publish({
@@ -4936,7 +4985,7 @@ function registerBonjour() {
         port: WEB_PORT,
         txt: { path: '/api/hub/status', role: 'hub', product: brand.getHubDisplayName(db) },
       });
-      console.log(`[mDNS] Registered "${bonjourName}" as _dmx-hub._tcp on port ${WEB_PORT}`);
+      console.log(`[mDNS] Registered "${bonjourName}" as _dmx-hub._tcp on port ${WEB_PORT} (${advertiseIp})`);
     }
 
     return bonjour;
@@ -4959,9 +5008,9 @@ function startMdnsResponder() {
     return;
   }
   try {
-    const ip = getLocalIPv4();
+    const ip = networkUtils.getLocalIPv4(getNetConfig);
     const fqdn = getMdnsHostname() + '.local';
-    mdnsResponder = mdns({ reuseAddr: true });
+    mdnsResponder = mdns(networkUtils.getMdnsOpts(getNetConfig));
     mdnsResponder.on('query', (query) => {
       for (const q of query.questions) {
         if (q.name === fqdn && q.type === 'A') {
@@ -4985,7 +5034,52 @@ function startMdnsResponder() {
   }
 }
 
+function isHubOs2lLocal() {
+  return db.getConfig('hub_os2l_local') !== '0';
+}
+
 // ─── Start Everything ───────────────────────────────────────────────────────
+
+/** Load a newly generated sequence onto any deck currently playing this track. */
+function autoLoadSequenceForTrack(trackId, generatedSeq) {
+  const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
+  if (!seqAutoLoad || !generatedSeq) return;
+
+  for (let deck = 1; deck <= 4; deck++) {
+    if (state.decks[deck]?.track_id !== trackId) continue;
+
+    touchOverrides.os2lOverrideFixtures.clear();
+    touchOverrides.colorOverrideFixtures.clear();
+    touchOverrides.movementOverrideFixtures.clear();
+    touchOverrides.smokeOverrideFixtures.clear();
+    touchOverrides.atmosphereOverrideFixtures.clear();
+    clearSequenceColorOverride();
+    clearSequenceBlockingOverrides();
+    deactivateScene();
+    stopPlaybackTimer(deck);
+    blackoutDeckFixtures(deck);
+
+    activeSequences[deck] = {
+      sequence: generatedSeq,
+      cuesByStart: sortCuesByStart(generatedSeq.cues),
+      lastTimeMs: -1,
+      playing: false,
+      currentTimeMs: 0,
+      vdjDriven: false,
+    };
+    broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+    console.log(`[SEQ] Auto-loaded sequence on deck ${deck} after satellite analysis`);
+
+    const deckPlayState = state.decks[deck]?.play;
+    const deckIsPlaying = deckPlayState === 1 || deckPlayState === true || deckPlayState === 'on';
+    if (deckIsPlaying) {
+      activeSequences[deck].playing = true;
+      activeSequences[deck].vdjDriven = true;
+      startPlaybackTimer(deck);
+      broadcast({ type: 'seq_playing', deck, playing: true });
+    }
+  }
+}
 
 // Initialise database
 db.init();
@@ -4999,6 +5093,8 @@ hubRoutes.init({
   getAnalysisConfig,
   getAnchorPoints,
   requireAuth,
+  generateSequenceForTrack: sequenceRoutes.generateSequenceForTrack,
+  onSequenceGenerated: (trackId, result) => autoLoadSequenceForTrack(trackId, result?.sequence),
 });
 
 loadTouchGroupDimmers();
@@ -5142,7 +5238,7 @@ os2l.init({
 })();
 
 if (isHubOs2lLocal()) {
-  os2l.startServer(OS2L_PORT);
+  os2l.startServer(OS2L_PORT, networkUtils.getBindHost(getNetConfig));
 } else {
   console.log('[OS2L] Local TCP server disabled — deck data expected from satellite via /api/hub/os2l');
 }
@@ -5187,14 +5283,16 @@ midiController.init({
   }
 })();
 
-httpServer.listen(WEB_PORT, () => {
-  console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT}`);
+httpServer.listen(WEB_PORT, networkUtils.getBindHost(getNetConfig), () => {
+  const bindHost = networkUtils.getBindHost(getNetConfig);
+  const label = bindHost === '0.0.0.0' ? 'all interfaces' : bindHost;
+  console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT} (bound to ${label})`);
 });
 
 // Auto-start live audio input capture if it was enabled on last run
 _applyAudioInputConfig();
 
-const bonjour = registerBonjour();
+let bonjourInstance = registerBonjour();
 startMdnsResponder();
 
 // Graceful shutdown (SIGINT = Ctrl+C, SIGTERM = node --watch restart)
@@ -5204,7 +5302,7 @@ async function shutdown() {
   await dmxUsbServer.shutdownAll();
   audioInput.capture.stop();
   if (mdnsResponder) mdnsResponder.destroy();
-  if (bonjour) bonjour.destroy();
+  if (bonjourInstance) bonjourInstance.destroy();
   midiController.stop();
   os2l.stopServer();
   httpServer.close();
@@ -5216,11 +5314,11 @@ process.on('SIGTERM', () => { shutdown().catch(console.error); });
 
 console.log(`
 ╔══════════════════════════════════════════════╗
-║          DMX Controller v1.0                 ║
+║          DMX Controller v1.2.0               ║
 ║                                              ║
 ║  OS2L:  port ${OS2L_PORT}                            ║
 ║  Web:   http://localhost:${WEB_PORT}                ║
-║  mDNS:  http://${getMdnsHostname()}.local:${WEB_PORT}         ║
+║  mDNS:  http://${getMdnsHostname()}.local:${WEB_PORT}  (${networkUtils.getLocalIPv4(getNetConfig)}) ║
 ║                                              ║
 ║  Waiting for VirtualDJ connection...         ║
 ╚══════════════════════════════════════════════╝

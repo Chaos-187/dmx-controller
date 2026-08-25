@@ -277,7 +277,10 @@ async function analyzeAndPush(localTrack, filePath, deckNum) {
       const push = await hub.pushAnalysis(hubTrackId, result);
       if (push.ok) {
         state.stats.analyses_pushed++;
-        console.log(`[Satellite] Pushed analysis to hub for track ${hubTrackId}`);
+        const seqNote = push.data?.sequence_generated
+          ? `, sequence generated (${push.data.cue_count || '?'} cues)`
+          : (push.data?.has_sequence ? ', sequence already on hub' : '');
+        console.log(`[Satellite] Pushed analysis to hub for track ${hubTrackId}${seqNote}`);
       } else {
         state.stats.analyze_errors++;
         console.warn(`[Satellite] Hub analysis push failed: ${push.data?.error}`);

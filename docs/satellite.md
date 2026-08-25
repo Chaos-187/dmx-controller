@@ -104,7 +104,7 @@ The hub matches tracks by:
 2. Path after drive letter (`E:\Music\…` ↔ `\\NAS\Music\…`)
 3. Artist + title + remix identity
 
-Keep VirtualDJ library imported on **both** hub and satellite so metadata stays aligned. The satellite pushes analysis to the hub track ID resolved after sync.
+Keep VirtualDJ library imported on **both** hub and satellite so metadata stays aligned. The satellite pushes analysis to the hub track ID resolved after sync. When **Auto-generate sequences** is enabled on the hub (Sequencer settings), the hub creates (or refreshes) the light sequence automatically when satellite analysis arrives.
 
 ## Audio files
 

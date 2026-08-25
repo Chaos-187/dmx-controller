@@ -34,6 +34,7 @@ function init(deps) {
 
   discovery.startSatelliteDiscovery((found) => {
     broadcast?.({ type: 'satellite_discovered', count: found.length });
+    broadcastSatelliteStatus();
   });
 }
 
@@ -99,7 +100,10 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   if (!track) return null;
 
   const existing = db.getSequenceByTrackId(trackId);
-  if (existing) return { sequence: existing, cue_count: db.getSequenceCues(existing.id)?.length || 0, skipped: 'exists' };
+  const overwrite = source === 'satellite' || !existing;
+  if (existing && !overwrite) {
+    return { sequence: existing, cue_count: db.getSequenceCues(existing.id)?.length || 0, skipped: 'exists' };
+  }
 
   const analysis = db.getTrackAnalysis(trackId);
   if (!analysis) return null;
@@ -107,7 +111,7 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   try {
     const fixtures = db.getFixtureChannelMap();
     const result = await generateSequenceForTrack(track, {
-      overwrite: true,
+      overwrite,
       fixtures,
       analysis,
       skipAnalysis: true,
@@ -133,6 +137,58 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   }
 }
 
+const SATELLITE_ACTIVE_MS = 3 * 60 * 1000;
+
+function parseSqliteDatetime(value) {
+  if (!value) return NaN;
+  const s = String(value).trim();
+  const iso = s.includes('T') ? s : s.replace(' ', 'T');
+  const withTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`;
+  return Date.parse(withTz);
+}
+
+function isRecentlyActive(lastSeen, maxAgeMs = SATELLITE_ACTIVE_MS) {
+  const t = parseSqliteDatetime(lastSeen);
+  return !Number.isNaN(t) && (Date.now() - t) < maxAgeMs;
+}
+
+function getSatelliteStatusSummary() {
+  if (!isSatelliteEnabled()) {
+    return { enabled: false, connected_count: 0, pending_count: 0, connected: [], pending: [] };
+  }
+
+  const approved = db.getSatelliteDevices('approved');
+  const pending = db.getSatelliteDevices('pending');
+  const discovered = discovery.getDiscoveredSatellites();
+  const discoveredIds = new Set(discovered.map(d => d.device_id).filter(Boolean));
+
+  const connected = [];
+  for (const device of approved) {
+    const active = isRecentlyActive(device.last_seen);
+    const onLan = device.device_id && discoveredIds.has(device.device_id);
+    if (!active && !onLan) continue;
+    connected.push({
+      id: device.id,
+      name: device.name,
+      ip: device.ip,
+      device_id: device.device_id,
+      active,
+      on_lan: onLan,
+    });
+  }
+
+  return {
+    enabled: true,
+    connected_count: connected.length,
+    pending_count: pending.length,
+    connected,
+    pending: pending.map(d => ({ id: d.id, name: d.name, ip: d.ip })),
+  };
+}
+
+function broadcastSatelliteStatus() {
+  broadcast?.({ type: 'satellite_status', ...getSatelliteStatusSummary() });
+}
 /** Hub discovery */
 router.get('/status', (req, res) => {
   res.json({
@@ -146,6 +202,11 @@ router.get('/status', (req, res) => {
     analysis_version: audioAnalyzer?.ANALYSIS_VERSION || 0,
     version: require('./package.json').version,
   });
+});
+
+/** Public satellite connection summary (main UI status bar) */
+router.get('/satellites/status', (req, res) => {
+  res.json(getSatelliteStatusSummary());
 });
 
 /** Satellite requests pairing (no auth) */
@@ -168,6 +229,7 @@ router.post('/pair/request', (req, res) => {
   if (device.status === 'pending') {
     console.log(`[Hub] Satellite pairing request: "${device.name}" (${device.device_id}) from ${device.ip}`);
     broadcast?.({ type: 'satellite_pair_request', device: publicDevice(device) });
+    broadcastSatelliteStatus();
   }
 
   res.json({
@@ -251,6 +313,7 @@ router.post('/devices/:id/approve', requireHubAdminAuth, (req, res) => {
 
   console.log(`[Hub] Approved satellite "${approved.name}" (${approved.device_id})`);
   broadcast?.({ type: 'satellite_device_approved', device: publicDevice(approved) });
+  broadcastSatelliteStatus();
 
   res.json({ device: publicDevice(approved), token: approved.token });
 });
@@ -260,6 +323,7 @@ router.post('/devices/:id/reject', requireHubAdminAuth, (req, res) => {
   const device = db.rejectSatelliteDevice(id);
   if (!device) return res.status(404).json({ error: 'Device not found' });
   broadcast?.({ type: 'satellite_device_rejected', device });
+  broadcastSatelliteStatus();
   res.json({ device });
 });
 
@@ -268,6 +332,7 @@ router.delete('/devices/:id', requireHubAdminAuth, (req, res) => {
   const device = db.revokeSatelliteDevice(id);
   if (!device) return res.status(404).json({ error: 'Device not found' });
   broadcast?.({ type: 'satellite_device_revoked', device });
+  broadcastSatelliteStatus();
   res.json({ device });
 });
 
@@ -392,4 +457,6 @@ module.exports = {
   init,
   ensureSatelliteToken,
   isSatelliteEnabled,
+  getSatelliteStatusSummary,
+  broadcastSatelliteStatus,
 };

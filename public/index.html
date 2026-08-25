@@ -28,6 +28,10 @@
     <div class="status-dot" id="statusDot"></div>
     <span id="statusText">Disconnected</span>
   </div>
+  <div class="status-pill sat-status-pill sat-status-off" id="satStatusPill" hidden>
+    <span class="status-pill-dot" id="satStatusDot"></span>
+    <span id="satStatusText">Satellite</span>
+  </div>
 </div>
 
 <!-- ══════ Login Modal ══════ -->
@@ -3263,6 +3267,10 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === 'state') updateState(msg.state);
     else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); logEvent({ evtType: 'connection', raw: msg }); }
+    else if (msg.type === 'satellite_status') { updateSatelliteStatus(msg); }
+    else if (msg.type === 'satellite_pair_request' || msg.type === 'satellite_device_approved'
+      || msg.type === 'satellite_device_rejected' || msg.type === 'satellite_device_revoked'
+      || msg.type === 'satellite_discovered') { refreshSatelliteStatus(); }
     else if (msg.type === 'beat') { handleBeat(msg.data); }
     else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
     else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing' || msg.type === 'seq_time') { handleSeqWsMessage(msg); }
@@ -3586,6 +3594,60 @@ function updateNowPlaying(state) {
 function updateConnection(connected, address) {
   document.getElementById('statusDot').classList.toggle('connected', connected);
   document.getElementById('statusText').textContent = connected ? `Connected: ${address||'VirtualDJ'}` : 'Disconnected';
+}
+
+function updateSatelliteStatus(data) {
+  const pill = document.getElementById('satStatusPill');
+  const text = document.getElementById('satStatusText');
+  if (!pill || !text) return;
+
+  if (!data || !data.enabled) {
+    pill.hidden = true;
+    return;
+  }
+
+  pill.hidden = false;
+  pill.classList.remove('sat-status-on', 'sat-status-pending', 'sat-status-off');
+
+  const connected = data.connected || [];
+  const pendingCount = data.pending_count || 0;
+
+  if (connected.length > 0) {
+    pill.classList.add('sat-status-on');
+    if (connected.length === 1) {
+      const name = connected[0].name || 'Satellite';
+      text.textContent = `Satellite: ${name}`;
+      pill.title = connected[0].ip ? `${name} (${connected[0].ip})` : name;
+    } else {
+      text.textContent = `${connected.length} satellites connected`;
+      pill.title = connected.map(s => `${s.name || 'Satellite'}${s.ip ? ` (${s.ip})` : ''}`).join('\n');
+    }
+  } else if (pendingCount > 0) {
+    pill.classList.add('sat-status-pending');
+    text.textContent = pendingCount === 1 ? '1 satellite pending' : `${pendingCount} satellites pending`;
+    pill.title = 'Accept in Config → Thaluxis Satellites';
+  } else {
+    pill.classList.add('sat-status-off');
+    text.textContent = 'No satellite connected';
+    pill.title = 'No approved Thaluxis Satellite is active on the network';
+  }
+}
+
+async function refreshSatelliteStatus() {
+  try {
+    const data = await fetch('/api/hub/satellites/status').then(r => r.json());
+    updateSatelliteStatus(data);
+  } catch {
+    const pill = document.getElementById('satStatusPill');
+    if (pill) pill.hidden = true;
+  }
+}
+
+let _satStatusPollTimer = null;
+function startSatelliteStatusPolling() {
+  refreshSatelliteStatus();
+  if (_satStatusPollTimer) clearInterval(_satStatusPollTimer);
+  _satStatusPollTimer = setInterval(refreshSatelliteStatus, 30000);
 }
 
 function handleBeat(data) {
@@ -13193,6 +13255,7 @@ loadButtonMaps();
 // Fetch initial DMX output state so header toggle is correct
 fetch('/api/dmx/output').then(r => r.json()).then(r => { dmxOutputOn = r.enabled; updateOutputToggle(); }).catch(() => {});
 connect();
+startSatelliteStatusPolling();
 </script>
 </body>
 </html>
