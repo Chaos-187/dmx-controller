@@ -184,7 +184,28 @@
       <!-- Network Tab -->
       <div class="device-tab-panel" id="devtab-network">
         <div class="config-section">
-          <h3><span class="section-icon">&#127760;</span> Network &amp; mDNS</h3>
+          <h3><span class="section-icon">&#127760;</span> Network Interface</h3>
+          <p class="config-desc">Choose where the controller listens and which IP it advertises on the network. Use separate settings when a VPN is active — listen on all interfaces but advertise your LAN address.</p>
+          <div class="config-card">
+            <h4>Listen &amp; Advertise</h4>
+            <div class="config-row">
+              <label>Listen on</label>
+              <select id="cfgNetworkBind" style="min-width:320px;max-width:100%">
+                <option value="0.0.0.0">All interfaces (0.0.0.0)</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <label>Advertise as</label>
+              <select id="cfgNetworkAdvertise" style="min-width:320px;max-width:100%">
+                <option value="auto">Auto — prefer LAN, skip VPN</option>
+              </select>
+            </div>
+            <p class="config-hint" style="margin-top:8px"><strong>Listen on</strong> controls which address HTTP and OS2L bind to. <strong>Advertise as</strong> sets the IP used for mDNS/Bonjour and shown to satellites — pick your Ethernet or Wi‑Fi adapter when a VPN is connected.</p>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <h3><span class="section-icon">&#128225;</span> Network &amp; mDNS</h3>
           <p class="config-desc">Configure mDNS (Bonjour) so you can access the controller from any device on your network using a friendly <code>.local</code> hostname.</p>
           <div class="config-card">
             <h4>mDNS Responder</h4>
@@ -210,7 +231,9 @@
             <h4>Status</h4>
             <div class="config-row"><label>Responder</label><span id="mdnsStatusBadge" style="font-size:12px;color:var(--text-dim)">—</span></div>
             <div class="config-row"><label>Address</label><span id="mdnsStatusAddr" style="font-size:12px;color:var(--text-dim)">—</span></div>
-            <div class="config-row"><label>Local IP</label><span id="mdnsStatusIP" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>Advertised IP</label><span id="mdnsStatusIP" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>Advertise via</label><span id="mdnsStatusIface" style="font-size:12px;color:var(--text-dim)">—</span></div>
+            <div class="config-row"><label>Listen on</label><span id="mdnsStatusBind" style="font-size:12px;color:var(--text-dim)">—</span></div>
             <div class="config-row"><label>Web Port</label><span id="mdnsStatusWebPort" style="font-size:12px;color:var(--text-dim)">—</span></div>
             <div class="config-row"><label>OS2L Port</label><span id="mdnsStatusOs2lPort" style="font-size:12px;color:var(--text-dim)">—</span></div>
           </div>
@@ -517,7 +540,29 @@
         <h3><span class="section-icon">&#128225;</span> Thaluxis Hub &amp; Satellites</h3>
         <p class="config-desc">Configure this machine as the <strong>Thaluxis Hub</strong> and manage <strong>Thaluxis Satellite</strong> nodes on VirtualDJ laptops. Satellites analyze tracks locally and sync to this hub over the LAN.</p>
 
-        <div class="config-card">
+        <div id="satPendingBanner" class="sat-pending-banner" hidden>
+          <div class="sat-pending-banner-inner">
+            <div>
+              <strong id="satPendingBannerTitle">Satellite waiting for approval</strong>
+              <p id="satPendingBannerDesc">A Thaluxis Satellite has requested connection. Accept it below to authorize sync and OS2L forwarding.</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btnRefreshSatellitesTop" type="button">Refresh</button>
+          </div>
+        </div>
+
+        <div class="config-card sat-priority-card">
+          <h4>Pending connections <span id="satPendingCount" class="sat-count-badge"></span></h4>
+          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellite nodes waiting for approval. Click <strong>Accept</strong> to authorize analysis sync and OS2L forwarding.</p>
+          <div id="satPendingList" class="sat-device-list"></div>
+        </div>
+
+        <div class="config-card sat-priority-card" style="margin-top:16px">
+          <h4>Discovered on network</h4>
+          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellites seen via mDNS that may not have requested pairing yet.</p>
+          <div id="satDiscoveredList" class="sat-device-list"></div>
+        </div>
+
+        <div class="config-card" style="margin-top:16px">
           <h4>Thaluxis Hub</h4>
           <div class="config-row">
             <label>Hub name</label>
@@ -561,18 +606,6 @@
             <button class="btn btn-secondary btn-sm" id="btnRefreshSatellites">Refresh devices</button>
             <span id="cfgHubSaveStatus" style="font-size:11px;color:var(--text-dim)"></span>
           </div>
-        </div>
-
-        <div class="config-card" style="margin-top:16px">
-          <h4>Pending connections <span id="satPendingCount" style="font-size:12px;color:var(--text-dim)"></span></h4>
-          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellite nodes waiting for approval. Click <strong>Accept</strong> to authorize analysis sync and OS2L forwarding.</p>
-          <div id="satPendingList" class="sat-device-list"></div>
-        </div>
-
-        <div class="config-card" style="margin-top:16px">
-          <h4>Discovered on network</h4>
-          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellites seen via mDNS that may not have requested pairing yet.</p>
-          <div id="satDiscoveredList" class="sat-device-list"></div>
         </div>
 
         <div class="config-card" style="margin-top:16px">

@@ -144,7 +144,7 @@ function stopServer() {
  * @param {number} port
  * @returns {net.Server}
  */
-function startServer(port) {
+function startServer(port, host = '0.0.0.0') {
   stopServer();
 
   os2lServer = net.createServer((socket) => {
@@ -208,14 +208,15 @@ function startServer(port) {
     if (err.code === 'EADDRINUSE') {
       console.error(`[OS2L] Port ${port} already in use — retrying in 1s (stop the other server or free the port)`);
       stopServer();
-      setTimeout(() => startServer(port), 1000);
+      setTimeout(() => startServer(port, host), 1000);
       return;
     }
     console.error(`[OS2L] Server error: ${err.message}`);
   });
 
-  os2lServer.listen(port, '0.0.0.0', () => {
-    console.log(`[OS2L] TCP server listening on port ${port}`);
+  os2lServer.listen(port, host, () => {
+    const bindLabel = host === '0.0.0.0' ? 'all interfaces' : host;
+    console.log(`[OS2L] TCP server listening on ${bindLabel}:${port}`);
   });
 
   return os2lServer;

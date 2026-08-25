@@ -2018,12 +2018,43 @@ window.deleteTouchAction = async (id) => {
 // ═══════════════════════════════════════════════════════════════
 //  Network / mDNS
 // ═══════════════════════════════════════════════════════════════
+function _fillNetworkAdapterSelect(sel, ifaces, { includeAuto = false, autoLabel = 'Auto — prefer LAN, skip VPN' } = {}) {
+  sel.innerHTML = '';
+  if (includeAuto) {
+    sel.innerHTML = `<option value="auto">${autoLabel}</option>`;
+  }
+  for (const iface of ifaces) {
+    const opt = document.createElement('option');
+    opt.value = iface.key;
+    const vpnTag = iface.likelyVpn ? ' (VPN)' : '';
+    opt.textContent = `${iface.name} — ${iface.address}${vpnTag}`;
+    sel.appendChild(opt);
+  }
+}
+
 async function loadNetworkConfig() {
   try {
-    const [config, status] = await Promise.all([
+    const [config, status, ifaces] = await Promise.all([
       fetch('/api/config').then(r => r.json()),
       fetch('/api/mdns/status').then(r => r.json()),
+      fetch('/api/network/interfaces').then(r => r.json()),
     ]);
+    const ifaceList = ifaces.interfaces || [];
+    const bindSel = document.getElementById('cfgNetworkBind');
+    const advSel = document.getElementById('cfgNetworkAdvertise');
+    bindSel.innerHTML = '<option value="0.0.0.0">All interfaces (0.0.0.0)</option>';
+    for (const iface of ifaceList) {
+      const opt = document.createElement('option');
+      opt.value = iface.key;
+      const vpnTag = iface.likelyVpn ? ' (VPN)' : '';
+      opt.textContent = `${iface.name} — ${iface.address}${vpnTag}`;
+      bindSel.appendChild(opt);
+    }
+    _fillNetworkAdapterSelect(advSel, ifaceList, { includeAuto: true });
+    const savedBind = config.network_bind || '0.0.0.0';
+    const savedAdv = config.network_interface || 'auto';
+    bindSel.value = [...bindSel.options].some(o => o.value === savedBind) ? savedBind : '0.0.0.0';
+    advSel.value = [...advSel.options].some(o => o.value === savedAdv) ? savedAdv : 'auto';
     document.getElementById('cfgMdnsEnabled').checked = config.mdns_enabled !== '0';
     document.getElementById('cfgMdnsHostname').value = config.mdns_hostname || 'dmxcontrol';
     updateMdnsStatus(status);
@@ -2039,6 +2070,16 @@ function updateMdnsStatus(s) {
     document.getElementById('mdnsStatusAddr').textContent = '\u2014';
   }
   document.getElementById('mdnsStatusIP').textContent = s.ip || '\u2014';
+  const ifaceEl = document.getElementById('mdnsStatusIface');
+  if (ifaceEl) {
+    ifaceEl.textContent = s.interface_name && s.interface_address
+      ? `${s.interface_name} (${s.interface_address})`
+      : '\u2014';
+  }
+  const bindEl = document.getElementById('mdnsStatusBind');
+  if (bindEl) {
+    bindEl.textContent = s.bind_host === '0.0.0.0' ? 'All interfaces (0.0.0.0)' : (s.bind_host || '\u2014');
+  }
   document.getElementById('mdnsStatusWebPort').textContent = s.web_port || '\u2014';
   document.getElementById('mdnsStatusOs2lPort').textContent = s.os2l_port || '\u2014';
 }
@@ -2433,10 +2474,14 @@ document.getElementById('btnSaveMdnsConfig').addEventListener('click', async () 
   try {
     const enabled = document.getElementById('cfgMdnsEnabled').checked ? '1' : '0';
     const hostname = document.getElementById('cfgMdnsHostname').value.trim().replace(/\.local$/i, '') || 'dmxcontrol';
+    const networkBind = document.getElementById('cfgNetworkBind').value || '0.0.0.0';
+    const networkAdvertise = document.getElementById('cfgNetworkAdvertise').value || 'auto';
     document.getElementById('cfgMdnsHostname').value = hostname;
     await Promise.all([
       fetch('/api/config/mdns_enabled', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: enabled }) }),
       fetch('/api/config/mdns_hostname', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: hostname }) }),
+      fetch('/api/config/network_bind', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: networkBind }) }),
+      fetch('/api/config/network_interface', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: networkAdvertise }) }),
     ]);
     await fetch('/api/mdns/restart', { method: 'POST' });
     const status = await fetch('/api/mdns/status').then(r => r.json());
@@ -4716,7 +4761,28 @@ async function loadSatelliteConfig() {
     );
 
     const pendingEl = document.getElementById('satPendingCount');
-    if (pendingEl) pendingEl.textContent = pending.length ? `(${pending.length})` : '';
+    if (pendingEl) pendingEl.textContent = pending.length ? String(pending.length) : '';
+
+    const banner = document.getElementById('satPendingBanner');
+    const bannerTitle = document.getElementById('satPendingBannerTitle');
+    const bannerDesc = document.getElementById('satPendingBannerDesc');
+    const pendingCard = document.querySelector('#satPendingList')?.closest('.sat-priority-card');
+    if (banner) {
+      const hasPending = pending.length > 0;
+      banner.hidden = !hasPending;
+      if (hasPending && bannerTitle) {
+        bannerTitle.textContent = pending.length === 1
+          ? '1 satellite waiting for approval'
+          : `${pending.length} satellites waiting for approval`;
+      }
+      if (hasPending && bannerDesc) {
+        const names = pending.slice(0, 3).map(d => d.name || 'Thaluxis Satellite').join(', ');
+        bannerDesc.textContent = pending.length === 1
+          ? `${names} has requested connection — accept below to authorize sync and OS2L forwarding.`
+          : `${names}${pending.length > 3 ? ` and ${pending.length - 3} more` : ''} — accept below to authorize sync and OS2L forwarding.`;
+      }
+    }
+    if (pendingCard) pendingCard.classList.toggle('has-pending', pending.length > 0);
 
     _renderSatDeviceList('satPendingList', pending, 'No pending connection requests');
     _renderSatDeviceList('satDiscoveredList', discovered, 'No Thaluxis Satellites discovered on the network');
@@ -4779,6 +4845,7 @@ document.getElementById('btnRegenerateHubToken')?.addEventListener('click', asyn
 });
 
 document.getElementById('btnRefreshSatellites')?.addEventListener('click', () => loadSatelliteConfig());
+document.getElementById('btnRefreshSatellitesTop')?.addEventListener('click', () => loadSatelliteConfig());
 
 document.getElementById('cfgpage-satellites')?.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-sat-action]');
