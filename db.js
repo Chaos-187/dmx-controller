@@ -836,6 +836,16 @@ function init() {
     console.log('[DB] Added 14pcs RGBW 4 in 1 Par Light fixture type (4ch + 8ch modes)');
   }
 
+  // Migration: Generic LED Smoke Machine (7ch)
+  const hasLedSmoke = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = 'Generic LED Smoke Machine'").get().c;
+  if (hasLedSmoke === 0) {
+    createLedSmokeMachineFixtureType();
+    db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('led_smoke_profile_v2', '1')").run();
+    console.log('[DB] Added Generic LED Smoke Machine fixture type (7ch)');
+  } else {
+    migrateLedSmokeMachine();
+  }
+
   // Seed default color wheel map for 60W Spot Moving Head
   seedDefaultColorWheelMap();
 
@@ -1446,6 +1456,83 @@ function create14pcsRgbwParFixtureType() {
       },
     ],
   });
+}
+
+const LED_SMOKE_FOG_RANGES = [
+  { min: 0, max: 24, label: 'Fog off', type: 'other' },
+  { min: 25, max: 255, label: 'Fog on', type: 'smoke' },
+];
+
+const LED_SMOKE_STROBE_RANGES = [
+  { min: 0, max: 9, label: 'Strobe off', type: 'other' },
+  { min: 10, max: 255, label: 'Strobe slow to fast', type: 'strobe' },
+];
+
+const LED_SMOKE_MACRO_RANGES = [
+  { min: 0, max: 9, label: 'Manual RGB (CH2–4)', type: 'other' },
+  { min: 10, max: 59, label: 'Color jump / gradual 1', type: 'macro' },
+  { min: 60, max: 109, label: 'Color jump / gradual 2', type: 'macro' },
+  { min: 110, max: 159, label: 'Color pulse / fade', type: 'macro' },
+  { min: 160, max: 209, label: 'Multi-color strobe', type: 'macro' },
+  { min: 210, max: 255, label: 'Sound active', type: 'macro' },
+];
+
+function getLedSmokeMachineModes() {
+  return [{
+    name: '7 Channel',
+    short_name: '7ch',
+    channels: [
+      { channel_number: 1, name: 'Fog Output', type: 'smoke', default_value: 0, ranges: LED_SMOKE_FOG_RANGES },
+      { channel_number: 2, name: 'Red LED', type: 'red', default_value: 0 },
+      { channel_number: 3, name: 'Green LED', type: 'green', default_value: 0 },
+      { channel_number: 4, name: 'Blue LED', type: 'blue', default_value: 0 },
+      { channel_number: 5, name: 'LED Strobe', type: 'strobe', default_value: 0, ranges: LED_SMOKE_STROBE_RANGES },
+      { channel_number: 6, name: 'Color Change / Macros', type: 'macro', default_value: 0, ranges: LED_SMOKE_MACRO_RANGES },
+      { channel_number: 7, name: 'Macro Speed', type: 'speed', default_value: 0 },
+    ],
+  }];
+}
+
+/**
+ * Generic LED Smoke Machine — 7-channel fog + RGB + strobe + macros.
+ */
+function createLedSmokeMachineFixtureType() {
+  return createFixtureType({
+    name: 'Generic LED Smoke Machine',
+    manufacturer: 'Generic',
+    category: 'fog',
+    modes: getLedSmokeMachineModes(),
+  });
+}
+
+/** Update existing LED smoke fixture type to match manufacturer 7ch profile. */
+function migrateLedSmokeMachine() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'led_smoke_profile_v2'").get();
+  if (done?.value === '1') return;
+
+  const type = db.prepare("SELECT id FROM fixture_types WHERE name = 'Generic LED Smoke Machine'").get();
+  if (!type) return;
+
+  const fixtures = db.prepare('SELECT id, mode_id FROM fixtures WHERE fixture_type_id = ?').all(type.id);
+
+  updateFixtureType(type.id, {
+    name: 'Generic LED Smoke Machine',
+    manufacturer: 'Generic',
+    category: 'fog',
+    modes: getLedSmokeMachineModes(),
+  });
+
+  const newMode = db.prepare(
+    'SELECT id FROM fixture_type_modes WHERE fixture_type_id = ? ORDER BY sort_order LIMIT 1',
+  ).get(type.id);
+  if (newMode) {
+    for (const fix of fixtures) {
+      db.prepare('UPDATE fixtures SET mode_id = ? WHERE id = ?').run(newMode.id, fix.id);
+    }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('led_smoke_profile_v2', '1')").run();
+  console.log('[DB] Updated Generic LED Smoke Machine to 7ch profile');
 }
 
 /** All DMX modes for Generic Atomic LED Strobe (per manufacturer manual). */
@@ -4580,6 +4667,7 @@ module.exports = {
   createPixelTapeFixtureType,
   createMultiCellFixtureType,
   createAtomicLedStrobeFixtureType,
+  createLedSmokeMachineFixtureType,
   getColorWheelMap, getAllColorWheelMaps, setColorWheelMap, deleteColorWheelMap,
   getGoboWheelMap, getAllGoboWheelMaps, setGoboWheelMap, deleteGoboWheelMap,
   getFixtures, getFixture, createFixture, createFixtureBatch, updateFixture, deleteFixture, updateFixtureRigPositions,
