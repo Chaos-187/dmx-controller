@@ -3928,6 +3928,9 @@ function scheduleSequencePlaybackIfPlaying(deck, trackId, delayMs = 250) {
  * Playing decks hot-swap without blackout or pausing playback.
  */
 function loadGeneratedSequenceOntoDeck(deck, generatedSeq, trackId) {
+  if (!generatedSeq.cues && generatedSeq.id) {
+    generatedSeq.cues = db.getSequenceCues(generatedSeq.id);
+  }
   touchOverrides.os2lOverrideFixtures.clear();
   touchOverrides.colorOverrideFixtures.clear();
   touchOverrides.movementOverrideFixtures.clear();

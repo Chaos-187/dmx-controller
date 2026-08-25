@@ -105,9 +105,10 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
     const stale = regenStale && db.isSequenceFixtureStale(existing);
     if (!stale) {
       const cue_count = db.getSequenceCues(existing.id)?.length || 0;
+      const sequence = { ...existing, cues: db.getSequenceCues(existing.id) };
       console.log(`[Hub] Sequence already exists for track ${trackId} "${existing.name}" (${cue_count} cues) — skipping auto-generate (${source})`);
-      onSequenceGenerated?.(trackId, { sequence: existing, cue_count, skipped: 'exists' });
-      return { sequence: existing, cue_count, skipped: 'exists' };
+      onSequenceGenerated?.(trackId, { sequence, cue_count, skipped: 'exists' });
+      return { sequence, cue_count, skipped: 'exists' };
     }
   }
 
