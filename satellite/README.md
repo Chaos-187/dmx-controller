@@ -32,6 +32,12 @@ npm run service:uninstall
 ```
 Or run `scripts/uninstall-service.cmd`.
 
-**Requirements:** Node.js on PATH for the service account (default Local System). If ffmpeg is used for analysis, ensure it is on the system PATH as well.
+**Requirements:** Node.js on PATH for the service account (default Local System). After upgrading Node.js, rebuild native modules from the **repo root**:
+
+```bash
+npm run rebuild:native:dev
+```
+
+Then restart the Thaluxis Satellite service. If ffmpeg is used for analysis, ensure it is on the system PATH as well.
 
 See [../docs/satellite.md](../docs/satellite.md) for full architecture docs.
