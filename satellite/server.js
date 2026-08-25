@@ -148,20 +148,100 @@ function queuePendingSync(localTrack, filePath, deckNum) {
   hubConnection.pendingSyncs.set(filePath, { localTrack, filePath, deckNum });
 }
 
-async function flushPendingSyncs() {
+function analysisRowToPayload(row) {
+  if (!row) return null;
+  const parseJson = (value, fallback = []) => {
+    if (Array.isArray(value)) return value;
+    try { return JSON.parse(value || '[]'); } catch { return fallback; }
+  };
+  return {
+    waveform_peaks: parseJson(row.waveform_peaks),
+    energy_levels: parseJson(row.energy_levels),
+    beats: parseJson(row.beats),
+    sections: parseJson(row.sections),
+    sample_rate: row.sample_rate || 0,
+    channels: row.channels || 0,
+    duration_ms: row.duration_ms || 0,
+    peak_count: row.peak_count || 0,
+    analysis_version: row.analysis_version || 0,
+  };
+}
+
+async function pushLocalAnalysisToHub(localTrack, hubTrackId) {
+  const payload = analysisRowToPayload(db.getTrackAnalysis(localTrack.id));
+  if (!payload || !hubTrackId) return false;
+
+  const push = await hub.pushAnalysis(hubTrackId, payload);
+  if (push.ok) {
+    state.stats.analyses_pushed++;
+    const seqNote = push.data?.sequence_generated
+      ? `, sequence generated (${push.data.cue_count || '?'} cues)`
+      : '';
+    console.log(`[Satellite] Re-pushed analysis to hub for track ${hubTrackId}${seqNote}`);
+    return true;
+  }
+  console.warn(`[Satellite] Analysis re-push failed: ${push.data?.error}`);
+  return false;
+}
+
+async function forwardDeckStateToHub(deckNum) {
+  const deck = state.decks[deckNum];
+  if (!deck?.filepath) return;
+
+  const keys = ['filepath', 'genre', 'bpm', 'beatpos', 'firstbeat', 'time', 'play', 'loop'];
+  for (const key of keys) {
+    let value = deck[key];
+    if (key === 'filepath' && !value) return;
+    if (key !== 'filepath' && (value === '' || value == null)) continue;
+
+    if (key === 'play' || key === 'loop') {
+      value = value ? 'on' : 'off';
+    }
+
+    const res = await hub.forwardOs2l({
+      evt: 'subscribed',
+      trigger: `deck ${deckNum} ${key}`,
+      value,
+    });
+    if (res.ok) state.stats.os2l_forwarded++;
+  }
+}
+
+async function resyncHubAfterReconnect() {
+  const active = getActiveHubEntry();
+  if (!active?.hub_url) return;
+  if (!active.token && active.pair_status !== 'approved') return;
+
+  console.log('[Satellite] Resyncing tracks and deck state with hub…');
+
   const pending = [...hubConnection.pendingSyncs.values()];
   hubConnection.pendingSyncs.clear();
 
-  for (const item of pending) {
-    await syncTrackToHub(item.localTrack, item.filePath, item.deckNum);
-  }
+  const seen = new Set();
+  const items = [...pending];
 
   for (let deck = 1; deck <= 4; deck++) {
     const deckState = state.decks[deck];
-    if (!deckState?.filepath) continue;
-    const localTrack = db.getTrackByPath(deckState.filepath);
-    if (localTrack) await syncTrackToHub(localTrack, deckState.filepath, deck);
+    if (!deckState?.filepath || seen.has(deckState.filepath)) continue;
+    seen.add(deckState.filepath);
+    items.push({
+      localTrack: ensureLocalTrack(deckState.filepath, deck),
+      filePath: deckState.filepath,
+      deckNum: deck,
+    });
   }
+
+  for (const item of items) {
+    await syncTrackToHub(item.localTrack, item.filePath, item.deckNum, { resync: true });
+  }
+
+  for (let deck = 1; deck <= 4; deck++) {
+    if (state.decks[deck]?.filepath) {
+      await forwardDeckStateToHub(deck);
+    }
+  }
+
+  console.log(`[Satellite] Hub resync complete (${items.length} track(s), deck state forwarded)`);
 }
 
 async function tryRediscoverActiveHub() {
@@ -376,7 +456,7 @@ async function analyzeAndPush(localTrack, filePath, deckNum) {
   }
 }
 
-async function syncTrackToHub(localTrack, filePath, deckNum) {
+async function syncTrackToHub(localTrack, filePath, deckNum, { resync = false } = {}) {
   const active = getActiveHubEntry();
   if (!active?.hub_url) return;
   if (!active.token && active.pair_status !== 'approved') return;
@@ -405,6 +485,8 @@ async function syncTrackToHub(localTrack, filePath, deckNum) {
 
   if (res.data.needs_analysis) {
     await analyzeAndPush(localTrack, filePath, deckNum);
+  } else if (resync) {
+    await pushLocalAnalysisToHub(localTrack, hubTrackId);
   }
 }
 
@@ -919,7 +1001,7 @@ async function hubPingLoop() {
     if (activeConnected && !hubConnection.activeWasConnected) {
       console.log(`[Satellite] Hub reconnected: ${active.hub_url}`);
       pairMessages.set(active.id, 'Connected to hub');
-      await flushPendingSyncs();
+      await resyncHubAfterReconnect();
     } else if (!activeConnected && hubConnection.activeWasConnected) {
       console.warn(`[Satellite] Hub offline: ${active.hub_url} (${state.hub_last_error || hub.lastError || 'unreachable'}) — retrying every ${config.ping_interval_ms / 1000}s`);
       pairMessages.set(active.id, `Hub offline — retrying (${state.hub_last_error || 'unreachable'})`);
