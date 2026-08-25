@@ -131,6 +131,80 @@ rebuildHubClient();
 
 const pairMessages = new Map(); // hub id → message
 
+const hubConnection = {
+  activeWasConnected: false,
+  lastDiscoveryAt: 0,
+  pendingSyncs: new Map(), // filepath → { localTrack, filePath, deckNum }
+};
+
+const RECONNECT_SCAN_MS = 15000;
+
+function isNetworkError(message) {
+  return /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|ECONNRESET|EPIPE|socket hang up|timed out/i.test(message || '');
+}
+
+function queuePendingSync(localTrack, filePath, deckNum) {
+  if (!filePath) return;
+  hubConnection.pendingSyncs.set(filePath, { localTrack, filePath, deckNum });
+}
+
+async function flushPendingSyncs() {
+  const pending = [...hubConnection.pendingSyncs.values()];
+  hubConnection.pendingSyncs.clear();
+
+  for (const item of pending) {
+    await syncTrackToHub(item.localTrack, item.filePath, item.deckNum);
+  }
+
+  for (let deck = 1; deck <= 4; deck++) {
+    const deckState = state.decks[deck];
+    if (!deckState?.filepath) continue;
+    const localTrack = db.getTrackByPath(deckState.filepath);
+    if (localTrack) await syncTrackToHub(localTrack, deckState.filepath, deck);
+  }
+}
+
+async function tryRediscoverActiveHub() {
+  const active = getActiveHubEntry();
+  if (!active) return false;
+
+  const now = Date.now();
+  if (now - hubConnection.lastDiscoveryAt < RECONNECT_SCAN_MS) return false;
+  hubConnection.lastDiscoveryAt = now;
+
+  console.log(`[Satellite] Hub unreachable at ${active.hub_url} — scanning LAN…`);
+  const found = await discoverHubs();
+  if (!found.length) {
+    console.log('[Satellite] No hubs found on LAN — will retry');
+    return false;
+  }
+
+  for (const item of found) {
+    const client = new HubClient({
+      baseUrl: item.hub_url,
+      token: active.token,
+      name: config.satellite_name,
+      deviceId: config.device_id,
+    });
+    const res = await client.ping();
+    if (!res.ok) continue;
+
+    const known = hubRegistry.findByUrl(item.hub_url);
+    if (known && known.id !== active.id) continue;
+
+    if (item.hub_url !== active.hub_url) {
+      console.log(`[Satellite] Hub found at ${item.hub_url} (was ${active.hub_url})`);
+      hubRegistry.update(active.id, { hub_url: item.hub_url, name: item.name || active.name });
+      rebuildHubClient();
+      saveConfigFile();
+    }
+    return true;
+  }
+
+  console.log('[Satellite] Discovered hub(s) on LAN but none responded — will retry');
+  return false;
+}
+
 // ─── State ──────────────────────────────────────────────────────────────────
 
 const state = {
@@ -312,6 +386,9 @@ async function syncTrackToHub(localTrack, filePath, deckNum) {
     state.hub_connected = false;
     state.hub_last_error = res.data?.error || 'Sync failed';
     hubRegistry.setRuntime(active.id, { connected: false, last_error: state.hub_last_error });
+    if (isNetworkError(state.hub_last_error)) {
+      queuePendingSync(localTrack, filePath, deckNum);
+    }
     console.warn(`[Satellite] Hub track sync failed: ${state.hub_last_error}`);
     return;
   }
@@ -337,8 +414,18 @@ function handleOs2lSubscribed(data) {
   const active = getActiveHubEntry();
   if (active?.token || active?.pair_status === 'approved') {
     hub.forwardOs2l(data).then((res) => {
-      if (res.ok) state.stats.os2l_forwarded++;
-      else state.hub_last_error = res.data?.error;
+      if (res.ok) {
+        state.stats.os2l_forwarded++;
+        if (!state.hub_connected) {
+          state.hub_connected = true;
+          state.hub_last_error = null;
+        }
+      } else {
+        state.hub_last_error = res.data?.error;
+        if (isNetworkError(state.hub_last_error)) {
+          state.hub_connected = false;
+        }
+      }
     });
   }
 
@@ -718,8 +805,13 @@ async function pairHubEntry(hubEntry) {
       }
     }
   } else {
-    hubRegistry.setPairStatus(hubEntry.id, 'error');
-    pairMessages.set(hubEntry.id, req.data?.error || 'Pairing request failed');
+    const msg = req.data?.error || 'Pairing request failed';
+    if (isNetworkError(msg)) {
+      pairMessages.set(hubEntry.id, `Hub offline — retrying (${msg})`);
+    } else {
+      hubRegistry.setPairStatus(hubEntry.id, 'error');
+      pairMessages.set(hubEntry.id, msg);
+    }
     return;
   }
 
@@ -769,6 +861,8 @@ async function runPairingLoop() {
   for (const hubEntry of hubs) {
     if (!hubEntry.token || hubEntry.pair_status !== 'approved') {
       await pairHubEntry(hubEntry);
+    } else if (!state.hub_connected && hubEntry.id === hubRegistry.activeHubId) {
+      await pingHubEntry(hubEntry);
     }
   }
 
@@ -805,9 +899,36 @@ try {
 }
 
 async function hubPingLoop() {
+  const active = getActiveHubEntry();
+  let activeConnected = false;
+
   for (const hubEntry of hubRegistry.hubs) {
-    await pingHubEntry(hubEntry);
+    const res = await pingHubEntry(hubEntry);
+    if (hubEntry.id === hubRegistry.activeHubId) activeConnected = res.ok;
   }
+
+  if (active && !activeConnected && isNetworkError(state.hub_last_error || hub.lastError)) {
+    const relocated = await tryRediscoverActiveHub();
+    if (relocated) {
+      const retry = await pingHubEntry(getActiveHubEntry());
+      activeConnected = retry.ok;
+    }
+  }
+
+  if (active) {
+    if (activeConnected && !hubConnection.activeWasConnected) {
+      console.log(`[Satellite] Hub reconnected: ${active.hub_url}`);
+      pairMessages.set(active.id, 'Connected to hub');
+      await flushPendingSyncs();
+    } else if (!activeConnected && hubConnection.activeWasConnected) {
+      console.warn(`[Satellite] Hub offline: ${active.hub_url} (${state.hub_last_error || hub.lastError || 'unreachable'}) — retrying every ${config.ping_interval_ms / 1000}s`);
+      pairMessages.set(active.id, `Hub offline — retrying (${state.hub_last_error || 'unreachable'})`);
+    } else if (!activeConnected && !hubConnection.activeWasConnected) {
+      pairMessages.set(active.id, `Hub offline — retrying (${state.hub_last_error || 'unreachable'})`);
+    }
+    hubConnection.activeWasConnected = activeConnected;
+  }
+
   broadcast({
     type: 'hub_status',
     connected: state.hub_connected,
