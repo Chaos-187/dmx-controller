@@ -189,6 +189,7 @@ function getSatelliteStatusSummary() {
 function broadcastSatelliteStatus() {
   broadcast?.({ type: 'satellite_status', ...getSatelliteStatusSummary() });
 }
+
 /** Hub discovery */
 router.get('/status', (req, res) => {
   res.json({
