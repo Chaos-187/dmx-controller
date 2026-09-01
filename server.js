@@ -2499,15 +2499,20 @@ app.get('/api/tracks/:id', (req, res) => {
 
 app.post('/api/tracks/import', (req, res) => {
   try {
-    // Use configured path or try auto-detect
     let xmlPath = db.getConfig('vdj_db_path');
     if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
     if (!xmlPath) return res.status(400).json({ error: 'VDJ database path not configured and auto-detect failed' });
 
-    const tracks = vdjParser.parseVdjDatabase(xmlPath);
+    const resolved = vdjParser.resolveDatabasePath(xmlPath);
+    if (!resolved.path) {
+      return res.status(400).json({ error: resolved.error, hint: resolved.hint || null });
+    }
+
+    const tracks = vdjParser.parseVdjDatabase(resolved.path);
     const result = db.importTracks(tracks);
-    console.log(`[VDJ] Imported ${result.total} tracks from ${xmlPath} (+${result.inserted} new, ~${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed)`);
-    res.json({ ...result, path: xmlPath });
+    if (resolved.path !== xmlPath) db.setConfig('vdj_db_path', resolved.path);
+    console.log(`[VDJ] Imported ${result.total} tracks from ${resolved.path} (+${result.inserted} new, ~${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed)`);
+    res.json({ ...result, path: resolved.path, resolved_from: resolved.resolvedFrom || undefined });
   } catch (e) {
     console.error(`[VDJ] Import error: ${e.message}`);
     res.status(500).json({ error: e.message });

@@ -24,7 +24,7 @@
 	<stoptimeout>30sec</stoptimeout>
 	<env name="NODE_ENV" value="production"/>
 	<serviceaccount>
-		<domain>JARVIS</domain>
+		<domain>KYLES_PC</domain>
 		<user>LocalSystem</user>
 		<password></password>
 	</serviceaccount>

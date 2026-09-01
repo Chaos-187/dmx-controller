@@ -2,8 +2,19 @@
   "satellite_name": "VDJ-Laptop",
   "web_port": 8788,
   "os2l_port": 8787,
+  "vdj_deck_count": 2,
+  "vdj_deck_map": [1, 3],
+  "subscription_frequency": 25,
   "auto_analyze": true,
-  "vdj_db_path": "",
+  "vdj_db_path": "W:\\VirtualDJ\\database.xml",
+  "network_drives": [
+    {
+      "letter": "W",
+      "unc": "\\\\your-nas\\share",
+      "username": "your-user",
+      "password": "your-password"
+    }
+  ],
   "ping_interval_ms": 10000,
   "pair_interval_ms": 3000
 }

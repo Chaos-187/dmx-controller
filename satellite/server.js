@@ -22,8 +22,12 @@ const db = require(path.join(ROOT, 'db'));
 const os2l = require(path.join(ROOT, 'os2l'));
 const audioAnalyzer = require(path.join(ROOT, 'audio-analyzer'));
 const vdjParser = require(path.join(ROOT, 'vdj-parser'));
+const networkDrives = require(path.join(ROOT, 'network-drives'));
 const HubClient = require('./lib/hub-client');
 const { HubRegistry, normalizeUrl } = require('./lib/hub-registry');
+const eventLog = require('./lib/event-log');
+
+eventLog.installConsoleHook();
 const brand = require(path.join(ROOT, 'thaluxis-brand'));
 const crypto = require('crypto');
 const os = require('os');
@@ -49,6 +53,10 @@ function loadConfig() {
     os2l_port: parseInt(process.env.DMX_SATELLITE_OS2L_PORT || file.os2l_port || '8787', 10),
     auto_analyze: file.auto_analyze !== false,
     vdj_db_path: process.env.DMX_VDJ_DB_PATH || file.vdj_db_path || '',
+    vdj_deck_count: parseInt(process.env.DMX_VDJ_DECK_COUNT || file.vdj_deck_count || '4', 10) === 2 ? 2 : 4,
+    vdj_deck_map: Array.isArray(file.vdj_deck_map) ? file.vdj_deck_map : null,
+    subscription_frequency: parseInt(file.subscription_frequency || '25', 10) || 25,
+    network_drives: Array.isArray(file.network_drives) ? file.network_drives : [],
     ping_interval_ms: parseInt(file.ping_interval_ms || '10000', 10),
     pair_interval_ms: parseInt(file.pair_interval_ms || '3000', 10),
     // Legacy — migrated into hubs.json on first run
@@ -70,6 +78,37 @@ function loadOrCreateDeviceId() {
   return device_id;
 }
 
+function maskNetworkDrivesForClient(drives) {
+  return (drives || []).map((d) => ({
+    letter: d.letter || 'W',
+    unc: d.unc || '',
+    username: d.username || '',
+    password: d.password ? '••••••••' : '',
+  }));
+}
+
+function mergeNetworkDriveConfig(next, prev) {
+  if (!Array.isArray(next)) return prev || [];
+  return next.map((d, i) => {
+    const letter = (d.letter || 'W').replace(':', '').toUpperCase();
+    const prevMatch = (prev || []).find((p) => (p.letter || 'W').replace(':', '').toUpperCase() === letter)
+      || (prev || [])[i];
+    let password = d.password;
+    if (!password || password === '••••••••') password = prevMatch?.password || '';
+    return {
+      letter,
+      unc: (d.unc || '').trim(),
+      username: (d.username || '').trim(),
+      password,
+    };
+  }).filter((d) => d.unc);
+}
+
+function applyNetworkDrivesFromConfig() {
+  if (!config.network_drives?.length) return [];
+  return networkDrives.connectNetworkDrives(config.network_drives);
+}
+
 function saveConfigFile() {
   const legacy = hubRegistry.getLegacyConfigFields();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
@@ -80,6 +119,10 @@ function saveConfigFile() {
     os2l_port: config.os2l_port,
     auto_analyze: config.auto_analyze,
     vdj_db_path: config.vdj_db_path,
+    vdj_deck_count: config.vdj_deck_count,
+    vdj_deck_map: config.vdj_deck_map,
+    subscription_frequency: config.subscription_frequency,
+    network_drives: config.network_drives || [],
     ping_interval_ms: config.ping_interval_ms,
     pair_interval_ms: config.pair_interval_ms,
   }, null, 2));
@@ -119,6 +162,7 @@ function applyEnvHubOverrides() {
 
 let config = loadConfig();
 config.device_id = loadOrCreateDeviceId();
+let networkDriveResults = applyNetworkDrivesFromConfig();
 
 let hubRegistry = new HubRegistry({
   dataPath: HUBS_PATH,
@@ -184,9 +228,10 @@ async function pushLocalAnalysisToHub(localTrack, hubTrackId) {
   return false;
 }
 
-async function forwardDeckStateToHub(deckNum) {
-  const deck = state.decks[deckNum];
-  if (!deck?.filepath) return;
+async function forwardDeckStateToHub(logicalDeckNum) {
+  const vdjDeck = logicalToVdjDeck(logicalDeckNum);
+  const deck = state.decks[logicalDeckNum];
+  if (!vdjDeck || !deck?.filepath) return;
 
   const keys = ['filepath', 'genre', 'bpm', 'beatpos', 'firstbeat', 'time', 'play', 'loop'];
   for (const key of keys) {
@@ -200,7 +245,7 @@ async function forwardDeckStateToHub(deckNum) {
 
     const res = await hub.forwardOs2l({
       evt: 'subscribed',
-      trigger: `deck ${deckNum} ${key}`,
+      trigger: `deck ${vdjDeck} ${key}`,
       value,
     });
     if (res.ok) state.stats.os2l_forwarded++;
@@ -220,7 +265,7 @@ async function resyncHubAfterReconnect() {
   const seen = new Set();
   const items = [...pending];
 
-  for (let deck = 1; deck <= 4; deck++) {
+  for (let deck = 1; deck <= getDeckCount(); deck++) {
     const deckState = state.decks[deck];
     if (!deckState?.filepath || seen.has(deckState.filepath)) continue;
     seen.add(deckState.filepath);
@@ -232,7 +277,7 @@ async function resyncHubAfterReconnect() {
   }
 
   // Forward play/time/filepath first so hub can load sequences without blacking out
-  for (let deck = 1; deck <= 4; deck++) {
+  for (let deck = 1; deck <= getDeckCount(); deck++) {
     if (state.decks[deck]?.filepath) {
       await forwardDeckStateToHub(deck);
     }
@@ -288,6 +333,63 @@ async function tryRediscoverActiveHub() {
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
+function normalizeDeckCount(value) {
+  return parseInt(value, 10) === 2 ? 2 : 4;
+}
+
+function getDeckCount() {
+  return normalizeDeckCount(config?.vdj_deck_count || 4);
+}
+
+function createEmptyDeck() {
+  return {
+    filepath: '', filename: '', genre: '', bpm: 0, beatpos: 0,
+    firstbeat: 0, time: 0, play: 0, loop: 0, track_id: null,
+  };
+}
+
+function defaultVdjDeckMap(count) {
+  return count === 2 ? [1, 2] : [1, 2, 3, 4];
+}
+
+function normalizeVdjDeckMap(map, count) {
+  const n = normalizeDeckCount(count);
+  if (Array.isArray(map) && map.length === n) {
+    const nums = map.map((d) => parseInt(d, 10)).filter((d) => d >= 1 && d <= 4);
+    if (nums.length === n && new Set(nums).size === n) return nums;
+  }
+  return defaultVdjDeckMap(n);
+}
+
+function getVdjDeckMap() {
+  return normalizeVdjDeckMap(config.vdj_deck_map, getDeckCount());
+}
+
+function vdjDeckToLogical(vdjDeck) {
+  const map = getVdjDeckMap();
+  const idx = map.indexOf(parseInt(vdjDeck, 10));
+  return idx >= 0 ? idx + 1 : null;
+}
+
+function logicalToVdjDeck(logicalDeck) {
+  return getVdjDeckMap()[logicalDeck - 1] || null;
+}
+
+function normalizeVdjFilepath(value) {
+  if (typeof value !== 'string' || !value) return value;
+  return value.replace(/^\\\\\?\\+/i, '').replace(/\//g, '\\');
+}
+
+function initDeckState(count) {
+  const n = normalizeDeckCount(count);
+  for (let d = 1; d <= n; d++) {
+    if (!state.decks[d]) state.decks[d] = createEmptyDeck();
+  }
+  for (const key of Object.keys(state.decks)) {
+    if (parseInt(key, 10) > n) delete state.decks[key];
+  }
+}
+
 const state = {
   decks: {},
   connected: false,
@@ -302,12 +404,7 @@ const state = {
   },
 };
 
-for (let d = 1; d <= 4; d++) {
-  state.decks[d] = {
-    filepath: '', filename: '', genre: '', bpm: 0, beatpos: 0,
-    firstbeat: 0, time: 0, play: 0, loop: 0, track_id: null,
-  };
-}
+initDeckState(getDeckCount());
 
 const analysisInProgress = new Set();
 const hubTrackIds = new Map(); // local filepath → hub track_id
@@ -521,27 +618,35 @@ function handleOs2lSubscribed(data) {
   const value = data.value;
   if (!trigger) return;
 
-  const { deck, key } = os2l.parseTrigger(trigger);
+  const { deck: vdjDeck, key } = os2l.parseTrigger(trigger);
+  if (vdjDeck === null) return;
+
+  const deck = vdjDeckToLogical(vdjDeck);
   if (deck === null || !state.decks[deck]) return;
 
+  let nextValue = value;
   if (typeof value === 'string') {
-    if (value === 'on') state.decks[deck][key] = 1;
-    else if (value === 'off') state.decks[deck][key] = 0;
-    else state.decks[deck][key] = value;
-  } else {
-    state.decks[deck][key] = value;
+    if (value === 'on') nextValue = 1;
+    else if (value === 'off') nextValue = 0;
+  }
+  if (key === 'filepath' && typeof nextValue === 'string') {
+    nextValue = normalizeVdjFilepath(nextValue);
   }
 
-  if (key === 'filepath' && typeof value === 'string' && value) {
-    const parts = value.replace(/\\\\/g, '\\').split('\\');
-    state.decks[deck].filename = parts[parts.length - 1] || value;
+  if (typeof nextValue === 'string') state.decks[deck][key] = nextValue;
+  else state.decks[deck][key] = nextValue;
 
-    const localTrack = ensureLocalTrack(value, deck);
+  if (key === 'filepath' && typeof nextValue === 'string' && nextValue) {
+    const parts = nextValue.split('\\');
+    state.decks[deck].filename = parts[parts.length - 1] || nextValue;
+
+    const localTrack = ensureLocalTrack(nextValue, deck);
     state.decks[deck].track_id = localTrack?.id || null;
-    syncTrackToHub(localTrack, value, deck);
+    syncTrackToHub(localTrack, nextValue, deck);
+    console.log(`[Satellite] Deck ${deck} (VDJ ${vdjDeck}) loaded: ${state.decks[deck].filename}`);
   }
 
-  broadcast({ type: 'deck_update', deck, key, value, state: state.decks[deck] });
+  broadcast({ type: 'deck_update', deck, vdj_deck: vdjDeck, key, value: nextValue, state: state.decks[deck] });
 }
 
 function handleOs2lButton(data) {
@@ -552,6 +657,22 @@ function handleOs2lButton(data) {
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+
+app.get('/api/logs', (req, res) => {
+  const since = parseInt(req.query.since || '0', 10) || 0;
+  const limit = parseInt(req.query.limit || '200', 10) || 200;
+  const items = eventLog.getEntries({ since, limit });
+  res.json({
+    entries: items,
+    latest: items.length ? items[items.length - 1].id : since,
+  });
+});
+
+app.delete('/api/logs', (req, res) => {
+  eventLog.clear();
+  eventLog.add('info', '[Satellite] Log cleared');
+  res.json({ ok: true });
+});
 
 app.get('/api/status', (req, res) => {
   const active = getActiveHubEntry();
@@ -569,6 +690,9 @@ app.get('/api/status', (req, res) => {
     pair_status: activePublic?.pair_status || 'unpaired',
     pair_message: active ? (pairMessages.get(active.id) || '') : '',
     vdj_connected: state.connected,
+    vdj_deck_count: getDeckCount(),
+    vdj_deck_map: getVdjDeckMap(),
+    os2l_port: config.os2l_port,
     auto_analyze: config.auto_analyze,
     stats: state.stats,
     decks: state.decks,
@@ -658,6 +782,8 @@ app.get('/api/config', (req, res) => {
   const legacy = hubRegistry.getLegacyConfigFields();
   res.json({
     ...config,
+    network_drives: maskNetworkDrivesForClient(config.network_drives),
+    network_drive_status: networkDriveResults,
     hub_url: legacy.hub_url,
     satellite_token: legacy.satellite_token ? '••••••••' : '',
     active_hub_id: hubRegistry.activeHubId,
@@ -665,17 +791,94 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+function applyDeckCountFromConfig({ resubscribe = false } = {}) {
+  const count = getDeckCount();
+  config.vdj_deck_count = count;
+  config.vdj_deck_map = getVdjDeckMap();
+  const result = db.syncSubscriptionsForDecks(config.vdj_deck_map);
+  initDeckState(count);
+  if (resubscribe && os2l.isConnected()) os2l.sendSubscription();
+  return result;
+}
+
+function applyOs2lSettingsFromConfig() {
+  if (config.subscription_frequency != null) {
+    db.setConfig('subscription_frequency', String(config.subscription_frequency));
+  }
+  db.setConfig('os2l_port', String(config.os2l_port));
+  db.setConfig('vdj_deck_count', String(getDeckCount()));
+}
+
 app.put('/api/config', (req, res) => {
+  const prevDeckCount = getDeckCount();
+  const prevDeckMap = getVdjDeckMap();
+  const prevOs2lPort = config.os2l_port;
   const next = { ...config, ...req.body };
   delete next.hub_url;
   delete next.satellite_token;
   delete next.hubs;
   delete next.active_hub_id;
-  config = next;
+  delete next.network_drive_status;
+  if (next.network_drives != null) {
+    next.network_drives = mergeNetworkDriveConfig(next.network_drives, config.network_drives);
+  }
+  if (next.vdj_deck_count != null) {
+    next.vdj_deck_count = normalizeDeckCount(next.vdj_deck_count);
+  }
+  if (next.vdj_deck_map != null) {
+    next.vdj_deck_map = normalizeVdjDeckMap(next.vdj_deck_map, next.vdj_deck_count ?? config.vdj_deck_count);
+  } else if (next.vdj_deck_count != null) {
+    next.vdj_deck_map = normalizeVdjDeckMap(config.vdj_deck_map, next.vdj_deck_count);
+  }
+  if (next.os2l_port != null) {
+    next.os2l_port = parseInt(next.os2l_port, 10) || config.os2l_port;
+  }
+  if (next.subscription_frequency != null) {
+    next.subscription_frequency = Math.min(Math.max(parseInt(next.subscription_frequency, 10) || 25, 1), 100);
+  }
+  config = { ...config, ...next };
+  networkDriveResults = applyNetworkDrivesFromConfig();
+  if (next.vdj_db_path != null && String(next.vdj_db_path).trim()) {
+    const resolved = vdjParser.resolveDatabasePath(String(next.vdj_db_path).trim());
+    if (resolved.path) config.vdj_db_path = resolved.path;
+  }
+  applyOs2lSettingsFromConfig();
+  const deckSync = prevDeckCount !== getDeckCount() || JSON.stringify(prevDeckMap) !== JSON.stringify(getVdjDeckMap())
+    ? applyDeckCountFromConfig({ resubscribe: true })
+    : null;
+  if (next.subscription_frequency != null && os2l.isConnected()) {
+    os2l.sendSubscription();
+  }
   saveConfigFile();
   rebuildHubClient();
-  res.json({ ok: true });
+  console.log('[Satellite] Settings saved');
+  if (deckSync) {
+    console.log(`[Satellite] OS2L deck count set to ${deckSync.deck_count} (${deckSync.added} subs added, ${deckSync.removed} removed)`);
+  }
+  if (networkDriveResults.length) {
+    for (const r of networkDriveResults) {
+      if (r.ok) console.log(`[Satellite] Network drive ${r.letter}: mapped to ${r.unc}`);
+      else console.warn(`[Satellite] Network drive ${r.letter}: ${r.error}`);
+    }
+  }
+  res.json({
+    ok: true,
+    vdj_db_path: config.vdj_db_path,
+    vdj_deck_count: getDeckCount(),
+    vdj_deck_map: getVdjDeckMap(),
+    os2l_port: config.os2l_port,
+    subscription_frequency: config.subscription_frequency,
+    network_drive_status: networkDriveResults,
+    os2l_restart_required: prevOs2lPort !== config.os2l_port,
+    deck_sync: deckSync,
+  });
 });
+
+function resolveVdjPathOrError(xmlPath) {
+  const resolved = vdjParser.resolveDatabasePath(xmlPath);
+  if (resolved.path) return { path: resolved.path, resolvedFrom: resolved.resolvedFrom };
+  return { error: resolved.error || 'VDJ database not found', hint: resolved.hint || null };
+}
 
 app.post('/api/hub/ping', async (req, res) => {
   const active = getActiveHubEntry();
@@ -692,11 +895,21 @@ app.post('/api/tracks/import', (req, res) => {
     if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
     if (!xmlPath) return res.status(400).json({ error: 'VDJ database not found — set the path in Settings or use Auto-detect' });
 
-    const tracks = vdjParser.parseVdjDatabase(xmlPath);
+    const check = resolveVdjPathOrError(xmlPath);
+    if (check.error) return res.status(400).json({ error: check.error, hint: check.hint });
+
+    console.log(`[Satellite] Opening VDJ database: ${check.path}`);
+    const tracks = vdjParser.parseVdjDatabase(check.path);
+    console.log(`[Satellite] VDJ database closed after read`);
     const result = db.importTracks(tracks);
-    config.vdj_db_path = xmlPath;
+    config.vdj_db_path = check.path;
     saveConfigFile();
-    res.json({ ...result, path: xmlPath });
+    console.log(`[Satellite] VDJ import via UI: ${result.total} tracks (${result.inserted} new) from ${check.path}`);
+    res.json({
+      ...result,
+      path: check.path,
+      resolved_from: check.resolvedFrom || undefined,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -704,7 +917,18 @@ app.post('/api/tracks/import', (req, res) => {
 
 app.get('/api/vdj/detect', (req, res) => {
   const path = config.vdj_db_path || vdjParser.findVdjDatabase();
-  res.json({ path: path || '', found: !!path });
+  if (!path) return res.json({ path: '', found: false });
+  const check = resolveVdjPathOrError(path);
+  if (check.path) return res.json({ path: check.path, found: true, resolved_from: check.resolvedFrom || undefined });
+  res.json({ path: '', found: false, error: check.error, hint: check.hint });
+});
+
+app.post('/api/vdj/resolve-path', (req, res) => {
+  const input = (req.body?.path || req.query?.path || '').trim();
+  if (!input) return res.status(400).json({ error: 'path required' });
+  const check = resolveVdjPathOrError(input);
+  if (check.path) return res.json({ path: check.path, found: true, resolved_from: check.resolvedFrom || undefined });
+  res.status(400).json({ error: check.error, hint: check.hint });
 });
 
 app.post('/api/library/sync-to-hub', async (req, res) => {
@@ -740,6 +964,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 db.init();
+applyOs2lSettingsFromConfig();
+const deckSyncOnStart = applyDeckCountFromConfig({ resubscribe: false });
+console.log(`[Satellite] OS2L configured for ${deckSyncOnStart.deck_count} logical deck(s), VDJ decks [${deckSyncOnStart.deck_numbers.join(', ')}]`);
 
 os2l.init({
   db,
@@ -1034,22 +1261,6 @@ async function hubPingLoop() {
 
 runPairingLoop();
 hubPingLoop();
-
-// Optional VDJ import on startup
-(function importVdjOnStartup() {
-  try {
-    let xmlPath = config.vdj_db_path;
-    if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
-    if (xmlPath) {
-      console.log(`[Satellite] Importing VDJ library from ${xmlPath}...`);
-      const tracks = vdjParser.parseVdjDatabase(xmlPath);
-      const result = db.importTracks(tracks);
-      console.log(`[Satellite] VDJ import: ${result.total} tracks (${result.inserted} new)`);
-    }
-  } catch (e) {
-    console.warn(`[Satellite] VDJ import skipped: ${e.message}`);
-  }
-})();
 
 console.log(`[Satellite] OS2L listening on port ${config.os2l_port}`);
 const activeAtStart = getActiveHubEntry();

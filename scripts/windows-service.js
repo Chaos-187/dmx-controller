@@ -61,6 +61,7 @@ svc.on('start', () => {
   console.log(`[Service] "${serviceName}" is running.`);
   console.log('Web UI: http://localhost');
   console.log('OS2L port: 8787 (when hub OS2L is enabled in config)');
+  console.log('If the UI is unreachable, check daemon\\*.err.log in the project folder after install.');
 });
 
 svc.on('error', (err) => {

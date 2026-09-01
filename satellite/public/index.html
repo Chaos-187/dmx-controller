@@ -14,6 +14,7 @@
     .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; align-items: flex-end; }
     label { display: block; font-size: 0.85rem; color: #9aa0a6; margin-bottom: 4px; }
     input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #0f1117; color: #fff; }
+    select { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #0f1117; color: #fff; }
     .field { flex: 1; min-width: 200px; }
     button { padding: 8px 14px; border-radius: 6px; border: none; background: #4c8bf5; color: #fff; cursor: pointer; font-size: 0.9rem; }
     button.secondary { background: #333; }
@@ -89,6 +90,23 @@
       font-size: 0.9rem;
     }
     .active-hub-summary .label { color: #9aa0a6; font-size: 0.8rem; margin-bottom: 4px; }
+    .log-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .log-view {
+      background: #0f1117;
+      border-radius: 8px;
+      padding: 10px;
+      max-height: 480px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.75rem;
+      line-height: 1.5;
+    }
+    .log-line { padding: 1px 0; word-break: break-word; }
+    .log-line.info { color: #c8cdd3; }
+    .log-line.warn { color: #fdd663; }
+    .log-line.error { color: #f28b82; }
+    .log-time { color: #6b7280; margin-right: 8px; user-select: none; }
+    .log-empty { color: #6b7280; font-size: 0.85rem; margin: 0; }
   </style>
 </head>
 <body>
@@ -98,6 +116,7 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab-btn active" data-tab="status" role="tab" aria-selected="true">Status</button>
+    <button class="tab-btn" data-tab="log" role="tab" aria-selected="false">Log</button>
     <button class="tab-btn" data-tab="hubs" role="tab" aria-selected="false">Hubs</button>
     <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
   </nav>
@@ -108,6 +127,7 @@
         <div>Active hub: <span id="hubStatus" class="pill bad">unknown</span></div>
         <div>Pairing: <span id="pairStatus" class="pill bad">—</span></div>
         <div>VirtualDJ: <span id="vdjStatus" class="pill bad">disconnected</span></div>
+        <div>Decks: <span id="deckCountStatus" class="pill muted">—</span></div>
       </div>
       <p id="pairMessage" style="color:#9aa0a6;font-size:0.85rem;margin:8px 0 0"></p>
       <div id="activeHubSummary" class="active-hub-summary" style="display:none"></div>
@@ -117,6 +137,20 @@
     <div class="card">
       <h2 style="margin-top:0;font-size:1rem;">Decks</h2>
       <pre id="decks">Loading…</pre>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-log" role="tabpanel">
+    <div class="card">
+      <div class="log-toolbar">
+        <h2 style="margin:0;font-size:1rem;flex:1;">Activity log</h2>
+        <button class="secondary small" id="clearLogBtn">Clear</button>
+        <label style="font-size:0.85rem;color:#9aa0a6;display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="logAutoScroll" checked> Auto-scroll
+        </label>
+      </div>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin:0 0 10px;">Recent satellite activity — hub connection, VDJ/OS2L, library import, analysis, and network drive events.</p>
+      <div id="logView" class="log-view"><p class="log-empty">Loading…</p></div>
     </div>
   </div>
 
@@ -150,11 +184,66 @@
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0;font-size:1rem;">Library</h2>
-      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Import tracks from VirtualDJ and push unanalyzed tracks to the active hub.</p>
+      <h2 style="margin-top:0;font-size:1rem;">VirtualDJ / OS2L</h2>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Must match your VirtualDJ layout (2-deck or 4-deck). Wrong deck count causes missing or incorrect OS2L data.</p>
       <div class="row">
-        <div class="field"><label>VirtualDJ database.xml path</label><input id="vdjDbPath" placeholder="Leave empty to auto-detect on import"></div>
+        <div class="field" style="max-width:8rem">
+          <label>Number of decks</label>
+          <select id="vdjDeckCount">
+            <option value="2">2</option>
+            <option value="4">4</option>
+          </select>
+        </div>
+        <div class="field" style="max-width:8rem">
+          <label>OS2L port</label>
+          <input id="os2lPort" type="number" min="1" max="65535" placeholder="8787">
+        </div>
+        <div class="field" style="max-width:8rem">
+          <label>Update rate (Hz)</label>
+          <input id="subscriptionFrequency" type="number" min="1" max="100" placeholder="25">
+        </div>
       </div>
+      <div class="row" id="vdjDeckMapRow" style="display:none">
+        <div class="field" style="max-width:8rem">
+          <label>Left → VDJ deck</label>
+          <select id="vdjDeckMapA">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </div>
+        <div class="field" style="max-width:8rem">
+          <label>Right → VDJ deck</label>
+          <select id="vdjDeckMapB">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </div>
+      </div>
+      <p style="color:#9aa0a6;font-size:0.8rem;margin:0">Match your VirtualDJ layout. Many 2-deck skins use VDJ decks <strong>1</strong> and <strong>3</strong> (not 1 and 2). Only the mapped VDJ decks are subscribed — this stops ghost copies on decks 3/4.</p>
+      <p style="color:#9aa0a6;font-size:0.8rem;margin:0.5rem 0 0">Deck mapping updates apply immediately and re-subscribe to VirtualDJ. OS2L port changes need a satellite restart.</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1rem;">Library</h2>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Set the database path below, then click <strong>Import VDJ library</strong> when you want to refresh tracks (not imported on startup).</p>
+      <div class="row">
+        <div class="field"><label>VirtualDJ database.xml path</label><input id="vdjDbPath" placeholder="W:\VirtualDJ\database.xml or \\server\share\VirtualDJ\database.xml"><p class="hint" style="margin:0.35rem 0 0;color:#9aa0a6;font-size:0.8rem">You can use <code>W:</code> if you configure the network drive below. Services run outside your login session, so they cannot see Explorer mapped drives unless Thaluxis maps them at startup.</p></div>
+      </div>
+      <h3 style="margin:1rem 0 0.5rem;font-size:0.9rem;color:#e8eaed;">Network drive (Windows service)</h3>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Map a drive letter with credentials when running as a Windows service. Example: letter <code>W</code>, UNC <code>\\nas\music</code>, then use <code>W:\VirtualDJ\database.xml</code> above.</p>
+      <div class="row">
+        <div class="field" style="max-width:5rem"><label>Letter</label><input id="netDriveLetter" placeholder="W" maxlength="1"></div>
+        <div class="field" style="flex:2"><label>UNC share</label><input id="netDriveUnc" placeholder="\\server\share"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Username</label><input id="netDriveUser" placeholder="DOMAIN\user or user@domain" autocomplete="username"></div>
+        <div class="field"><label>Password</label><input id="netDrivePass" type="password" placeholder="Leave blank to keep saved" autocomplete="current-password"></div>
+      </div>
+      <p id="netDriveStatus" style="color:#9aa0a6;font-size:0.85rem;margin:0.35rem 0 0;"></p>
       <div class="row">
         <button class="secondary" id="detectVdjBtn">Auto-detect path</button>
       </div>
@@ -194,7 +283,12 @@
       return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
+    let activeTab = 'status';
+    let lastLogId = 0;
+    let logPollTimer = null;
+
     function switchTab(tabId) {
+      activeTab = tabId;
       document.querySelectorAll('.tab-btn').forEach(btn => {
         const active = btn.dataset.tab === tabId;
         btn.classList.toggle('active', active);
@@ -205,6 +299,67 @@
       });
       try { localStorage.setItem(TAB_KEY, tabId); } catch { /* ignore */ }
       if (location.hash !== '#' + tabId) history.replaceState(null, '', '#' + tabId);
+      if (tabId === 'log') {
+        loadLogs(true);
+        startLogPolling();
+      } else {
+        stopLogPolling();
+      }
+    }
+
+    function formatLogTime(ts) {
+      return new Date(ts).toLocaleTimeString(undefined, { hour12: false });
+    }
+
+    function renderLogEntries(items, replace) {
+      if (!items.length && replace) {
+        logView.innerHTML = '<p class="log-empty">No log entries yet.</p>';
+        return;
+      }
+      if (!items.length) return;
+      if (replace) logView.innerHTML = '';
+      const atBottom = logView.scrollHeight - logView.scrollTop - logView.clientHeight < 40;
+      for (const entry of items) {
+        const line = document.createElement('div');
+        line.className = 'log-line ' + (entry.level || 'info');
+        line.innerHTML = `<span class="log-time">${formatLogTime(entry.ts)}</span>${escapeHtml(entry.message)}`;
+        logView.appendChild(line);
+      }
+      if (logAutoScroll.checked && (replace || atBottom)) {
+        logView.scrollTop = logView.scrollHeight;
+      }
+    }
+
+    async function loadLogs(full) {
+      const url = full ? '/api/logs?limit=200' : '/api/logs?since=' + lastLogId;
+      const data = await (await fetch(url)).json();
+      if (full) lastLogId = 0;
+      if (data.entries?.length) {
+        if (full) {
+          lastLogId = data.latest || data.entries[data.entries.length - 1].id;
+          renderLogEntries(data.entries, true);
+        } else {
+          lastLogId = data.latest || data.entries[data.entries.length - 1].id;
+          if (logView.querySelector('.log-empty')) logView.innerHTML = '';
+          renderLogEntries(data.entries, false);
+        }
+      } else if (full) {
+        renderLogEntries([], true);
+      }
+    }
+
+    function startLogPolling() {
+      stopLogPolling();
+      logPollTimer = setInterval(() => {
+        if (activeTab === 'log') loadLogs(false);
+      }, 2000);
+    }
+
+    function stopLogPolling() {
+      if (logPollTimer) {
+        clearInterval(logPollTimer);
+        logPollTimer = null;
+      }
     }
 
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -213,7 +368,7 @@
 
     (function initTab() {
       const fromHash = (location.hash || '').replace(/^#/, '');
-      const valid = ['status', 'hubs', 'settings'];
+      const valid = ['status', 'log', 'hubs', 'settings'];
       let tab = valid.includes(fromHash) ? fromHash : null;
       if (!tab) {
         try { tab = localStorage.getItem(TAB_KEY); } catch { /* ignore */ }
@@ -280,6 +435,7 @@
       document.getElementById('pairMessage').textContent = s.pair_message || '';
       document.getElementById('vdjStatus').textContent = s.vdj_connected ? 'connected' : 'disconnected';
       document.getElementById('vdjStatus').className = 'pill ' + (s.vdj_connected ? 'ok' : 'bad');
+      document.getElementById('deckCountStatus').textContent = `${s.vdj_deck_count || 4} (VDJ ${(s.vdj_deck_map || [1,2,3,4]).join('/')})`;
       document.getElementById('decks').textContent = JSON.stringify(s.decks, null, 2);
       document.getElementById('stats').innerHTML = Object.entries(s.stats || {}).map(([k,v]) =>
         `<div class="stat"><span>${k.replace(/_/g,' ')}</span><b>${v}</b></div>`).join('');
@@ -287,10 +443,61 @@
       renderHubs(s.hubs || []);
     }
 
+    function networkDrivesFromForm() {
+      const unc = netDriveUnc.value.trim();
+      if (!unc) return [];
+      return [{
+        letter: (netDriveLetter.value.trim() || 'W').replace(':', '').toUpperCase(),
+        unc,
+        username: netDriveUser.value.trim(),
+        password: netDrivePass.value,
+      }];
+    }
+
+    function renderNetDriveStatus(status) {
+      if (!status?.length) {
+        netDriveStatus.textContent = '';
+        return;
+      }
+      const s = status[0];
+      netDriveStatus.textContent = s.ok
+        ? `Drive ${s.letter}: mapped to ${s.unc}`
+        : `Drive ${s.letter || '?'} failed: ${s.error || 'unknown error'}`;
+      netDriveStatus.style.color = s.ok ? '#81c995' : '#f28b82';
+    }
+
+    function updateDeckMapVisibility() {
+      vdjDeckMapRow.style.display = parseInt(vdjDeckCount.value, 10) === 2 ? 'flex' : 'none';
+    }
+
+    function vdjDeckMapFromForm() {
+      const count = parseInt(vdjDeckCount.value, 10) || 4;
+      if (count === 2) {
+        return [parseInt(vdjDeckMapA.value, 10) || 1, parseInt(vdjDeckMapB.value, 10) || 2];
+      }
+      return [1, 2, 3, 4];
+    }
+
+    vdjDeckCount.addEventListener('change', updateDeckMapVisibility);
+
     async function loadConfig() {
       const c = await (await fetch('/api/config')).json();
       satelliteName.value = c.satellite_name || '';
+      vdjDeckCount.value = String(c.vdj_deck_count === 2 ? 2 : 4);
+      os2lPort.value = c.os2l_port || 8787;
+      subscriptionFrequency.value = c.subscription_frequency || 25;
+      const map = c.vdj_deck_map || (c.vdj_deck_count === 2 ? [1, 2] : [1, 2, 3, 4]);
+      vdjDeckMapA.value = String(map[0] || 1);
+      vdjDeckMapB.value = String(map[1] || 2);
+      updateDeckMapVisibility();
       vdjDbPath.value = c.vdj_db_path || '';
+      const nd = (c.network_drives || [])[0] || {};
+      netDriveLetter.value = nd.letter || 'W';
+      netDriveUnc.value = nd.unc || '';
+      netDriveUser.value = nd.username || '';
+      netDrivePass.value = '';
+      netDrivePass.placeholder = nd.password ? 'Saved (leave blank to keep)' : 'Password';
+      renderNetDriveStatus(c.network_drive_status);
     }
 
     hubList.addEventListener('click', async (e) => {
@@ -366,15 +573,33 @@
     };
 
     saveBtn.onclick = async () => {
-      await fetch('/api/config', {
+      const r = await (await fetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           satellite_name: satelliteName.value.trim(),
+          vdj_deck_count: parseInt(vdjDeckCount.value, 10) || 4,
+          vdj_deck_map: vdjDeckMapFromForm(),
+          os2l_port: parseInt(os2lPort.value, 10) || 8787,
+          subscription_frequency: parseInt(subscriptionFrequency.value, 10) || 25,
           vdj_db_path: vdjDbPath.value.trim(),
+          network_drives: networkDrivesFromForm(),
         }),
-      });
-      libMsg.textContent = 'Settings saved.';
+      })).json();
+      renderNetDriveStatus(r.network_drive_status);
+      netDrivePass.value = '';
+      netDrivePass.placeholder = netDriveUnc.value.trim() ? 'Saved (leave blank to keep)' : 'Password';
+      const parts = ['Settings saved.'];
+      if (r.deck_sync) {
+        parts.push(`OS2L now using VDJ decks [${(r.deck_sync.deck_numbers || []).join(', ')}].`);
+      }
+      if (r.os2l_restart_required) {
+        parts.push('Restart the satellite service for the OS2L port change.');
+      }
+      if (r.network_drive_status?.some(s => !s.ok)) {
+        parts.push('Network drive mapping failed — check credentials.');
+      }
+      libMsg.textContent = parts.join(' ');
     };
 
     detectVdjBtn.onclick = async () => {
@@ -390,16 +615,20 @@
 
     importBtn.onclick = async () => {
       libMsg.textContent = 'Importing…';
-      if (vdjDbPath.value.trim()) {
+      if (vdjDbPath.value.trim() || netDriveUnc.value.trim()) {
         await fetch('/api/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vdj_db_path: vdjDbPath.value.trim() }),
+          body: JSON.stringify({
+            vdj_db_path: vdjDbPath.value.trim(),
+            network_drives: networkDrivesFromForm(),
+          }),
         });
       }
       const r = await (await fetch('/api/tracks/import', { method: 'POST' })).json();
-      if (r.error) libMsg.textContent = r.error;
-      else {
+      if (r.error) {
+        libMsg.textContent = r.hint ? `${r.error} — try: ${r.hint}` : r.error;
+      } else {
         libMsg.textContent = `Imported ${r.total} tracks from ${r.path}.`;
         if (r.path) vdjDbPath.value = r.path;
       }
@@ -411,9 +640,16 @@
       libMsg.textContent = r.error ? r.error : `Syncing ${r.count} tracks in background.`;
     };
 
+    clearLogBtn.onclick = async () => {
+      await fetch('/api/logs', { method: 'DELETE' });
+      lastLogId = 0;
+      await loadLogs(true);
+    };
+
     loadConfig();
     load();
     setInterval(load, 3000);
+    if (activeTab === 'log') startLogPolling();
   </script>
 </body>
 </html>

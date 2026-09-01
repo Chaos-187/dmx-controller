@@ -1760,43 +1760,97 @@ function migrateAtomicStrobeModes() {
 
 // ─── Seed Default Subscriptions ─────────────────────────────────────────────
 
-function seedSubscriptions() {
+function normalizeDeckCount(deckCount) {
+  return parseInt(deckCount, 10) === 2 ? 2 : 4;
+}
+
+function normalizeDeckNumbers(input) {
+  if (Array.isArray(input)) {
+    const nums = [...new Set(input.map((n) => parseInt(n, 10)).filter((n) => n >= 1 && n <= 4))].sort((a, b) => a - b);
+    if (nums.length) return nums;
+  }
+  const count = normalizeDeckCount(input);
+  return count === 2 ? [1, 2] : [1, 2, 3, 4];
+}
+
+function defaultSubscriptionRows(deckNumbers = 4) {
+  const decks = normalizeDeckNumbers(deckNumbers);
+  const rows = [];
+  let sortOrder = 0;
+  const push = (trigger, label, category) => {
+    rows.push({ trigger, label, category, sort_order: sortOrder++ });
+  };
+
+  for (const d of decks) push(`deck ${d} get_text '%SOUNDSWITCH_ID'`, `Deck ${d} SoundSwitch ID`, 'soundswitch');
+  for (const d of decks) push(`deck ${d} get_filepath`, `Deck ${d} Filepath`, 'track');
+  for (const d of decks) push(`deck ${d} get_genre`, `Deck ${d} Genre`, 'track');
+  for (const d of decks) push(`deck ${d} level`, `Deck ${d} Level`, 'mixer');
+  push('crossfader', 'Crossfader', 'mixer');
+  for (const d of decks) push(`deck ${d} get_time elapsed absolute`, `Deck ${d} Time`, 'transport');
+  for (const d of decks) push(`deck ${d} get_beatpos`, `Deck ${d} Beat Position`, 'transport');
+  for (const d of decks) push(`deck ${d} get_firstbeat`, `Deck ${d} First Beat`, 'transport');
+  for (const d of decks) push(`deck ${d} get_bpm`, `Deck ${d} BPM`, 'transport');
+  for (const d of decks) push(`deck ${d} play`, `Deck ${d} Play`, 'transport');
+  for (const d of decks) push(`deck ${d} loop`, `Deck ${d} Loop`, 'loop');
+  for (const d of decks) push(`deck ${d} get_loop`, `Deck ${d} Get Loop`, 'loop');
+  for (const d of decks) {
+    const expr = `deck ${d} loop_roll 0.03125 ? constant 0.03125 : deck ${d} loop_roll 0.0625 ? constant 0.0625 : deck ${d} loop_roll 0.125 ? constant 0.125 : deck ${d} loop_roll 0.25 ? constant 0.25 : deck ${d} loop_roll 0.5 ? constant 0.5 : deck ${d} loop_roll 0.75 ? constant 0.75 : deck ${d} loop_roll 1 ? constant 1 : deck ${d} loop_roll 2 ? constant 2 : deck ${d} loop_roll 4 ? constant 4 : constant 0`;
+    push(expr, `Deck ${d} Loop Roll`, 'loop');
+  }
+  return rows;
+}
+
+function seedSubscriptions(deckNumbers = 4) {
   const ins = db.prepare(
     `INSERT INTO subscriptions (trigger, label, category, enabled, sort_order) VALUES (?, ?, ?, 1, ?)`
   );
   const subs = db.transaction(() => {
-    let o = 0;
-    // SoundSwitch IDs
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_text '%SOUNDSWITCH_ID'`, `Deck ${d} SoundSwitch ID`, 'soundswitch', o++);
-    // Filepath
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_filepath`, `Deck ${d} Filepath`, 'track', o++);
-    // Genre
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_genre`, `Deck ${d} Genre`, 'track', o++);
-    // Level
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} level`, `Deck ${d} Level`, 'mixer', o++);
-    // Crossfader
-    ins.run('crossfader', 'Crossfader', 'mixer', o++);
-    // Time
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_time elapsed absolute`, `Deck ${d} Time`, 'transport', o++);
-    // Beat position
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_beatpos`, `Deck ${d} Beat Position`, 'transport', o++);
-    // First beat
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_firstbeat`, `Deck ${d} First Beat`, 'transport', o++);
-    // BPM
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_bpm`, `Deck ${d} BPM`, 'transport', o++);
-    // Play
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} play`, `Deck ${d} Play`, 'transport', o++);
-    // Loop
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} loop`, `Deck ${d} Loop`, 'loop', o++);
-    // Get loop
-    for (let d = 1; d <= 4; d++) ins.run(`deck ${d} get_loop`, `Deck ${d} Get Loop`, 'loop', o++);
-    // Loop roll expressions
-    for (let d = 1; d <= 4; d++) {
-      const expr = `deck ${d} loop_roll 0.03125 ? constant 0.03125 : deck ${d} loop_roll 0.0625 ? constant 0.0625 : deck ${d} loop_roll 0.125 ? constant 0.125 : deck ${d} loop_roll 0.25 ? constant 0.25 : deck ${d} loop_roll 0.5 ? constant 0.5 : deck ${d} loop_roll 0.75 ? constant 0.75 : deck ${d} loop_roll 1 ? constant 1 : deck ${d} loop_roll 2 ? constant 2 : deck ${d} loop_roll 4 ? constant 4 : constant 0`;
-      ins.run(expr, `Deck ${d} Loop Roll`, 'loop', o++);
+    for (const row of defaultSubscriptionRows(deckNumbers)) {
+      ins.run(row.trigger, row.label, row.category, row.sort_order);
     }
   });
   subs();
+}
+
+/** Align OS2L subscriptions with specific VirtualDJ deck numbers (e.g. [1, 3] for 2-deck skins). */
+function syncSubscriptionsForDecks(deckNumbers) {
+  const decks = normalizeDeckNumbers(deckNumbers);
+  const deckSet = new Set(decks);
+  let removed = 0;
+  let added = 0;
+
+  for (const sub of getSubscriptions()) {
+    const m = sub.trigger.match(/^deck (\d+)\b/);
+    if (m && !deckSet.has(parseInt(m[1], 10))) {
+      deleteSubscription(sub.id);
+      removed++;
+    }
+  }
+
+  const existing = new Set(getSubscriptions().map((s) => s.trigger));
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as m FROM subscriptions').get().m;
+  let sortOrder = maxOrder + 1;
+  const ins = db.prepare(
+    `INSERT INTO subscriptions (trigger, label, category, enabled, sort_order) VALUES (?, ?, ?, 1, ?)`
+  );
+
+  for (const row of defaultSubscriptionRows(decks)) {
+    if (!existing.has(row.trigger)) {
+      ins.run(row.trigger, row.label, row.category, sortOrder++);
+      added++;
+    }
+  }
+
+  const logicalCount = decks.length <= 2 ? 2 : 4;
+  setConfig('vdj_deck_count', String(logicalCount));
+  setConfig('vdj_deck_map', JSON.stringify(decks));
+  return { deck_numbers: decks, deck_count: logicalCount, added, removed };
+}
+
+/** @deprecated use syncSubscriptionsForDecks — kept for hub compatibility */
+function syncSubscriptionsForDeckCount(deckCount) {
+  const count = normalizeDeckCount(deckCount);
+  return syncSubscriptionsForDecks(count === 2 ? [1, 2] : [1, 2, 3, 4]);
 }
 
 // ─── Subscriptions CRUD ─────────────────────────────────────────────────────
@@ -2905,19 +2959,28 @@ function getTrack(id) {
 }
 
 function getTrackByPath(filepath) {
+  const normalized = normalizeTrackFilepath(filepath);
   // Try exact match first
-  const exact = db.prepare('SELECT * FROM tracks WHERE filepath = ?').get(filepath);
+  const exact = db.prepare('SELECT * FROM tracks WHERE filepath = ?').get(normalized);
   if (exact) return exact;
+  if (normalized !== filepath) {
+    const raw = db.prepare('SELECT * FROM tracks WHERE filepath = ?').get(filepath);
+    if (raw) return raw;
+  }
 
   // Fall back to drive-letter-agnostic match (e.g. E:\Music\... vs H:\Music\...)
-  // Compare everything after the drive letter (e.g. "\Music\...")
-  const driveMatch = filepath.match(/^[A-Za-z]:\\/);
+  const driveMatch = normalized.match(/^[A-Za-z]:\\/);
   if (driveMatch) {
-    const pathAfterDrive = filepath.substring(2); // strip "X:" keep "\Music\..."
+    const pathAfterDrive = normalized.substring(2);
     return db.prepare('SELECT * FROM tracks WHERE SUBSTR(filepath, 3) = ?').get(pathAfterDrive);
   }
 
   return null;
+}
+
+function normalizeTrackFilepath(filepath) {
+  if (!filepath || typeof filepath !== 'string') return filepath;
+  return filepath.replace(/^\\\\\?\\+/i, '').replace(/\//g, '\\');
 }
 
 function updateTrackBeatgridPos(trackId, beatgridPos) {
@@ -4783,6 +4846,7 @@ module.exports = {
   getGroups, getGroup, createGroup, updateGroup, deleteGroup, setGroupFixtures,
   getArtNetUniverses, getArtNetUniverse, createArtNetUniverse, updateArtNetUniverse, deleteArtNetUniverse, toggleArtNetUniverse,
   getSubscriptions, getEnabledSubscriptions, createSubscription, updateSubscription, deleteSubscription, toggleSubscription,
+  syncSubscriptionsForDeckCount, syncSubscriptionsForDecks,
   getConfig, setConfig, getAllConfig,
   getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks, updateTrackBeatgridPos,
   getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,

@@ -60,6 +60,7 @@ svc.on('uninstall', () => {
 svc.on('start', () => {
   console.log(`[Service] "${serviceName}" is running.`);
   console.log('Status UI: http://localhost:8788');
+  console.log('If unreachable, check satellite\\daemon\\thaluxissatellite.err.log');
 });
 
 svc.on('error', (err) => {

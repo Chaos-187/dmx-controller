@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { XMLParser } = require('fast-xml-parser');
 
 // ─── Parser Options ─────────────────────────────────────────────────────────
@@ -130,14 +131,101 @@ function parseSong(song) {
   };
 }
 
-// ─── Parse the full database.xml file ───────────────────────────────────────
+// ─── Resolve database path (mapped drives → UNC for Windows services) ───────
 
-function parseVdjDatabase(xmlPath) {
-  if (!fs.existsSync(xmlPath)) {
-    throw new Error(`VDJ database not found: ${xmlPath}`);
+function uncRootForDriveLetter(letter) {
+  if (process.platform !== 'win32') return null;
+  const drive = String(letter || '').replace(':', '').toUpperCase();
+  if (!drive) return null;
+  try {
+    const out = execSync(`net use ${drive}:`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const m = out.match(/Remote name\s+(\S+)/i);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve database.xml path for read access.
+ * Windows services cannot use mapped drives (W:) — converts to UNC when possible.
+ */
+function resolveDatabasePath(inputPath) {
+  if (!inputPath || typeof inputPath !== 'string') {
+    return { path: null, error: 'No path configured' };
   }
 
-  const xmlData = fs.readFileSync(xmlPath, 'utf-8');
+  const trimmed = inputPath.trim();
+  if (!trimmed) return { path: null, error: 'No path configured' };
+
+  if (fs.existsSync(trimmed)) {
+    return { path: trimmed };
+  }
+
+  const driveMatch = trimmed.match(/^([a-zA-Z]):[\\/](.*)$/);
+  if (driveMatch && process.platform === 'win32') {
+    const uncRoot = uncRootForDriveLetter(driveMatch[1]);
+    const rest = driveMatch[2].replace(/\//g, '\\');
+    if (uncRoot) {
+      const uncPath = path.win32.join(uncRoot, rest);
+      if (fs.existsSync(uncPath)) {
+        return { path: uncPath, resolvedFrom: trimmed };
+      }
+      return {
+        path: null,
+        error: `VDJ database not found at UNC path: ${uncPath}`,
+        hint: uncPath,
+        resolvedFrom: trimmed,
+      };
+    }
+    return {
+      path: null,
+      error: `Cannot access mapped drive ${driveMatch[1].toUpperCase()}:\\ — Windows services do not see Explorer mapped drives.`,
+      hint: `Configure the network drive in Satellite Settings (letter ${driveMatch[1].toUpperCase()}, UNC share, username, password) and save, or use a full UNC path like \\\\server\\share\\VirtualDJ\\database.xml.`,
+    };
+  }
+
+  return { path: null, error: `VDJ database not found: ${trimmed}` };
+}
+
+/** Prefer resolved path; fall back to original string for storage attempts. */
+function normalizeDatabasePath(inputPath) {
+  const resolved = resolveDatabasePath(inputPath);
+  return resolved.path || (typeof inputPath === 'string' ? inputPath.trim() : '');
+}
+
+// ─── Parse the full database.xml file ───────────────────────────────────────
+
+/** Read database.xml and release the file handle immediately (important on network shares). */
+function readDatabaseXml(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const { size } = fs.fstatSync(fd);
+    const buf = Buffer.alloc(size);
+    let offset = 0;
+    while (offset < size) {
+      const read = fs.readSync(fd, buf, offset, size - offset, offset);
+      if (read <= 0) break;
+      offset += read;
+    }
+    return buf.toString('utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function parseVdjDatabase(xmlPath) {
+  const resolved = resolveDatabasePath(xmlPath);
+  if (!resolved.path) {
+    throw new Error(resolved.error || `VDJ database not found: ${xmlPath}`);
+  }
+
+  const actualPath = resolved.path;
+  const xmlData = readDatabaseXml(actualPath);
   const parser = new XMLParser(parserOptions);
   const result = parser.parse(xmlData);
 
@@ -184,4 +272,6 @@ function findVdjDatabase() {
 module.exports = {
   parseVdjDatabase,
   findVdjDatabase,
+  resolveDatabasePath,
+  normalizeDatabasePath,
 };
