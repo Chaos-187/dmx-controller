@@ -690,15 +690,21 @@ app.post('/api/tracks/import', (req, res) => {
   try {
     let xmlPath = config.vdj_db_path || db.getConfig('vdj_db_path');
     if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
-    if (!xmlPath) return res.status(400).json({ error: 'VDJ database not found' });
+    if (!xmlPath) return res.status(400).json({ error: 'VDJ database not found — set the path in Settings or use Auto-detect' });
 
     const tracks = vdjParser.parseVdjDatabase(xmlPath);
     const result = db.importTracks(tracks);
     config.vdj_db_path = xmlPath;
+    saveConfigFile();
     res.json({ ...result, path: xmlPath });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get('/api/vdj/detect', (req, res) => {
+  const path = config.vdj_db_path || vdjParser.findVdjDatabase();
+  res.json({ path: path || '', found: !!path });
 });
 
 app.post('/api/library/sync-to-hub', async (req, res) => {

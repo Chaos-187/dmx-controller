@@ -145,9 +145,7 @@
       <div class="row">
         <div class="field"><label>Satellite name</label><input id="satelliteName" placeholder="Thaluxis Satellite (VDJ-Laptop)"></div>
       </div>
-      <div class="row">
-        <button id="saveBtn">Save</button>
-      </div>
+      <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Shown on the hub and sent during pairing.</p>
       <p id="msg" style="color:#9aa0a6;font-size:0.85rem;"></p>
     </div>
 
@@ -155,10 +153,20 @@
       <h2 style="margin-top:0;font-size:1rem;">Library</h2>
       <p style="color:#9aa0a6;font-size:0.85rem;margin-top:0">Import tracks from VirtualDJ and push unanalyzed tracks to the active hub.</p>
       <div class="row">
+        <div class="field"><label>VirtualDJ database.xml path</label><input id="vdjDbPath" placeholder="Leave empty to auto-detect on import"></div>
+      </div>
+      <div class="row">
+        <button class="secondary" id="detectVdjBtn">Auto-detect path</button>
+      </div>
+      <div class="row">
         <button class="secondary" id="importBtn">Import VDJ library</button>
         <button class="secondary" id="syncBtn">Sync unanalyzed to active hub</button>
       </div>
       <p id="libMsg" style="color:#9aa0a6;font-size:0.85rem;"></p>
+    </div>
+
+    <div class="row">
+      <button id="saveBtn">Save settings</button>
     </div>
   </div>
   </main>
@@ -282,6 +290,7 @@
     async function loadConfig() {
       const c = await (await fetch('/api/config')).json();
       satelliteName.value = c.satellite_name || '';
+      vdjDbPath.value = c.vdj_db_path || '';
     }
 
     hubList.addEventListener('click', async (e) => {
@@ -360,16 +369,40 @@
       await fetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ satellite_name: satelliteName.value.trim() }),
+        body: JSON.stringify({
+          satellite_name: satelliteName.value.trim(),
+          vdj_db_path: vdjDbPath.value.trim(),
+        }),
       });
-      msg.textContent = 'Saved.';
-      load();
+      libMsg.textContent = 'Settings saved.';
+    };
+
+    detectVdjBtn.onclick = async () => {
+      libMsg.textContent = 'Detecting…';
+      const r = await (await fetch('/api/vdj/detect')).json();
+      if (r.path) {
+        vdjDbPath.value = r.path;
+        libMsg.textContent = `Found: ${r.path}`;
+      } else {
+        libMsg.textContent = 'VirtualDJ database.xml not found in default locations.';
+      }
     };
 
     importBtn.onclick = async () => {
       libMsg.textContent = 'Importing…';
+      if (vdjDbPath.value.trim()) {
+        await fetch('/api/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vdj_db_path: vdjDbPath.value.trim() }),
+        });
+      }
       const r = await (await fetch('/api/tracks/import', { method: 'POST' })).json();
-      libMsg.textContent = r.error ? r.error : `Imported ${r.total} tracks.`;
+      if (r.error) libMsg.textContent = r.error;
+      else {
+        libMsg.textContent = `Imported ${r.total} tracks from ${r.path}.`;
+        if (r.path) vdjDbPath.value = r.path;
+      }
     };
 
     syncBtn.onclick = async () => {
