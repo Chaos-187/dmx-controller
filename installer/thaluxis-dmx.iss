@@ -26,7 +26,6 @@ DefaultDirName={autopf}\{#MyInstallSubdir}
 DefaultGroupName={#MyAppName}
 DisableDirPage=auto
 DisableProgramGroupPage=auto
-DisableReadyPage=auto
 UsePreviousAppDir=yes
 CloseApplications=force
 CloseApplicationsFilter={#MyAppExeName}
