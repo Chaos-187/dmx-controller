@@ -83,9 +83,14 @@ begin
   Result := ExpandConstant('{autopf}\{#MyInstallSubdir}');
 end;
 
-function IsUpgradeInstall(): Boolean;
+function GetInstalledVersion(): String;
 begin
-  Result := (GetPreviousVersion() <> '');
+  Result := '';
+  if RegQueryStringValue(HKLM64, '{#MyUninstallRegKey}', 'DisplayVersion', Result) then
+    Exit;
+  if RegQueryStringValue(HKLM, '{#MyUninstallRegKey}', 'DisplayVersion', Result) then
+    Exit;
+  RegQueryStringValue(HKCU64, '{#MyUninstallRegKey}', 'DisplayVersion', Result);
 end;
 
 function InitializeSetup(): Boolean;
@@ -94,7 +99,7 @@ var
   ExistingPath: String;
 begin
   Result := True;
-  PrevVersion := GetPreviousVersion();
+  PrevVersion := GetInstalledVersion();
   ExistingPath := GetExistingInstallPath();
 
   if (PrevVersion <> '') or (DirExists(ExistingPath) and FileExists(ExistingPath + '\{#MyAppExeName}')) then
