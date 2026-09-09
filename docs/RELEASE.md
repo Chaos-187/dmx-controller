@@ -39,6 +39,21 @@ The zip includes:
 | `ffmpeg.exe`, etc. | Audio analysis (optional) |
 | `version.json` | Build metadata |
 
+## Windows service (exe install)
+
+After extracting a release zip, run **`install-service.bat`** from the same folder as `dmx-controller.exe` (Administrator required). This registers the exe with Windows as **ThaluxisMaster** using `sc.exe` — no Node.js install needed.
+
+| Script | Purpose |
+|--------|---------|
+| `install-service.bat` | Register & start the service |
+| `uninstall-service.bat` | Stop & remove the service |
+| `start-service.bat` | Start the service |
+| `stop-service.bat` | Stop the service |
+
+The auto-updater stops and restarts **ThaluxisMaster** when applying updates.
+
+**Development** (from git clone, `node server.js`): use `npm run service:install` or `scripts\install-master-service.cmd` — those use node-windows with `server.js`.
+
 ## Auto-update (installed hubs)
 
 On **Windows** installs with `dmx-controller.exe`:

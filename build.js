@@ -168,6 +168,17 @@ const versionManifest = {
 fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify(versionManifest, null, 2));
 console.log(`\nWrote version.json (${pkg.version})`);
 
+// ─── Windows service scripts (exe + sc.exe — no Node required) ──────────────
+
+console.log('\nCopying Windows service scripts...');
+const serviceScriptsDir = path.join(ROOT, 'scripts', 'service');
+if (fs.existsSync(serviceScriptsDir)) {
+  for (const name of fs.readdirSync(serviceScriptsDir)) {
+    if (!name.toLowerCase().endsWith('.bat')) continue;
+    copyFile(path.join(serviceScriptsDir, name), path.join(DIST, name));
+  }
+}
+
 // ─── Done ───────────────────────────────────────────────────────────────────
 
 console.log('\n=== Build complete ===');
@@ -181,4 +192,5 @@ for (const f of fs.readdirSync(DIST, { recursive: true })) {
   }
 }
 console.log('\nTo run: dist\\dmx-controller.exe');
-console.log('Note: Database is stored in data/dmx-controller.db alongside the exe (created on first run if missing).\n');
+console.log('Note: Database is stored in data/dmx-controller.db alongside the exe (created on first run if missing).');
+console.log('Service: run install-service.bat as Administrator to register ThaluxisMaster.\n');

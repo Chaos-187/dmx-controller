@@ -1,13 +1,17 @@
 /**
- * Install or remove Thaluxis Master as a Windows service.
+ * Install or remove Thaluxis Master as a Windows service (dev / source installs).
  *
  * Requires Administrator PowerShell / CMD:
  *   npm run service:install
  *   npm run service:uninstall
  *
  * Uses node-windows (dev dependency). Service runs server.js from the project root.
+ *
+ * Packaged exe installs: use scripts/service/*.bat (copied to dist/ on build).
+ * Those register dmx-controller.exe directly with sc.exe — no Node.js required.
  */
 
+const fs = require('fs');
 const path = require('path');
 
 const action = process.argv[2];
@@ -26,8 +30,15 @@ try {
 }
 
 const projectRoot = path.join(__dirname, '..');
+const distExe = path.join(projectRoot, 'dist', 'dmx-controller.exe');
 const scriptPath = path.join(projectRoot, 'server.js');
 const serviceName = 'ThaluxisMaster';
+
+if (action === 'install' && fs.existsSync(distExe)) {
+  console.log('[Service] dist/dmx-controller.exe found.');
+  console.log('[Service] For exe installs, prefer: dist\\install-service.bat (Windows service on the packaged exe).');
+  console.log('[Service] Continuing with node-windows + server.js for development…\n');
+}
 
 const svc = new Service({
   name: serviceName,
