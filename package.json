@@ -20,6 +20,7 @@
     "satellite:service:install": "npm run rebuild:native && npm install --prefix satellite && npm run service:install --prefix satellite",
     "satellite:service:uninstall": "npm run service:uninstall --prefix satellite",
     "build": "node build.js",
+    "build:installer": "node scripts/build-installer.js",
     "release:prepare": "node scripts/release-prepare.js",
     "rebuild:native": "npm rebuild better-sqlite3 ftdi-d2xx usb",
     "rebuild:native:dev": "node scripts/rebuild-native-dev.js",

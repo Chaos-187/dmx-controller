@@ -247,7 +247,7 @@ Companion and other external clients can connect to the same WebSocket. See [doc
 
 ## Releases & auto-update
 
-Push a version tag to build and publish a Windows zip on GitHub Releases. Installed hubs can check, download, and apply updates from **Config → About**.
+Push a version tag to build and publish a Windows **installer** and **zip** on GitHub Releases. Installed hubs can check, download, and apply updates from **Config → About**.
 
 See [docs/RELEASE.md](docs/RELEASE.md) for the full release workflow.
 

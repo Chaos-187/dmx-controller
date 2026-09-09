@@ -69,11 +69,29 @@ jobs:
           Write-Host "Created $zipFile ($sizeMb MB)"
           echo "ZIP_FILE=$zipFile" >> $env:GITHUB_ENV
 
-      - name: Upload artifact
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v',''
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after Inno Setup install" }
+          & $iscc installer\thaluxis-dmx.iss "/DMyAppVersion=$version"
+          $setupFile = "${{ env.PACKAGE_NAME }}-${version}-setup.exe"
+          if (-not (Test-Path $setupFile)) { throw "Installer not created: $setupFile" }
+          $sizeMb = [math]::Round((Get-Item $setupFile).Length / 1MB, 1)
+          Write-Host "Created $setupFile ($sizeMb MB)"
+          echo "SETUP_FILE=$setupFile" >> $env:GITHUB_ENV
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-zip
-          path: ${{ env.ZIP_FILE }}
+          name: release-files
+          path: |
+            ${{ env.ZIP_FILE }}
+            ${{ env.SETUP_FILE }}
           retention-days: 30
 
   release:
@@ -86,10 +104,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download artifact
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-zip
+          name: release-files
 
       - name: Generate release notes
         id: notes
@@ -103,7 +121,7 @@ jobs:
             BODY="${BODY}$(git log --pretty=format:'- %s (%h)' "${PREV}..${TAG}" | head -50)"
           fi
           BODY="${BODY}"$'\n\n'"### Install / update"$'\n'
-          BODY="${BODY}Download **${{ env.PACKAGE_NAME }}-${TAG}.zip**, extract alongside your existing install (keep the \`data/\` folder), or use **Config → About → Check for updates** on a running hub."$'\n'
+          BODY="${BODY}Download **${{ env.PACKAGE_NAME }}-${TAG}-setup.exe** for a guided install, or **${{ env.PACKAGE_NAME }}-${TAG}.zip** to extract manually (keep the \`data/\` folder on upgrade). Running hubs can use **Config → About → Check for updates**."$'\n'
           echo "body<<EOF" >> "$GITHUB_OUTPUT"
           echo "$BODY" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
@@ -115,5 +133,7 @@ jobs:
           body: ${{ steps.notes.outputs.body }}
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
-          files: "${{ env.PACKAGE_NAME }}-${{ github.ref_name }}.zip"
+          files: |
+            ${{ env.PACKAGE_NAME }}-${{ github.ref_name }}.zip
+            ${{ env.PACKAGE_NAME }}-*-setup.exe
           generate_release_notes: true

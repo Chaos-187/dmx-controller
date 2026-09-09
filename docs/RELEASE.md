@@ -21,11 +21,29 @@ GitHub Actions (`.github/workflows/release.yml`) will:
 1. Verify `package.json` version matches the tag
 2. Run `npm run build` (pkg exe + native addons + ffmpeg)
 3. Zip `dist/*` as `dmx-controller-v1.3.0.zip`
-4. Create a GitHub Release and attach the zip
+4. Build `dmx-controller-1.3.0-setup.exe` with Inno Setup
+5. Create a GitHub Release and attach the zip + installer
 
-## Release asset
+## Release assets
 
-Each release must include a **zip** of the `dist/` folder. The auto-updater looks for:
+Each release includes:
+
+| Asset | Purpose |
+|-------|---------|
+| `dmx-controller-v1.3.0-setup.exe` | Windows installer (Program Files, shortcuts, optional service) |
+| `dmx-controller-v1.3.0.zip` | Portable / manual install; used by the in-app auto-updater |
+
+Build the installer locally after `npm run build`:
+
+```bash
+npm run build:installer
+```
+
+Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`iscc` on PATH).
+
+### Zip asset (auto-updater)
+
+The auto-updater looks for:
 
 - Preferred: `dmx-controller-v{version}.zip`
 - Fallback: any `.zip` containing `dmx-controller` in the name
@@ -39,9 +57,19 @@ The zip includes:
 | `ffmpeg.exe`, etc. | Audio analysis (optional) |
 | `version.json` | Build metadata |
 
+## Windows installer
+
+The **setup.exe** on GitHub Releases:
+
+- Installs to `C:\Program Files\EYUP Events\ThaluxisMaster\`
+- Creates Start Menu shortcuts (hub, config URL, service scripts)
+- Optional: desktop shortcut
+- Optional: install **ThaluxisMaster** Windows service (checked by default)
+- Preserves `data\` on upgrade (database and settings)
+
 ## Windows service (exe install)
 
-After extracting a release zip, run **`install-service.bat`** from the same folder as `dmx-controller.exe` (Administrator required). This registers the exe with Windows as **ThaluxisMaster** using `sc.exe` — no Node.js install needed.
+After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers the exe with Windows as **ThaluxisMaster** using `sc.exe` — no Node.js install needed.
 
 | Script | Purpose |
 |--------|---------|
