@@ -168,16 +168,14 @@ const versionManifest = {
 fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify(versionManifest, null, 2));
 console.log(`\nWrote version.json (${pkg.version})`);
 
-// ─── Windows service (NSSM wrapper + batch scripts) ─────────────────────────
+// ─── Windows service scripts (cmd.exe + run-service.bat via sc.exe) ──────────
 
 console.log('\nPreparing Windows service files...');
-const { ensureNssmExe } = require('./scripts/ensure-nssm');
-copyFile(ensureNssmExe(), path.join(DIST, 'nssm.exe'));
-
 const serviceScriptsDir = path.join(ROOT, 'scripts', 'service');
 if (fs.existsSync(serviceScriptsDir)) {
   for (const name of fs.readdirSync(serviceScriptsDir)) {
-    if (!name.toLowerCase().endsWith('.bat')) continue;
+    const lower = name.toLowerCase();
+    if (!lower.endsWith('.bat') && !lower.endsWith('.ps1')) continue;
     copyFile(path.join(serviceScriptsDir, name), path.join(DIST, name));
   }
 }
@@ -196,4 +194,4 @@ for (const f of fs.readdirSync(DIST, { recursive: true })) {
 }
 console.log('\nTo run: dist\\dmx-controller.exe');
 console.log('Note: Database is stored in data/dmx-controller.db alongside the exe (created on first run if missing).');
-console.log('Service: run install-service.bat as Administrator (uses nssm.exe to wrap the exe).\n');
+console.log('Service: run install-service.bat as Administrator (registers via sc.exe + run-service.bat).\n');

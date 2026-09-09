@@ -10,7 +10,7 @@ if /i "%~2"=="silent" set "SILENT=1"
 if not "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR%\"
 set "EXE=%INSTALL_DIR%dmx-controller.exe"
 set "RUNNER=%INSTALL_DIR%run-service.bat"
-set "NSSM=%INSTALL_DIR%nssm.exe"
+set "REGISTER_PS=%INSTALL_DIR%register-service.ps1"
 set "DATA_DIR=%ProgramData%\EYUP Events\ThaluxisMaster"
 set "LOG_DIR=%DATA_DIR%\logs"
 
@@ -25,39 +25,6 @@ if not exist "%EXE%" (
   exit /b 1
 )
 
-if not exist "%NSSM%" (
-  echo.
-  echo ERROR: nssm.exe not found in:
-  echo   %INSTALL_DIR%
-  echo Reinstall from a current release build ^(npm run build bundles nssm.exe^).
-  echo.
-  if not defined SILENT pause
-  exit /b 1
-)
-
-echo Installing Thaluxis Master service via NSSM...
-echo   Application: %EXE%
-echo   Directory:   %INSTALL_DIR%
-echo.
-
-REM Remove legacy sc.exe registration ^(does not work with pkg exe^)
-sc query "%SERVICE%" >nul 2>&1
-if not errorlevel 1 (
-  echo Removing legacy sc.exe service registration...
-  sc stop "%SERVICE%" >nul 2>&1
-  timeout /t 2 /nobreak >nul
-  sc delete "%SERVICE%" >nul 2>&1
-)
-
-REM Reinstall NSSM service if it already exists
-"%NSSM%" status %SERVICE% >nul 2>&1
-if not errorlevel 1 (
-  echo Updating existing NSSM service...
-  net stop "%SERVICE%" >nul 2>&1
-  timeout /t 2 /nobreak >nul
-  "%NSSM%" remove %SERVICE% confirm >nul 2>&1
-)
-
 if not exist "%RUNNER%" (
   echo.
   echo ERROR: run-service.bat not found in:
@@ -67,6 +34,22 @@ if not exist "%RUNNER%" (
   if not defined SILENT pause
   exit /b 1
 )
+
+if not exist "%REGISTER_PS%" (
+  echo.
+  echo ERROR: register-service.ps1 not found in:
+  echo   %INSTALL_DIR%
+  echo Reinstall from a current release build.
+  echo.
+  if not defined SILENT pause
+  exit /b 1
+)
+
+echo Installing Thaluxis Master Windows service...
+echo   Hub:       %EXE%
+echo   Launcher:  %RUNNER%
+echo   Data:      %DATA_DIR%
+echo.
 
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
@@ -80,30 +63,12 @@ if exist "%INSTALL_DIR%data\dmx-controller.db" (
   )
 )
 
-REM NSSM runs run-service.bat (sets DMX_DATA_DIR + logging under ProgramData)
-"%NSSM%" install %SERVICE% "%RUNNER%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REGISTER_PS%" -InstallDir "%INSTALL_DIR%"
 if errorlevel 1 (
-  echo Failed to register service with NSSM.
+  echo Failed to register the Windows service.
   if not defined SILENT pause
   exit /b 1
 )
-
-"%NSSM%" set %SERVICE% AppDirectory "%INSTALL_DIR%"
-"%NSSM%" set %SERVICE% DisplayName "Thaluxis Master"
-"%NSSM%" set %SERVICE% Description "Thaluxis Master - DMX lighting control, Art-Net output, and VirtualDJ OS2L integration."
-"%NSSM%" set %SERVICE% ObjectName LocalSystem
-"%NSSM%" set %SERVICE% Start SERVICE_AUTO_START
-"%NSSM%" set %SERVICE% AppExit Default Exit
-"%NSSM%" set %SERVICE% AppThrottle 5000
-"%NSSM%" set %SERVICE% AppKillProcess dmx-controller.exe
-"%NSSM%" set %SERVICE% AppStopMethodConsole 3000
-"%NSSM%" set %SERVICE% AppStdout "%LOG_DIR%\nssm-out.log"
-"%NSSM%" set %SERVICE% AppStderr "%LOG_DIR%\nssm-err.log"
-"%NSSM%" set %SERVICE% AppStdoutCreationDisposition 4
-"%NSSM%" set %SERVICE% AppStderrCreationDisposition 4
-"%NSSM%" set %SERVICE% AppRotateFiles 1
-"%NSSM%" set %SERVICE% AppRotateOnline 1
-"%NSSM%" set %SERVICE% AppRotateBytes 1048576
 
 echo Starting service...
 net start "%SERVICE%"
@@ -131,5 +96,5 @@ net session >nul 2>&1
 if not errorlevel 1 exit /b 0
 if defined SILENT exit /b 1
 echo Requesting Administrator privileges...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '%~1','silent' -Verb RunAs"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -LiteralPath '%~f0' -ArgumentList @('%INSTALL_DIR%','silent') -Verb RunAs"
 exit /b 1

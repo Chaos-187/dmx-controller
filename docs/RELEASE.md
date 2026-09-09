@@ -70,7 +70,7 @@ The **setup.exe** on GitHub Releases:
 
 ## Windows service (exe install)
 
-After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers **ThaluxisMaster** using **NSSM** (`nssm.exe` is bundled in the build) — the pkg exe is not a native Windows service binary, so NSSM wraps it and sets the correct working directory.
+After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers **ThaluxisMaster** as a Windows service using **`cmd.exe`** to run **`run-service.bat`**, which launches the hub with the correct working directory and logging. Requires **64-bit Windows**.
 
 If the service fails to start, check logs in **`%ProgramData%\EYUP Events\ThaluxisMaster\logs\`**:
 
@@ -82,10 +82,10 @@ If the service fails to start, check logs in **`%ProgramData%\EYUP Events\Thalux
 
 Run **`diagnose-service.bat`** from the install folder (Administrator not required) for service status, NSSM config, port 80 checks, and a short manual test.
 
-In **services.msc**, the path shows **`nssm.exe`** running **`run-service.bat`** — that is normal. NSSM is the wrapper; the hub is **`dmx-controller.exe`**. Verify with:
+In **services.msc**, the service path shows **`cmd.exe`** running **`run-service.bat`** — that is normal. The hub is **`dmx-controller.exe`**. Verify with:
 
 ```bat
-"C:\Program Files\EYUP Events\ThaluxisMaster\nssm.exe" get ThaluxisMaster Application
+sc qc ThaluxisMaster
 ```
 
 Database and settings for Program Files installs live in **`%ProgramData%\EYUP Events\ThaluxisMaster\`** (writable by the service), not under Program Files.
