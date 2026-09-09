@@ -168,9 +168,12 @@ const versionManifest = {
 fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify(versionManifest, null, 2));
 console.log(`\nWrote version.json (${pkg.version})`);
 
-// ─── Windows service scripts (exe + sc.exe — no Node required) ──────────────
+// ─── Windows service (NSSM wrapper + batch scripts) ─────────────────────────
 
-console.log('\nCopying Windows service scripts...');
+console.log('\nPreparing Windows service files...');
+const { ensureNssmExe } = require('./scripts/ensure-nssm');
+copyFile(ensureNssmExe(), path.join(DIST, 'nssm.exe'));
+
 const serviceScriptsDir = path.join(ROOT, 'scripts', 'service');
 if (fs.existsSync(serviceScriptsDir)) {
   for (const name of fs.readdirSync(serviceScriptsDir)) {
@@ -193,4 +196,4 @@ for (const f of fs.readdirSync(DIST, { recursive: true })) {
 }
 console.log('\nTo run: dist\\dmx-controller.exe');
 console.log('Note: Database is stored in data/dmx-controller.db alongside the exe (created on first run if missing).');
-console.log('Service: run install-service.bat as Administrator to register ThaluxisMaster.\n');
+console.log('Service: run install-service.bat as Administrator (uses nssm.exe to wrap the exe).\n');

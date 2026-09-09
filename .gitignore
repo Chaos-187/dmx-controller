@@ -11,6 +11,9 @@ node_modules/
 *.db-shm
 data/
 updates/
+installer/nssm/
+installer/nssm-extract/
+installer/nssm.zip
 
 # Logs
 *.log

@@ -47,6 +47,7 @@ Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs creat
 
 [Dirs]
 Name: "{app}\data"; Permissions: users-modify
+Name: "{app}\logs"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -57,12 +58,12 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\install-service.bat"; Description: "Register ThaluxisMaster Windows service"; Flags: postinstall skipifsilent waituntilterminated; Tasks: installservice
+Filename: "{app}\install-service.bat"; Parameters: "{app} silent"; Description: "Register ThaluxisMaster Windows service"; Flags: postinstall skipifsilent waituntilterminated; Tasks: installservice
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallRun]
 Filename: "{app}\stop-service.bat"; Flags: runhidden waituntilterminated
-Filename: "{app}\uninstall-service.bat"; Flags: runhidden waituntilterminated
+Filename: "{app}\uninstall-service.bat"; Parameters: "{app} silent"; Flags: runhidden waituntilterminated
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);

@@ -69,7 +69,9 @@ The **setup.exe** on GitHub Releases:
 
 ## Windows service (exe install)
 
-After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers the exe with Windows as **ThaluxisMaster** using `sc.exe` — no Node.js install needed.
+After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers **ThaluxisMaster** using **NSSM** (`nssm.exe` is bundled in the build) — the pkg exe is not a native Windows service binary, so NSSM wraps it and sets the correct working directory.
+
+If the service fails to start, check **`logs\service-err.log`** in the install folder.
 
 | Script | Purpose |
 |--------|---------|
