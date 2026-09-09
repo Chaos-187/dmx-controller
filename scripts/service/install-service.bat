@@ -9,7 +9,10 @@ if not "%~1"=="" (
 if /i "%~2"=="silent" set "SILENT=1"
 if not "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR%\"
 set "EXE=%INSTALL_DIR%dmx-controller.exe"
+set "RUNNER=%INSTALL_DIR%run-service.bat"
 set "NSSM=%INSTALL_DIR%nssm.exe"
+set "DATA_DIR=%ProgramData%\EYUP Events\ThaluxisMaster"
+set "LOG_DIR=%DATA_DIR%\logs"
 
 call :EnsureAdmin || exit /b 1
 
@@ -55,10 +58,18 @@ if not errorlevel 1 (
   "%NSSM%" remove %SERVICE% confirm >nul 2>&1
 )
 
-if not exist "%INSTALL_DIR%logs" mkdir "%INSTALL_DIR%logs"
+if not exist "%RUNNER%" (
+  echo.
+  echo ERROR: run-service.bat not found in:
+  echo   %INSTALL_DIR%
+  echo Reinstall from a current release build.
+  echo.
+  if not defined SILENT pause
+  exit /b 1
+)
 
-set "DATA_DIR=%ProgramData%\EYUP Events\ThaluxisMaster"
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 icacls "%DATA_DIR%" /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-32-545:(OI)(CI)M /T >nul 2>&1
 
 REM Migrate database out of Program Files if a previous install created it there
@@ -69,7 +80,8 @@ if exist "%INSTALL_DIR%data\dmx-controller.db" (
   )
 )
 
-"%NSSM%" install %SERVICE% "%EXE%"
+REM NSSM runs run-service.bat (sets DMX_DATA_DIR + logging under ProgramData)
+"%NSSM%" install %SERVICE% "%RUNNER%"
 if errorlevel 1 (
   echo Failed to register service with NSSM.
   if not defined SILENT pause
@@ -77,12 +89,16 @@ if errorlevel 1 (
 )
 
 "%NSSM%" set %SERVICE% AppDirectory "%INSTALL_DIR%"
-"%NSSM%" set %SERVICE% AppEnvironmentExtra "DMX_DATA_DIR=%DATA_DIR%"
 "%NSSM%" set %SERVICE% DisplayName "Thaluxis Master"
 "%NSSM%" set %SERVICE% Description "Thaluxis Master - DMX lighting control, Art-Net output, and VirtualDJ OS2L integration."
+"%NSSM%" set %SERVICE% ObjectName LocalSystem
 "%NSSM%" set %SERVICE% Start SERVICE_AUTO_START
-"%NSSM%" set %SERVICE% AppStdout "%INSTALL_DIR%logs\service-out.log"
-"%NSSM%" set %SERVICE% AppStderr "%INSTALL_DIR%logs\service-err.log"
+"%NSSM%" set %SERVICE% AppExit Default Exit
+"%NSSM%" set %SERVICE% AppThrottle 5000
+"%NSSM%" set %SERVICE% AppKillProcess dmx-controller.exe
+"%NSSM%" set %SERVICE% AppStopMethodConsole 3000
+"%NSSM%" set %SERVICE% AppStdout "%LOG_DIR%\nssm-out.log"
+"%NSSM%" set %SERVICE% AppStderr "%LOG_DIR%\nssm-err.log"
 "%NSSM%" set %SERVICE% AppStdoutCreationDisposition 4
 "%NSSM%" set %SERVICE% AppStderrCreationDisposition 4
 "%NSSM%" set %SERVICE% AppRotateFiles 1
@@ -93,7 +109,8 @@ echo Starting service...
 net start "%SERVICE%"
 if errorlevel 1 (
   echo Service failed to start. Check logs in:
-  echo   %INSTALL_DIR%logs\
+  echo   %LOG_DIR%\
+  echo Run diagnose-service.bat for more detail.
   sc query "%SERVICE%"
   if not defined SILENT pause
   exit /b 1
@@ -104,7 +121,7 @@ sc query "%SERVICE%"
 echo.
 echo Web UI: http://localhost
 echo Database: %DATA_DIR%\dmx-controller.db
-echo Logs: %INSTALL_DIR%logs\
+echo Logs: %LOG_DIR%\
 echo.
 if not defined SILENT pause
 exit /b 0

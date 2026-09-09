@@ -53,14 +53,12 @@ Name: "installservice"; Description: "Install or update the ThaluxisMaster Windo
 ; dist/ must exist (npm run build) — never ship or overwrite runtime data/
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\*"
 
-[Dirs]
-Name: "{app}\logs"; Permissions: users-modify
-
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Config (browser)"; Filename: "http://localhost/config.html"
 Name: "{group}\Install Windows Service"; Filename: "{app}\install-service.bat"
 Name: "{group}\Stop Windows Service"; Filename: "{app}\stop-service.bat"
+Name: "{group}\Diagnose Service"; Filename: "{app}\diagnose-service.bat"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 

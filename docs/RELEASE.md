@@ -72,9 +72,17 @@ The **setup.exe** on GitHub Releases:
 
 After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers **ThaluxisMaster** using **NSSM** (`nssm.exe` is bundled in the build) — the pkg exe is not a native Windows service binary, so NSSM wraps it and sets the correct working directory.
 
-If the service fails to start, check **`logs\service-err.log`** in the install folder.
+If the service fails to start, check logs in **`%ProgramData%\EYUP Events\ThaluxisMaster\logs\`**:
 
-In **services.msc**, the path shows **`nssm.exe`** — that is normal. NSSM is the service wrapper; the hub is **`dmx-controller.exe`**. Verify with:
+| File | Contents |
+|------|----------|
+| `service-wrapper.log` | Service start/stop and exit codes |
+| `service-err.log` | Hub stderr (crashes, port bind errors) |
+| `service-out.log` | Hub stdout |
+
+Run **`diagnose-service.bat`** from the install folder (Administrator not required) for service status, NSSM config, port 80 checks, and a short manual test.
+
+In **services.msc**, the path shows **`nssm.exe`** running **`run-service.bat`** — that is normal. NSSM is the wrapper; the hub is **`dmx-controller.exe`**. Verify with:
 
 ```bat
 "C:\Program Files\EYUP Events\ThaluxisMaster\nssm.exe" get ThaluxisMaster Application
@@ -88,6 +96,7 @@ Database and settings for Program Files installs live in **`%ProgramData%\EYUP E
 | `uninstall-service.bat` | Stop & remove the service |
 | `start-service.bat` | Start the service |
 | `stop-service.bat` | Stop the service |
+| `diagnose-service.bat` | Troubleshoot service / port / logs |
 
 The auto-updater stops and restarts **ThaluxisMaster** when applying updates.
 

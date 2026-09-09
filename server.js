@@ -5457,10 +5457,29 @@ midiController.init({
   }
 })();
 
+httpServer.on('error', (err) => {
+  console.error(`[HTTP] Failed to listen on port ${WEB_PORT}: ${err.message}`);
+  if (err.code === 'EADDRINUSE') {
+    console.error('[HTTP] Port is already in use (common on Windows: IIS / World Wide Web Publishing Service).');
+    console.error('[HTTP] Stop the other service or change the hub port in config after a successful start.');
+  }
+  process.exit(1);
+});
+
 httpServer.listen(WEB_PORT, networkUtils.getBindHost(getNetConfig), () => {
   const bindHost = networkUtils.getBindHost(getNetConfig);
   const label = bindHost === '0.0.0.0' ? 'all interfaces' : bindHost;
   console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT} (bound to ${label})`);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err.stack || err.message || err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection:', reason);
+  process.exit(1);
 });
 
 // Auto-start live audio input capture if it was enabled on last run
