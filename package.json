@@ -1,6 +1,6 @@
 {
   "name": "dmx-controller",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Thaluxis DMX — Lighting control forged for live events. VirtualDJ OS2L integration.",
   "repository": {
     "type": "git",
