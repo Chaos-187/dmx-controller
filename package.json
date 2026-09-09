@@ -2,6 +2,10 @@
   "name": "dmx-controller",
   "version": "1.2.0",
   "description": "Thaluxis DMX — Lighting control forged for live events. VirtualDJ OS2L integration.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Chaos-187/dmx-controller.git"
+  },
   "main": "server.js",
   "bin": "server.js",
   "scripts": {
@@ -16,6 +20,7 @@
     "satellite:service:install": "npm run rebuild:native && npm install --prefix satellite && npm run service:install --prefix satellite",
     "satellite:service:uninstall": "npm run service:uninstall --prefix satellite",
     "build": "node build.js",
+    "release:prepare": "node scripts/release-prepare.js",
     "rebuild:native": "npm rebuild better-sqlite3 ftdi-d2xx usb",
     "rebuild:native:dev": "node scripts/rebuild-native-dev.js",
     "companion:config": "node companion/generate-config.cjs"

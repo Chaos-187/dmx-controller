@@ -174,11 +174,74 @@ const GLOBAL_MASTER_CHANNEL_TYPES = new Set([
   'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
   'pan', 'pan_fine', 'tilt', 'tilt_fine',
   'gobo', 'gobo_rotation', 'color_wheel', 'focus', 'zoom', 'prism',
-  'smoke', 'atmosphere',
+  'smoke', 'atmosphere', 'motor',
 ]);
 
 function isGlobalMasterChannel(type) {
   return GLOBAL_MASTER_CHANNEL_TYPES.has(type);
+}
+
+/** Strobe channel that doubles as a shutter (e.g. Kam Strato CH7). */
+function hasShutterStrobeChannel(ch) {
+  return ch.type === 'strobe' && Array.isArray(ch.ranges) && ch.ranges.some(r => r.type === 'shutter_open');
+}
+
+function getShutterRangeDmxValue(ch, rangeType, fallback = 0) {
+  if (!Array.isArray(ch.ranges)) return fallback;
+  const range = ch.ranges.find(r => r.type === rangeType);
+  if (!range) return fallback;
+  return Math.round((range.min + range.max) / 2);
+}
+
+function getShutterOpenDmxValue(ch) {
+  return getShutterRangeDmxValue(ch, 'shutter_open', 0);
+}
+
+function getShutterOffDmxValue(ch) {
+  return getShutterRangeDmxValue(ch, 'shutter_off', 0);
+}
+
+/** Map logical 0–255 strobe intent onto shutter/strobe sub-ranges. */
+function mapShutterStrobeValue(value, ch) {
+  if (!Array.isArray(ch.ranges) || ch.ranges.length === 0) return value;
+  if (!hasShutterStrobeChannel(ch)) {
+    const range = ch.ranges.find(r => r.type === 'strobe');
+    if (!range) return value;
+    return Math.round(range.min + (value / 255) * (range.max - range.min));
+  }
+  if (value <= 0) return getShutterOffDmxValue(ch);
+  const strobeRange = ch.ranges.find(r => r.type === 'strobe');
+  if (strobeRange) {
+    return Math.round(strobeRange.min + (value / 255) * (strobeRange.max - strobeRange.min));
+  }
+  return getShutterOpenDmxValue(ch);
+}
+
+function fixtureHasLightOutputInUpdates(channelUpdates, fixMap) {
+  const chMap = channelUpdates[fixMap.universe];
+  if (!chMap) return false;
+  for (const ch of fixMap.channels) {
+    if (!COLOR_CHANNELS.has(ch.type) && ch.type !== 'dimmer') continue;
+    const val = chMap[ch.dmx_address];
+    if (val !== undefined && val > 0) return true;
+  }
+  return false;
+}
+
+/** Open the shutter on combined strobe/shutter fixtures when outputting steady light. */
+function ensureShutterOpenInUpdates(channelUpdates, fixtures, { activeStrobeFixtureIds = new Set(), applyInvertFn = null } = {}) {
+  for (const fixMap of fixtures) {
+    if (activeStrobeFixtureIds.has(fixMap.id)) continue;
+    const strobeCh = fixMap.channels.find(hasShutterStrobeChannel);
+    if (!strobeCh) continue;
+    if (!fixtureHasLightOutputInUpdates(channelUpdates, fixMap)) continue;
+    const u = fixMap.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    if (channelUpdates[u][strobeCh.dmx_address] !== undefined) continue;
+    let val = getShutterOpenDmxValue(strobeCh);
+    if (applyInvertFn) val = applyInvertFn(val, strobeCh);
+    channelUpdates[u][strobeCh.dmx_address] = val;
+  }
 }
 
 /** Resolve rows×cols for matrix multicell effects (supports unified multi-fixture width). */
@@ -1512,4 +1575,9 @@ module.exports = {
   PAN_TILT,
   COLOR_CHANNELS,
   GLOBAL_MASTER_CHANNEL_TYPES,
+  hasShutterStrobeChannel,
+  getShutterOpenDmxValue,
+  getShutterOffDmxValue,
+  mapShutterStrobeValue,
+  ensureShutterOpenInUpdates,
 };

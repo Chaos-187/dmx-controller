@@ -34,6 +34,8 @@ try {
   console.warn('[MIDI] jzz module not available — MIDI controller disabled');
 }
 
+const { mapShutterStrobeValue } = require('./effects-engine');
+
 // ─── APC Mini mk2 LED Color Constants (Velocity Palette) ────────────────────
 // The mk2 pad LEDs use velocity 0-127 as an index into a fixed color palette.
 // These are the most useful color indices from the palette.
@@ -1093,18 +1095,11 @@ function executeMidiAction(mapping, isOn) {
         if (!channelUpdates[u]) channelUpdates[u] = [];
         let fixAffected = false;
         for (const ch of fix.channels) {
-          if (ch.type === 'strobe') {
-            channelUpdates[u].push({ ch: ch.dmx_address, val: activate ? strobeSpeed : 0 });
+          const hasStrobeRange = ch.ranges && ch.ranges.some(r => r.type === 'strobe' || r.type === 'shutter_open');
+          if (ch.type === 'strobe' || hasStrobeRange) {
+            const mapped = mapShutterStrobeValue(activate ? strobeSpeed : 0, ch);
+            channelUpdates[u].push({ ch: ch.dmx_address, val: mapped });
             fixAffected = true;
-          } else if (ch.ranges) {
-            const strobeRange = ch.ranges.find(r => r.type === 'strobe');
-            if (strobeRange) {
-              const mapped = activate
-                ? Math.round(strobeRange.min + (strobeSpeed / 255) * (strobeRange.max - strobeRange.min))
-                : 0;
-              channelUpdates[u].push({ ch: ch.dmx_address, val: mapped });
-              fixAffected = true;
-            }
           }
         }
         if (fixAffected) {

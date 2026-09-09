@@ -245,9 +245,23 @@ The server pushes the following message types to connected browser clients:
 
 Companion and other external clients can connect to the same WebSocket. See [docs/companion.md](docs/companion.md).
 
+## Releases & auto-update
+
+Push a version tag to build and publish a Windows zip on GitHub Releases. Installed hubs can check, download, and apply updates from **Config → About**.
+
+See [docs/RELEASE.md](docs/RELEASE.md) for the full release workflow.
+
+```bash
+npm run release:prepare -- 1.3.0
+git commit -am "Release v1.3.0" && git tag v1.3.0
+git push origin main && git push origin v1.3.0
+```
+
 ## Database Schema
 
-The SQLite database (`dmx-controller.db`) is created automatically on first run with the following tables:
+The SQLite database (`data/dmx-controller.db`) is created automatically on first run. An existing `dmx-controller.db` in the project root is moved into `data/` on first startup after upgrade. Override with `DMX_DB_PATH` or `DMX_DATA_DIR` if needed.
+
+Tables:
 
 | Table | Purpose |
 |-------|---------|

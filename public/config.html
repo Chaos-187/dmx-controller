@@ -1275,9 +1275,28 @@
           <div style="font-size:13px;color:var(--text-dim);margin-bottom:2px">Lighting control forged for live events.</div>
           <div style="font-size:13px;color:var(--text-dim)" id="aboutVersion">Version —</div>
         </div>
+        <div class="config-section" style="margin-bottom:24px;padding:16px;border:1px solid var(--panel-border);border-radius:8px;background:var(--panel-bg)">
+          <h3 style="font-size:13px;color:var(--accent);margin:0 0 12px;text-transform:uppercase;letter-spacing:1px">Software updates</h3>
+          <p class="config-desc" style="margin:0 0 12px">Check GitHub Releases for new builds. Download and install preserves your <code>data/</code> folder (database, config).</p>
+          <div id="aboutUpdateStatus" style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Checking for updates…</div>
+          <div id="aboutUpdateProgress" style="display:none;margin-bottom:12px">
+            <div style="height:8px;background:var(--panel-border);border-radius:4px;overflow:hidden">
+              <div id="aboutUpdateProgressBar" style="height:100%;width:0;background:var(--accent);transition:width 0.2s"></div>
+            </div>
+            <div id="aboutUpdateProgressLabel" style="font-size:11px;color:var(--text-dim);margin-top:4px">0%</div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btnUpdateCheck" type="button">Check for updates</button>
+            <button class="btn btn-secondary btn-sm" id="btnUpdateDownload" type="button" style="display:none">Download update</button>
+            <button class="btn btn-primary btn-sm" id="btnUpdateApply" type="button" style="display:none">Install &amp; restart</button>
+            <a class="btn btn-secondary btn-sm" id="btnUpdateReleaseLink" href="#" target="_blank" rel="noopener" style="display:none">View release</a>
+          </div>
+          <div id="aboutUpdateNotes" style="display:none;margin-top:12px;font-size:12px;color:var(--text-dim);max-height:120px;overflow-y:auto;white-space:pre-wrap;border-top:1px solid var(--panel-border);padding-top:10px"></div>
+        </div>
         <table class="subs-table" style="margin-bottom:24px">
           <tbody>
             <tr><td style="width:140px"><strong>Version</strong></td><td id="aboutVersionValue">—</td></tr>
+            <tr><td><strong>Install</strong></td><td id="aboutInstallDir" style="color:var(--text-dim);font-family:var(--mono);font-size:11px;word-break:break-all">—</td></tr>
             <tr><td><strong>Licence</strong></td><td id="aboutLicenceStatus" style="color:var(--text-dim)">Not licenced</td></tr>
             <tr><td><strong>Licence Key</strong></td><td id="aboutLicenceKey" style="color:var(--text-dim);font-family:var(--mono);font-size:12px">—</td></tr>
             <tr><td><strong>Node.js</strong></td><td id="aboutNodeVersion">—</td></tr>

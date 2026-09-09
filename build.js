@@ -155,6 +155,19 @@ for (const bin of ['ffmpeg.exe', 'ffplay.exe', 'ffprobe.exe']) {
   copyFile(path.join(ROOT, bin), path.join(DIST, bin));
 }
 
+// ─── Version manifest (used by auto-updater) ────────────────────────────────
+
+const pkg = require('./package.json');
+const versionManifest = {
+  version: pkg.version,
+  name: pkg.name,
+  builtAt: new Date().toISOString(),
+  commit: process.env.GITHUB_SHA || null,
+  target: PKG_TARGET,
+};
+fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify(versionManifest, null, 2));
+console.log(`\nWrote version.json (${pkg.version})`);
+
 // ─── Done ───────────────────────────────────────────────────────────────────
 
 console.log('\n=== Build complete ===');
@@ -168,4 +181,4 @@ for (const f of fs.readdirSync(DIST, { recursive: true })) {
   }
 }
 console.log('\nTo run: dist\\dmx-controller.exe');
-console.log('Note: Place your dmx-controller.db alongside the exe (created on first run if missing).\n');
+console.log('Note: Database is stored in data/dmx-controller.db alongside the exe (created on first run if missing).\n');

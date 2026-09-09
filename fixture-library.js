@@ -45,7 +45,7 @@ const OFL_TYPE_MAP = {
   'Generic':          'other',
   'Maintenance':      'other',
   'NoFunction':       'other',
-  'Rotation':         'speed',
+  'Rotation':         'motor',
   'IrisEffect':       'other',
   'Iris':             'other',
 };
@@ -182,7 +182,20 @@ function guessTypeFromName(name) {
   if (/\bsmoke\b/.test(n) || /\bfog\b/.test(n) || /\bhaze\b/.test(n)) return 'smoke';
   if (/\bfire\b/.test(n) || /\bflame\b/.test(n) || /\batmosphere\b/.test(n) || /\bpyro\b/.test(n)) return 'atmosphere';
   if (/\bmacro\b/.test(n) || /\bauto\b/.test(n) || /\beffect\b/.test(n)) return 'macro';
+  if (/\bmotor\b/.test(n) || /\brotation\b/.test(n)) return 'motor';
   return 'other';
+}
+
+function resolveMotorRangeType(cap, label) {
+  const text = `${label || ''} ${cap.comment || ''} ${cap.speedStart || ''} ${cap.speedEnd || ''}`.toLowerCase();
+  if (cap.type === 'NoFunction' || /stop|stopped|no function/.test(text)) return 'motor_stop';
+  if (/counter.?clock|ccw|anticlock/.test(text)) return 'motor_ccw';
+  if (/clockwise|\bcw\b/.test(text) && !/counter/.test(text)) return 'motor_cw';
+  if (cap.type === 'Rotation') {
+    if (cap.speedStart === 'fast' && cap.speedEnd === 'slow') return 'motor_cw';
+    if (cap.speedStart === 'slow' && cap.speedEnd === 'fast') return 'motor_ccw';
+  }
+  return null;
 }
 
 // ─── Build Ranges from OFL Capabilities ─────────────────────────────────────
@@ -198,7 +211,7 @@ function buildRanges(capabilities, channelName, wheels) {
   if (withRange.length <= 1) return null;
 
   return withRange.map(cap => {
-    const type = resolveCapabilityType(cap, channelName, wheels);
+    const baseType = resolveCapabilityType(cap, channelName, wheels);
     let label = cap.comment || '';
     if (!label) {
       // Build a label from the capability
@@ -220,6 +233,12 @@ function buildRanges(capabilities, channelName, wheels) {
       } else {
         label = cap.type;
       }
+    }
+    const motorRangeType = resolveMotorRangeType(cap, label);
+    let type = motorRangeType || (baseType === 'motor' ? 'motor_stop' : baseType);
+    if (cap.type === 'ShutterStrobe') {
+      if (cap.shutterEffect === 'Open' || /^open$/i.test(label)) type = 'shutter_open';
+      else if (cap.shutterEffect === 'Closed' || /^off$/i.test(label)) type = 'shutter_off';
     }
     return {
       min: cap.dmxRange[0],
@@ -554,6 +573,238 @@ function summarizeOflLibrary(data) {
   };
 }
 
+// Internal category → OFL category (reverse map built below)
+const INTERNAL_CATEGORY_TO_OFL = {
+  moving_head: 'Moving Head',
+  moving_head_wash: 'Moving Head Wash',
+  moving_head_spot: 'Moving Head Spot',
+  strobe: 'Strobe',
+  dimmer: 'Dimmer',
+  par: 'Color Changer',
+  effect: 'Effect',
+  fog: 'Smoke',
+  laser: 'Laser',
+  multi_cell: 'Matrix',
+  pixel_tape: 'Pixel Bar',
+  other: 'Other',
+};
+
+const INTERNAL_COLOR_TO_OFL = {
+  red: 'Red',
+  green: 'Green',
+  blue: 'Blue',
+  white: 'White',
+  amber: 'Amber',
+  uv: 'UV',
+};
+
+const INTERNAL_TYPE_TO_OFL = {
+  dimmer: 'Intensity',
+  strobe: 'ShutterStrobe',
+  pan: 'Pan',
+  tilt: 'Tilt',
+  pan_fine: 'Pan',
+  tilt_fine: 'Tilt',
+  speed: 'Speed',
+  motor: 'Rotation',
+  motor_stop: 'NoFunction',
+  motor_cw: 'Rotation',
+  motor_ccw: 'Rotation',
+  shutter_open: 'ShutterStrobe',
+  shutter_off: 'ShutterStrobe',
+  macro: 'Effect',
+  color_wheel: 'WheelSlot',
+  gobo: 'WheelSlot',
+  gobo_rotation: 'WheelSlotRotation',
+  prism: 'Prism',
+  focus: 'Focus',
+  zoom: 'Zoom',
+  frost: 'Frost',
+  smoke: 'Fog',
+  atmosphere: 'Effect',
+  laser: 'Effect',
+  other: 'Generic',
+};
+
+function oflCapabilityType(internalType) {
+  if (INTERNAL_COLOR_TO_OFL[internalType]) return 'ColorIntensity';
+  return INTERNAL_TYPE_TO_OFL[internalType] || 'Generic';
+}
+
+function buildOflCapability(internalType, min, max, label) {
+  const cap = {
+    dmxRange: [min, max],
+    type: oflCapabilityType(internalType),
+  };
+  if (label) cap.comment = label;
+
+  const colorName = INTERNAL_COLOR_TO_OFL[internalType];
+  if (colorName) cap.color = colorName;
+
+  if (internalType === 'shutter_open') {
+    cap.type = 'ShutterStrobe';
+    cap.shutterEffect = 'Open';
+    return cap;
+  }
+  if (internalType === 'shutter_off') {
+    cap.type = 'ShutterStrobe';
+    cap.shutterEffect = 'Closed';
+    return cap;
+  }
+
+  if (cap.type === 'ShutterStrobe') {
+    const lower = (label || '').toLowerCase();
+    if (lower.includes('off') || lower.includes('open') || lower.includes('no strobe')) {
+      cap.shutterEffect = 'Open';
+    } else if (lower.includes('closed') || lower.includes('blackout')) {
+      cap.shutterEffect = 'Closed';
+    } else {
+      cap.shutterEffect = 'Strobe';
+      if (min > 0) cap.speedStart = 'slow';
+      if (max < 255) cap.speedEnd = 'fast';
+    }
+  }
+
+  if (cap.type === 'Effect' && label) {
+    cap.effectName = label;
+  }
+
+  return cap;
+}
+
+function buildOflChannelDef(ch) {
+  const def = {};
+  const defaultValue = ch.default_value ?? 0;
+  if (defaultValue) def.defaultValue = defaultValue;
+
+  const ranges = Array.isArray(ch.ranges) ? ch.ranges : null;
+  if (ranges && ranges.length) {
+    const caps = ranges.map(r => buildOflCapability(
+      r.type || ch.type,
+      r.min ?? 0,
+      r.max ?? 255,
+      r.label || '',
+    ));
+    if (caps.length === 1) def.capability = caps[0];
+    else def.capabilities = caps;
+    return def;
+  }
+
+  def.capability = buildOflCapability(
+    ch.type,
+    ch.min_value ?? 0,
+    ch.max_value ?? 255,
+    ch.name || '',
+  );
+  return def;
+}
+
+function buildOflWheels(colorWheel, goboWheel) {
+  const wheels = {};
+
+  if (colorWheel && colorWheel.length) {
+    wheels['Color Wheel'] = {
+      name: 'Color Wheel',
+      slots: colorWheel.map(c => {
+        const isOpen = /^open$/i.test(c.label || '');
+        if (isOpen) return { type: 'Open', name: 'Open' };
+        return {
+          type: 'Color',
+          name: c.label || '',
+          colors: [c.color_hex || '#FFFFFF'],
+        };
+      }),
+    };
+  }
+
+  if (goboWheel && goboWheel.length) {
+    wheels['Gobo Wheel'] = {
+      name: 'Gobo Wheel',
+      slots: goboWheel.map(g => {
+        const isOpen = /^open$/i.test(g.label || '');
+        if (isOpen) return { type: 'Open', name: 'Open' };
+        return { type: 'Gobo', name: g.label || 'Gobo' };
+      }),
+    };
+  }
+
+  return Object.keys(wheels).length ? wheels : undefined;
+}
+
+/**
+ * Convert an internal fixture_type (+ optional wheel maps) to OFL / AGLight JSON.
+ */
+function exportToOfl(fixtureType, { colorWheel = [], goboWheel = [] } = {}) {
+  if (!fixtureType) throw new Error('Fixture type required');
+
+  const modes = fixtureType.modes && fixtureType.modes.length
+    ? fixtureType.modes
+    : [{ name: 'Default', short_name: '', channels: fixtureType.channels || [] }];
+
+  const availableChannels = {};
+
+  for (const mode of modes) {
+    for (const ch of mode.channels || []) {
+      const key = (ch.name || `Channel ${ch.channel_number}`).trim();
+      const nextDef = buildOflChannelDef(ch);
+      if (!availableChannels[key]) {
+        availableChannels[key] = nextDef;
+        continue;
+      }
+      const existing = availableChannels[key];
+      const existingHasRanges = !!(existing.capabilities || existing.capability);
+      const nextHasRanges = !!(nextDef.capabilities || nextDef.capability);
+      if (!existingHasRanges && nextHasRanges) availableChannels[key] = nextDef;
+    }
+  }
+
+  const oflModes = modes.map(mode => ({
+    name: mode.name || 'Default',
+    ...(mode.short_name ? { shortName: mode.short_name } : {}),
+    channels: (mode.channels || []).map(ch => (ch.name || `Channel ${ch.channel_number}`).trim()),
+  }));
+
+  const oflCategories = [];
+  const oflCat = INTERNAL_CATEGORY_TO_OFL[fixtureType.category];
+  if (oflCat) oflCategories.push(oflCat);
+  else if (fixtureType.category) oflCategories.push('Other');
+
+  const fixtureKey = `${fixtureType.manufacturer || 'custom'}-${fixtureType.name}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  const result = {
+    $schema: 'https://raw.githubusercontent.com/OpenLightingProject/open-fixture-library/schema-12.2.0/schemas/fixture.json',
+    name: fixtureType.name,
+    shortName: fixtureType.name,
+    manufacturer: fixtureType.manufacturer || '',
+    categories: oflCategories,
+    fixtureKey: fixtureKey || 'custom-fixture',
+    modes: oflModes,
+    availableChannels,
+    meta: {
+      authors: ['Thaluxis DMX'],
+      createDate: new Date().toISOString().slice(0, 10),
+      lastModifyDate: new Date().toISOString().slice(0, 10),
+    },
+  };
+
+  const wheels = buildOflWheels(colorWheel, goboWheel);
+  if (wheels) result.wheels = wheels;
+
+  return result;
+}
+
+/**
+ * Suggested download filename for an OFL / AGLight export.
+ */
+function exportFilename(fixtureType) {
+  const mfr = (fixtureType.manufacturer || 'Custom').replace(/[^\w.-]+/g, '-');
+  const name = (fixtureType.name || 'Fixture').replace(/[^\w.-]+/g, '-');
+  return `${mfr}-${name}.json`.replace(/-+/g, '-');
+}
+
 // ─── Exports ────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -562,6 +813,8 @@ module.exports = {
   convertOflFixture,
   convertOflMode,
   extractWheelData,
+  exportToOfl,
+  exportFilename,
   OFL_CATEGORY_MAP,
   OFL_TYPE_MAP,
 };

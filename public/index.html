@@ -2999,7 +2999,10 @@ const CHANNEL_TYPES = [
   'dimmer','red','green','blue','white','amber','uv',
   'pan','pan_fine','tilt','tilt_fine',
   'speed','strobe','gobo','gobo_rotation','color_wheel',
-  'prism','focus','zoom','frost','smoke','atmosphere','macro','other'
+  'prism','focus','zoom','frost','smoke','atmosphere','macro',
+  'motor','motor_stop','motor_cw','motor_ccw',
+  'shutter_open','shutter_off',
+  'other'
 ];
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',
@@ -4522,6 +4525,7 @@ function renderLibraryList() {
       <td><span class="lib-cat">${CATEGORY_LABELS[t.category] || t.category}</span></td>
       <td><div class="lib-modes">${modeBadges}</div></td>
       <td class="lib-actions">
+        <button class="btn btn-secondary btn-sm" onclick="exportTypeOfl(${t.id})" title="Export AGLight / OFL file">Export</button>
         <button class="btn btn-secondary btn-sm" onclick="editType(${t.id})">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id},'${esc(t.name).replace(/'/g, "\\'")}')">Delete</button>
       </td>`;
@@ -4991,7 +4995,7 @@ const MULTI_CELL_GLOBAL_MASTER_TYPES = new Set([
   'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
   'pan', 'pan_fine', 'tilt', 'tilt_fine',
   'gobo', 'gobo_rotation', 'color_wheel', 'focus', 'zoom', 'prism',
-  'smoke', 'atmosphere',
+  'smoke', 'atmosphere', 'motor',
 ]);
 
 function partitionMultiCellPreservedChannels(channels) {
@@ -5221,6 +5225,30 @@ async function openTypeModal(typeId) {
 }
 
 window.editType = (id) => openTypeModal(id);
+
+window.exportTypeOfl = async (id) => {
+  try {
+    const res = await fetch(`/api/fixture-library/export/${id}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || 'Export failed');
+      return;
+    }
+    let filename = 'fixture.json';
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition && disposition.match(/filename="([^"]+)"/);
+    if (match) filename = match[1];
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+  }
+};
 
 window.deleteType = async (id, name) => {
   if (!confirm(`Delete fixture type "${name}"?`)) return;
@@ -10491,19 +10519,24 @@ function getStrobeTargets(value) {
   const targets = [];
   for (const fix of filtered) {
     for (const ch of fix.channels) {
-      // Dedicated strobe channel
-      if (ch.type === 'strobe') {
+      const hasShutter = ch.ranges && ch.ranges.some(r => r.type === 'shutter_open');
+      if (ch.type === 'strobe' && !hasShutter) {
         targets.push({ universe: fix.universe, address: ch.dmx_address, val: value });
         continue;
       }
-      // Channel with strobe range
       if (ch.ranges) {
         const strobeRange = ch.ranges.find(r => r.type === 'strobe');
-        if (strobeRange) {
-          // Map 0-255 slider value into the range's min–max
-          const mapped = value === 0
-            ? 0 // off → send 0 (typically "no function" range)
-            : Math.round(strobeRange.min + (value / 255) * (strobeRange.max - strobeRange.min));
+        if (strobeRange || hasShutter) {
+          let mapped;
+          if (value === 0) {
+            const off = ch.ranges.find(r => r.type === 'shutter_off');
+            mapped = off ? Math.round((off.min + off.max) / 2) : 0;
+          } else if (strobeRange) {
+            mapped = Math.round(strobeRange.min + (value / 255) * (strobeRange.max - strobeRange.min));
+          } else {
+            const open = ch.ranges.find(r => r.type === 'shutter_open');
+            mapped = open ? Math.round((open.min + open.max) / 2) : value;
+          }
           targets.push({ universe: fix.universe, address: ch.dmx_address, val: mapped });
         }
       }

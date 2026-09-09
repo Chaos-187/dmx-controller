@@ -8,19 +8,45 @@
  */
 
 const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
 // In pkg mode, __dirname points to the read-only snapshot; use the exe directory instead
 const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+const DATA_DIR = process.env.DMX_DATA_DIR
+  ? path.resolve(process.env.DMX_DATA_DIR)
+  : path.join(APP_DIR, 'data');
+const LEGACY_DB_PATH = path.join(APP_DIR, 'dmx-controller.db');
 const DB_PATH = process.env.DMX_DB_PATH
   ? path.resolve(process.env.DMX_DB_PATH)
-  : path.join(APP_DIR, 'dmx-controller.db');
+  : path.join(DATA_DIR, 'dmx-controller.db');
 
 let db;
 
 // ─── Initialise ─────────────────────────────────────────────────────────────
 
+function ensureDataDir() {
+  if (!process.env.DMX_DB_PATH) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+/** Move database from repo/exe root into data/ on first run after upgrade. */
+function migrateLegacyDbLocation() {
+  if (process.env.DMX_DB_PATH) return;
+  ensureDataDir();
+  if (!fs.existsSync(LEGACY_DB_PATH) || fs.existsSync(DB_PATH)) return;
+  for (const suffix of ['', '-wal', '-shm']) {
+    const from = LEGACY_DB_PATH + suffix;
+    const to = DB_PATH + suffix;
+    if (fs.existsSync(from)) fs.renameSync(from, to);
+  }
+  console.log(`[DB] Migrated database from ${LEGACY_DB_PATH} to ${DB_PATH}`);
+}
+
 function init() {
+  migrateLegacyDbLocation();
+  if (!process.env.DMX_DB_PATH) ensureDataDir();
   db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
@@ -869,6 +895,23 @@ function init() {
     migrateLedSmokeMachine();
   }
 
+  // Migration: Kam Stratosphere (11ch + 3ch macro modes)
+  const hasStratosphere = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = 'Kam Stratosphere'").get().c;
+  if (hasStratosphere === 0) {
+    createKamStratosphereFixtureType();
+    console.log('[DB] Added Kam Stratosphere fixture type (11ch + 3ch modes)');
+  }
+
+  // Migration: Kam Strato (12ch RGBWY+Purple effect light)
+  const hasStrato = db.prepare("SELECT COUNT(*) as c FROM fixture_types WHERE name = 'Kam Strato'").get().c;
+  if (hasStrato === 0) {
+    createKamStratoFixtureType();
+    console.log('[DB] Added Kam Strato fixture type (12ch mode)');
+  }
+
+  migrateMotorRotationChannelTypes();
+  migrateShutterStrobeChannelTypes();
+
   // Seed default color wheel map for 60W Spot Moving Head
   seedDefaultColorWheelMap();
 
@@ -1526,6 +1569,204 @@ function createLedSmokeMachineFixtureType() {
     category: 'fog',
     modes: getLedSmokeMachineModes(),
   });
+}
+
+const KAM_STRATOSPHERE_STROBE_RANGES = [
+  { min: 0, max: 25, label: 'Open / no strobe', type: 'shutter_open' },
+  { min: 26, max: 255, label: 'Strobe slow to fast', type: 'strobe' },
+];
+
+const KAM_STRATOSPHERE_MOTOR_RANGES = [
+  { min: 0, max: 30, label: 'Motor stopped', type: 'motor_stop' },
+  { min: 31, max: 140, label: 'Clockwise (fast to slow)', type: 'motor_cw' },
+  { min: 141, max: 145, label: 'Motor stop', type: 'motor_stop' },
+  { min: 146, max: 255, label: 'Counter-clockwise (slow to fast)', type: 'motor_ccw' },
+];
+
+const KAM_STRATOSPHERE_COLOR_MACRO_RANGES = [
+  { min: 0, max: 25, label: 'Manual RGBWA+UV (CH1–6)', type: 'other' },
+  { min: 26, max: 205, label: 'Static color combinations', type: 'macro' },
+  { min: 206, max: 255, label: 'Auto jumping colors (fast to slow)', type: 'macro' },
+];
+
+const KAM_STRATOSPHERE_SOUND_RANGES = [
+  { min: 0, max: 55, label: 'Standard DMX control', type: 'other' },
+  { min: 56, max: 75, label: 'Sound-active', type: 'macro' },
+  { min: 76, max: 255, label: 'Sound-active + motor patterns', type: 'macro' },
+];
+
+function getKamStratosphereModes() {
+  return [
+    {
+      name: '11 Channel',
+      short_name: '11ch',
+      channels: [
+        { channel_number: 1, name: 'Red LED', type: 'red', default_value: 0 },
+        { channel_number: 2, name: 'Green LED', type: 'green', default_value: 0 },
+        { channel_number: 3, name: 'Blue LED', type: 'blue', default_value: 0 },
+        { channel_number: 4, name: 'White LED', type: 'white', default_value: 0 },
+        { channel_number: 5, name: 'Amber LED', type: 'amber', default_value: 0 },
+        { channel_number: 6, name: 'UV LED', type: 'uv', default_value: 0 },
+        { channel_number: 7, name: 'Strobe Rate', type: 'strobe', default_value: 0, ranges: KAM_STRATOSPHERE_STROBE_RANGES },
+        { channel_number: 8, name: 'Master Dimmer', type: 'dimmer', default_value: 255 },
+        { channel_number: 9, name: 'Motor Rotation', type: 'motor', default_value: 0, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
+        { channel_number: 10, name: 'Color Mixing Macros', type: 'macro', default_value: 0, ranges: KAM_STRATOSPHERE_COLOR_MACRO_RANGES },
+        { channel_number: 11, name: 'Sound Control', type: 'macro', default_value: 0, ranges: KAM_STRATOSPHERE_SOUND_RANGES },
+      ],
+    },
+    {
+      name: '3 Channel Macro',
+      short_name: '3ch',
+      channels: [
+        { channel_number: 1, name: 'Auto Shows & Color Macros', type: 'macro', default_value: 0 },
+        { channel_number: 2, name: 'Program Running Speed', type: 'speed', default_value: 0 },
+        { channel_number: 3, name: 'Motor Rotation', type: 'motor', default_value: 0, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
+      ],
+    },
+  ];
+}
+
+/**
+ * Kam Stratosphere — 11ch RGBWA+UV effect light with motor, or 3ch macro mode.
+ */
+function createKamStratosphereFixtureType() {
+  return createFixtureType({
+    name: 'Kam Stratosphere',
+    manufacturer: 'Kam',
+    category: 'effect',
+    modes: getKamStratosphereModes(),
+  });
+}
+
+const KAM_STRATO_STROBE_RANGES = [
+  { min: 0, max: 7, label: 'Off', type: 'shutter_off' },
+  { min: 8, max: 15, label: 'Open', type: 'shutter_open' },
+  { min: 16, max: 131, label: 'Strobe slow to fast', type: 'strobe' },
+  { min: 132, max: 139, label: 'Open', type: 'shutter_open' },
+  { min: 140, max: 181, label: 'Open / fast close', type: 'strobe' },
+  { min: 182, max: 189, label: 'Open', type: 'shutter_open' },
+  { min: 190, max: 231, label: 'Fast open / slow close', type: 'strobe' },
+  { min: 232, max: 239, label: 'Open', type: 'shutter_open' },
+  { min: 240, max: 247, label: 'Random strobe', type: 'strobe' },
+  { min: 248, max: 255, label: 'Open', type: 'shutter_open' },
+];
+
+const KAM_STRATO_COLOR_MACRO_RANGES = [
+  { min: 0, max: 25, label: 'No function (manual CH1–6)', type: 'other' },
+  { min: 26, max: 205, label: 'Color mixes (every 20 values)', type: 'macro' },
+  { min: 206, max: 255, label: 'Color changes fast to slow', type: 'macro' },
+];
+
+const KAM_STRATO_PAN_COLOR_RANGES = [
+  { min: 0, max: 55, label: 'No function', type: 'other' },
+  { min: 56, max: 75, label: 'Sound mode', type: 'macro' },
+  { min: 76, max: 105, label: 'Red / clockwise rotation', type: 'macro' },
+  { min: 106, max: 135, label: 'Green / counter-clockwise rotation', type: 'macro' },
+  { min: 136, max: 165, label: 'Blue / clockwise rotation', type: 'macro' },
+  { min: 166, max: 195, label: 'White / counter-clockwise rotation', type: 'macro' },
+  { min: 196, max: 255, label: 'Yellow / clockwise rotation', type: 'macro' },
+];
+
+const KAM_STRATO_FUNCTION_RANGES = [
+  { min: 0, max: 69, label: 'Null', type: 'other' },
+  { min: 70, max: 85, label: 'Reset', type: 'macro' },
+  { min: 86, max: 255, label: 'Null', type: 'other' },
+];
+
+function getKamStratoModes() {
+  return [
+    {
+      name: '12 Channel',
+      short_name: '12ch',
+      channels: [
+        { channel_number: 1, name: 'Red', type: 'red', default_value: 0 },
+        { channel_number: 2, name: 'Green', type: 'green', default_value: 0 },
+        { channel_number: 3, name: 'Blue', type: 'blue', default_value: 0 },
+        { channel_number: 4, name: 'White', type: 'white', default_value: 0 },
+        { channel_number: 5, name: 'Yellow', type: 'other', default_value: 0 },
+        { channel_number: 6, name: 'Purple', type: 'other', default_value: 0 },
+        { channel_number: 7, name: 'Strobe', type: 'strobe', default_value: 12, ranges: KAM_STRATO_STROBE_RANGES },
+        { channel_number: 8, name: 'Dimmer', type: 'dimmer', default_value: 255 },
+        { channel_number: 9, name: 'Pan Rotation', type: 'motor', default_value: 0, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
+        { channel_number: 10, name: 'Colour Mixing & Effects', type: 'macro', default_value: 0, ranges: KAM_STRATO_COLOR_MACRO_RANGES },
+        { channel_number: 11, name: 'Pan / Colour Mixing', type: 'macro', default_value: 0, ranges: KAM_STRATO_PAN_COLOR_RANGES },
+        { channel_number: 12, name: 'Function', type: 'macro', default_value: 0, ranges: KAM_STRATO_FUNCTION_RANGES },
+      ],
+    },
+  ];
+}
+
+/**
+ * Kam Strato — 12ch RGBWY+Purple effect light with pan motor (per manufacturer DMX chart).
+ */
+function createKamStratoFixtureType() {
+  return createFixtureType({
+    name: 'Kam Strato',
+    manufacturer: 'Kam',
+    category: 'effect',
+    modes: getKamStratoModes(),
+  });
+}
+
+/** Upgrade Kam shutter/strobe channels so steady output uses shutter_open ranges. */
+function migrateShutterStrobeChannelTypes() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'shutter_strobe_types_v1'").get();
+  if (done?.value === '1') return;
+
+  const stratoRanges = JSON.stringify(KAM_STRATO_STROBE_RANGES);
+  const stratosphereRanges = JSON.stringify(KAM_STRATOSPHERE_STROBE_RANGES);
+  const typeIds = db.prepare(
+    "SELECT id, name FROM fixture_types WHERE name IN ('Kam Stratosphere', 'Kam Strato')",
+  ).all();
+
+  const update = db.prepare(`
+    UPDATE fixture_type_channels
+    SET ranges = ?, default_value = ?
+    WHERE mode_id = ? AND type = 'strobe' AND name IN ('Strobe', 'Strobe Rate')
+  `);
+
+  for (const { id, name } of typeIds) {
+    const rangesJson = name === 'Kam Strato' ? stratoRanges : stratosphereRanges;
+    const defaultValue = name === 'Kam Strato' ? 12 : 0;
+    const modes = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ?').all(id);
+    for (const { id: modeId } of modes) {
+      update.run(rangesJson, defaultValue, modeId);
+    }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('shutter_strobe_types_v1', '1')").run();
+  if (typeIds.length) {
+    console.log('[DB] Updated Kam shutter/strobe channel ranges (shutter_open / shutter_off)');
+  }
+}
+
+/** Upgrade Kam motor channels from generic "other" to motor + directional range types. */
+function migrateMotorRotationChannelTypes() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'motor_rotation_types_v1'").get();
+  if (done?.value === '1') return;
+
+  const motorRangesJson = JSON.stringify(KAM_STRATOSPHERE_MOTOR_RANGES);
+  const typeIds = db.prepare(
+    "SELECT id FROM fixture_types WHERE name IN ('Kam Stratosphere', 'Kam Strato')",
+  ).all();
+
+  const update = db.prepare(`
+    UPDATE fixture_type_channels
+    SET type = 'motor', ranges = ?
+    WHERE mode_id = ? AND name IN ('Motor Rotation', 'Pan Rotation')
+  `);
+
+  for (const { id } of typeIds) {
+    const modes = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ?').all(id);
+    for (const { id: modeId } of modes) {
+      update.run(motorRangesJson, modeId);
+    }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('motor_rotation_types_v1', '1')").run();
+  if (typeIds.length) {
+    console.log('[DB] Updated motor rotation channels to motor / motor_cw / motor_ccw / motor_stop types');
+  }
 }
 
 /** Update existing LED smoke fixture type to match manufacturer 7ch profile. */
@@ -4632,8 +4873,11 @@ function setDefaultSequenceTemplate(id) {
 
 // ─── Backup / Restore ───────────────────────────────────────────────────────
 
-const fs = require('fs');
 const os = require('os');
+
+function getDataDir() {
+  return DATA_DIR;
+}
 
 function getDbPath() {
   return DB_PATH;
@@ -4828,7 +5072,7 @@ function touchSatelliteDevice(deviceId, ip) {
 
 module.exports = {
   init,
-  backupDatabase, getDbPath, restoreDatabase,
+  backupDatabase, getDbPath, getDataDir, restoreDatabase,
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
   getFixtureTypeSummaries, searchFixtureTypes,
   createLedBarFixtureType,

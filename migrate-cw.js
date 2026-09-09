@@ -4,7 +4,7 @@
  * then insert the correct color wheel map for the Generic 60W Spot Moving Head.
  */
 const Database = require('better-sqlite3');
-const db = new Database('./dmx-controller.db');
+const db = new Database('./data/dmx-controller.db');
 
 // Check if migration is needed (old dmx_value column still present)
 let needsMigration = false;

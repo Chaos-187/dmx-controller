@@ -45,7 +45,10 @@ const CHANNEL_TYPES = [
   'dimmer','red','green','blue','white','amber','uv',
   'pan','pan_fine','tilt','tilt_fine',
   'speed','strobe','gobo','gobo_rotation','color_wheel',
-  'prism','focus','zoom','frost','smoke','atmosphere','macro','other'
+  'prism','focus','zoom','frost','smoke','atmosphere','macro',
+  'motor','motor_stop','motor_cw','motor_ccw',
+  'shutter_open','shutter_off',
+  'other'
 ];
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',
@@ -396,11 +399,24 @@ function getStrobeTargets(value) {
   const targets = [];
   for (const fix of filtered) {
     for (const ch of fix.channels) {
-      if (ch.type === 'strobe') { targets.push({ universe: fix.universe, address: ch.dmx_address, val: value }); continue; }
+      const hasShutter = ch.ranges && ch.ranges.some(r => r.type === 'shutter_open');
+      if (ch.type === 'strobe' && !hasShutter) {
+        targets.push({ universe: fix.universe, address: ch.dmx_address, val: value });
+        continue;
+      }
       if (ch.ranges) {
         const strobeRange = ch.ranges.find(r => r.type === 'strobe');
-        if (strobeRange) {
-          const mapped = value === 0 ? 0 : Math.round(strobeRange.min + (value / 255) * (strobeRange.max - strobeRange.min));
+        if (strobeRange || hasShutter) {
+          let mapped;
+          if (value === 0) {
+            const off = ch.ranges.find(r => r.type === 'shutter_off');
+            mapped = off ? Math.round((off.min + off.max) / 2) : 0;
+          } else if (strobeRange) {
+            mapped = Math.round(strobeRange.min + (value / 255) * (strobeRange.max - strobeRange.min));
+          } else {
+            const open = ch.ranges.find(r => r.type === 'shutter_open');
+            mapped = open ? Math.round((open.min + open.max) / 2) : value;
+          }
           targets.push({ universe: fix.universe, address: ch.dmx_address, val: mapped });
         }
       }
@@ -2282,11 +2298,83 @@ document.getElementById('btnStopAudioCapture').addEventListener('click', async (
 // ═══════════════════════════════════════════════════════════════
 //  About
 // ═══════════════════════════════════════════════════════════════
+let _updatePollTimer = null;
+
+function renderUpdateStatus(status, versionInfo) {
+  const statusEl = document.getElementById('aboutUpdateStatus');
+  const progressWrap = document.getElementById('aboutUpdateProgress');
+  const progressBar = document.getElementById('aboutUpdateProgressBar');
+  const progressLabel = document.getElementById('aboutUpdateProgressLabel');
+  const btnCheck = document.getElementById('btnUpdateCheck');
+  const btnDownload = document.getElementById('btnUpdateDownload');
+  const btnApply = document.getElementById('btnUpdateApply');
+  const btnRelease = document.getElementById('btnUpdateReleaseLink');
+  const notesEl = document.getElementById('aboutUpdateNotes');
+  if (!statusEl) return;
+
+  btnCheck.disabled = status.status === 'checking' || status.status === 'downloading' || status.status === 'applying';
+  btnDownload.style.display = 'none';
+  btnApply.style.display = 'none';
+  progressWrap.style.display = 'none';
+  notesEl.style.display = 'none';
+  btnRelease.style.display = 'none';
+
+  const current = status.currentVersion || versionInfo?.version || '\u2014';
+  if (status.status === 'checking') {
+    statusEl.textContent = 'Checking for updates…';
+  } else if (status.status === 'downloading') {
+    statusEl.textContent = `Downloading v${status.latestVersion}…`;
+    progressWrap.style.display = '';
+    progressBar.style.width = `${status.progress || 0}%`;
+    progressLabel.textContent = `${status.progress || 0}%`;
+  } else if (status.status === 'applying') {
+    statusEl.textContent = 'Installing update — hub will restart…';
+  } else if (status.status === 'ready') {
+    statusEl.innerHTML = `<span style="color:var(--green)">v${status.latestVersion} downloaded — ready to install.</span>`;
+    if (versionInfo?.canAutoUpdate) btnApply.style.display = '';
+    else statusEl.innerHTML += ' Extract the zip manually over your install folder (keep <code>data/</code>).';
+  } else if (status.status === 'available') {
+    statusEl.innerHTML = `<span style="color:var(--yellow)">Update available: v${current} \u2192 v${status.latestVersion}</span>`;
+    if (versionInfo?.canAutoUpdate) btnDownload.style.display = '';
+    else statusEl.innerHTML += '<br><span style="font-size:12px">Download the release zip from GitHub and extract over your install folder.</span>';
+  } else if (status.status === 'error') {
+    statusEl.innerHTML = `<span style="color:var(--danger)">Update check failed: ${esc(status.error || 'Unknown error')}</span>`;
+  } else {
+    statusEl.textContent = `You are on the latest release (v${current}).`;
+  }
+
+  if (status.releaseUrl) {
+    btnRelease.href = status.releaseUrl;
+    btnRelease.style.display = '';
+  }
+  if (status.releaseNotes) {
+    notesEl.textContent = status.releaseNotes;
+    notesEl.style.display = '';
+  }
+}
+
+async function refreshUpdateStatus(versionInfo) {
+  try {
+    const status = await fetch('/api/update/status').then(r => r.json());
+    renderUpdateStatus(status, versionInfo);
+    if (status.status === 'downloading') {
+      clearTimeout(_updatePollTimer);
+      _updatePollTimer = setTimeout(() => refreshUpdateStatus(versionInfo), 800);
+    }
+    return status;
+  } catch (e) {
+    document.getElementById('aboutUpdateStatus').textContent = 'Could not load update status.';
+    return null;
+  }
+}
+
 async function loadAboutInfo() {
   try {
     const info = await fetch('/api/version').then(r => r.json());
     document.getElementById('aboutVersion').textContent     = 'Version ' + info.version;
     document.getElementById('aboutVersionValue').textContent = info.version;
+    const installEl = document.getElementById('aboutInstallDir');
+    if (installEl) installEl.textContent = info.installDir || '\u2014';
     document.getElementById('aboutNodeVersion').textContent  = info.node + ' (' + info.platform + '/' + info.arch + ')';
     document.getElementById('aboutFfmpegVersion').textContent  = info.ffmpeg || '\u2014';
     document.getElementById('aboutFfprobeVersion').textContent = info.ffprobe || '\u2014';
@@ -2302,8 +2390,42 @@ async function loadAboutInfo() {
         tbody.appendChild(tr);
       }
     }
+    await refreshUpdateStatus(info);
   } catch (e) { console.error('Failed to load version info', e); }
 }
+
+document.getElementById('btnUpdateCheck')?.addEventListener('click', async () => {
+  renderUpdateStatus({ status: 'checking' });
+  try {
+    const status = await fetch('/api/update/check', { method: 'POST', headers: authHeaders() }).then(r => r.json());
+    const info = await fetch('/api/version').then(r => r.json());
+    renderUpdateStatus(status, info);
+  } catch (e) {
+    renderUpdateStatus({ status: 'error', error: e.message });
+  }
+});
+
+document.getElementById('btnUpdateDownload')?.addEventListener('click', async () => {
+  renderUpdateStatus({ status: 'downloading', progress: 0 });
+  try {
+    const status = await fetch('/api/update/download', { method: 'POST', headers: authHeaders() }).then(r => r.json());
+    const info = await fetch('/api/version').then(r => r.json());
+    renderUpdateStatus(status, info);
+    if (status.status === 'downloading') refreshUpdateStatus(info);
+  } catch (e) {
+    renderUpdateStatus({ status: 'error', error: e.message });
+  }
+});
+
+document.getElementById('btnUpdateApply')?.addEventListener('click', async () => {
+  if (!confirm('Install the downloaded update and restart the hub? Playback will stop briefly.')) return;
+  try {
+    await fetch('/api/update/apply', { method: 'POST', headers: authHeaders() });
+    renderUpdateStatus({ status: 'applying' });
+  } catch (e) {
+    alert(e.message || 'Apply failed');
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  App Settings
@@ -3889,6 +4011,7 @@ function renderLibraryList() {
       <td><span class="lib-cat">${CATEGORY_LABELS[t.category] || t.category}</span></td>
       <td><div class="lib-modes">${modeBadges}</div></td>
       <td class="lib-actions">
+        <button class="btn btn-secondary btn-sm" onclick="exportTypeOfl(${t.id})" title="Export AGLight / OFL file">Export</button>
         <button class="btn btn-secondary btn-sm" onclick="editType(${t.id})">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id},'${esc(t.name).replace(/'/g, "\\'")}')">Delete</button>
       </td>`;
@@ -4401,7 +4524,7 @@ const MULTI_CELL_GLOBAL_MASTER_TYPES = new Set([
   'dimmer', 'strobe', 'speed', 'macro', 'other', 'reset',
   'pan', 'pan_fine', 'tilt', 'tilt_fine',
   'gobo', 'gobo_rotation', 'color_wheel', 'focus', 'zoom', 'prism',
-  'smoke', 'atmosphere',
+  'smoke', 'atmosphere', 'motor',
 ]);
 
 function partitionMultiCellPreservedChannels(channels) {
@@ -4599,6 +4722,29 @@ async function openTypeModal(typeId) {
 }
 
 window.editType = (id) => openTypeModal(id);
+window.exportTypeOfl = async (id) => {
+  try {
+    const res = await fetch(`/api/fixture-library/export/${id}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || 'Export failed');
+      return;
+    }
+    let filename = 'fixture.json';
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition && disposition.match(/filename="([^"]+)"/);
+    if (match) filename = match[1];
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+  }
+};
 window.deleteType = async (id, name) => {
   if (!confirm(`Delete fixture type "${name}"?`)) return;
   const res = await fetch(`/api/fixture-types/${id}`, { method: 'DELETE' });

@@ -76,7 +76,7 @@ Pre-built Stream Deck layouts mirror the **APC Mini MIDI pages** (Home, Colors, 
 **Regenerate from your database** (matches your MIDI mappings and effect IDs):
 
 ```bash
-# On the show PC (with dmx-controller.db present)
+# On the show PC (with data/dmx-controller.db present)
 npm run companion:config
 
 # Or with custom host baked into the connection:

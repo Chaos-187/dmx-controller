@@ -51,6 +51,7 @@ const stemSeparator  = require('./stem-separator');
 const os2l = require('./os2l');
 const midiController = require('./midi-controller');
 const fixtureLibrary = require('./fixture-library');
+const updater = require('./lib/updater');
 const networkUtils = require('./network-utils');
 const { WebUSB } = require('usb');
 const {
@@ -59,6 +60,7 @@ const {
   MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES,
   RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
   PAN_TILT, COLOR_CHANNELS,
+  hasShutterStrobeChannel, getShutterOpenDmxValue, mapShutterStrobeValue, ensureShutterOpenInUpdates,
 } = require('./effects-engine');
 
 // ─── Authentication Helpers ─────────────────────────────────────────────────
@@ -778,6 +780,7 @@ const configProtectedPrefixes = [
   '/api/fixture-types',
   '/api/fixture-library',
   '/api/hub',
+  '/api/update',
 ];
 app.use((req, res, next) => {
   if (req.method === 'GET') return next(); // reads are open
@@ -846,6 +849,27 @@ app.post('/api/fixture-library/import', (req, res) => {
     res.json(results);
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// Export a fixture type as OFL / AGLight JSON
+app.get('/api/fixture-library/export/:id', (req, res) => {
+  try {
+    const id = +req.params.id;
+    const fixtureType = db.getFixtureType(id);
+    if (!fixtureType) return res.status(404).json({ error: 'Not found' });
+
+    const ofl = fixtureLibrary.exportToOfl(fixtureType, {
+      colorWheel: db.getColorWheelMap(id),
+      goboWheel: db.getGoboWheelMap(id),
+    });
+    const filename = fixtureLibrary.exportFilename(fixtureType);
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(ofl, null, 2));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -1280,10 +1304,48 @@ app.get('/api/version', async (req, res) => {
     node: process.version,
     platform: process.platform,
     arch: process.arch,
+    packaged: !!process.pkg,
+    installDir: updater.getAppDir(),
+    canAutoUpdate: updater.canAutoUpdate(),
+    updateRepo: updater.DEFAULT_REPO,
     ffmpeg: ffmpegVersion || 'Not found',
     ffprobe: ffprobeVersion || 'Not found',
     licenses
   });
+});
+
+// ─── Auto-update API (GitHub Releases) ──────────────────────────────────────
+
+app.get('/api/update/status', (req, res) => {
+  res.json(updater.getStatus());
+});
+
+app.post('/api/update/check', async (req, res) => {
+  try {
+    const status = await updater.checkForUpdate({ force: true });
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/update/download', async (req, res) => {
+  try {
+    const status = await updater.downloadUpdate();
+    if (status.status === 'error') return res.status(400).json(status);
+    res.json(status);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/update/apply', (req, res) => {
+  try {
+    const result = updater.applyUpdate();
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ─── Config API ─────────────────────────────────────────────────────────────
@@ -3125,6 +3187,9 @@ app.post('/api/effects/run', (req, res) => {
       }
     }
 
+    const qaFixtures = st.fixtureIds.map(id => getFixtureChannelMapByIdCached(id)).filter(Boolean);
+    ensureShutterOpenInUpdates(channelUpdates, qaFixtures, { applyInvertFn: applyInvert });
+
     for (const [u, chMap] of Object.entries(channelUpdates)) {
       const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
       if (channels.length > 0) {
@@ -3657,6 +3722,16 @@ function processSceneEffects(scene, startTime) {
     }
   }
 
+  const sceneFixtures = [];
+  for (const entry of scene.entries) {
+    if (!entry.effect_id) continue;
+    for (const fid of resolveEntryFixtures(entry, fixMap)) {
+      const fix = getFixtureChannelMapByIdCached(fid);
+      if (fix) sceneFixtures.push(fix);
+    }
+  }
+  ensureShutterOpenInUpdates(channelUpdates, sceneFixtures, { applyInvertFn: applyInvert });
+
   sendChannelUpdates(channelUpdates);
 }
 
@@ -3687,6 +3762,7 @@ function applyChannelValues(fix, channelValues, channelUpdates) {
       channelUpdates[u][ch.dmx_address] = applyInvert(mapped, ch);
     }
   }
+  ensureShutterOpenInUpdates(channelUpdates, [fix], { applyInvertFn: applyInvert });
 }
 
 /**
@@ -4277,6 +4353,7 @@ function handleSequenceCommand(ws, msg) {
       if (!fixtureId || !vals) break;
       const fixMap = getFixtureChannelMapByIdCached(fixtureId);
       if (!fixMap) break;
+      const previewUpdates = {};
       for (const ch of fixMap.channels) {
         if (!shouldApplyCellCue(msg.cell, ch)) continue;
         if (vals[ch.type] === undefined) continue;
@@ -4284,9 +4361,16 @@ function handleSequenceCommand(ws, msg) {
         v = mapValueToRange(v, ch, ch.type === 'dimmer' ? 'dimmer' : ch.type);
         v = applyInvert(v, ch);
         v = applyMasterDimmer(v, ch.type);
-        const uni = ch.universe || 1;
+        const uni = ch.universe || fixMap.universe || 1;
+        if (!previewUpdates[uni]) previewUpdates[uni] = {};
+        previewUpdates[uni][ch.dmx_address] = v;
+      }
+      ensureShutterOpenInUpdates(previewUpdates, [fixMap], { applyInvertFn: applyInvert });
+      for (const [uni, chMap] of Object.entries(previewUpdates)) {
         if (!dmxUniverses[uni]) dmxUniverses[uni] = Buffer.alloc(512, 0);
-        dmxUniverses[uni][ch.address - 1] = v;
+        for (const [addr, v] of Object.entries(chMap)) {
+          dmxUniverses[uni][+addr - 1] = v;
+        }
       }
       sendDMX();
       break;
@@ -4305,6 +4389,9 @@ function handleSequenceCommand(ws, msg) {
  */
 function mapValueToRange(value, channel, rangeType) {
   if (!channel.ranges || channel.ranges.length === 0) return value;
+  if (rangeType === 'strobe' && hasShutterStrobeChannel(channel)) {
+    return mapShutterStrobeValue(value, channel);
+  }
   const range = channel.ranges.find(r => r.type === rangeType);
   if (!range) return value;
   // Map 0-255 logical value to range.min..range.max
@@ -4945,6 +5032,10 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
   // Send all channel updates
   ensureMulticellMasterDimmer(channelUpdates, activeCues, allFixtures);
+  const activeStrobeFixtureIds = new Set(
+    activeCues.filter(c => c.cue_type === 'strobe').map(c => c.fixture_id).filter(Boolean),
+  );
+  ensureShutterOpenInUpdates(channelUpdates, allFixtures, { activeStrobeFixtureIds, applyInvertFn: applyInvert });
   applyActiveColorOverrideToUpdates(channelUpdates, fixturesWithFx);
   for (const [u, chMap] of Object.entries(channelUpdates)) {
     const channels = Object.entries(chMap).map(([ch, val]) => ({ ch: +ch, val }));
@@ -5006,6 +5097,8 @@ function applyActiveColorOverrideToUpdates(channelUpdates, fixturesWithFx) {
         let val = applyGroupDimmerToDimmerValue(applyMasterDimmer(255, ch.type), fix);
         val = mapValueToRange(Math.max(0, Math.min(255, Math.round(val))), ch, ch.type);
         channelUpdates[u][ch.dmx_address] = applyInvert(val, ch);
+      } else if (hasShutterStrobeChannel(ch)) {
+        channelUpdates[u][ch.dmx_address] = applyInvert(getShutterOpenDmxValue(ch), ch);
       }
     }
   }
