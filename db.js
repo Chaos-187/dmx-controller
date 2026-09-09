@@ -13,9 +13,17 @@ const path = require('path');
 
 // In pkg mode, __dirname points to the read-only snapshot; use the exe directory instead
 const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
-const DATA_DIR = process.env.DMX_DATA_DIR
-  ? path.resolve(process.env.DMX_DATA_DIR)
-  : path.join(APP_DIR, 'data');
+
+function defaultDataDir() {
+  if (process.env.DMX_DATA_DIR) return path.resolve(process.env.DMX_DATA_DIR);
+  // Installed under Program Files — keep writable data in ProgramData (Windows service cannot reliably use PF)
+  if (process.pkg && /Program Files/i.test(APP_DIR)) {
+    return path.join(process.env.ProgramData || 'C:\\ProgramData', 'EYUP Events', 'ThaluxisMaster');
+  }
+  return path.join(APP_DIR, 'data');
+}
+
+const DATA_DIR = defaultDataDir();
 const LEGACY_DB_PATH = path.join(APP_DIR, 'dmx-controller.db');
 const DB_PATH = process.env.DMX_DB_PATH
   ? path.resolve(process.env.DMX_DB_PATH)
@@ -44,8 +52,25 @@ function migrateLegacyDbLocation() {
   console.log(`[DB] Migrated database from ${LEGACY_DB_PATH} to ${DB_PATH}`);
 }
 
+/** Move database from install-dir data/ to ProgramData when using a Program Files install. */
+function migrateProgramFilesDataDir() {
+  if (process.env.DMX_DB_PATH || process.env.DMX_DATA_DIR) return;
+  if (!process.pkg || !/Program Files/i.test(APP_DIR)) return;
+  const legacyDir = path.join(APP_DIR, 'data');
+  if (!fs.existsSync(legacyDir) || legacyDir === DATA_DIR) return;
+  if (fs.existsSync(DB_PATH)) return;
+  ensureDataDir();
+  for (const name of fs.readdirSync(legacyDir)) {
+    const from = path.join(legacyDir, name);
+    const to = path.join(DATA_DIR, name);
+    if (!fs.existsSync(to)) fs.renameSync(from, to);
+  }
+  console.log(`[DB] Migrated data from ${legacyDir} to ${DATA_DIR}`);
+}
+
 function init() {
   migrateLegacyDbLocation();
+  migrateProgramFilesDataDir();
   if (!process.env.DMX_DB_PATH) ensureDataDir();
   db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');

@@ -57,6 +57,18 @@ if not errorlevel 1 (
 
 if not exist "%INSTALL_DIR%logs" mkdir "%INSTALL_DIR%logs"
 
+set "DATA_DIR=%ProgramData%\EYUP Events\ThaluxisMaster"
+if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
+icacls "%DATA_DIR%" /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-32-545:(OI)(CI)M /T >nul 2>&1
+
+REM Migrate database out of Program Files if a previous install created it there
+if exist "%INSTALL_DIR%data\dmx-controller.db" (
+  if not exist "%DATA_DIR%\dmx-controller.db" (
+    echo Migrating database to %DATA_DIR% ...
+    xcopy "%INSTALL_DIR%data\*" "%DATA_DIR%\" /E /I /Y >nul 2>&1
+  )
+)
+
 "%NSSM%" install %SERVICE% "%EXE%"
 if errorlevel 1 (
   echo Failed to register service with NSSM.
@@ -65,6 +77,7 @@ if errorlevel 1 (
 )
 
 "%NSSM%" set %SERVICE% AppDirectory "%INSTALL_DIR%"
+"%NSSM%" set %SERVICE% AppEnvironmentExtra "DMX_DATA_DIR=%DATA_DIR%"
 "%NSSM%" set %SERVICE% DisplayName "Thaluxis Master"
 "%NSSM%" set %SERVICE% Description "Thaluxis Master - DMX lighting control, Art-Net output, and VirtualDJ OS2L integration."
 "%NSSM%" set %SERVICE% Start SERVICE_AUTO_START
@@ -90,7 +103,7 @@ echo.
 sc query "%SERVICE%"
 echo.
 echo Web UI: http://localhost
-echo Database: %INSTALL_DIR%data\dmx-controller.db
+echo Database: %DATA_DIR%\dmx-controller.db
 echo Logs: %INSTALL_DIR%logs\
 echo.
 if not defined SILENT pause

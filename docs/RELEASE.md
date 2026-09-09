@@ -62,16 +62,25 @@ The zip includes:
 The **setup.exe** on GitHub Releases:
 
 - Installs to `C:\Program Files\EYUP Events\ThaluxisMaster\`
+- **Upgrades** an existing install in place (same AppId) — stops the service, replaces binaries, re-registers the service, preserves database
 - Creates Start Menu shortcuts (hub, config URL, service scripts)
 - Optional: desktop shortcut
-- Optional: install **ThaluxisMaster** Windows service (checked by default)
-- Preserves `data\` on upgrade (database and settings)
+- Optional: install or update **ThaluxisMaster** Windows service (checked by default)
+- Database lives in **`%ProgramData%\EYUP Events\ThaluxisMaster\`** (not under Program Files)
 
 ## Windows service (exe install)
 
 After extracting a release zip (or from the installed folder), run **`install-service.bat`** next to `dmx-controller.exe` (Administrator required). This registers **ThaluxisMaster** using **NSSM** (`nssm.exe` is bundled in the build) — the pkg exe is not a native Windows service binary, so NSSM wraps it and sets the correct working directory.
 
 If the service fails to start, check **`logs\service-err.log`** in the install folder.
+
+In **services.msc**, the path shows **`nssm.exe`** — that is normal. NSSM is the service wrapper; the hub is **`dmx-controller.exe`**. Verify with:
+
+```bat
+"C:\Program Files\EYUP Events\ThaluxisMaster\nssm.exe" get ThaluxisMaster Application
+```
+
+Database and settings for Program Files installs live in **`%ProgramData%\EYUP Events\ThaluxisMaster\`** (writable by the service), not under Program Files.
 
 | Script | Purpose |
 |--------|---------|
