@@ -63,6 +63,9 @@ const EFFECT_CATEGORY_MAP = {
   rig_chase: 'rig', rig_color_wave: 'rig', rig_sweep: 'rig', rig_alternate: 'rig', rig_converge: 'rig', rig_rainbow: 'rig',
   rig_depth_chase: 'rig', rig_depth_wave: 'rig', rig_round_robin: 'rig',
   sound_pulse: 'sound', sound_strobe: 'sound', sound_chase: 'sound', sound_wave: 'sound', sound_flash: 'sound', sound_vu: 'sound',
+  mirror_glow: 'mirror', mirror_soft_shift: 'mirror', mirror_slow_spin: 'mirror', mirror_glitter: 'mirror',
+  mirror_spin_cw: 'mirror', mirror_spin_ccw: 'mirror',
+  mirror_spin_fast_cw: 'mirror', mirror_spin_fast_ccw: 'mirror',
 };
 
 const EFFECT_CATEGORIES = [
@@ -71,6 +74,7 @@ const EFFECT_CATEGORIES = [
   { key: 'motion',    label: 'Movement',   bg: 'rgba(251,191,36,.14)',  border: 'rgba(251,191,36,.5)'  },
   { key: 'multicell', label: 'Multi-Cell', bg: 'rgba(167,139,250,.16)', border: 'rgba(167,139,250,.5)' },
   { key: 'sound',     label: 'Sound',      bg: 'rgba(251,113,133,.14)', border: 'rgba(251,113,133,.5)' },
+  { key: 'mirror',    label: 'Mirror',     bg: 'rgba(244,114,182,.14)', border: 'rgba(244,114,182,.5)' },
 ];
 
 const FX_PALETTE_PRESETS = {
@@ -119,6 +123,10 @@ function getEffectFixtureIds(effect) {
   if (effect.fixture_target === 'moving_head' || effect.fixture_target === 'moving_head_wash' || effect.fixture_target === 'moving_head_spot') {
     return getEnabledFixtures(getMoverFixtures()).map((f) => f.id);
   }
+  if (slot === 'mirror' || effect.fixture_target === 'mirror_ball') {
+    const mirrors = enabled.filter((f) => f.category === 'mirror_ball');
+    if (mirrors.length) return mirrors.map((f) => f.id);
+  }
   return enabled.map((f) => f.id);
 }
 
@@ -144,6 +152,11 @@ function getEnabledFixtures(list) {
 function getMoverFixtures() {
   return S.fixtures.filter((f) =>
     f.channels.some((ch) => ch.type === 'pan') && f.channels.some((ch) => ch.type === 'tilt'));
+}
+
+function getMirrorBallFixtures() {
+  return S.fixtures.filter((f) =>
+    f.category === 'mirror_ball' || f.channels.some((ch) => ch.type === 'motor'));
 }
 
 function getSelectedMovers() {

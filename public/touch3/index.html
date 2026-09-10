@@ -171,6 +171,7 @@
   <input type="range" id="masterDim" min="0" max="255" value="255">
   <span class="s-val" id="masterDimVal">255</span>
   <button class="lights-btn" id="btnMovers" style="display:none">&#127919; Movers</button>
+  <button class="lights-btn" id="btnMirror" style="display:none">&#127922; Spin</button>
   <button class="lights-btn" id="btnLights">&#128161; Lights</button>
 </footer>
 
@@ -191,6 +192,24 @@
         <div class="slider-row"><span class="s-label">Pan</span><input type="range" id="manualPan" min="0" max="255" value="128"><span class="s-val" id="panVal">128</span></div>
         <div class="slider-row"><span class="s-label">Tilt</span><input type="range" id="manualTilt" min="0" max="255" value="128"><span class="s-val" id="tiltVal">128</span></div>
         <div class="slider-row"><span class="s-label">Speed</span><input type="range" id="manualSpeed" min="0" max="255" value="128"><span class="s-val" id="speedVal">128</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ Mirror ball spin ══════ -->
+<div class="modal" id="mirrorModal">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>&#127922; Mirror spin</h2>
+      <button class="modal-close" id="btnCloseMirror">&#10005;</button>
+    </div>
+    <div class="modal-body touch-scroll">
+      <p class="fav-hint">Hold to spin the motor. Release to stop. Uses patched mirror-ball fixtures (e.g. Kam Strato).</p>
+      <div class="mirror-spin-row">
+        <button type="button" class="mirror-spin-btn" id="btnMirrorCw" data-dir="cw">&#8635; CW</button>
+        <button type="button" class="mirror-spin-btn stop" id="btnMirrorStop" data-dir="stop">Stop</button>
+        <button type="button" class="mirror-spin-btn" id="btnMirrorCcw" data-dir="ccw">&#8634; CCW</button>
       </div>
     </div>
   </div>

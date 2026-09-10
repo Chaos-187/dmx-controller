@@ -4,6 +4,7 @@
  */
 
 const { generateSectionBased } = require('./section-generator');
+const { generateBarBased } = require('./bar-generator');
 const { stableRoll } = require('./helpers');
 const { getSectionPalettes } = require('./palettes');
 
@@ -22,11 +23,11 @@ const MIRROR_SECTION_STYLES = {
 const DEFAULT_MIRROR_EFFECT_TYPES = {
   intro:     ['mirror_glow', 'mirror_soft_shift'],
   verse:     ['mirror_glow', 'mirror_soft_shift'],
-  chorus:    ['mirror_soft_shift', 'mirror_glitter'],
+  chorus:    ['mirror_soft_shift', 'mirror_glitter', 'mirror_spin_fast_cw'],
   bridge:    ['mirror_glow', 'mirror_soft_shift'],
   breakdown: ['mirror_glow'],
   buildup:   ['mirror_soft_shift', 'mirror_slow_spin'],
-  drop:      ['mirror_glitter', 'mirror_soft_shift'],
+  drop:      ['mirror_glitter', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw', 'mirror_soft_shift'],
   outro:     ['mirror_glow'],
 };
 
@@ -39,6 +40,10 @@ const EFFECT_COLORS = {
   mirror_glow: '#5c6bc0',
   mirror_soft_shift: '#7986cb',
   mirror_slow_spin: '#455a64',
+  mirror_spin_cw: '#546e7a',
+  mirror_spin_ccw: '#546e7a',
+  mirror_spin_fast_cw: '#37474f',
+  mirror_spin_fast_ccw: '#37474f',
   mirror_glitter: '#b39ddb',
 };
 
@@ -54,7 +59,10 @@ function generateMirrorBallEffectCues(cues, fixtures, sections, ctx) {
   const { effects, barMs, rand, durationMs } = ctx;
   if (!effects?.length || !fixtures.length) return;
 
-  const mirrorTypes = new Set(['mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter']);
+  const mirrorTypes = new Set([
+    'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
+    'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+  ]);
   const byType = {};
   for (const eff of effects) {
     if (eff.fixture_target !== 'mirror_ball' && !mirrorTypes.has(eff.type)) continue;
@@ -122,6 +130,43 @@ function generateMirrorBallEffectCues(cues, fixtures, sections, ctx) {
 /**
  * Generate calm colour + optional mirror-ball FX cues.
  */
+function generateMirrorBallBarEffectCues(cues, fixtures, ctx) {
+  const { effects, barMs, durationMs, rand } = ctx;
+  if (!effects?.length || !fixtures.length || !barMs) return;
+
+  const mirrorTypes = new Set([
+    'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
+    'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+  ]);
+  const pool = effects.filter((e) => mirrorTypes.has(e.type));
+  if (!pool.length) return;
+
+  let lane = cues.reduce((mx, c) => Math.max(mx, c.lane || 0), 0) + 1;
+  const totalBars = Math.floor(durationMs / barMs);
+  for (let bar = 8; bar < totalBars; bar += 16) {
+    if (rand() > 0.35) continue;
+    const startMs = Math.round(bar * barMs);
+    const durMs = Math.min(Math.round(barMs * 8), Math.round(durationMs - startMs));
+    if (durMs < barMs * 2) continue;
+    const effect = pool[Math.floor(rand() * pool.length)];
+    for (const fix of fixtures) {
+      cues.push({
+        lane: lane++,
+        start_ms: startMs,
+        duration_ms: durMs,
+        cue_type: 'effect',
+        fixture_id: fix.id,
+        track: 'fx-mirror',
+        effect_id: effect.id,
+        effect_params: {},
+        channel_values: { red: 180, green: 180, blue: 220, dimmer: 200 },
+        color: EFFECT_COLORS[effect.type] || '#7986cb',
+        label: effect.name,
+      });
+    }
+  }
+}
+
 function generateMirrorBallCues(cues, fixtures, sections, beats, energyLevels, ctx) {
   if (!fixtures.length) return;
 
@@ -141,9 +186,11 @@ function generateMirrorBallCues(cues, fixtures, sections, beats, energyLevels, c
 
   if (sections.length > 0) {
     generateSectionBased(cues, fixtures, sections, beats, energyLevels, mirrorCtx, { colorOnly: true });
+    generateMirrorBallEffectCues(cues, fixtures, sections, mirrorCtx);
+  } else {
+    generateBarBased(cues, fixtures, mirrorCtx);
+    generateMirrorBallBarEffectCues(cues, fixtures, mirrorCtx);
   }
-
-  generateMirrorBallEffectCues(cues, fixtures, sections, mirrorCtx);
 }
 
 module.exports = {

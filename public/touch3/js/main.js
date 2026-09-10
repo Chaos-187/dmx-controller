@@ -162,6 +162,29 @@ function initControls() {
     document.getElementById('btnCloseMovers').addEventListener('click', () => moversModal.classList.remove('open'));
     moversModal.addEventListener('click', (e) => { if (e.target === moversModal) moversModal.classList.remove('open'); });
   }
+
+  const mirrorModal = document.getElementById('mirrorModal');
+  const btnMirror = document.getElementById('btnMirror');
+  if (btnMirror && mirrorModal) {
+    btnMirror.addEventListener('click', () => mirrorModal.classList.add('open'));
+    document.getElementById('btnCloseMirror').addEventListener('click', () => mirrorModal.classList.remove('open'));
+    mirrorModal.addEventListener('click', (e) => { if (e.target === mirrorModal) mirrorModal.classList.remove('open'); });
+    for (const id of ['btnMirrorCw', 'btnMirrorCcw']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const dir = el.dataset.dir;
+      bindHoldToggle(
+        el,
+        () => { Actions.mirrorMotor(dir); el.classList.add('held'); },
+        () => { Actions.mirrorMotor('stop'); el.classList.remove('held'); },
+        () => true,
+      );
+    }
+    const stopBtn = document.getElementById('btnMirrorStop');
+    if (stopBtn) {
+      stopBtn.addEventListener('click', () => Actions.mirrorMotor('stop'));
+    }
+  }
   document.getElementById('btnAllOn').addEventListener('click', () => {
     S.fixtures.forEach((f) => Actions.setFixtureEnabled(f.id, true));
     UI.renderFixtureGrid();

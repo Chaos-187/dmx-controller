@@ -826,7 +826,10 @@ function init() {
   seedNewEffectsV8();
   seedNewEffectsV9();
   seedNewEffectsV10();
+  seedNewEffectsV11();
+  seedNewEffectsV12();
   migrateKamStratoMirrorBallCategory();
+  migrateKamMirrorBallCategoriesV2();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -840,7 +843,7 @@ function init() {
   db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin')");
   // Sound-reactive effects
   db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr')");
-  db.exec("UPDATE effects SET fixture_target = 'mirror_ball' WHERE type IN ('mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter')");
+  db.exec("UPDATE effects SET fixture_target = 'mirror_ball' WHERE type IN ('mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter','mirror_spin_cw','mirror_spin_ccw','mirror_spin_fast_cw','mirror_spin_fast_ccw')");
 
   // Seed default generator config if missing
   seedDefaultGeneratorConfig();
@@ -1417,6 +1420,55 @@ function seedNewEffectsV10() {
   if (added > 0) console.log(`[DB] Added ${added} new effects (v10 — mirror ball)`);
 }
 
+function seedNewEffectsV11() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    ['Mirror Ball Spin CW', 'mirror_spin_cw', 'movement', 'mirror_ball', J({}), 8],
+    ['Mirror Ball Spin CCW', 'mirror_spin_ccw', 'movement', 'mirror_ball', J({}), 8],
+  ];
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const row of allNew) {
+      if (!existing.has(row[0])) {
+        ins.run(...row);
+        added++;
+      }
+    }
+    db.prepare(
+      "UPDATE effects SET effect_data = ? WHERE name = 'Mirror Ball Slow Spin' AND effect_data = '{}'",
+    ).run(J({ cycle_sec: 16 }));
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v11 — mirror spin CW/CCW)`);
+}
+
+function seedNewEffectsV12() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    ['Mirror Ball Fast Spin CW', 'mirror_spin_fast_cw', 'movement', 'mirror_ball', J({}), 4],
+    ['Mirror Ball Fast Spin CCW', 'mirror_spin_fast_ccw', 'movement', 'mirror_ball', J({}), 4],
+  ];
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const row of allNew) {
+      if (!existing.has(row[0])) {
+        ins.run(...row);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v12 — mirror fast spin)`);
+}
+
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
 
 /**
@@ -1691,7 +1743,7 @@ function createKamStratosphereFixtureType() {
   return createFixtureType({
     name: 'Kam Stratosphere',
     manufacturer: 'Kam',
-    category: 'effect',
+    category: 'mirror_ball',
     modes: getKamStratosphereModes(),
   });
 }
@@ -1789,6 +1841,24 @@ function migrateKamStratoMirrorBallCategory() {
   db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('kam_strato_mirror_ball_category_v1', '1')").run();
   if (r.changes > 0) {
     console.log('[DB] Kam Strato category → mirror_ball (dedicated sequencer path)');
+  }
+}
+
+/** Kam Stratosphere + any Kam mirror types → mirror_ball for sequence generator. */
+function migrateKamMirrorBallCategoriesV2() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'kam_mirror_ball_category_v2'").get();
+  if (done?.value === '1') return;
+  const r = db.prepare(`
+    UPDATE fixture_types SET category = 'mirror_ball'
+    WHERE category != 'mirror_ball'
+      AND (
+        name IN ('Kam Stratosphere', 'Kam Strato')
+        OR (manufacturer = 'Kam' AND name LIKE '%Strato%')
+      )
+  `).run();
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('kam_mirror_ball_category_v2', '1')").run();
+  if (r.changes > 0) {
+    console.log(`[DB] Mirror ball category applied to ${r.changes} fixture type(s) (Kam Strato/Stratosphere)`);
   }
 }
 

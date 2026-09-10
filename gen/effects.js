@@ -7,7 +7,7 @@
  */
 
 const { getSectionPalettes } = require('./palettes');
-const { hasVocals, walkBeats, snapToBeat, stableRoll } = require('./helpers');
+const { hasVocals, walkBeats, snapToBeat, stableRoll, isMirrorBallFixture } = require('./helpers');
 
 const SECTION_EFFECT_TYPES = {
   intro:     { regular: ['color_fade', 'pulse'],            cellAware: ['color_wave', 'fire'],                                   rigWide: ['rig_color_wave', 'rig_rainbow'] },
@@ -101,6 +101,7 @@ function generateEffectCues(cues, regularFixtures, ledBars, effects, sections, c
   const ledBarIds = new Set(ledBars.map(b => b.id));
 
   for (const fix of allNonMovers) {
+    if (isMirrorBallFixture(fix)) continue;
     const key = fix.type_name || `unknown_${fix.id}`;
     if (!fixtureGroups[key]) {
       fixtureGroups[key] = { fixtures: [], isLedBar: ledBarIds.has(fix.id) };

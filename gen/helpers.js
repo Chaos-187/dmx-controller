@@ -233,6 +233,24 @@ function stableRoll(key) {
   return ((h * 2654435761) >>> 0) / 4294967296;
 }
 
+/** Disco / mirror ball fixtures (Kam Strato, Stratosphere, category mirror_ball). */
+function isMirrorBallFixture(fix) {
+  if (!fix || !Array.isArray(fix.channels)) return false;
+  if (fix.category === 'mirror_ball') return true;
+  const typeLabel = String(fix.type_name || fix.name || '').toLowerCase();
+  if (/strato|stratosphere|mirror ball|disco ball|\bdisco\b/.test(typeLabel)) {
+    return fix.channels.some((c) => c.type === 'motor');
+  }
+  const isMover = fix.channels.some((c) => c.type === 'pan') && fix.channels.some((c) => c.type === 'tilt');
+  if (isMover) return false;
+  const hasRgb = fix.channels.some((c) => c.type === 'red')
+    && fix.channels.some((c) => c.type === 'green')
+    && fix.channels.some((c) => c.type === 'blue');
+  const hasMotor = fix.channels.some((c) => c.type === 'motor');
+  if (hasRgb && hasMotor && (fix.category === 'effect' || fix.category === 'other')) return true;
+  return false;
+}
+
 /**
  * Get per-fixture intensity multiplier based on fixture role and section label.
  * Returns a 0–1 scalar that should multiply the section intensity.
@@ -340,6 +358,7 @@ module.exports = {
   walkBeats,
   seededRandom,
   stableRoll,
+  isMirrorBallFixture,
   getFixtureIntensity,
   getStemEnergy,
   hasVocals,

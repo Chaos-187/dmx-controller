@@ -1494,6 +1494,30 @@ button.fx-pal-preset.btn.btn-secondary { border-style: dashed !important; }
 }
 .toggle-switch.on::after { transform: translateX(18px); }
 
+.dmx-manual-output {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; padding: 10px 14px; border-radius: 8px;
+  background: rgba(76, 175, 80, 0.12); border: 1px solid rgba(76, 175, 80, 0.35);
+}
+.dmx-manual-output.is-stopped {
+  background: rgba(244, 67, 54, 0.1); border-color: rgba(244, 67, 54, 0.35);
+}
+.dmx-manual-output-text {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0;
+}
+.dmx-manual-output-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.dmx-manual-output-state {
+  font-size: 14px; font-weight: 700;
+}
+.dmx-manual-output-state.live { color: var(--green); }
+.dmx-manual-output-state.stopped { color: var(--danger); }
+.dmx-manual-output-hint {
+  flex: 1 1 100%; font-size: 12px; color: var(--text-dim); line-height: 1.35;
+}
+
 .dmx-channel-range {
   display: flex; align-items: center; gap: 8px;
 }

@@ -123,7 +123,14 @@ const MULTICELL_EFFECT_TYPES   = new Set([
   'checker','matrix_alternate','diagonal','plasma','rain','fill_rows',
 ]);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
-const MIRROR_BALL_EFFECT_TYPES = new Set(['mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter']);
+const MIRROR_BALL_EFFECT_TYPES = new Set([
+  'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
+  'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+]);
+const MIRROR_SPIN_EFFECT_TYPES = new Set([
+  'mirror_slow_spin', 'mirror_spin_cw', 'mirror_spin_ccw',
+  'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+]);
 const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
 const PAN_TILT = new Set(['pan','tilt']);
@@ -337,20 +344,32 @@ function isFixtureCompatibleWithEffect(effect, fix) {
   return true;
 }
 
-/** Pick a slow motor DMX value from Kam-style motor ranges. */
-function mirrorMotorDmx(channelCtx, rangeType, slow = true) {
+/**
+ * Motor DMX from Kam-style motor ranges.
+ * @param {number|boolean} speedOrSlow — 0–1 intensity (higher = faster), or legacy true/false for slow/fast.
+ */
+function mirrorMotorDmx(channelCtx, rangeType, speedOrSlow = 0.15) {
   if (!channelCtx || !Array.isArray(channelCtx.ranges)) return 0;
   const range = channelCtx.ranges.find(r => r.type === rangeType);
   if (!range) return 0;
   if (rangeType === 'motor_stop') return Math.round((range.min + range.max) / 2);
+  let speed = 0.15;
+  if (speedOrSlow === true) speed = 0.12;
+  else if (speedOrSlow === false) speed = 0.38;
+  else if (typeof speedOrSlow === 'number') speed = Math.max(0, Math.min(1, speedOrSlow));
   const span = range.max - range.min;
-  if (rangeType === 'motor_cw') {
-    return slow ? Math.round(range.max - span * 0.12) : Math.round(range.min + span * 0.2);
-  }
-  if (rangeType === 'motor_ccw') {
-    return slow ? Math.round(range.min + span * 0.12) : Math.round(range.max - span * 0.2);
-  }
+  const t = 0.06 + speed * 0.42;
+  if (rangeType === 'motor_cw') return Math.round(range.max - span * t);
+  if (rangeType === 'motor_ccw') return Math.round(range.min + span * t);
   return Math.round((range.min + range.max) / 2);
+}
+
+/** @param {'slow'|'normal'|'fast'} tier */
+function mirrorMotorSpeedFromParams(params, data, tier = 'normal') {
+  const mul = params._effectSpeed ?? data._effectSpeed ?? 1;
+  if (tier === 'slow') return Math.max(0.08, Math.min(0.32, 0.06 + mul * 0.14));
+  if (tier === 'fast') return Math.max(0.58, Math.min(1, 0.52 + mul * 0.4));
+  return Math.max(0.12, Math.min(0.52, 0.1 + mul * 0.2));
 }
 
 // ─── Effect Value Computation ───────────────────────────────────────────────
@@ -557,17 +576,37 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     case 'mirror_slow_spin': {
       if (channelType === 'motor') {
-        const half = progress < 0.5;
-        const local = half ? progress * 2 : (progress - 0.5) * 2;
+        const cycleSec = params.cycle_sec ?? data.cycle_sec ?? 16;
+        const phase = (progress / cycleSec) % 2;
+        const half = phase < 1;
+        const local = half ? phase : phase - 1;
         const dir = half ? 'motor_cw' : 'motor_ccw';
-        if (local < 0.08) return mirrorMotorDmx(channelCtx, 'motor_stop', true);
-        return mirrorMotorDmx(channelCtx, dir, true);
+        if (local < 0.04) return mirrorMotorDmx(channelCtx, 'motor_stop', 0);
+        return mirrorMotorDmx(channelCtx, dir, mirrorMotorSpeedFromParams(params, data, 'slow'));
       }
       if (channelType === 'dimmer') return Math.min(255, baseValues.dimmer ?? 180);
       if (channelType === 'strobe' || channelType === 'macro') return null;
       if (COLOR_CHANNELS.has(channelType)) {
         const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 160;
         return Math.round(val * 0.7);
+      }
+      return null;
+    }
+
+    case 'mirror_spin_cw':
+    case 'mirror_spin_ccw':
+    case 'mirror_spin_fast_cw':
+    case 'mirror_spin_fast_ccw': {
+      if (channelType === 'motor') {
+        const fast = type.includes('_fast_');
+        const dir = type.endsWith('_cw') ? 'motor_cw' : 'motor_ccw';
+        return mirrorMotorDmx(channelCtx, dir, mirrorMotorSpeedFromParams(params, data, fast ? 'fast' : 'normal'));
+      }
+      if (channelType === 'dimmer') return Math.min(255, baseValues.dimmer ?? 160);
+      if (channelType === 'strobe' || channelType === 'macro') return null;
+      if (COLOR_CHANNELS.has(channelType)) {
+        const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 140;
+        return Math.round(val * 0.55);
       }
       return null;
     }
@@ -1632,6 +1671,9 @@ function sequenceEffectProgress(effectType, cueStartMs, cueDurationMs, timeMs, e
   const cueProgress = cueDurationMs > 0 ? clamped / cueDurationMs : 0;
   const speed = effectSpeed || 1;
 
+  if (MIRROR_SPIN_EFFECT_TYPES.has(effectType)) {
+    return (clamped / 1000) * speed;
+  }
   if (effectType === 'color_fade' || effectType === 'buildup' || (effectType && effectType.startsWith('mirror_'))) {
     return Math.min(1, cueProgress * speed);
   }
@@ -1657,6 +1699,7 @@ module.exports = {
   MULTICELL_EFFECT_TYPES,
   COLOR_EFFECT_TYPES,
   MIRROR_BALL_EFFECT_TYPES,
+  MIRROR_SPIN_EFFECT_TYPES,
   RIG_EFFECT_TYPES,
   SOUND_EFFECT_TYPES,
   PAN_TILT,
@@ -1667,4 +1710,5 @@ module.exports = {
   getShutterOffDmxValue,
   mapShutterStrobeValue,
   ensureShutterOpenInUpdates,
+  mirrorMotorDmx,
 };

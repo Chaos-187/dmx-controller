@@ -1098,7 +1098,7 @@ const SEQ = (() => {
   const CATEGORY_ORDER = {
     par: 0, dimmer: 1, led_bar: 2, pixel_tape: 2, multi_cell: 3,
     moving_head: 4, moving_head_wash: 5, moving_head_spot: 6,
-    strobe: 7, effect: 8, laser: 9, fog: 10, other: 11,
+    mirror_ball: 7, strobe: 8, effect: 9, laser: 10, fog: 11, other: 12,
   };
 
   function buildLaneList() {

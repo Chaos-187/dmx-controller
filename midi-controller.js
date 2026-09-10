@@ -34,7 +34,7 @@ try {
   console.warn('[MIDI] jzz module not available — MIDI controller disabled');
 }
 
-const { mapShutterStrobeValue } = require('./effects-engine');
+const { mapShutterStrobeValue, hasShutterStrobeChannel, getShutterOpenDmxValue, mirrorMotorDmx } = require('./effects-engine');
 
 // ─── APC Mini mk2 LED Color Constants (Velocity Palette) ────────────────────
 // The mk2 pad LEDs use velocity 0-127 as an index into a fixed color palette.
@@ -929,6 +929,7 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
     const u = fix.universe;
     if (!channelUpdates[u]) channelUpdates[u] = [];
     const fixHasDimmer = fix.channels.some(c => c.type === 'dimmer');
+    let fixtureHasLight = false;
     for (const ch of fix.channels) {
       const colorMap = { red, green, blue, white };
       if (colorMap[ch.type] !== undefined) {
@@ -936,6 +937,7 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
         if (activate && !fixHasDimmer) {
           val = applyTouchDimmerChain(val, fix, ch.type);
         }
+        if (activate && val > 0) fixtureHasLight = true;
         channelUpdates[u].push({ ch: ch.dmx_address, val });
       } else if (ch.type === 'color_wheel' && fix.color_wheel_map && fix.color_wheel_map.length) {
         // Find nearest color wheel position for this RGB color
@@ -954,9 +956,28 @@ function sendColorToDmx(red, green, blue, white, group_id, activate) {
           channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
         }
       } else if (ch.type === 'dimmer' && activate) {
-        channelUpdates[u].push({ ch: ch.dmx_address, val: applyTouchDimmerChain(255, fix, 'dimmer') });
+        const dVal = applyTouchDimmerChain(255, fix, 'dimmer');
+        if (dVal > 0) fixtureHasLight = true;
+        channelUpdates[u].push({ ch: ch.dmx_address, val: dVal });
       } else if (ch.type === 'dimmer' && !activate) {
         channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
+      }
+    }
+    if (activate && fixtureHasLight) {
+      for (const ch of fix.channels) {
+        if (hasShutterStrobeChannel(ch)) {
+          let sVal = getShutterOpenDmxValue(ch);
+          if (typeof applyInvert === 'function') sVal = applyInvert(sVal, ch);
+          channelUpdates[u].push({ ch: ch.dmx_address, val: sVal });
+          break;
+        }
+      }
+      if (fix.category === 'mirror_ball') {
+        for (const ch of fix.channels) {
+          if (ch.type === 'macro') {
+            channelUpdates[u].push({ ch: ch.dmx_address, val: 0 });
+          }
+        }
       }
     }
   }
@@ -1269,7 +1290,7 @@ function executeMidiAction(mapping, isOn) {
                   channelCtx._fixtureOrdinal = fi;
                   channelCtx._fixtureCount = fixtureIds.length;
                   channelCtx._rigFixtureCount = channelMap.length;
-                  let value = computeEffectValue(effect, ch.type, progress, baseValues, {}, channelCtx);
+                  let value = computeEffectValue(effect, ch.type, progress, baseValues, { _effectSpeed: touchOverrides.effectSpeed }, channelCtx);
                   if (value !== null && value !== undefined) {
                     if (!chUpdates[fix.universe]) chUpdates[fix.universe] = {};
                     let finalVal = Math.max(0, Math.min(255, Math.round(value)));
@@ -1418,6 +1439,8 @@ function executeMidiAction(mapping, isOn) {
             for (const ch of fix.channels) {
               if (['dimmer','red','green','blue','white','amber','uv','strobe','smoke','atmosphere'].includes(ch.type)) {
                 channelUpdates[u][ch.dmx_address] = 0;
+              } else if (ch.type === 'motor') {
+                channelUpdates[u][ch.dmx_address] = mirrorMotorDmx({ ranges: ch.ranges }, 'motor_stop', 0);
               } else if (ch.type === 'pan') {
                 channelUpdates[u][ch.dmx_address] = fix.home_pan ?? 128;
               } else if (ch.type === 'tilt') {

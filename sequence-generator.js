@@ -19,7 +19,7 @@ const {
   sectionStyles, defaultStyle, getSectionPalettes,
 } = require('./gen/palettes');
 
-const { seededRandom, snapToBeat, snapToBar, computeDownbeatPhase } = require('./gen/helpers');
+const { seededRandom, snapToBeat, snapToBar, computeDownbeatPhase, isMirrorBallFixture } = require('./gen/helpers');
 
 const { generateSectionBased, resolveMultiCellConflicts } = require('./gen/section-generator');
 const { generateBarBased }         = require('./gen/bar-generator');
@@ -206,7 +206,7 @@ function generateSequence(opts) {
   const allMoverIds = new Set(allMovers.map(m => m.id));
   const nonMoverFixtures = rgbFixtures.filter(fix => !moverIds.has(fix.id));
 
-  const mirrorBallFixtures = nonMoverFixtures.filter(fix => fix.category === 'mirror_ball');
+  const mirrorBallFixtures = nonMoverFixtures.filter(isMirrorBallFixture);
   const mirrorBallIds = new Set(mirrorBallFixtures.map(f => f.id));
 
   const ledBars = nonMoverFixtures.filter(fix => {
@@ -296,7 +296,7 @@ function generateSequence(opts) {
   }
 
   // ── Mirror ball / disco ball (calm colours + dedicated FX) ───────────
-  if (mirrorBallFixtures.length > 0 && sections.length > 0) {
+  if (mirrorBallFixtures.length > 0) {
     generateMirrorBallCues(cues, mirrorBallFixtures, sections, beats, energyLevels, ctx);
   }
 

@@ -307,6 +307,14 @@
 
   <!-- Sub-page: Manual Faders -->
   <div class="dmx-subpage" id="dmxsub-manual">
+    <div class="dmx-manual-output" id="dmxManualOutputBar">
+      <div class="dmx-manual-output-text">
+        <span class="dmx-manual-output-label">DMX output</span>
+        <span class="dmx-manual-output-state stopped" id="dmxManualOutputState">Stopped</span>
+        <span class="dmx-manual-output-hint" id="dmxManualOutputHint">Enable output (header toggle or below) — faders do not reach fixtures while stopped.</span>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" id="dmxManualOutputToggle">Enable output</button>
+    </div>
     <div class="dmx-channel-range" style="margin-bottom:12px">
       <label>Universe:</label>
       <select id="dmxCtrlUniverse" style="padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;">
@@ -10115,7 +10123,13 @@ document.querySelectorAll('.dmx-subtab').forEach(btn => {
     btn.classList.add('active');
     document.getElementById(`dmxsub-${btn.dataset.dmxsub}`).classList.add('active');
     if (btn.dataset.dmxsub === 'quickactions') loadQuickActions();
-    if (btn.dataset.dmxsub === 'manual') refreshDmxFixtureMap().then(() => buildFaders());
+    if (btn.dataset.dmxsub === 'manual') {
+      fetch('/api/dmx/output').then(r => r.json()).then(r => {
+        dmxOutputOn = !!r.enabled;
+        updateOutputToggle();
+      }).catch(() => {});
+      refreshDmxFixtureMap().then(() => buildFaders());
+    }
   });
 });
 
@@ -10290,7 +10304,9 @@ function sendDmxChannel(universe, channel, value) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ universe, channel, value }),
-  });
+  }).then(r => r.json()).then(data => {
+    if (data.outputOff) updateDmxManualOutputBar();
+  }).catch(() => {});
 }
 
 function updateOutputToggle() {
@@ -10300,16 +10316,45 @@ function updateOutputToggle() {
   toggle.className = 'output-toggle ' + (dmxOutputOn ? 'active' : 'inactive');
   sw.className = 'toggle-switch' + (dmxOutputOn ? ' on' : '');
   label.textContent = dmxOutputOn ? 'ON' : 'OFF';
+  updateDmxManualOutputBar();
 }
 
-document.getElementById('outputSwitch').addEventListener('click', async () => {
-  dmxOutputOn = !dmxOutputOn;
+function updateDmxManualOutputBar() {
+  const stateEl = document.getElementById('dmxManualOutputState');
+  const hintEl = document.getElementById('dmxManualOutputHint');
+  const btn = document.getElementById('dmxManualOutputToggle');
+  const bar = document.getElementById('dmxManualOutputBar');
+  if (!stateEl || !btn) return;
+  if (dmxOutputOn) {
+    stateEl.textContent = 'Live';
+    stateEl.className = 'dmx-manual-output-state live';
+    if (hintEl) hintEl.textContent = 'Manual faders send to patched channels on this universe.';
+    btn.textContent = 'Stop output';
+    if (bar) bar.classList.remove('is-stopped');
+  } else {
+    stateEl.textContent = 'Stopped';
+    stateEl.className = 'dmx-manual-output-state stopped';
+    if (hintEl) hintEl.textContent = 'Output is off — moving faders here only updates this panel until you enable output.';
+    btn.textContent = 'Enable output';
+    if (bar) bar.classList.add('is-stopped');
+  }
+}
+
+async function setDmxOutputEnabled(enabled) {
+  dmxOutputOn = !!enabled;
   updateOutputToggle();
   await fetch('/api/dmx/output', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled: dmxOutputOn }),
   });
+}
+
+document.getElementById('outputSwitch').addEventListener('click', () => {
+  setDmxOutputEnabled(!dmxOutputOn);
+});
+document.getElementById('dmxManualOutputToggle')?.addEventListener('click', () => {
+  setDmxOutputEnabled(!dmxOutputOn);
 });
 
 function getVisibleDmxChannels() {
@@ -10976,7 +11021,7 @@ const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','
 const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows']);
 const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
-const MIRROR_TYPES = new Set(['mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter']);
+const MIRROR_TYPES = new Set(['mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter','mirror_spin_cw','mirror_spin_ccw','mirror_spin_fast_cw','mirror_spin_fast_ccw']);
 function getEffectSlot(type) {
   if (MOTION_TYPES.has(type)) return 'motion';
   if (MULTICELL_TYPES.has(type)) return 'multicell';

@@ -80,7 +80,7 @@ If the service fails to start, check logs in **`%ProgramData%\EYUP Events\Thalux
 | `service-err.log` | Hub stderr (crashes, port bind errors) |
 | `service-out.log` | Hub stdout |
 
-Run **`diagnose-service.bat`** from the install folder (Administrator not required) for service status, NSSM config, port 80 checks, and a short manual test.
+Run **`diagnose-service.bat`** from the install folder (Administrator not required) for service status, `sc qc` output, port 80 checks, and a short manual test.
 
 In **services.msc**, the service path shows **`cmd.exe`** running **`run-service.bat`** — that is normal. The hub is **`dmx-controller.exe`**. Verify with:
 
@@ -99,6 +99,12 @@ Database and settings for Program Files installs live in **`%ProgramData%\EYUP E
 | `diagnose-service.bat` | Troubleshoot service / port / logs |
 
 The auto-updater stops and restarts **ThaluxisMaster** when applying updates.
+
+### Known issue: services.msc may show “Stopped” while the hub runs
+
+The current registration uses **`sc.exe` + `cmd.exe` + batch**, not a native service binary. Windows sometimes reports **Stopped** in **services.msc** even when **`dmx-controller.exe`** is running (or the opposite: Stopped in the UI but the process exited). Trust **`sc query ThaluxisMaster`**, **`service-wrapper.log`**, and **http://localhost** more than the mmc status icon.
+
+Future improvement (not implemented yet): a dedicated service host exe, or a vetted wrapper that reports **SERVICE_RUNNING** correctly to the SCM (e.g. WinSW on x64, or NSSM where that binary runs on the target PC).
 
 **Development** (from git clone, `node server.js`): use `npm run service:install` or `scripts\install-master-service.cmd` — those use node-windows with `server.js`.
 

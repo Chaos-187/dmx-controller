@@ -60,7 +60,8 @@ const {
   MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES, MIRROR_BALL_EFFECT_TYPES,
   RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
   PAN_TILT, COLOR_CHANNELS,
-  hasShutterStrobeChannel, getShutterOpenDmxValue, mapShutterStrobeValue, ensureShutterOpenInUpdates,
+  hasShutterStrobeChannel, getShutterOpenDmxValue, getShutterOffDmxValue, mapShutterStrobeValue, ensureShutterOpenInUpdates,
+  mirrorMotorDmx,
 } = require('./effects-engine');
 
 // ─── Authentication Helpers ─────────────────────────────────────────────────
@@ -2492,6 +2493,45 @@ app.post('/api/touch/mover-position', (req, res) => {
   res.json({ ok: true, fixtureIds: affectedIds });
 });
 
+// Mirror ball motor spin (Kam Strato / Stratosphere CH motor), computed server-side
+app.post('/api/touch/mirror-motor', (req, res) => {
+  const { fixtureIds, direction, group_id } = req.body || {};
+  const dir = String(direction || 'stop').toLowerCase();
+  const rangeType = dir === 'cw' ? 'motor_cw' : dir === 'ccw' ? 'motor_ccw' : 'motor_stop';
+
+  let ids = Array.isArray(fixtureIds) ? fixtureIds.map(normalizeFixtureId).filter(Boolean) : [];
+  if (!ids.length) {
+    ids = getFixtureChannelMapCached()
+      .filter((f) => f.category === 'mirror_ball' && !isFixtureDisabled(f.id))
+      .map((f) => f.id);
+  }
+
+  const channelUpdates = {};
+  const affectedIds = [];
+  for (const id of ids) {
+    const fix = getFixtureChannelMapByIdCached(id);
+    if (!fix || isFixtureDisabled(fix.id)) continue;
+    if (group_id && !(fix.group_ids || []).includes(group_id)) continue;
+    const motorCh = fix.channels.find((ch) => ch.type === 'motor');
+    if (!motorCh) continue;
+    affectedIds.push(fix.id);
+    const ctx = { ranges: motorCh.ranges };
+    let val = mirrorMotorDmx(ctx, rangeType, true);
+    val = applyInvert(val, motorCh);
+    if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = [];
+    channelUpdates[fix.universe].push({ ch: motorCh.dmx_address, val });
+  }
+
+  if (dmxOutputEnabled) {
+    for (const [u, channels] of Object.entries(channelUpdates)) {
+      artnetServer.setChannels(+u, channels);
+      dmxUsbServer.setChannels(+u, channels);
+    }
+  }
+  console.log(`[TOUCH] Mirror motor ${rangeType} on ${affectedIds.length} fixture(s)`);
+  res.json({ ok: true, fixtureIds: affectedIds });
+});
+
 app.post('/api/touch/smoke-override', (req, res) => {
   const { fixtureIds, active } = req.body;
   if (!Array.isArray(fixtureIds)) return res.status(400).json({ error: 'fixtureIds required' });
@@ -3094,6 +3134,15 @@ function stopRunningEffect(slot, skipBlackout) {
             else if (COLOR_CHANNELS.has(ch.type)) {
               channelUpdates[fix.universe][ch.dmx_address] = 0;
             }
+          } else if (s === 'mirror') {
+            if (ch.type === 'motor') {
+              let val = mirrorMotorDmx({ ranges: ch.ranges }, 'motor_stop', 0);
+              channelUpdates[fix.universe][ch.dmx_address] = applyInvert(val, ch);
+            } else if (ch.type === 'dimmer' || COLOR_CHANNELS.has(ch.type)) {
+              channelUpdates[fix.universe][ch.dmx_address] = 0;
+            } else if (hasShutterStrobeChannel(ch)) {
+              channelUpdates[fix.universe][ch.dmx_address] = applyInvert(getShutterOffDmxValue(ch), ch);
+            }
           } else {
             // Color/multicell/rig/sound slot: zero out color & dimmer channels
             if (COLOR_CHANNELS.has(ch.type)) {
@@ -3154,9 +3203,11 @@ app.post('/api/effects/run', (req, res) => {
     const elapsed = ((Date.now() - startTime) / 1000) * touchOverrides.effectSpeed;
     const channelUpdates = {};
     const live = st.effectParams && typeof st.effectParams === 'object' ? { ...st.effectParams } : {};
-    const effectParams = SOUND_EFFECT_TYPES.has(eff.type)
-      ? { ...live, audio: getCurrentAudioData() }
-      : { ...live };
+    const effectParams = {
+      ...live,
+      _effectSpeed: touchOverrides.effectSpeed,
+      ...(SOUND_EFFECT_TYPES.has(eff.type) ? { audio: getCurrentAudioData() } : {}),
+    };
 
     for (let fi = 0; fi < st.fixtureIds.length; fi++) {
       const fixtureId = st.fixtureIds[fi];
@@ -4837,7 +4888,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
               }
             }
           }
-          const touchEffectParams = { ...(cue.effect_params || {}) };
+          const touchEffectParams = { ...(cue.effect_params || {}), _effectSpeed: touchOverrides.effectSpeed };
           if (_cachedMixerConfig.seqNoStrobes) touchEffectParams.no_strobes = true;
           const withOverride = applyLiveColorOverrideForMulticell(fixMap, effectBaseVals, touchEffectParams);
           effectBaseVals = withOverride.effectBaseVals;
@@ -4987,7 +5038,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
           }
         }
 
-        const rigEffectParams = { ...(rigCue.effect_params || {}) };
+        const rigEffectParams = { ...(rigCue.effect_params || {}), _effectSpeed: touchOverrides.effectSpeed };
         if (_cachedMixerConfig.seqNoStrobes) rigEffectParams.no_strobes = true;
         const withOverride = applyLiveColorOverrideForMulticell(fixMap, effectBaseVals, rigEffectParams);
         effectBaseVals = withOverride.effectBaseVals;

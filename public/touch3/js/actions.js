@@ -101,7 +101,7 @@ Actions.pushFxPaletteParams = function () {
   clearTimeout(_fxPalDebounce);
   _fxPalDebounce = setTimeout(async () => {
     const payload = getFxPaletteParams();
-    for (const slot of ['color', 'motion', 'multicell', 'rig', 'sound']) {
+    for (const slot of ['color', 'motion', 'multicell', 'rig', 'sound', 'mirror']) {
       if (!S.activeEffectSlots[slot]) continue;
       await post('/api/effects/params', { slot, effect_params: payload });
     }
@@ -140,6 +140,14 @@ Actions.sendMoverPosition = function (fixtureIds, pan, tilt, speed) {
 
 Actions.clearMovementOverride = function (fixtureIds) {
   return post('/api/touch/movement-override', { fixtureIds, active: false });
+};
+
+/** Mirror ball motor: cw | ccw | stop (hold buttons send stop on release). */
+Actions.mirrorMotor = function (direction, fixtureIds) {
+  const ids = fixtureIds && fixtureIds.length
+    ? fixtureIds
+    : getEnabledFixtures(getMirrorBallFixtures()).map((f) => f.id);
+  return post('/api/touch/mirror-motor', { direction, fixtureIds: ids, group_id: S.selectedGroup || undefined });
 };
 
 /* ── Scenes ── */

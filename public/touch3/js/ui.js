@@ -292,6 +292,17 @@ UI.renderScenes = function () {
   UI.renderPanelNav();
 };
 
+/* ── Mirror ball spin ── */
+UI.renderMirror = function () {
+  const mirrors = getMirrorBallFixtures();
+  const btn = document.getElementById('btnMirror');
+  if (!mirrors.length) {
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+  if (btn) btn.style.display = '';
+};
+
 /* ── Movers ── */
 UI.renderMovers = function () {
   const movers = getMoverFixtures();
@@ -632,6 +643,7 @@ UI.renderAll = function () {
   UI.syncEffectSpeed();
   UI.renderScenes();
   UI.renderMovers();
+  UI.renderMirror();
   UI.syncMasterDim();
   UI.renderGroupToggles();
   UI.renderGroupDimmers();

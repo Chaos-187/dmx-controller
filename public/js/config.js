@@ -1183,8 +1183,8 @@ function renderCellPatternsEditor() {
 }
 
 // ─── Fixture Intensity Editor ───
-const _FI_ROLES = ['par','mover','led_bar','pixel_tape','multi_cell','color_wheel'];
-const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', pixel_tape: 'Pixel Tape', multi_cell: 'Multi-Cell', color_wheel: 'Color Wheel' };
+const _FI_ROLES = ['par','mover','led_bar','pixel_tape','multi_cell','color_wheel','mirror_ball'];
+const _FI_ROLE_LABELS = { par: 'Pars', mover: 'Movers', led_bar: 'LED Bars', pixel_tape: 'Pixel Tape', multi_cell: 'Multi-Cell', color_wheel: 'Color Wheel', mirror_ball: 'Mirror / Disco Ball' };
 const _FI_SECTIONS = ['intro','verse','chorus','bridge','breakdown','buildup','drop','outro'];
 const _FI_SEC_COLORS = { intro:'#78909c', verse:'#42a5f5', chorus:'#ef5350', bridge:'#ab47bc', breakdown:'#26a69a', buildup:'#ffa726', drop:'#e53935', outro:'#78909c' };
 
