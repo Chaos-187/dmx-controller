@@ -26,6 +26,7 @@ const { generateBarBased }         = require('./gen/bar-generator');
 const { generateColorWheelCues }   = require('./gen/color-wheel');
 const { MOVEMENT_STYLES, DEFAULT_MOVEMENT, SPEED_DMX, generateMoverMovement } = require('./gen/mover-movement');
 const { SECTION_EFFECT_TYPES, generateEffectCues } = require('./gen/effects');
+const { generateMirrorBallCues } = require('./gen/mirror-ball');
 const { CELL_PATTERN_MAP, generateMultiCellPatterns } = require('./gen/multi-cell');
 const { generatePixelTapePatterns } = require('./gen/pixel-tape');
 const { buildGroupMap } = require('./gen/group-coordination');
@@ -138,6 +139,7 @@ function generateSequence(opts) {
   const activeSectionEffects = gc.gen_section_effects   || SECTION_EFFECT_TYPES;
   const activeCellPatterns   = gc.gen_cell_patterns     || CELL_PATTERN_MAP;
   const activeFixtureIntensity = gc.gen_fixture_intensity || null;
+  const activeMirrorBallEffects = gc.gen_mirror_ball_effects || null;
 
   // Resolve genre preset using active config
   const genreKey = opts.genre || resolveGenrePresetWith(track.genre, activeGenrePresets, activeGenreAliases);
@@ -204,17 +206,21 @@ function generateSequence(opts) {
   const allMoverIds = new Set(allMovers.map(m => m.id));
   const nonMoverFixtures = rgbFixtures.filter(fix => !moverIds.has(fix.id));
 
+  const mirrorBallFixtures = nonMoverFixtures.filter(fix => fix.category === 'mirror_ball');
+  const mirrorBallIds = new Set(mirrorBallFixtures.map(f => f.id));
+
   const ledBars = nonMoverFixtures.filter(fix => {
+    if (mirrorBallIds.has(fix.id)) return false;
     if (fix.category === 'pixel_tape' || fix.category === 'led_bar' || fix.category === 'multi_cell') return true;
     const rgbCount = fix.channels.filter(ch => ch.type === 'red' || ch.type === 'green' || ch.type === 'blue').length;
     return rgbCount >= 6;
   });
   const ledBarIds = new Set(ledBars.map(b => b.id));
 
-  const cellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0);
+  const cellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0 && !mirrorBallIds.has(fix.id));
   const pixelTapeFixtures = cellFixtures.filter(fix => fix.category === 'pixel_tape' || fix.category === 'led_bar');
   const matrixFixtures = cellFixtures.filter(fix => fix.category === 'multi_cell');
-  const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id));
+  const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id) && !mirrorBallIds.has(fix.id));
 
   // ── Build fixture role map for per-fixture intensity curves ──────────
   const fixtureRoleMap = new Map();
@@ -225,6 +231,7 @@ function generateSequence(opts) {
     else fixtureRoleMap.set(f.id, 'led_bar');
   }
   for (const f of colorWheelFixtures) fixtureRoleMap.set(f.id, 'color_wheel');
+  for (const f of mirrorBallFixtures) fixtureRoleMap.set(f.id, 'mirror_ball');
   for (const f of regularFixtures) {
     if (!fixtureRoleMap.has(f.id)) fixtureRoleMap.set(f.id, 'par');
   }
@@ -247,14 +254,14 @@ function generateSequence(opts) {
   const ctx = {
     bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
     activePalettes, activeSectionStyles, activeMovementStyles, activeSpeedDmx,
-    activeSectionEffects, activeCellPatterns, activeFixtureIntensity, fixtureRoleMap,
+    activeSectionEffects, activeCellPatterns, activeFixtureIntensity, activeMirrorBallEffects, fixtureRoleMap,
     stemEnergy, energyLevels, groupMap, effects: effects || [],
   };
 
   // Cell fixtures get dedicated effect patterns — exclude from main color generator.
   const colorFixtures = (cellFixtures.length > 0 && sections.length > 0)
-    ? rgbFixtures.filter(f => f.cell_count <= 0 && !moverIds.has(f.id))
-    : rgbFixtures.filter(f => !moverIds.has(f.id));
+    ? rgbFixtures.filter(f => f.cell_count <= 0 && !moverIds.has(f.id) && !mirrorBallIds.has(f.id))
+    : rgbFixtures.filter(f => !moverIds.has(f.id) && !mirrorBallIds.has(f.id));
 
   if (sections.length > 0) {
     generateSectionBased(cues, colorFixtures, sections, beats, energyLevels, ctx);
@@ -286,6 +293,11 @@ function generateSequence(opts) {
   // ── Color-wheel cue generation ────────────────────────────────────────
   if (colorWheelFixtures.length > 0) {
     generateColorWheelCues(cues, colorWheelFixtures, sections, beats, energyLevels, ctx);
+  }
+
+  // ── Mirror ball / disco ball (calm colours + dedicated FX) ───────────
+  if (mirrorBallFixtures.length > 0 && sections.length > 0) {
+    generateMirrorBallCues(cues, mirrorBallFixtures, sections, beats, energyLevels, ctx);
   }
 
   // ── Effects generation (non-movers only) ──────────────────────────────

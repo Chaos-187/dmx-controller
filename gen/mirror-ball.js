@@ -1,0 +1,153 @@
+/**
+ * Mirror ball / disco ball fixtures (e.g. Kam Strato) — calm colours and motion.
+ * Avoids par-style strobes, rig FX, and built-in macro channels.
+ */
+
+const { generateSectionBased } = require('./section-generator');
+const { stableRoll } = require('./helpers');
+const { getSectionPalettes } = require('./palettes');
+
+/** Softer section timing than standard pars — longer holds, no strobes. */
+const MIRROR_SECTION_STYLES = {
+  intro:     { intensity: [0.30, 0.50], beatColorChange: false, strobeChance: 0, cuePerBars: 8, beatColorBars: 8 },
+  verse:     { intensity: [0.40, 0.60], beatColorChange: true,  strobeChance: 0, cuePerBars: 4, beatColorBars: 4 },
+  chorus:    { intensity: [0.50, 0.70], beatColorChange: true,  strobeChance: 0, cuePerBars: 2, beatColorBars: 2 },
+  bridge:    { intensity: [0.35, 0.55], beatColorChange: true,  strobeChance: 0, cuePerBars: 4, beatColorBars: 4 },
+  breakdown: { intensity: [0.25, 0.40], beatColorChange: false, strobeChance: 0, cuePerBars: 8, beatColorBars: 8 },
+  buildup:   { intensity: [0.35, 0.65], beatColorChange: true,  strobeChance: 0, cuePerBars: 2, beatColorBars: 2, rampIntensity: true },
+  drop:      { intensity: [0.55, 0.75], beatColorChange: true,  strobeChance: 0, cuePerBars: 2, beatColorBars: 2 },
+  outro:     { intensity: [0.35, 0.15], beatColorChange: false, strobeChance: 0, cuePerBars: 8, beatColorBars: 8, fadeOut: true },
+};
+
+const DEFAULT_MIRROR_EFFECT_TYPES = {
+  intro:     ['mirror_glow', 'mirror_soft_shift'],
+  verse:     ['mirror_glow', 'mirror_soft_shift'],
+  chorus:    ['mirror_soft_shift', 'mirror_glitter'],
+  bridge:    ['mirror_glow', 'mirror_soft_shift'],
+  breakdown: ['mirror_glow'],
+  buildup:   ['mirror_soft_shift', 'mirror_slow_spin'],
+  drop:      ['mirror_glitter', 'mirror_soft_shift'],
+  outro:     ['mirror_glow'],
+};
+
+const MIRROR_EFFECT_CHANCE = {
+  intro: 0.06, verse: 0.10, chorus: 0.18, bridge: 0.08,
+  breakdown: 0.05, buildup: 0.12, drop: 0.15, outro: 0.05,
+};
+
+const EFFECT_COLORS = {
+  mirror_glow: '#5c6bc0',
+  mirror_soft_shift: '#7986cb',
+  mirror_slow_spin: '#455a64',
+  mirror_glitter: '#b39ddb',
+};
+
+function mergeMirrorSectionStyles(baseStyles) {
+  const out = { ...baseStyles };
+  for (const [label, style] of Object.entries(MIRROR_SECTION_STYLES)) {
+    out[label] = { ...(out[label] || {}), ...style };
+  }
+  return out;
+}
+
+function generateMirrorBallEffectCues(cues, fixtures, sections, ctx) {
+  const { effects, barMs, rand, durationMs } = ctx;
+  if (!effects?.length || !fixtures.length) return;
+
+  const mirrorTypes = new Set(['mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter']);
+  const byType = {};
+  for (const eff of effects) {
+    if (eff.fixture_target !== 'mirror_ball' && !mirrorTypes.has(eff.type)) continue;
+    if (!mirrorTypes.has(eff.type)) continue;
+    if (!byType[eff.type]) byType[eff.type] = [];
+    byType[eff.type].push(eff);
+  }
+  if (Object.keys(byType).length === 0) return;
+
+  const effectTypesBySection = ctx.activeMirrorBallEffects || DEFAULT_MIRROR_EFFECT_TYPES;
+  let lane = cues.reduce((mx, c) => Math.max(mx, c.lane || 0), 0) + 1;
+
+  function pickEffect(sectionLabel, rollKey) {
+    const types = effectTypesBySection[sectionLabel] || effectTypesBySection.verse || ['mirror_glow'];
+    const pool = [];
+    for (const t of types) {
+      if (byType[t]) pool.push(...byType[t]);
+    }
+    if (!pool.length) return null;
+    const r = rollKey ? stableRoll(rollKey) : rand();
+    return pool[Math.floor(r * pool.length)];
+  }
+
+  for (const section of sections) {
+    const label = section.label || 'verse';
+    const chance = MIRROR_EFFECT_CHANCE[label] ?? 0.1;
+    if (stableRoll(`mirror-fx-${label}-${section.start_ms}`) > chance) continue;
+
+    const secStart = Math.round(section.start_ms);
+    const secEnd = Math.min(Math.round(section.end_ms), Math.round(durationMs));
+    const secDur = secEnd - secStart;
+    if (secDur < barMs * 2) continue;
+
+    const effect = pickEffect(label, `mirror-pick-${label}-${secStart}`);
+    if (!effect) continue;
+
+    const startMs = secStart + Math.round(secDur * 0.15);
+    const durMs = Math.min(Math.round(secDur * 0.55), barMs * 16);
+
+    for (const fix of fixtures) {
+      const palettes = getSectionPalettes(ctx.paletteKey, label, ctx.activePalettes);
+      const flat = palettes.flat();
+      const pick = flat[Math.floor(stableRoll(`mirror-color-${fix.id}-${startMs}`) * flat.length)] || { r: 180, g: 180, b: 220 };
+      cues.push({
+        lane: lane++,
+        start_ms: startMs,
+        duration_ms: durMs,
+        cue_type: 'effect',
+        fixture_id: fix.id,
+        track: 'fx-mirror',
+        effect_id: effect.id,
+        effect_params: {},
+        channel_values: {
+          red: pick.r, green: pick.g, blue: pick.b,
+          white: Math.min(255, Math.round((pick.r + pick.g + pick.b) / 3)),
+          dimmer: 200,
+        },
+        color: EFFECT_COLORS[effect.type] || '#7986cb',
+        label: effect.name,
+      });
+    }
+  }
+}
+
+/**
+ * Generate calm colour + optional mirror-ball FX cues.
+ */
+function generateMirrorBallCues(cues, fixtures, sections, beats, energyLevels, ctx) {
+  if (!fixtures.length) return;
+
+  const mirrorCtx = {
+    ...ctx,
+    noStrobes: true,
+    activeSectionStyles: mergeMirrorSectionStyles(ctx.activeSectionStyles || {}),
+    activeMirrorBallEffects: ctx.activeMirrorBallEffects || DEFAULT_MIRROR_EFFECT_TYPES,
+    preset: {
+      ...(ctx.preset || {}),
+      strobeMult: 0,
+      flashOnSection: false,
+      accentPulses: false,
+      intensityMult: Math.min(0.9, (ctx.preset?.intensityMult ?? 1) * 0.85),
+    },
+  };
+
+  if (sections.length > 0) {
+    generateSectionBased(cues, fixtures, sections, beats, energyLevels, mirrorCtx, { colorOnly: true });
+  }
+
+  generateMirrorBallEffectCues(cues, fixtures, sections, mirrorCtx);
+}
+
+module.exports = {
+  generateMirrorBallCues,
+  MIRROR_SECTION_STYLES,
+  DEFAULT_MIRROR_EFFECT_TYPES,
+};

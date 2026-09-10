@@ -6,7 +6,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ServiceName = 'ThaluxisMaster'
-$InstallDir = $InstallDir.TrimEnd('\', '/')
+# cmd.exe passes "C:\path\" poorly (trailing \ escapes the closing quote) — normalize
+$InstallDir = ($InstallDir -replace '^[\s"]+|[\s"]+$', '').TrimEnd('\', '/')
+if (-not $InstallDir) {
+    throw 'InstallDir was empty or invalid.'
+}
 $Exe = Join-Path $InstallDir 'dmx-controller.exe'
 $Runner = Join-Path $InstallDir 'run-service.bat'
 $Cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'

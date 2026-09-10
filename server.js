@@ -57,7 +57,7 @@ const { WebUSB } = require('usb');
 const {
   pseudoRandom, hslToRgb, computeEffectValue, sequenceEffectProgress, isFixtureCompatibleWithEffect,
   shouldApplyCellCue, isAuxiliaryMulticellChannel,
-  MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES,
+  MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES, MIRROR_BALL_EFFECT_TYPES,
   RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
   PAN_TILT, COLOR_CHANNELS,
   hasShutterStrobeChannel, getShutterOpenDmxValue, mapShutterStrobeValue, ensureShutterOpenInUpdates,
@@ -3060,6 +3060,7 @@ function getEffectSlot(effectType) {
   if (MULTICELL_EFFECT_TYPES.has(effectType)) return 'multicell';
   if (RIG_EFFECT_TYPES.has(effectType)) return 'rig';
   if (SOUND_EFFECT_TYPES.has(effectType)) return 'sound';
+  if (MIRROR_BALL_EFFECT_TYPES.has(effectType)) return 'mirror';
   return 'color';
 }
 
@@ -3207,7 +3208,7 @@ app.post('/api/effects/run', (req, res) => {
 });
 
 app.post('/api/effects/stop', (req, res) => {
-  const QA_SLOT_KEYS = new Set(['color', 'motion', 'multicell', 'rig', 'sound']);
+  const QA_SLOT_KEYS = new Set(['color', 'motion', 'multicell', 'rig', 'sound', 'mirror']);
   let { slot } = req.body || {};
   if (slot == null || slot === '' || slot === 'all') {
     slot = undefined;
@@ -4493,6 +4494,8 @@ function buildChannelCtx(ch, fix) {
   const ctx = {
     channel_number: ch.channel_number,
     channel_type: ch.type,
+    ranges: ch.ranges,
+    fixture_id: fix.id,
     total_channels: fix.channels.length,
     home_pan: fix.home_pan ?? 128,
     home_tilt: fix.home_tilt ?? 128,

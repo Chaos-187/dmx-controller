@@ -123,6 +123,7 @@ const MULTICELL_EFFECT_TYPES   = new Set([
   'checker','matrix_alternate','diagonal','plasma','rain','fill_rows',
 ]);
 const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade','sparkle','color_wave','fire']);
+const MIRROR_BALL_EFFECT_TYPES = new Set(['mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter']);
 const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
 const PAN_TILT = new Set(['pan','tilt']);
@@ -330,7 +331,26 @@ function isFixtureCompatibleWithEffect(effect, fix) {
   if (target === 'sound') {
     return fix.channels.some(ch => COLOR_CHANNELS.has(ch.type));
   }
+  if (target === 'mirror_ball') {
+    return fix.category === 'mirror_ball';
+  }
   return true;
+}
+
+/** Pick a slow motor DMX value from Kam-style motor ranges. */
+function mirrorMotorDmx(channelCtx, rangeType, slow = true) {
+  if (!channelCtx || !Array.isArray(channelCtx.ranges)) return 0;
+  const range = channelCtx.ranges.find(r => r.type === rangeType);
+  if (!range) return 0;
+  if (rangeType === 'motor_stop') return Math.round((range.min + range.max) / 2);
+  const span = range.max - range.min;
+  if (rangeType === 'motor_cw') {
+    return slow ? Math.round(range.max - span * 0.12) : Math.round(range.min + span * 0.2);
+  }
+  if (rangeType === 'motor_ccw') {
+    return slow ? Math.round(range.min + span * 0.12) : Math.round(range.max - span * 0.2);
+  }
+  return Math.round((range.min + range.max) / 2);
 }
 
 // ─── Effect Value Computation ───────────────────────────────────────────────
@@ -494,6 +514,72 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const startVal = startColor[channelType] !== undefined ? startColor[channelType] : 0;
       const endVal = endColor[channelType] !== undefined ? endColor[channelType] : 0;
       return Math.round(startVal + (endVal - startVal) * progress);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  MIRROR BALL / DISCO BALL (calm — Kam Strato class fixtures)
+    // ══════════════════════════════════════════════════════════════════════
+
+    case 'mirror_glow': {
+      if (channelType === 'motor' || channelType === 'macro' || channelType === 'strobe') return null;
+      if (channelType === 'dimmer') {
+        const base = baseValues.dimmer ?? 255;
+        const depth = params.depth ?? data.depth ?? 0.35;
+        const freq = params.frequency ?? data.frequency ?? 0.35;
+        return Math.round(base * (1 - depth * 0.5 * (1 + Math.sin(progress * freq * 2 * Math.PI))));
+      }
+      if (!COLOR_CHANNELS.has(channelType) && channelType !== 'other') return null;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 200;
+      const depth = params.depth ?? data.depth ?? 0.3;
+      const freq = params.frequency ?? data.frequency ?? 0.35;
+      return Math.round(val * (1 - depth * 0.5 * (1 + Math.sin(progress * freq * 2 * Math.PI))));
+    }
+
+    case 'mirror_soft_shift': {
+      if (channelType === 'motor' || channelType === 'macro' || channelType === 'strobe') return null;
+      if (channelType === 'dimmer') return Math.min(255, Math.round((baseValues.dimmer ?? 220) * 0.85));
+      const cycles = params.cycles ?? data.cycles ?? 0.35;
+      const palette = getEffectPaletteRgb(data, params);
+      let r; let g; let b;
+      if (usePaletteColors(data, params) && palette) {
+        [r, g, b] = rgbAtPalettePhase((progress * cycles) % 1, palette);
+      } else {
+        const hue = (progress * 360 * cycles) % 360;
+        [r, g, b] = hslToRgb(hue / 360, 0.55, 0.45);
+      }
+      const level = params.level ?? data.level ?? 0.75;
+      if (channelType === 'red') return Math.round(r * level);
+      if (channelType === 'green') return Math.round(g * level);
+      if (channelType === 'blue') return Math.round(b * level);
+      if (channelType === 'white') return Math.round(255 * level * 0.4);
+      return null;
+    }
+
+    case 'mirror_slow_spin': {
+      if (channelType === 'motor') {
+        const half = progress < 0.5;
+        const local = half ? progress * 2 : (progress - 0.5) * 2;
+        const dir = half ? 'motor_cw' : 'motor_ccw';
+        if (local < 0.08) return mirrorMotorDmx(channelCtx, 'motor_stop', true);
+        return mirrorMotorDmx(channelCtx, dir, true);
+      }
+      if (channelType === 'dimmer') return Math.min(255, baseValues.dimmer ?? 180);
+      if (channelType === 'strobe' || channelType === 'macro') return null;
+      if (COLOR_CHANNELS.has(channelType)) {
+        const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 160;
+        return Math.round(val * 0.7);
+      }
+      return null;
+    }
+
+    case 'mirror_glitter': {
+      if (channelType === 'motor' || channelType === 'macro' || channelType === 'strobe') return null;
+      if (channelType === 'dimmer') return baseValues.dimmer ?? 200;
+      const seed = (channelCtx?.fixture_id || 0) * 17 + (channelCtx?.channel_number || 0);
+      const sparkle = pseudoRandom(seed + Math.floor(progress * 40)) > 0.88 ? 1 : 0.35;
+      const val = baseValues[channelType] !== undefined ? baseValues[channelType] : 200;
+      if (!COLOR_CHANNELS.has(channelType) && channelType !== 'other') return null;
+      return Math.round(val * sparkle * 0.65);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1546,7 +1632,7 @@ function sequenceEffectProgress(effectType, cueStartMs, cueDurationMs, timeMs, e
   const cueProgress = cueDurationMs > 0 ? clamped / cueDurationMs : 0;
   const speed = effectSpeed || 1;
 
-  if (effectType === 'color_fade' || effectType === 'buildup') {
+  if (effectType === 'color_fade' || effectType === 'buildup' || (effectType && effectType.startsWith('mirror_'))) {
     return Math.min(1, cueProgress * speed);
   }
 
@@ -1570,6 +1656,7 @@ module.exports = {
   MOVING_HEAD_EFFECT_TYPES,
   MULTICELL_EFFECT_TYPES,
   COLOR_EFFECT_TYPES,
+  MIRROR_BALL_EFFECT_TYPES,
   RIG_EFFECT_TYPES,
   SOUND_EFFECT_TYPES,
   PAN_TILT,

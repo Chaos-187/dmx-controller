@@ -53,7 +53,8 @@ const CHANNEL_TYPES = [
 const CATEGORY_LABELS = {
   par:'Par Can', moving_head:'Moving Head', moving_head_wash:'Moving Head Wash', moving_head_spot:'Moving Head Spot',
   strobe:'Strobe', laser:'Laser',
-  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', pixel_tape:'Pixel Tape', multi_cell:'Multi-Cell', effect:'Effect', other:'Other'
+  fog:'Fog/Haze', dimmer:'Dimmer', led_bar:'LED Bar', pixel_tape:'Pixel Tape', multi_cell:'Multi-Cell',
+  mirror_ball:'Mirror Ball / Disco Ball', effect:'Effect', other:'Other'
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1388,7 +1389,7 @@ function renderCfgEffectsList() {
     list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects yet. Click "+ New Effect" to create one.</div>';
     return;
   }
-  const TARGET_BADGE = { all: '', color: '\u{1F3A8}', moving_head: '\u{1F526}', moving_head_wash: '\u{1F526}', moving_head_spot: '\u{1F526}', multicell: '\u2593' };
+  const TARGET_BADGE = { all: '', color: '\u{1F3A8}', moving_head: '\u{1F526}', moving_head_wash: '\u{1F526}', moving_head_spot: '\u{1F526}', multicell: '\u2593', mirror_ball: '\u{1FA9F}' };
   let html = '<table class="subs-table"><thead><tr><th>Type</th><th>Name</th><th>Target</th><th>Duration</th><th>Actions</th></tr></thead><tbody>';
   for (const eff of cfgEffects) {
     const badge = TARGET_BADGE[eff.fixture_target] || '';

@@ -10831,14 +10831,16 @@ const MOTION_TYPES = new Set(['pan_sweep','tilt_sweep','circle','figure_eight','
 const MULTICELL_TYPES = new Set(['chase','comet','scanner','buildup','segments','ripple','cell_strobe','gradient','checker','matrix_alternate','diagonal','plasma','rain','fill_rows']);
 const RIG_TYPES = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_TYPES = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
+const MIRROR_TYPES = new Set(['mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter']);
 function getEffectSlot(type) {
   if (MOTION_TYPES.has(type)) return 'motion';
   if (MULTICELL_TYPES.has(type)) return 'multicell';
   if (RIG_TYPES.has(type)) return 'rig';
   if (SOUND_TYPES.has(type)) return 'sound';
+  if (MIRROR_TYPES.has(type)) return 'mirror';
   return 'color';
 }
-const qaActiveEffects = {}; // { color: effectId, motion: effectId, multicell: effectId, rig: effectId, sound: effectId }
+const qaActiveEffects = {}; // { color, motion, multicell, rig, sound, mirror }
 
 function qaGetTabsForEffect(eff) {
   const t = eff.fixture_target || 'all';
@@ -10848,6 +10850,7 @@ function qaGetTabsForEffect(eff) {
   else if (t === 'multicell') tabs.push('multicell');
   else if (t === 'rig') tabs.push('rig');
   else if (t === 'sound') tabs.push('sound');
+  else if (t === 'mirror_ball') tabs.push('mirror');
   return tabs;
 }
 

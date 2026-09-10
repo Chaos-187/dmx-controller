@@ -825,6 +825,8 @@ function init() {
   seedNewEffectsV7();
   seedNewEffectsV8();
   seedNewEffectsV9();
+  seedNewEffectsV10();
+  migrateKamStratoMirrorBallCategory();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -838,6 +840,7 @@ function init() {
   db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin')");
   // Sound-reactive effects
   db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr')");
+  db.exec("UPDATE effects SET fixture_target = 'mirror_ball' WHERE type IN ('mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter')");
 
   // Seed default generator config if missing
   seedDefaultGeneratorConfig();
@@ -1384,6 +1387,36 @@ function seedNewEffectsV9() {
   if (added > 0) console.log(`[DB] Added ${added} new effects (v9 — 2D matrix / Atomic)`);
 }
 
+// ─── Seed V10: Mirror ball / disco ball (Kam Strato class) ───────────────────
+
+function seedNewEffectsV10() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    ['Mirror Ball Glow', 'mirror_glow', 'intensity', 'mirror_ball', J({ frequency: 0.35, depth: 0.3 }), 8],
+    ['Mirror Ball Soft Shift', 'mirror_soft_shift', 'color', 'mirror_ball', J({ cycles: 0.35, level: 0.75, color_mode: 'palette' }), 8],
+    ['Mirror Ball Slow Spin', 'mirror_slow_spin', 'movement', 'mirror_ball', J({}), 8],
+    ['Mirror Ball Glitter', 'mirror_glitter', 'intensity', 'mirror_ball', J({}), 4],
+    ['Mirror Ball Deep Glow', 'mirror_glow', 'intensity', 'mirror_ball', J({ frequency: 0.25, depth: 0.45 }), 16],
+    ['Mirror Ball Pastel Shift', 'mirror_soft_shift', 'color', 'mirror_ball', J({ cycles: 0.2, level: 0.6, color_mode: 'palette' }), 16],
+  ];
+
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const row of allNew) {
+      if (!existing.has(row[0])) {
+        ins.run(...row);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v10 — mirror ball)`);
+}
+
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
 
 /**
@@ -1728,9 +1761,35 @@ function createKamStratoFixtureType() {
   return createFixtureType({
     name: 'Kam Strato',
     manufacturer: 'Kam',
-    category: 'effect',
+    category: 'mirror_ball',
     modes: getKamStratoModes(),
   });
+}
+
+/** Kam Strato is a mirror-ball class fixture — use calm sequencer + FX, not par-style looks. */
+function migrateKamStratoMirrorBallCategory() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'kam_strato_mirror_ball_category_v1'").get();
+  if (done?.value === '1') return;
+  const r = db.prepare(
+    "UPDATE fixture_types SET category = 'mirror_ball' WHERE name = 'Kam Strato' AND category != 'mirror_ball'",
+  ).run();
+  db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)').run(
+    'gen_mirror_ball_effects',
+    JSON.stringify({
+      intro: ['mirror_glow', 'mirror_soft_shift'],
+      verse: ['mirror_glow', 'mirror_soft_shift'],
+      chorus: ['mirror_soft_shift', 'mirror_glitter'],
+      bridge: ['mirror_glow', 'mirror_soft_shift'],
+      breakdown: ['mirror_glow'],
+      buildup: ['mirror_soft_shift', 'mirror_slow_spin'],
+      drop: ['mirror_glitter', 'mirror_soft_shift'],
+      outro: ['mirror_glow'],
+    }),
+  );
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('kam_strato_mirror_ball_category_v1', '1')").run();
+  if (r.changes > 0) {
+    console.log('[DB] Kam Strato category → mirror_ball (dedicated sequencer path)');
+  }
 }
 
 /** Upgrade Kam shutter/strobe channels so steady output uses shutter_open ranges. */
@@ -3956,6 +4015,17 @@ const GENERATOR_CONFIG_DEFAULTS = {
     pixel_tape:  { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
     multi_cell:  { intro: 0.65, verse: 0.75, chorus: 1.00, bridge: 0.60, breakdown: 0.50, buildup: 0.80, drop: 1.00, outro: 0.55 },
     color_wheel: { intro: 0.70, verse: 0.80, chorus: 1.00, bridge: 0.70, breakdown: 0.50, buildup: 0.85, drop: 1.00, outro: 0.60 },
+    mirror_ball: { intro: 0.55, verse: 0.60, chorus: 0.72, bridge: 0.58, breakdown: 0.45, buildup: 0.65, drop: 0.75, outro: 0.50 },
+  },
+  gen_mirror_ball_effects: {
+    intro:     ['mirror_glow', 'mirror_soft_shift'],
+    verse:     ['mirror_glow', 'mirror_soft_shift'],
+    chorus:    ['mirror_soft_shift', 'mirror_glitter'],
+    bridge:    ['mirror_glow', 'mirror_soft_shift'],
+    breakdown: ['mirror_glow'],
+    buildup:   ['mirror_soft_shift', 'mirror_slow_spin'],
+    drop:      ['mirror_glitter', 'mirror_soft_shift'],
+    outro:     ['mirror_glow'],
   },
 };
 
