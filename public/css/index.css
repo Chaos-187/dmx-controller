@@ -1512,9 +1512,29 @@ button.fx-pal-preset.btn.btn-secondary { border-style: dashed !important; }
 .dmx-fader {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
 }
+.dmx-faders-wrap {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.dmx-fixture-block {
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 8px; padding: 8px 8px 12px;
+}
+.dmx-fixture-header {
+  font-size: 11px; font-weight: 600; color: var(--text);
+  padding: 4px 6px 8px; border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 8px;
+}
+.dmx-faders-empty {
+  padding: 16px; background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
 .dmx-fader-label {
   font-size: 9px; color: var(--text-dim); text-align: center;
   min-height: 12px; line-height: 12px;
+}
+.dmx-fader-name {
+  font-size: 8px; color: var(--accent); text-align: center;
+  max-width: 36px; overflow: hidden; line-height: 1.1;
 }
 .dmx-fader-val {
   font-size: 9px; color: var(--cyan); font-variant-numeric: tabular-nums;

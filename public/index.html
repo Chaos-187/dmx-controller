@@ -314,6 +314,7 @@
       </select>
       <label>Channels:</label>
       <select id="dmxCtrlRange">
+        <option value="fixtures" selected>Patched fixtures only</option>
         <option value="1-512">All (1 – 512)</option>
         <option value="1-32">1 – 32</option>
         <option value="33-64">33 – 64</option>
@@ -332,10 +333,16 @@
         <option value="449-480">449 – 480</option>
         <option value="481-512">481 – 512</option>
       </select>
+      <label id="dmxCtrlFixtureFilterWrap" style="display:none">Fixture:</label>
+      <select id="dmxCtrlFixtureFilter" style="display:none;padding:6px 10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:13px;max-width:220px">
+        <option value="">All on this universe</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" id="dmxCtrlRefreshMap" title="Reload patched channels from fixtures">Refresh</button>
       <button class="btn btn-secondary btn-sm" id="dmxCtrlZeroAll">Zero All</button>
       <button class="btn btn-secondary btn-sm" id="dmxCtrlFullAll">Full All</button>
     </div>
-    <div class="dmx-faders" id="dmxFaders"></div>
+    <p id="dmxManualStatus" class="config-desc" style="margin:0 0 8px"></p>
+    <div id="dmxFaders"></div>
   </div>
 
   <!-- Sub-page: Quick Actions -->
@@ -10098,6 +10105,7 @@ const dmxValues = {};  // {universe: {channel: value}}
 let dmxFadersBuilt = false;
 let dmxOutputOn = false;
 let qaChannelMap = []; // cached fixture channel map for quick actions
+let dmxFixtureChannelMap = []; // full map for manual DMX tab
 
 // ─── DMX Sub-tab switching ──────────────────────────────────────────────────
 document.querySelectorAll('.dmx-subtab').forEach(btn => {
@@ -10107,6 +10115,7 @@ document.querySelectorAll('.dmx-subtab').forEach(btn => {
     btn.classList.add('active');
     document.getElementById(`dmxsub-${btn.dataset.dmxsub}`).classList.add('active');
     if (btn.dataset.dmxsub === 'quickactions') loadQuickActions();
+    if (btn.dataset.dmxsub === 'manual') refreshDmxFixtureMap().then(() => buildFaders());
   });
 });
 
@@ -10115,8 +10124,101 @@ function getDmxUniverse() {
 }
 
 function getDmxRange() {
-  const [s, e] = document.getElementById('dmxCtrlRange').value.split('-').map(Number);
-  return { start: s, end: e };
+  const val = document.getElementById('dmxCtrlRange').value;
+  if (val === 'fixtures') return { mode: 'fixtures' };
+  const [s, e] = val.split('-').map(Number);
+  return { mode: 'range', start: s, end: e };
+}
+
+async function refreshDmxFixtureMap() {
+  try {
+    dmxFixtureChannelMap = await fetch('/api/fixture-channel-map').then(r => r.json());
+  } catch {
+    dmxFixtureChannelMap = [];
+  }
+  populateDmxFixtureFilter();
+}
+
+function populateDmxFixtureFilter() {
+  const sel = document.getElementById('dmxCtrlFixtureFilter');
+  const u = getDmxUniverse();
+  const prev = sel.value;
+  const fixtures = dmxFixtureChannelMap.filter(f => f.universe === u);
+  sel.innerHTML = '<option value="">All on this universe</option>';
+  for (const f of fixtures) {
+    sel.innerHTML += `<option value="${f.id}">${esc(f.name)} (${f.channels.length} ch)</option>`;
+  }
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
+/** Patched channels on the selected universe (optional single-fixture filter). */
+function getPatchedDmxChannels() {
+  const u = getDmxUniverse();
+  const fixtureFilter = document.getElementById('dmxCtrlFixtureFilter').value;
+  const list = [];
+  for (const fix of dmxFixtureChannelMap) {
+    if (fix.universe !== u) continue;
+    if (fixtureFilter && String(fix.id) !== fixtureFilter) continue;
+    for (const ch of fix.channels) {
+      list.push({
+        ch: ch.dmx_address,
+        channelName: ch.name,
+        channelType: ch.type,
+        fixtureId: fix.id,
+        fixtureName: fix.name,
+      });
+    }
+  }
+  list.sort((a, b) => a.ch - b.ch || a.fixtureName.localeCompare(b.fixtureName));
+  return list;
+}
+
+function updateDmxManualStatus(count, mode) {
+  const el = document.getElementById('dmxManualStatus');
+  if (!el) return;
+  if (mode === 'fixtures') {
+    const u = getDmxUniverse();
+    const fixCount = new Set(getPatchedDmxChannels().map(c => c.fixtureId)).size;
+    el.textContent = count > 0
+      ? `${count} channel(s) from ${fixCount} fixture(s) on universe ${u}.`
+      : `No patched fixtures on universe ${u}. Add fixtures or switch universe.`;
+  } else {
+    el.textContent = count > 0 ? `${count} channel(s) shown.` : '';
+  }
+}
+
+function bindDmxFaderInput(u, inp) {
+  const ch = +inp.dataset.ch;
+  inp.addEventListener('input', () => {
+    const v = +inp.value;
+    dmxValues[u][ch] = v;
+    const valEl = inp.parentElement.querySelector('.dmx-fader-val');
+    valEl.textContent = v;
+    inp.parentElement.classList.toggle('nonzero', v > 0);
+    sendDmxChannel(u, ch, v);
+  });
+}
+
+function createDmxFaderEl(u, ch, meta) {
+  const val = dmxValues[u][ch] || 0;
+  const div = document.createElement('div');
+  div.className = 'dmx-fader' + (val > 0 ? ' nonzero' : '');
+  const shortName = meta?.channelName
+    ? meta.channelName.replace(/\s+/g, ' ').trim()
+    : '';
+  const title = meta
+    ? `${meta.fixtureName} — ${meta.channelName} (${meta.channelType}) · DMX ${ch}`
+    : `DMX ${ch}`;
+  const nameLine = shortName
+    ? `<span class="dmx-fader-name" title="${esc(title)}">${esc(shortName.length > 8 ? shortName.slice(0, 7) + '…' : shortName)}</span>`
+    : '';
+  div.innerHTML = `
+    <span class="dmx-fader-label" title="${esc(title)}">${ch}</span>
+    ${nameLine}
+    <input type="range" min="0" max="255" value="${val}" data-ch="${ch}">
+    <span class="dmx-fader-val">${val}</span>`;
+  bindDmxFaderInput(u, div.querySelector('input[type=range]'));
+  return div;
 }
 
 function ensureUniverse(u) {
@@ -10127,33 +10229,59 @@ function ensureUniverse(u) {
 }
 
 function buildFaders() {
-  const { start, end } = getDmxRange();
+  const range = getDmxRange();
   const u = getDmxUniverse();
   ensureUniverse(u);
   const container = document.getElementById('dmxFaders');
   container.innerHTML = '';
-  for (let ch = start; ch <= end; ch++) {
-    const val = dmxValues[u][ch] || 0;
-    const div = document.createElement('div');
-    div.className = 'dmx-fader' + (val > 0 ? ' nonzero' : '');
-    div.innerHTML = `
-      <span class="dmx-fader-label">${ch}</span>
-      <input type="range" min="0" max="255" value="${val}" data-ch="${ch}">
-      <span class="dmx-fader-val">${val}</span>`;
-    container.appendChild(div);
+  container.className = '';
+
+  const showFixtureFilter = range.mode === 'fixtures';
+  document.getElementById('dmxCtrlFixtureFilterWrap').style.display = showFixtureFilter ? '' : 'none';
+  document.getElementById('dmxCtrlFixtureFilter').style.display = showFixtureFilter ? '' : 'none';
+
+  if (range.mode === 'fixtures') {
+    const patched = getPatchedDmxChannels();
+    updateDmxManualStatus(patched.length, 'fixtures');
+    if (patched.length === 0) {
+      container.className = 'dmx-faders-empty';
+      container.innerHTML = '<p class="config-desc">No patched channels on this universe.</p>';
+      dmxFadersBuilt = true;
+      return;
+    }
+    container.className = 'dmx-faders-wrap';
+    const byFixture = new Map();
+    for (const item of patched) {
+      if (!byFixture.has(item.fixtureId)) {
+        byFixture.set(item.fixtureId, { name: item.fixtureName, items: [] });
+      }
+      byFixture.get(item.fixtureId).items.push(item);
+    }
+    for (const [, group] of byFixture) {
+      const block = document.createElement('div');
+      block.className = 'dmx-fixture-block';
+      const header = document.createElement('div');
+      header.className = 'dmx-fixture-header';
+      header.textContent = group.name;
+      block.appendChild(header);
+      const row = document.createElement('div');
+      row.className = 'dmx-faders';
+      for (const item of group.items) {
+        row.appendChild(createDmxFaderEl(u, item.ch, item));
+      }
+      block.appendChild(row);
+      container.appendChild(block);
+    }
+    dmxFadersBuilt = true;
+    return;
   }
-  // Bind input events
-  container.querySelectorAll('input[type=range]').forEach(inp => {
-    const ch = +inp.dataset.ch;
-    inp.addEventListener('input', () => {
-      const v = +inp.value;
-      dmxValues[u][ch] = v;
-      const valEl = inp.parentElement.querySelector('.dmx-fader-val');
-      valEl.textContent = v;
-      inp.parentElement.classList.toggle('nonzero', v > 0);
-      sendDmxChannel(u, ch, v);
-    });
-  });
+
+  const { start, end } = range;
+  container.className = 'dmx-faders';
+  for (let ch = start; ch <= end; ch++) {
+    container.appendChild(createDmxFaderEl(u, ch, null));
+  }
+  updateDmxManualStatus(end - start + 1, 'range');
   dmxFadersBuilt = true;
 }
 
@@ -10184,15 +10312,32 @@ document.getElementById('outputSwitch').addEventListener('click', async () => {
   });
 });
 
-document.getElementById('dmxCtrlRange').addEventListener('change', buildFaders);
-document.getElementById('dmxCtrlUniverse').addEventListener('change', buildFaders);
+function getVisibleDmxChannels() {
+  const range = getDmxRange();
+  if (range.mode === 'fixtures') {
+    return getPatchedDmxChannels().map(p => p.ch);
+  }
+  const chs = [];
+  for (let ch = range.start; ch <= range.end; ch++) chs.push(ch);
+  return chs;
+}
+
+document.getElementById('dmxCtrlRange').addEventListener('change', () => {
+  populateDmxFixtureFilter();
+  buildFaders();
+});
+document.getElementById('dmxCtrlUniverse').addEventListener('change', () => {
+  populateDmxFixtureFilter();
+  buildFaders();
+});
+document.getElementById('dmxCtrlFixtureFilter').addEventListener('change', buildFaders);
+document.getElementById('dmxCtrlRefreshMap').addEventListener('click', () => refreshDmxFixtureMap().then(() => buildFaders()));
 
 document.getElementById('dmxCtrlZeroAll').addEventListener('click', async () => {
   const u = getDmxUniverse();
-  const { start, end } = getDmxRange();
   ensureUniverse(u);
   const channels = [];
-  for (let ch = start; ch <= end; ch++) {
+  for (const ch of getVisibleDmxChannels()) {
     dmxValues[u][ch] = 0;
     channels.push({ ch, val: 0 });
   }
@@ -10206,10 +10351,9 @@ document.getElementById('dmxCtrlZeroAll').addEventListener('click', async () => 
 
 document.getElementById('dmxCtrlFullAll').addEventListener('click', async () => {
   const u = getDmxUniverse();
-  const { start, end } = getDmxRange();
   ensureUniverse(u);
   const channels = [];
-  for (let ch = start; ch <= end; ch++) {
+  for (const ch of getVisibleDmxChannels()) {
     dmxValues[u][ch] = 255;
     channels.push({ ch, val: 255 });
   }
@@ -10253,6 +10397,7 @@ async function initDmxControl() {
     if (sorted.includes(+currentVal)) sel.value = currentVal;
   } catch { /* keep default */ }
 
+  await refreshDmxFixtureMap();
   buildFaders();
 
   // Load Quick Actions if that sub-tab is active (default)
