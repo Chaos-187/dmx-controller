@@ -14,6 +14,12 @@ const PAGE_EFFECT_TYPES = {
     'rig_chase', 'rig_color_wave', 'rig_sweep', 'rig_alternate', 'rig_converge',
     'rig_rainbow', 'rig_depth_chase', 'rig_depth_wave', 'rig_round_robin',
   ]),
+  'Mirror FX': new Set([
+    'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
+    'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+    'mirror_motor_cw', 'mirror_motor_ccw', 'mirror_motor_slow',
+    'mirror_motor_fast_cw', 'mirror_motor_fast_ccw', 'mirror_motor_party',
+  ]),
 };
 
 const INSTANCE_ID = 'dmx-controller-connection';
@@ -247,6 +253,7 @@ function addNavBar(controls, cols, rows, pageMap, currentPageName) {
       { key: 'Cell FX', label: 'Cell\nFX' },
       { key: 'Mover FX', label: 'Mover\nFX' },
       { key: 'Rig FX', label: 'Rig\nFX' },
+      { key: 'Mirror FX', label: 'Mirror\nFX' },
     ].filter((p) => p.key !== currentPageName);
 
     let col = 2;
@@ -382,6 +389,7 @@ function buildHomePage(pageMap, midiMappings, effects, cols, rows) {
     mkPageShortcut('Cell FX', 'Cell\nFX', pageMap, 0x0a84ff),
     mkPageShortcut('Mover FX', 'Mover\nFX', pageMap, 0x0a84ff),
     mkPageShortcut('Rig FX', 'Rig\nFX', pageMap, 0x0a84ff),
+    mkPageShortcut('Mirror FX', 'Mirror\nFX', pageMap, 0xf06292),
   ];
 
   const homeUtilities = mkHomeUtilityButtons();
@@ -593,6 +601,7 @@ function buildCompanionConfig(opts) {
     'Cell FX': pageNum + 5,
     'Mover FX': pageNum + 6,
     'Rig FX': pageNum + 7,
+    'Mirror FX': pageNum + 8,
   };
 
   pages[String(pageNum++)] = buildHomePage(pageMap, midiMappings, effects, cols, rows);

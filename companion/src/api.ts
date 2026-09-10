@@ -14,6 +14,12 @@ const SOUND_EFFECT_TYPES = new Set([
 	'sound_pulse', 'sound_strobe', 'sound_chase', 'sound_wave', 'sound_flash',
 	'sound_vu', 'sound_vu_tb', 'sound_vu_lr',
 ])
+const MIRROR_BALL_EFFECT_TYPES = new Set([
+	'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
+	'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+	'mirror_motor_cw', 'mirror_motor_ccw', 'mirror_motor_slow',
+	'mirror_motor_fast_cw', 'mirror_motor_fast_ccw', 'mirror_motor_party',
+])
 
 export function normalizeEffectName(name: string): string {
 	return String(name || '')
@@ -26,6 +32,7 @@ export function normalizeEffectName(name: string): string {
 }
 
 export function effectSlotForType(effectType: string): string {
+	if (MIRROR_BALL_EFFECT_TYPES.has(effectType)) return 'mirror'
 	if (MOVING_HEAD_EFFECT_TYPES.has(effectType)) return 'motion'
 	if (MULTICELL_EFFECT_TYPES.has(effectType)) return 'multicell'
 	if (RIG_EFFECT_TYPES.has(effectType)) return 'rig'
@@ -36,9 +43,9 @@ export function effectSlotForType(effectType: string): string {
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug'
 
 export type SceneRow = { id: number; name: string }
-export type EffectRow = { id: number; name: string; type: string }
+export type EffectRow = { id: number; name: string; type: string; fixture_target?: string }
 export type GroupRow = { id: number; name: string; fixture_ids: number[] }
-export type FixtureRow = { id: number; name: string }
+export type FixtureRow = { id: number; name: string; category?: string; type_name?: string; channels?: { type: string }[] }
 export type SequenceRow = { id: number; name: string }
 
 export type DmxState = {
@@ -565,9 +572,9 @@ export class DmxControllerClient {
 			return
 		}
 
-		const fixtureIds = this.resolveFixtureIds(target, groupId)
+		const fixtureIds = this.resolveFixtureIdsForEffect(effect, target, groupId)
 		if (!fixtureIds.length) {
-			throw new Error('No fixtures configured — add fixtures in Config → Devices')
+			throw new Error('No fixtures match this effect — check mirror ball patches or group selection')
 		}
 		await this.runEffect(effectId, fixtureIds)
 	}
@@ -578,6 +585,35 @@ export class DmxControllerClient {
 			return group?.fixture_ids || []
 		}
 		return this.fixtures.map((f) => f.id)
+	}
+
+	isMirrorBallFixture(f: FixtureRow): boolean {
+		if (f.category === 'mirror_ball') return true
+		const label = String(f.type_name || f.name || '').toLowerCase()
+		if (/strato|stratosphere|mirror ball|disco ball/.test(label)) return true
+		const ch = f.channels || []
+		const isMover = ch.some((c) => c.type === 'pan') && ch.some((c) => c.type === 'tilt')
+		if (isMover) return false
+		return ch.some((c) => c.type === 'motor') && ch.some((c) => c.type === 'red')
+	}
+
+	resolveFixtureIdsForEffect(effect: EffectRow, target: string, groupId: string): number[] {
+		let ids = this.resolveFixtureIds(target, groupId)
+		const mirrorEffect =
+			effect.fixture_target === 'mirror_ball' || MIRROR_BALL_EFFECT_TYPES.has(effect.type)
+		if (mirrorEffect) {
+			ids = ids.filter((id) => {
+				const f = this.fixtures.find((x) => x.id === id)
+				return f && this.isMirrorBallFixture(f)
+			})
+		} else if (effect.fixture_target === 'moving_head') {
+			ids = ids.filter((id) => {
+				const f = this.fixtures.find((x) => x.id === id)
+				const ch = f?.channels || []
+				return ch.some((c) => c.type === 'pan') && ch.some((c) => c.type === 'tilt')
+			})
+		}
+		return ids
 	}
 
 	sceneChoices(): Choice[] {

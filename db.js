@@ -828,6 +828,8 @@ function init() {
   seedNewEffectsV10();
   seedNewEffectsV11();
   seedNewEffectsV12();
+  seedNewEffectsV13();
+  seedNewEffectsV14();
   migrateKamStratoMirrorBallCategory();
   migrateKamMirrorBallCategoriesV2();
 
@@ -843,7 +845,7 @@ function init() {
   db.exec("UPDATE effects SET fixture_target = 'rig' WHERE type IN ('rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin')");
   // Sound-reactive effects
   db.exec("UPDATE effects SET fixture_target = 'sound' WHERE type IN ('sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr')");
-  db.exec("UPDATE effects SET fixture_target = 'mirror_ball' WHERE type IN ('mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter','mirror_spin_cw','mirror_spin_ccw','mirror_spin_fast_cw','mirror_spin_fast_ccw')");
+  db.exec("UPDATE effects SET fixture_target = 'mirror_ball' WHERE type IN ('mirror_glow','mirror_soft_shift','mirror_slow_spin','mirror_glitter','mirror_spin_cw','mirror_spin_ccw','mirror_spin_fast_cw','mirror_spin_fast_ccw','mirror_motor_cw','mirror_motor_ccw','mirror_motor_slow','mirror_motor_fast_cw','mirror_motor_fast_ccw','mirror_motor_party')");
 
   // Seed default generator config if missing
   seedDefaultGeneratorConfig();
@@ -941,6 +943,7 @@ function init() {
   }
 
   migrateMotorRotationChannelTypes();
+  migrateKamMotorRangesV2();
   migrateShutterStrobeChannelTypes();
 
   // Seed default color wheel map for 60W Spot Moving Head
@@ -1469,6 +1472,54 @@ function seedNewEffectsV12() {
   if (added > 0) console.log(`[DB] Added ${added} new effects (v12 — mirror fast spin)`);
 }
 
+function seedNewEffectsV13() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    ['Mirror Ball Motor CW', 'mirror_motor_cw', 'movement', 'mirror_ball', J({}), 8],
+    ['Mirror Ball Motor CCW', 'mirror_motor_ccw', 'movement', 'mirror_ball', J({}), 8],
+    ['Mirror Ball Motor Slow', 'mirror_motor_slow', 'movement', 'mirror_ball', J({ cycle_sec: 16 }), 16],
+    ['Mirror Ball Motor Fast CW', 'mirror_motor_fast_cw', 'movement', 'mirror_ball', J({}), 4],
+    ['Mirror Ball Motor Fast CCW', 'mirror_motor_fast_ccw', 'movement', 'mirror_ball', J({}), 4],
+  ];
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const row of allNew) {
+      if (!existing.has(row[0])) {
+        ins.run(...row);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v13 — mirror motor-only spin)`);
+}
+
+function seedNewEffectsV14() {
+  const existing = new Set(db.prepare('SELECT name FROM effects').all().map(r => r.name));
+  const ins = db.prepare(
+    'INSERT INTO effects (name, type, category, fixture_target, effect_data, duration_beats) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const J = JSON.stringify;
+  const allNew = [
+    ['Mirror Ball Party Spin', 'mirror_motor_party', 'movement', 'mirror_ball', J({ segment_sec: 1.4 }), 8],
+  ];
+  let added = 0;
+  const tx = db.transaction(() => {
+    for (const row of allNew) {
+      if (!existing.has(row[0])) {
+        ins.run(...row);
+        added++;
+      }
+    }
+  });
+  tx();
+  if (added > 0) console.log(`[DB] Added ${added} new effects (v14 — mirror party spin)`);
+}
+
 // ─── LED Bar Fixture Type Helper ────────────────────────────────────────────
 
 /**
@@ -1686,12 +1737,15 @@ const KAM_STRATOSPHERE_STROBE_RANGES = [
   { min: 26, max: 255, label: 'Strobe slow to fast', type: 'strobe' },
 ];
 
+/** Kam Strato / Stratosphere CH9 — 0–30 is no function (not a safe stop; can hunt home). */
 const KAM_STRATOSPHERE_MOTOR_RANGES = [
-  { min: 0, max: 30, label: 'Motor stopped', type: 'motor_stop' },
+  { min: 0, max: 30, label: 'No function', type: 'other' },
   { min: 31, max: 140, label: 'Clockwise (fast to slow)', type: 'motor_cw' },
   { min: 141, max: 145, label: 'Motor stop', type: 'motor_stop' },
   { min: 146, max: 255, label: 'Counter-clockwise (slow to fast)', type: 'motor_ccw' },
 ];
+
+const KAM_MOTOR_DEFAULT_DMX = 143;
 
 const KAM_STRATOSPHERE_COLOR_MACRO_RANGES = [
   { min: 0, max: 25, label: 'Manual RGBWA+UV (CH1–6)', type: 'other' },
@@ -1719,7 +1773,7 @@ function getKamStratosphereModes() {
         { channel_number: 6, name: 'UV LED', type: 'uv', default_value: 0 },
         { channel_number: 7, name: 'Strobe Rate', type: 'strobe', default_value: 0, ranges: KAM_STRATOSPHERE_STROBE_RANGES },
         { channel_number: 8, name: 'Master Dimmer', type: 'dimmer', default_value: 255 },
-        { channel_number: 9, name: 'Motor Rotation', type: 'motor', default_value: 0, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
+        { channel_number: 9, name: 'Motor Rotation', type: 'motor', default_value: KAM_MOTOR_DEFAULT_DMX, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
         { channel_number: 10, name: 'Color Mixing Macros', type: 'macro', default_value: 0, ranges: KAM_STRATOSPHERE_COLOR_MACRO_RANGES },
         { channel_number: 11, name: 'Sound Control', type: 'macro', default_value: 0, ranges: KAM_STRATOSPHERE_SOUND_RANGES },
       ],
@@ -1730,7 +1784,7 @@ function getKamStratosphereModes() {
       channels: [
         { channel_number: 1, name: 'Auto Shows & Color Macros', type: 'macro', default_value: 0 },
         { channel_number: 2, name: 'Program Running Speed', type: 'speed', default_value: 0 },
-        { channel_number: 3, name: 'Motor Rotation', type: 'motor', default_value: 0, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
+        { channel_number: 3, name: 'Motor Rotation', type: 'motor', default_value: KAM_MOTOR_DEFAULT_DMX, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
       ],
     },
   ];
@@ -1797,7 +1851,7 @@ function getKamStratoModes() {
         { channel_number: 6, name: 'Purple', type: 'other', default_value: 0 },
         { channel_number: 7, name: 'Strobe', type: 'strobe', default_value: 12, ranges: KAM_STRATO_STROBE_RANGES },
         { channel_number: 8, name: 'Dimmer', type: 'dimmer', default_value: 255 },
-        { channel_number: 9, name: 'Pan Rotation', type: 'motor', default_value: 0, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
+        { channel_number: 9, name: 'Pan Rotation', type: 'motor', default_value: KAM_MOTOR_DEFAULT_DMX, ranges: KAM_STRATOSPHERE_MOTOR_RANGES },
         { channel_number: 10, name: 'Colour Mixing & Effects', type: 'macro', default_value: 0, ranges: KAM_STRATO_COLOR_MACRO_RANGES },
         { channel_number: 11, name: 'Pan / Colour Mixing', type: 'macro', default_value: 0, ranges: KAM_STRATO_PAN_COLOR_RANGES },
         { channel_number: 12, name: 'Function', type: 'macro', default_value: 0, ranges: KAM_STRATO_FUNCTION_RANGES },
@@ -1920,6 +1974,35 @@ function migrateMotorRotationChannelTypes() {
   db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('motor_rotation_types_v1', '1')").run();
   if (typeIds.length) {
     console.log('[DB] Updated motor rotation channels to motor / motor_cw / motor_ccw / motor_stop types');
+  }
+}
+
+/** Fix CH9 0–30 marked as stop (homing) and default motor DMX to narrow stop band. */
+function migrateKamMotorRangesV2() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'kam_motor_ranges_v2'").get();
+  if (done?.value === '1') return;
+
+  const motorRangesJson = JSON.stringify(KAM_STRATOSPHERE_MOTOR_RANGES);
+  const typeIds = db.prepare(
+    "SELECT id FROM fixture_types WHERE name IN ('Kam Stratosphere', 'Kam Strato')",
+  ).all();
+
+  const update = db.prepare(`
+    UPDATE fixture_type_channels
+    SET ranges = ?, default_value = ?
+    WHERE mode_id = ? AND name IN ('Motor Rotation', 'Pan Rotation')
+  `);
+
+  for (const { id } of typeIds) {
+    const modes = db.prepare('SELECT id FROM fixture_type_modes WHERE fixture_type_id = ?').all(id);
+    for (const { id: modeId } of modes) {
+      update.run(motorRangesJson, KAM_MOTOR_DEFAULT_DMX, modeId);
+    }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('kam_motor_ranges_v2', '1')").run();
+  if (typeIds.length) {
+    console.log('[DB] Kam motor ranges: 0–30 = no function, default DMX 143 (stop band)');
   }
 }
 

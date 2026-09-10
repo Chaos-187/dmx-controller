@@ -3868,13 +3868,23 @@ async function loadCompanionExportDefaults() {
     if (hostEl.dataset.userEdited !== '1') {
       hostEl.value = status.ip || (status.fqdn || '').replace(/\.local$/i, '') || window.location.hostname || '127.0.0.1';
     }
-    if (portEl) portEl.value = config.web_port || status.web_port || window.location.port || '80';
+    if (portEl && portEl.dataset.userEdited !== '1') {
+      const wp = config.web_port ?? status.web_port;
+      const n = wp != null && wp !== '' ? parseInt(wp, 10) : NaN;
+      // Production default is 80 — do not use the browser dev port (e.g. 3000).
+      if (Number.isFinite(n) && n > 0 && n !== 3000) portEl.value = String(n);
+      else portEl.value = '80';
+    }
   } catch (e) {
     console.warn('Companion export defaults:', e);
   }
 }
 
 document.getElementById('companionExportHost')?.addEventListener('input', (e) => {
+  e.target.dataset.userEdited = '1';
+});
+
+document.getElementById('companionExportPort')?.addEventListener('input', (e) => {
   e.target.dataset.userEdited = '1';
 });
 

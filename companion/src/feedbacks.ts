@@ -120,6 +120,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						{ id: 'multicell', label: 'Multicell' },
 						{ id: 'rig', label: 'Rig' },
 						{ id: 'sound', label: 'Sound' },
+						{ id: 'mirror', label: 'Mirror ball' },
 					],
 				},
 			],

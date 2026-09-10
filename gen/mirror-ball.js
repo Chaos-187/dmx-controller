@@ -23,12 +23,37 @@ const MIRROR_SECTION_STYLES = {
 const DEFAULT_MIRROR_EFFECT_TYPES = {
   intro:     ['mirror_glow', 'mirror_soft_shift'],
   verse:     ['mirror_glow', 'mirror_soft_shift'],
-  chorus:    ['mirror_soft_shift', 'mirror_glitter', 'mirror_spin_fast_cw'],
+  chorus:    ['mirror_soft_shift', 'mirror_glitter'],
   bridge:    ['mirror_glow', 'mirror_soft_shift'],
   breakdown: ['mirror_glow'],
-  buildup:   ['mirror_soft_shift', 'mirror_slow_spin'],
-  drop:      ['mirror_glitter', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw', 'mirror_soft_shift'],
+  buildup:   ['mirror_soft_shift'],
+  drop:      ['mirror_glitter', 'mirror_soft_shift'],
   outro:     ['mirror_glow'],
+};
+
+/** Motor-only types — rotation without touching dimmer/RGB (pairs with color cues). */
+const MIRROR_MOTOR_EFFECT_TYPES = new Set([
+  'mirror_motor_cw', 'mirror_motor_ccw', 'mirror_motor_slow',
+  'mirror_motor_fast_cw', 'mirror_motor_fast_ccw', 'mirror_motor_party',
+]);
+
+const MOTOR_TYPES_BY_SECTION = {
+  intro:     ['mirror_motor_slow'],
+  verse:     ['mirror_motor_cw', 'mirror_motor_ccw'],
+  chorus:    ['mirror_motor_party', 'mirror_motor_fast_cw', 'mirror_motor_cw'],
+  bridge:    ['mirror_motor_cw', 'mirror_motor_slow'],
+  breakdown: ['mirror_motor_slow'],
+  buildup:   ['mirror_motor_cw', 'mirror_motor_party'],
+  drop:      ['mirror_motor_party', 'mirror_motor_fast_cw', 'mirror_motor_fast_ccw'],
+  outro:     ['mirror_motor_slow'],
+};
+
+/** Sections that always get a full-length motor cue when effects exist in DB. */
+const MOTOR_SECTION_ALWAYS = new Set(['chorus', 'drop', 'buildup']);
+
+const MOTOR_SECTION_CHANCE = {
+  intro: 0.35, verse: 0.55, chorus: 1, bridge: 0.45,
+  breakdown: 0.4, buildup: 1, drop: 1, outro: 0.35,
 };
 
 const MIRROR_EFFECT_CHANCE = {
@@ -44,6 +69,12 @@ const EFFECT_COLORS = {
   mirror_spin_ccw: '#546e7a',
   mirror_spin_fast_cw: '#37474f',
   mirror_spin_fast_ccw: '#37474f',
+  mirror_motor_cw: '#607d8b',
+  mirror_motor_ccw: '#607d8b',
+  mirror_motor_slow: '#78909c',
+  mirror_motor_fast_cw: '#455a64',
+  mirror_motor_fast_ccw: '#455a64',
+  mirror_motor_party: '#ff6f00',
   mirror_glitter: '#b39ddb',
 };
 
@@ -167,6 +198,62 @@ function generateMirrorBallBarEffectCues(cues, fixtures, ctx) {
   }
 }
 
+function generateMirrorBallMotorCues(cues, fixtures, sections, ctx) {
+  const { effects, barMs, durationMs } = ctx;
+  if (!effects?.length || !fixtures.length || !sections?.length) return;
+
+  const byType = {};
+  for (const eff of effects) {
+    if (!MIRROR_MOTOR_EFFECT_TYPES.has(eff.type)) continue;
+    if (!byType[eff.type]) byType[eff.type] = [];
+    byType[eff.type].push(eff);
+  }
+  if (Object.keys(byType).length === 0) return;
+
+  let lane = cues.reduce((mx, c) => Math.max(mx, c.lane || 0), 0) + 1;
+
+  for (const section of sections) {
+    const label = section.label || 'verse';
+    const always = MOTOR_SECTION_ALWAYS.has(label);
+    const chance = MOTOR_SECTION_CHANCE[label] ?? 0.5;
+    if (!always && stableRoll(`mirror-motor-${label}-${section.start_ms}`) > chance) continue;
+
+    const typeList = MOTOR_TYPES_BY_SECTION[label] || MOTOR_TYPES_BY_SECTION.verse;
+    const pool = [];
+    for (const t of typeList) {
+      if (byType[t]) pool.push(...byType[t]);
+    }
+    if (!pool.length) continue;
+
+    const secStart = Math.round(section.start_ms);
+    const secEnd = Math.min(Math.round(section.end_ms), Math.round(durationMs));
+    const secDur = secEnd - secStart;
+    if (secDur < barMs) continue;
+
+    const pickIdx = Math.floor(stableRoll(`mirror-motor-pick-${label}-${secStart}`) * pool.length);
+    const effect = pool[pickIdx];
+    const margin = Math.round(Math.min(secDur * 0.05, barMs));
+    const startMs = secStart + margin;
+    const durMs = Math.max(barMs, secDur - margin * 2);
+
+    for (const fix of fixtures) {
+      cues.push({
+        lane: lane++,
+        start_ms: startMs,
+        duration_ms: durMs,
+        cue_type: 'effect',
+        fixture_id: fix.id,
+        track: 'fx-mirror',
+        effect_id: effect.id,
+        effect_params: {},
+        channel_values: {},
+        color: EFFECT_COLORS[effect.type] || '#607d8b',
+        label: effect.name,
+      });
+    }
+  }
+}
+
 function generateMirrorBallCues(cues, fixtures, sections, beats, energyLevels, ctx) {
   if (!fixtures.length) return;
 
@@ -186,6 +273,7 @@ function generateMirrorBallCues(cues, fixtures, sections, beats, energyLevels, c
 
   if (sections.length > 0) {
     generateSectionBased(cues, fixtures, sections, beats, energyLevels, mirrorCtx, { colorOnly: true });
+    generateMirrorBallMotorCues(cues, fixtures, sections, mirrorCtx);
     generateMirrorBallEffectCues(cues, fixtures, sections, mirrorCtx);
   } else {
     generateBarBased(cues, fixtures, mirrorCtx);

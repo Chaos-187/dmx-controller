@@ -138,6 +138,23 @@ const SEED_EFFECTS = [
   ['Round Robin (Reverse)', 'rig_round_robin'],
   ['Round Robin (Ping Pong)', 'rig_round_robin'],
   ['Round Robin (Wide)', 'rig_round_robin'],
+  // seedNewEffectsV10–V12 (mirror ball)
+  ['Mirror Ball Glow', 'mirror_glow'],
+  ['Mirror Ball Soft Shift', 'mirror_soft_shift'],
+  ['Mirror Ball Slow Spin', 'mirror_slow_spin'],
+  ['Mirror Ball Glitter', 'mirror_glitter'],
+  ['Mirror Ball Deep Glow', 'mirror_glow'],
+  ['Mirror Ball Pastel Shift', 'mirror_soft_shift'],
+  ['Mirror Ball Spin CW', 'mirror_spin_cw'],
+  ['Mirror Ball Spin CCW', 'mirror_spin_ccw'],
+  ['Mirror Ball Fast Spin CW', 'mirror_spin_fast_cw'],
+  ['Mirror Ball Fast Spin CCW', 'mirror_spin_fast_ccw'],
+  ['Mirror Ball Motor CW', 'mirror_motor_cw'],
+  ['Mirror Ball Motor CCW', 'mirror_motor_ccw'],
+  ['Mirror Ball Motor Slow', 'mirror_motor_slow'],
+  ['Mirror Ball Motor Fast CW', 'mirror_motor_fast_cw'],
+  ['Mirror Ball Motor Fast CCW', 'mirror_motor_fast_ccw'],
+  ['Mirror Ball Party Spin', 'mirror_motor_party'],
 ];
 
 module.exports = SEED_EFFECTS.map(([name, type], i) => ({ id: i + 1, name, type }));

@@ -27,7 +27,7 @@ const S = {
 
   activeSceneId: null,
   activeEffectSlots: {},   // slot → effectId
-  activePanel: 'effects',   // actions | colors | scenes | effects | favorites
+  activePanel: 'actions',   // actions | colors | scenes | effects | favorites
   fxTab: 'multicell',       // active effect category tab
   fxPaletteMode: 'hsl',    // 'hsl' | 'palette'
   fxPalettePreset: 'hsl',
@@ -66,6 +66,20 @@ const EFFECT_CATEGORY_MAP = {
   mirror_glow: 'mirror', mirror_soft_shift: 'mirror', mirror_slow_spin: 'mirror', mirror_glitter: 'mirror',
   mirror_spin_cw: 'mirror', mirror_spin_ccw: 'mirror',
   mirror_spin_fast_cw: 'mirror', mirror_spin_fast_ccw: 'mirror',
+  mirror_motor_cw: 'mirror', mirror_motor_ccw: 'mirror', mirror_motor_slow: 'mirror',
+  mirror_motor_fast_cw: 'mirror', mirror_motor_fast_ccw: 'mirror',
+  mirror_motor_party: 'mirror',
+};
+
+/** Spin / pan-tilt only — does not drive fixture color or dimmer (mirror motor FX, mover sweeps). */
+const MOTION_ONLY_MIRROR_TYPES = new Set([
+  'mirror_motor_cw', 'mirror_motor_ccw', 'mirror_motor_slow',
+  'mirror_motor_fast_cw', 'mirror_motor_fast_ccw', 'mirror_motor_party',
+]);
+
+const MOTION_ONLY_TILE = {
+  bg: 'rgba(251,191,36,.22)',
+  border: 'rgba(251,191,36,.78)',
 };
 
 const EFFECT_CATEGORIES = [
@@ -137,6 +151,20 @@ const MULTICELL_EFFECT_TYPES = new Set([
 
 function effectSlot(type) {
   return EFFECT_CATEGORY_MAP[type] || 'color';
+}
+
+function isMotionOnlyEffect(type) {
+  if (effectSlot(type) === 'motion') return true;
+  return MOTION_ONLY_MIRROR_TYPES.has(type);
+}
+
+function sortEffectsForTouch(list) {
+  return list.slice().sort((a, b) => {
+    const ma = isMotionOnlyEffect(a.type) ? 0 : 1;
+    const mb = isMotionOnlyEffect(b.type) ? 0 : 1;
+    if (ma !== mb) return ma - mb;
+    return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+  });
 }
 
 function esc(s) {

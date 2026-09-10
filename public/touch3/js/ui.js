@@ -221,14 +221,23 @@ UI.renderEffects = function () {
   });
 
   const cat = cats.find((c) => c.key === S.fxTab);
-  const list = byCat[cat.key] || [];
+  const list = sortEffectsForTouch(byCat[cat.key] || []);
+  const legend = document.getElementById('fxMotionLegend');
+  if (legend) {
+    const hasMotionOnly = list.some((e) => isMotionOnlyEffect(e.type));
+    legend.hidden = !hasMotionOnly;
+  }
   if (!list.length) {
     grid.innerHTML = '<div class="scene-empty">No effects in this category.</div>';
   } else {
     grid.innerHTML = list.map((e) => {
       const active = S.activeEffectSlots[cat.key] === e.id ? ' active' : '';
-      return '<button class="fx-tile' + active + '" data-eid="' + e.id + '" ' +
-        'style="background:' + cat.bg + ';border-color:' + cat.border + ';color:var(--text)">' + esc(e.name) + '</button>';
+      const motionOnly = isMotionOnlyEffect(e.type);
+      const bg = motionOnly ? MOTION_ONLY_TILE.bg : cat.bg;
+      const border = motionOnly ? MOTION_ONLY_TILE.border : cat.border;
+      const motionCls = motionOnly ? ' fx-motion-only' : '';
+      return '<button class="fx-tile' + active + motionCls + '" data-eid="' + e.id + '" ' +
+        'style="background:' + bg + ';border-color:' + border + ';color:var(--text)">' + esc(e.name) + '</button>';
     }).join('');
     grid.querySelectorAll('.fx-tile').forEach((el) => {
       el.addEventListener('click', () => {
@@ -551,10 +560,13 @@ UI.renderFavPicker = function () {
       html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="color" data-idx="' + i + '" style="background:' + c.hex + ';color:#fff">' + esc(c.name) + '</button>';
     });
   } else if (tab === 'effects') {
-    S.effects.forEach((e) => {
+    sortEffectsForTouch(S.effects).forEach((e) => {
       const item = Favorites.buildEffect(e);
-      const cls = Favorites.has(item) ? ' is-fav' : '';
-      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="effect" data-eid="' + e.id + '">' + esc(e.name) + '</button>';
+      const cls = (Favorites.has(item) ? ' is-fav' : '') + (isMotionOnlyEffect(e.type) ? ' fx-motion-only' : '');
+      const style = isMotionOnlyEffect(e.type)
+        ? ' style="border-color:' + MOTION_ONLY_TILE.border + ';background:' + MOTION_ONLY_TILE.bg + '"'
+        : '';
+      html += '<button type="button" class="fav-picker-item' + cls + '" data-kind="effect" data-eid="' + e.id + '"' + style + '>' + esc(e.name) + '</button>';
     });
   } else if (tab === 'scenes') {
     S.scenes.forEach((sc) => {

@@ -4,7 +4,7 @@
  */
 
 /** Effect pages only — Colors has its own dedicated page builder. */
-const PAGE_NAMES = ['Color FX', 'Cell FX', 'Mover FX', 'Rig FX'];
+const PAGE_NAMES = ['Color FX', 'Cell FX', 'Mover FX', 'Rig FX', 'Mirror FX'];
 
 const COLORS_PRIMARY = [
   { name: 'Red', r: 255, g: 0, b: 0 },
@@ -77,6 +77,11 @@ const EFFECT_PAGES = {
     'Rig Sweep L→R', 'Rig Sweep R→L', 'Rig Sweep Bounce', 'Rig Sweep T→B',
     'Rig Wide Sweep', 'Rig Converge', 'Rig Diverge', 'Rig Alternate',
     'Rig Fast Alternate', 'Rig Rainbow', 'Rig Rainbow Fast', 'Rig Rainbow T→B',
+  ],
+  'Mirror FX': [
+    'Mirror Ball Glow', 'Mirror Ball Deep Glow', 'Mirror Ball Soft Shift', 'Mirror Ball Pastel Shift',
+    'Mirror Ball Glitter', 'Mirror Ball Slow Spin', 'Mirror Ball Spin CW', 'Mirror Ball Spin CCW',
+    'Mirror Ball Fast Spin CW', 'Mirror Ball Fast Spin CCW',
   ],
 };
 

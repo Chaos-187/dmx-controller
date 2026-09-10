@@ -2516,7 +2516,8 @@ app.post('/api/touch/mirror-motor', (req, res) => {
     if (!motorCh) continue;
     affectedIds.push(fix.id);
     const ctx = { ranges: motorCh.ranges };
-    let val = mirrorMotorDmx(ctx, rangeType, true);
+    const spinSpeed = dir === 'stop' ? 0 : 0.85;
+    let val = mirrorMotorDmx(ctx, rangeType, spinSpeed);
     val = applyInvert(val, motorCh);
     if (!channelUpdates[fix.universe]) channelUpdates[fix.universe] = [];
     channelUpdates[fix.universe].push({ ch: motorCh.dmx_address, val });

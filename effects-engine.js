@@ -126,10 +126,14 @@ const COLOR_EFFECT_TYPES       = new Set(['pulse','rainbow','strobe','color_fade
 const MIRROR_BALL_EFFECT_TYPES = new Set([
   'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
   'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+  'mirror_motor_cw', 'mirror_motor_ccw', 'mirror_motor_slow',
+  'mirror_motor_fast_cw', 'mirror_motor_fast_ccw', 'mirror_motor_party',
 ]);
 const MIRROR_SPIN_EFFECT_TYPES = new Set([
   'mirror_slow_spin', 'mirror_spin_cw', 'mirror_spin_ccw',
   'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+  'mirror_motor_cw', 'mirror_motor_ccw', 'mirror_motor_slow',
+  'mirror_motor_fast_cw', 'mirror_motor_fast_ccw', 'mirror_motor_party',
 ]);
 const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
@@ -344,32 +348,51 @@ function isFixtureCompatibleWithEffect(effect, fix) {
   return true;
 }
 
+const KAM_MOTOR_STOP_DMX_FALLBACK = 143;
+
+function findMirrorMotorRange(ranges, rangeType) {
+  if (!ranges?.length) return null;
+  const matches = ranges.filter((r) => r.type === rangeType);
+  if (!matches.length) return null;
+  if (rangeType === 'motor_stop') {
+    const narrow = matches.find((r) => r.max - r.min <= 12);
+    return narrow || matches[matches.length - 1];
+  }
+  return matches[0];
+}
+
 /**
- * Motor DMX from Kam-style motor ranges.
- * @param {number|boolean} speedOrSlow — 0–1 intensity (higher = faster), or legacy true/false for slow/fast.
+ * Motor DMX from Kam-style motor ranges (CH9: 31–140 CW fast→slow, 141–145 stop, 146–255 CCW slow→fast).
+ * Avoid 0–30 — fixture treats it as no function / can hunt a home position.
+ * @param {number|boolean} speedOrSlow — 0–1 (higher = faster spin), or legacy true/false.
  */
-function mirrorMotorDmx(channelCtx, rangeType, speedOrSlow = 0.15) {
-  if (!channelCtx || !Array.isArray(channelCtx.ranges)) return 0;
-  const range = channelCtx.ranges.find(r => r.type === rangeType);
-  if (!range) return 0;
+function mirrorMotorDmx(channelCtx, rangeType, speedOrSlow = 0.5) {
+  const ranges = channelCtx?.ranges;
+  if (!ranges?.length) return KAM_MOTOR_STOP_DMX_FALLBACK;
+  const range = findMirrorMotorRange(ranges, rangeType);
+  if (!range) return KAM_MOTOR_STOP_DMX_FALLBACK;
   if (rangeType === 'motor_stop') return Math.round((range.min + range.max) / 2);
-  let speed = 0.15;
-  if (speedOrSlow === true) speed = 0.12;
-  else if (speedOrSlow === false) speed = 0.38;
+
+  let speed = 0.5;
+  if (speedOrSlow === true) speed = 0.82;
+  else if (speedOrSlow === false) speed = 0.55;
   else if (typeof speedOrSlow === 'number') speed = Math.max(0, Math.min(1, speedOrSlow));
+
   const span = range.max - range.min;
-  const t = 0.06 + speed * 0.42;
+  const margin = 0.03;
+  const t = margin + speed * (1 - 2 * margin);
+
   if (rangeType === 'motor_cw') return Math.round(range.max - span * t);
   if (rangeType === 'motor_ccw') return Math.round(range.min + span * t);
-  return Math.round((range.min + range.max) / 2);
+  return KAM_MOTOR_STOP_DMX_FALLBACK;
 }
 
 /** @param {'slow'|'normal'|'fast'} tier */
 function mirrorMotorSpeedFromParams(params, data, tier = 'normal') {
   const mul = params._effectSpeed ?? data._effectSpeed ?? 1;
-  if (tier === 'slow') return Math.max(0.08, Math.min(0.32, 0.06 + mul * 0.14));
-  if (tier === 'fast') return Math.max(0.58, Math.min(1, 0.52 + mul * 0.4));
-  return Math.max(0.12, Math.min(0.52, 0.1 + mul * 0.2));
+  if (tier === 'slow') return Math.max(0.12, Math.min(0.38, 0.15 + mul * 0.12));
+  if (tier === 'fast') return Math.max(0.78, Math.min(1, 0.72 + mul * 0.28));
+  return Math.max(0.45, Math.min(0.78, 0.4 + mul * 0.25));
 }
 
 // ─── Effect Value Computation ───────────────────────────────────────────────
@@ -581,7 +604,6 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
         const half = phase < 1;
         const local = half ? phase : phase - 1;
         const dir = half ? 'motor_cw' : 'motor_ccw';
-        if (local < 0.04) return mirrorMotorDmx(channelCtx, 'motor_stop', 0);
         return mirrorMotorDmx(channelCtx, dir, mirrorMotorSpeedFromParams(params, data, 'slow'));
       }
       if (channelType === 'dimmer') return Math.min(255, baseValues.dimmer ?? 180);
@@ -609,6 +631,46 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
         return Math.round(val * 0.55);
       }
       return null;
+    }
+
+    case 'mirror_motor_slow': {
+      if (channelType !== 'motor') return null;
+      const cycleSec = params.cycle_sec ?? data.cycle_sec ?? 16;
+      const phase = (progress / cycleSec) % 2;
+      const half = phase < 1;
+      const local = half ? phase : phase - 1;
+      const dir = half ? 'motor_cw' : 'motor_ccw';
+      return mirrorMotorDmx(channelCtx, dir, mirrorMotorSpeedFromParams(params, data, 'slow'));
+    }
+
+    case 'mirror_motor_cw':
+    case 'mirror_motor_ccw':
+    case 'mirror_motor_fast_cw':
+    case 'mirror_motor_fast_ccw': {
+      if (channelType !== 'motor') return null;
+      const fast = type.includes('_fast_');
+      const dir = type.endsWith('_cw') ? 'motor_cw' : 'motor_ccw';
+      return mirrorMotorDmx(channelCtx, dir, mirrorMotorSpeedFromParams(params, data, fast ? 'fast' : 'normal'));
+    }
+
+    case 'mirror_motor_party': {
+      if (channelType !== 'motor') return null;
+      const segmentSec = params.segment_sec ?? data.segment_sec ?? 1.4;
+      const fixtureSkew = ((channelCtx?.fixture_id || 0) % 5) * 0.41;
+      const t = progress + fixtureSkew;
+      const pattern = [
+        { dir: 'motor_cw', tier: 'fast' },
+        { dir: 'motor_ccw', tier: 'fast' },
+        { dir: 'motor_cw', tier: 'fast' },
+        { dir: 'motor_ccw', tier: 'fast' },
+        { dir: 'motor_cw', tier: 'normal' },
+        { dir: 'motor_ccw', tier: 'fast' },
+        { dir: 'motor_cw', tier: 'fast' },
+        { dir: 'motor_ccw', tier: 'normal' },
+      ];
+      const segIdx = Math.floor(t / segmentSec) % pattern.length;
+      const seg = pattern[segIdx];
+      return mirrorMotorDmx(channelCtx, seg.dir, mirrorMotorSpeedFromParams(params, data, seg.tier));
     }
 
     case 'mirror_glitter': {
