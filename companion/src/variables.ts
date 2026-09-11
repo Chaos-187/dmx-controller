@@ -14,6 +14,7 @@ export type VariablesSchema = {
 	deck2_track: string
 	deck2_bpm: string
 	color_mode: string
+	mirror_spin_block: string
 }
 
 export function UpdateVariableDefinitions(self: ModuleInstance): void {
@@ -31,6 +32,7 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 		deck2_track: { name: 'Deck 2 track filename' },
 		deck2_bpm: { name: 'Deck 2 BPM' },
 		color_mode: { name: 'Color input mode (PUSH or TOGGLE)' },
+		mirror_spin_block: { name: 'Mirror ball sequence spin (BLOCKED or ALLOW)' },
 	})
 }
 
@@ -56,5 +58,6 @@ export function RefreshVariables(self: ModuleInstance): void {
 		deck2_track: deck2.filename || deck2.filepath || '',
 		deck2_bpm: deck2.bpm != null ? String(deck2.bpm) : '',
 		color_mode: client.state.colorPushMode ? 'PUSH' : 'TOGGLE',
+		mirror_spin_block: client.state.seqMirrorSpinBlocked ? 'BLOCKED' : 'ALLOW',
 	})
 }

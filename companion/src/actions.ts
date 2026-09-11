@@ -8,6 +8,7 @@ export type ActionsSchema = {	dmx_output: { options: { mode: string } }
 	set_color_release: { options: { red: number; green: number; blue: number; white: number } }
 	release_color: { options: Record<string, never> }
 	toggle_color_mode: { options: Record<string, never> }
+	mirror_spin_block: { options: { mode: string } }
 	strobe: { options: { mode: string } }
 	smoke: { options: { mode: string } }
 	fire: { options: { mode: string } }
@@ -208,6 +209,32 @@ export function UpdateActions(self: ModuleInstance): void {
 				await client!.toggleColorPushMode()
 				RefreshVariables(self)
 				self.checkAllFeedbacks()
+			},
+		},
+
+		mirror_spin_block: {
+			name: 'Mirror Ball: Block Sequence Spin',
+			options: [
+				{
+					id: 'mode',
+					type: 'dropdown',
+					label: 'Mode',
+					default: 'toggle',
+					choices: [
+						{ id: 'toggle', label: 'Toggle' },
+						{ id: 'on', label: 'Block spin (on)' },
+						{ id: 'off', label: 'Allow spin (off)' },
+					],
+				},
+			],
+			callback: async (event) => {
+				const mode = String(optionValue(event.options.mode) || 'toggle')
+				logAction(self, 'mirror_spin_block', { mode })
+				if (!requireClient(self, client, 'mirror_spin_block')) return
+				if (mode === 'toggle') await client!.toggleMirrorSpinBlocked()
+				else await client!.setMirrorSpinBlocked(mode === 'on')
+				RefreshVariables(self)
+				self.checkFeedbacks('mirror_spin_blocked')
 			},
 		},
 

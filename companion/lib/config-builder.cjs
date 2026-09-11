@@ -179,11 +179,22 @@ function mkHoldActionButton({ text, bgcolor, color = 0xffffff, actionId, extraOp
   });
 }
 
+function mkMirrorSpinBlockButton() {
+  return mkButton({
+    text: 'NO\nSPIN',
+    bgcolor: 0x546e7a,
+    color: 0xffffff,
+    down: [mkAction('mirror_spin_block', { mode: 'toggle' })],
+    feedbacks: [mkFeedback('mirror_spin_blocked', {}, { bgcolor: 0xff9f0a, color: 0x000000, text: 'NO\nSPIN' })],
+  });
+}
+
 function mkHomeUtilityButtons() {
   return [
     mkHoldActionButton({ text: 'STROBE', bgcolor: 0xffd60a, color: 0x000000, actionId: 'strobe' }),
     mkHoldActionButton({ text: 'SMOKE', bgcolor: 0x78909c, actionId: 'smoke' }),
     mkHoldActionButton({ text: 'FIRE', bgcolor: 0xbf360c, actionId: 'fire' }),
+    mkMirrorSpinBlockButton(),
   ];
 }
 
@@ -242,7 +253,9 @@ function addNavBar(controls, cols, rows, pageMap, currentPageName) {
 
   placeControl(controls, navRow, 1, currentPageName === 'Colors'
     ? mkColorModeToggleButton()
-    : mkStopFxButton());
+    : currentPageName === 'Mirror FX'
+      ? mkMirrorSpinBlockButton()
+      : mkStopFxButton());
 
   if (!onHome) {
     const shortcuts = [

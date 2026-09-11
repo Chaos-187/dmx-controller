@@ -150,6 +150,7 @@ function generateSequence(opts) {
 
   // Strobe suppression from config
   const noStrobes = !!opts.noStrobes;
+  const noMirrorSpin = !!opts.noMirrorSpin;
 
   // Resolve color palette
   const activePaletteKeys = Object.keys(activePalettes);
@@ -252,7 +253,7 @@ function generateSequence(opts) {
   const groupMap = buildGroupMap(activeFixtures);
 
   const ctx = {
-    bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, firstBeatMs, snapBeat, snapBar, beats,
+    bpm, durationMs, beatMs, barMs, rand, paletteKey, preset, bpmFactor, noStrobes, noMirrorSpin, firstBeatMs, snapBeat, snapBar, beats,
     activePalettes, activeSectionStyles, activeMovementStyles, activeSpeedDmx,
     activeSectionEffects, activeCellPatterns, activeFixtureIntensity, activeMirrorBallEffects, fixtureRoleMap,
     stemEnergy, energyLevels, groupMap, effects: effects || [],

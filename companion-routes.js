@@ -11,12 +11,16 @@ let midiController;
 let db;
 let touchOverrides;
 let broadcast;
+let getSeqNoMirrorSpin;
+let setSeqNoMirrorSpin;
 
 function init(deps) {
   midiController = deps.midiController;
   db = deps.db;
   touchOverrides = deps.touchOverrides;
   broadcast = deps.broadcast || null;
+  getSeqNoMirrorSpin = deps.getSeqNoMirrorSpin || (() => false);
+  setSeqNoMirrorSpin = deps.setSeqNoMirrorSpin || null;
 }
 
 function resolveCompanionColorMode(mode) {
@@ -52,6 +56,25 @@ function registerRoutes(app) {
 
   app.get('/api/companion/color-mode', (req, res) => {
     res.json({ pushMode: touchOverrides.companionColorPushMode, holdMode: touchOverrides.companionColorPushMode });
+  });
+
+  app.get('/api/companion/mirror-spin', (req, res) => {
+    res.json({ blocked: getSeqNoMirrorSpin() });
+  });
+
+  app.post('/api/companion/mirror-spin', (req, res) => {
+    try {
+      if (!setSeqNoMirrorSpin) return res.status(501).json({ error: 'not available' });
+      const body = req.body || {};
+      let blocked = getSeqNoMirrorSpin();
+      if (body.toggle) blocked = setSeqNoMirrorSpin(!blocked);
+      else if (body.blocked !== undefined) blocked = setSeqNoMirrorSpin(!!body.blocked);
+      else if (body.enabled !== undefined) blocked = setSeqNoMirrorSpin(!body.enabled);
+      else blocked = setSeqNoMirrorSpin(!blocked);
+      res.json({ blocked, ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post('/api/companion/color-release', (req, res) => {

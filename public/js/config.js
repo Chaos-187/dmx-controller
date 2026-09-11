@@ -801,6 +801,8 @@ async function loadSequencerConfig() {
   const staleChk = document.getElementById('cfgSeqAutoRegenerateStale');
   if (staleChk) staleChk.checked = config.seq_auto_regenerate_stale === '1';
   document.getElementById('cfgSeqNoStrobes').checked = config.seq_no_strobes === '1';
+  const cfgSeqNoMirrorSpin = document.getElementById('cfgSeqNoMirrorSpin');
+  if (cfgSeqNoMirrorSpin) cfgSeqNoMirrorSpin.checked = config.seq_no_mirror_spin === '1';
   document.getElementById('cfgSeqNoStems').checked = config.seq_no_stems === '1';
   document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
   document.getElementById('cfgSeqCrossfaderMode').value = config.seq_crossfader_mode || 'gate';
@@ -859,6 +861,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_auto_generate', document.getElementById('cfgSeqAutoGenerate').checked ? '1' : '0'],
     ['seq_auto_regenerate_stale', document.getElementById('cfgSeqAutoRegenerateStale')?.checked ? '1' : '0'],
     ['seq_no_strobes', document.getElementById('cfgSeqNoStrobes').checked ? '1' : '0'],
+    ['seq_no_mirror_spin', document.getElementById('cfgSeqNoMirrorSpin')?.checked ? '1' : '0'],
     ['seq_no_stems', document.getElementById('cfgSeqNoStems').checked ? '1' : '0'],
     ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],
     ['seq_crossfader_mode', document.getElementById('cfgSeqCrossfaderMode').value],

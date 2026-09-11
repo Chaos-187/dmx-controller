@@ -60,6 +60,7 @@ export type DmxState = {
 	seqPlaying: Record<number, boolean>
 	disabledFixtures: number[]
 	colorPushMode: boolean
+	seqMirrorSpinBlocked: boolean
 }
 
 export class DmxControllerClient {
@@ -78,6 +79,7 @@ export class DmxControllerClient {
 		seqPlaying: {},
 		disabledFixtures: [],
 		colorPushMode: true,
+		seqMirrorSpinBlocked: false,
 	}
 
 	scenes: SceneRow[] = []
@@ -262,6 +264,15 @@ export class DmxControllerClient {
 				}
 				break
 			}
+			case 'seqMirrorSpin': {
+				const blocked = !!msg.blocked
+				if (blocked !== this.state.seqMirrorSpinBlocked) {
+					this.state.seqMirrorSpinBlocked = blocked
+					this.log('info', `Mirror spin during sequences → ${blocked ? 'BLOCKED' : 'allowed'} (websocket)`)
+					changed = true
+				}
+				break
+			}
 			case 'masterDimmer':
 				if (typeof msg.value === 'number' && msg.value !== this.state.masterDimmer) {
 					this.state.masterDimmer = msg.value
@@ -369,11 +380,12 @@ export class DmxControllerClient {
 	}
 
 	async syncState(): Promise<void> {
-		const [output, scene, effects, touch] = await Promise.all([
+		const [output, scene, effects, touch, mirrorSpin] = await Promise.all([
 			this.fetch<{ enabled: boolean }>('/api/dmx/output'),
 			this.fetch<{ activeSceneId: number | null }>('/api/scenes/active'),
 			this.fetch<{ slots: DmxState['effectSlots'] }>('/api/effects/status'),
-			this.fetch<{ disabledFixtures?: number[]; companionColorPushMode?: boolean; companionColorHoldMode?: boolean }>('/api/touch/state'),
+			this.fetch<{ disabledFixtures?: number[]; companionColorPushMode?: boolean; companionColorHoldMode?: boolean; seqNoMirrorSpin?: boolean }>('/api/touch/state'),
+			this.fetch<{ blocked?: boolean }>('/api/companion/mirror-spin'),
 		])
 		this.state.dmxOutput = !!output.enabled
 		this.state.activeSceneId = scene.activeSceneId
@@ -383,6 +395,27 @@ export class DmxControllerClient {
 		if (pushMode !== undefined) {
 			this.state.colorPushMode = !!pushMode
 		}
+		this.state.seqMirrorSpinBlocked = !!(mirrorSpin.blocked ?? touch.seqNoMirrorSpin)
+		this.notify()
+	}
+
+	async setMirrorSpinBlocked(blocked: boolean): Promise<void> {
+		const res = await this.fetch<{ blocked?: boolean }>('/api/companion/mirror-spin', {
+			method: 'POST',
+			body: JSON.stringify({ blocked }),
+		})
+		this.state.seqMirrorSpinBlocked = !!res.blocked
+		this.log('info', `Mirror spin during sequences → ${this.state.seqMirrorSpinBlocked ? 'BLOCKED' : 'allowed'}`)
+		this.notify()
+	}
+
+	async toggleMirrorSpinBlocked(): Promise<void> {
+		const res = await this.fetch<{ blocked?: boolean }>('/api/companion/mirror-spin', {
+			method: 'POST',
+			body: JSON.stringify({ toggle: true }),
+		})
+		this.state.seqMirrorSpinBlocked = !!res.blocked
+		this.log('info', `Mirror spin during sequences → ${this.state.seqMirrorSpinBlocked ? 'BLOCKED' : 'allowed'}`)
 		this.notify()
 	}
 

@@ -80,6 +80,7 @@ function resolveGenerateOptions(body) {
   let effectivePalette = palKey || undefined;
   let effectiveGenre = genKey || undefined;
   let effectiveNoStrobes = _db.getConfig('seq_no_strobes') === '1';
+  let effectiveNoMirrorSpin = _db.getConfig('seq_no_mirror_spin') === '1';
   let effectiveGenConfig = _db.getGeneratorConfig();
 
   if (template_id) {
@@ -93,7 +94,7 @@ function resolveGenerateOptions(body) {
       }
     }
   }
-  return { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveGenConfig };
+  return { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveNoMirrorSpin, effectiveGenConfig };
 }
 
 /**
@@ -130,7 +131,7 @@ async function generateSequenceForTrack(track, opts = {}) {
 
   await yieldToEventLoop();
 
-  const { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveGenConfig } =
+  const { effectivePalette, effectiveGenre, effectiveNoStrobes, effectiveNoMirrorSpin, effectiveGenConfig } =
     resolveGenerateOptions({ palette, genre, template_id });
 
   const trackForGen = beatgridPosOverride != null && beatgridPosOverride > 0
@@ -147,6 +148,7 @@ async function generateSequenceForTrack(track, opts = {}) {
     effects: _db.getEffects(),
     moverPresets: _db.getMoverPresets(),
     noStrobes: effectiveNoStrobes,
+    noMirrorSpin: effectiveNoMirrorSpin,
     generatorConfig: effectiveGenConfig,
   });
   const genMs = Date.now() - genStart;
@@ -432,6 +434,7 @@ router.post('/api/sequences/generate-batch', async (req, res) => {
           effects: allEffects,
           moverPresets: _db.getMoverPresets(),
           noStrobes: _db.getConfig('seq_no_strobes') === '1',
+          noMirrorSpin: _db.getConfig('seq_no_mirror_spin') === '1',
           generatorConfig: _db.getGeneratorConfig(),
         });
 

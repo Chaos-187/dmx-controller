@@ -17,6 +17,7 @@ export type FeedbacksSchema = {
 	color_toggle_mode: { type: 'boolean'; options: Record<string, never> }
 	color_push_mode: { type: 'boolean'; options: Record<string, never> }
 	sequence_playing: { type: 'boolean'; options: { deck: number } }
+	mirror_spin_blocked: { type: 'boolean'; options: Record<string, never> }
 }
 
 export function UpdateFeedbacks(self: ModuleInstance): void {
@@ -175,6 +176,18 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!self.client) return false
 				return !!self.client.state.seqPlaying[Number(feedback.options.deck)]
 			},
+		},
+
+		mirror_spin_blocked: {
+			name: 'Mirror Ball Sequence Spin Blocked',
+			type: 'boolean',
+			defaultStyle: {
+				bgcolor: 0xff9f0a,
+				color: 0x000000,
+				text: 'NO\nSPIN',
+			},
+			options: [],
+			callback: () => !!self.client?.state.seqMirrorSpinBlocked,
 		},
 	})
 }

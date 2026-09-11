@@ -94,6 +94,12 @@ function generateMirrorBallEffectCues(cues, fixtures, sections, ctx) {
     'mirror_glow', 'mirror_soft_shift', 'mirror_slow_spin', 'mirror_glitter',
     'mirror_spin_cw', 'mirror_spin_ccw', 'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
   ]);
+  if (ctx.noMirrorSpin) {
+    for (const t of [
+      'mirror_slow_spin', 'mirror_spin_cw', 'mirror_spin_ccw',
+      'mirror_spin_fast_cw', 'mirror_spin_fast_ccw',
+    ]) mirrorTypes.delete(t);
+  }
   const byType = {};
   for (const eff of effects) {
     if (eff.fixture_target !== 'mirror_ball' && !mirrorTypes.has(eff.type)) continue;
@@ -273,7 +279,7 @@ function generateMirrorBallCues(cues, fixtures, sections, beats, energyLevels, c
 
   if (sections.length > 0) {
     generateSectionBased(cues, fixtures, sections, beats, energyLevels, mirrorCtx, { colorOnly: true });
-    generateMirrorBallMotorCues(cues, fixtures, sections, mirrorCtx);
+    if (!mirrorCtx.noMirrorSpin) generateMirrorBallMotorCues(cues, fixtures, sections, mirrorCtx);
     generateMirrorBallEffectCues(cues, fixtures, sections, mirrorCtx);
   } else {
     generateBarBased(cues, fixtures, mirrorCtx);

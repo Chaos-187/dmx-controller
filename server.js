@@ -2348,8 +2348,18 @@ app.get('/api/touch/state', (req, res) => {
     effectSpeed: touchOverrides.effectSpeed,
     companionColorPushMode: touchOverrides.companionColorPushMode,
     groupDimmers: { ...touchOverrides.groupDimmers },
+    seqNoMirrorSpin: _cachedMixerConfig.seqNoMirrorSpin,
   });
 });
+
+function setSeqNoMirrorSpin(enabled) {
+  const val = enabled ? '1' : '0';
+  db.setConfig('seq_no_mirror_spin', val);
+  refreshMixerConfig();
+  broadcast({ type: 'seqMirrorSpin', blocked: _cachedMixerConfig.seqNoMirrorSpin });
+  console.log(`[SEQ] Mirror ball spin during playback → ${_cachedMixerConfig.seqNoMirrorSpin ? 'BLOCKED' : 'allowed'}`);
+  return _cachedMixerConfig.seqNoMirrorSpin;
+}
 
 app.post('/api/touch/fixture-disable', (req, res) => {
   const fixtureId = normalizeFixtureId(req.body.fixtureId);
@@ -2566,7 +2576,11 @@ midiController.registerRoutes(app);
 // ─── Companion (Stream Deck) API ────────────────────────────────────────────
 
 const companionRoutes = require('./companion-routes');
-companionRoutes.init({ db, midiController, touchOverrides, broadcast });
+companionRoutes.init({
+  db, midiController, touchOverrides, broadcast,
+  getSeqNoMirrorSpin: () => _cachedMixerConfig.seqNoMirrorSpin,
+  setSeqNoMirrorSpin,
+});
 companionRoutes.registerRoutes(app);
 
 // ─── Tracks API ─────────────────────────────────────────────────────────────
@@ -3989,13 +4003,35 @@ const playbackTimers = {};   // { deckNum: intervalId }
 const vdjTimeLastAt = {};    // { deckNum: timestamp } — last OS2L time event per deck
 
 // Cached mixer integration settings (refreshed on config save / startup)
-let _cachedMixerConfig = { crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none', seqNoStrobes: false };
+let _cachedMixerConfig = {
+  crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none',
+  seqNoStrobes: false, seqNoMirrorSpin: false,
+};
 function refreshMixerConfig() {
   _cachedMixerConfig.crossfaderGating = db.getConfig('seq_crossfader_gating') === '1';
   _cachedMixerConfig.crossfaderMode = db.getConfig('seq_crossfader_mode') || 'gate'; // gate | blend | off
   _cachedMixerConfig.deckFaderDimmer = db.getConfig('seq_deck_fader_dimmer') === '1';
   _cachedMixerConfig.endAction = db.getConfig('seq_end_action') || 'none'; // none | blackout | scene
   _cachedMixerConfig.seqNoStrobes = db.getConfig('seq_no_strobes') === '1';
+  _cachedMixerConfig.seqNoMirrorSpin = db.getConfig('seq_no_mirror_spin') === '1';
+}
+
+function applySequenceMirrorSpinHold(channelUpdates, allFixtures, activeCues) {
+  if (!_cachedMixerConfig.seqNoMirrorSpin) return;
+  const activeMirrorIds = new Set(
+    activeCues.map((c) => c.fixture_id).filter((id) => id && id !== 0),
+  );
+  for (const fixMap of allFixtures) {
+    if (fixMap.category !== 'mirror_ball') continue;
+    if (!activeMirrorIds.has(fixMap.id)) continue;
+    if (touchOverrides.disabledFixtures.has(fixMap.id)) continue;
+    const motorCh = fixMap.channels.find((c) => c.type === 'motor');
+    if (!motorCh) continue;
+    const u = fixMap.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    const stopVal = mirrorMotorDmx(buildChannelCtx(motorCh, fixMap), 'motor_stop', 0);
+    channelUpdates[u][motorCh.dmx_address] = applyInvert(stopVal, motorCh);
+  }
 }
 // Refresh on startup after DB is ready
 try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ }
@@ -4988,6 +5024,8 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
       }
     }
   }
+
+  applySequenceMirrorSpinHold(channelUpdates, allFixtures, activeCues);
 
   // ── Rig-wide master effects (fixture_id 0): fan out to all fixtures ──
   // Only applies to fixtures that don't already have a per-fixture effect active.
