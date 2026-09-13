@@ -8,6 +8,16 @@
 </head>
 <body>
 
+<div id="bootOverlay" class="boot-overlay" hidden>
+  <div class="boot-panel">
+    <h2>Thaluxis Hub</h2>
+    <p class="boot-sub">Starting services…</p>
+    <ul id="bootSteps" class="boot-steps"></ul>
+    <p class="boot-hint">The page is connected; lighting and deck control activate when startup finishes.</p>
+    <p id="bootError" class="boot-error" hidden></p>
+  </div>
+</div>
+
 <!-- ══════ Header ══════ -->
 <header>
   <h1>Thaluxis <span>DMX</span></h1>
@@ -26,7 +36,7 @@
 <div class="status-bar">
   <div class="status-badge">
     <div class="status-dot" id="statusDot"></div>
-    <span id="statusText">Disconnected</span>
+    <span id="statusText">Starting hub…</span>
   </div>
   <div class="status-pill sat-status-pill sat-status-off" id="satStatusPill" hidden>
     <span class="status-pill-dot" id="satStatusDot"></span>
@@ -1901,30 +1911,41 @@
       <div class="config-sub-page" id="cfgpage-event-log">
         <div class="config-section">
           <h3>Event Log</h3>
-          <p class="config-desc">View real-time OS2L messages from VirtualDJ. Toggle capture on/off to control whether events are recorded.</p>
+          <p class="config-desc">Hub console output, OS2L traffic, and connection events. Server <strong>log level</strong> (App Settings) controls what is stored; use filters below to narrow the view.</p>
 
           <div class="subs-status-bar" style="margin-bottom:12px">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
               <input type="checkbox" id="logCaptureToggle" checked style="accent-color:var(--accent);width:16px;height:16px">
-              <strong>Capture Events</strong>
+              <strong>Live capture</strong>
             </label>
             <span class="log-count" id="logCount" style="font-size:11px;color:var(--accent)">0 events</span>
+            <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;margin-left:12px">
+              Show ≥
+              <select id="logUiMinLevel" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--panel-border);background:var(--panel-bg);color:var(--text)">
+                <option value="debug">Debug</option>
+                <option value="info" selected>Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
             <span style="flex:1"></span>
             <label class="log-auto" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
               <input type="checkbox" id="logAutoScroll" checked style="accent-color:var(--accent)"> Auto-scroll
             </label>
+            <button class="btn btn-secondary btn-sm" id="btnRefreshLog">Refresh</button>
             <button class="btn btn-secondary btn-sm" id="btnClearLog">Clear</button>
           </div>
 
           <div class="event-log open" id="eventLog" style="max-height:calc(100vh - 300px)">
             <div class="log-toolbar">
               <button class="filter-btn active" data-filter="all">All</button>
-              <button class="filter-btn" data-filter="subscribed">Subscribed</button>
+              <button class="filter-btn" data-filter="server">Server</button>
+              <button class="filter-btn" data-filter="subscribed">OS2L</button>
               <button class="filter-btn" data-filter="beat">Beat</button>
               <button class="filter-btn" data-filter="btn">Btn</button>
               <button class="filter-btn" data-filter="cmd">Cmd</button>
               <button class="filter-btn" data-filter="connection">Connection</button>
-              <button class="filter-btn" data-filter="server">Server</button>
+              <button class="filter-btn" data-filter="error">Errors</button>
             </div>
             <div id="logEntries"></div>
           </div>
@@ -1960,13 +1981,27 @@
               <tr>
                 <td>
                   <strong>Debug Logging</strong>
-                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Enable verbose debug logging for OS2L messages, deck subscriptions, and auto-generation. Logs appear in the Event Log with the Server filter.</div>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Enable verbose debug logging for OS2L messages, deck subscriptions, and auto-generation.</div>
                 </td>
                 <td>
                   <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                     <input type="checkbox" id="settingDebugLogging" style="accent-color:var(--accent);width:18px;height:18px">
                     <span id="settingDebugLoggingLabel" style="font-size:12px">Off</span>
                   </label>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Server log level</strong>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Minimum severity stored in the hub event log (error &lt; warn &lt; info &lt; debug).</div>
+                </td>
+                <td>
+                  <select id="settingLogLevel" style="width:100%;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--panel-border);background:var(--panel-bg);color:var(--text)">
+                    <option value="error">Error</option>
+                    <option value="warn">Warn</option>
+                    <option value="info" selected>Info</option>
+                    <option value="debug">Debug</option>
+                  </select>
                 </td>
               </tr>
             </tbody>
@@ -2884,6 +2919,8 @@
 <!-- ══════════════════════════════════════════════════════════════
      JavaScript
      ══════════════════════════════════════════════════════════════ -->
+<script src="js/hub-connection.js"></script>
+<script src="js/hub-event-log.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════
 //  Authentication
@@ -3281,17 +3318,93 @@ window.addEventListener('resize', () => {
 })();
 
 // ═══════════════════════════════════════════════════════════════
+//  Hub boot / startup status
+// ═══════════════════════════════════════════════════════════════
+function renderBootOverlay(boot, errorMsg) {
+  const overlay = document.getElementById('bootOverlay');
+  const list = document.getElementById('bootSteps');
+  const errEl = document.getElementById('bootError');
+  if (!overlay || !list || !boot) return;
+  if (boot.ready) {
+    overlay.hidden = true;
+    document.body.classList.remove('hub-booting');
+    const txt = document.getElementById('statusText');
+    if (txt && txt.textContent === 'Starting hub…') txt.textContent = 'Disconnected';
+    if (typeof HubConnection !== 'undefined') HubConnection.notifyHubReady();
+    return;
+  }
+  if (typeof HubConnection !== 'undefined') HubConnection.notifyHubBooting();
+  overlay.hidden = false;
+  document.body.classList.add('hub-booting');
+  list.innerHTML = (boot.steps || []).map((s) => {
+    const icon = s.status === 'done' ? '✓' : s.status === 'running' ? '…' : s.status === 'error' ? '!' : '○';
+    const detail = s.detail ? ` <span class="boot-detail">${esc(s.detail)}</span>` : '';
+    return `<li class="boot-step boot-${s.status}"><span class="boot-step-icon">${icon}</span><span>${esc(s.label)}</span>${detail}</li>`;
+  }).join('');
+  if (errEl) {
+    const err = errorMsg || boot.error;
+    if (err) {
+      errEl.hidden = false;
+      errEl.textContent = err;
+    } else {
+      errEl.hidden = true;
+      errEl.textContent = '';
+    }
+  }
+}
+
+let bootPollTimer = null;
+
+async function checkBootStatus() {
+  try {
+    const boot = await fetch('/api/boot/status').then((r) => r.json());
+    renderBootOverlay(boot);
+    if (boot.ready) {
+      if (bootPollTimer) {
+        clearInterval(bootPollTimer);
+        bootPollTimer = null;
+      }
+    } else if (!bootPollTimer) {
+      bootPollTimer = setInterval(() => checkBootStatus(), 400);
+    }
+  } catch {
+    /* hub not reachable yet — keep polling until first response */
+    if (!bootPollTimer) bootPollTimer = setInterval(() => checkBootStatus(), 400);
+  }
+}
+
+checkBootStatus();
+
+HubConnection.init({
+  updateStatusBar: false,
+  onRetry: () => {
+    try {
+      if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
+    } catch { /* ignore */ }
+    connect();
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  WebSocket
 // ═══════════════════════════════════════════════════════════════
 let ws;
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => console.log('[WS] Connected');
+  ws.onopen = () => {
+    console.log('[WS] Connected');
+    HubConnection.notifyOpen();
+    checkBootStatus();
+  };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
+    if (msg.type === 'boot_progress' || msg.type === 'boot_ready' || msg.type === 'boot_error') {
+      renderBootOverlay(msg.boot, msg.error);
+      return;
+    }
     if (msg.type === 'state') updateState(msg.state);
-    else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); logEvent({ evtType: 'connection', raw: msg }); }
+    else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); HubEventLog.handleWsMessage(msg); }
     else if (msg.type === 'satellite_status') { updateSatelliteStatus(msg); }
     else if (msg.type === 'satellite_pair_request' || msg.type === 'satellite_device_approved'
       || msg.type === 'satellite_device_rejected' || msg.type === 'satellite_device_revoked'
@@ -3340,11 +3453,13 @@ function connect() {
       if (statusEl) statusEl.textContent = `Finished: ${msg.regenerated} updated, ${msg.failed} failed.`;
       if (typeof refreshStaleSequenceSummary === 'function') refreshStaleSequenceSummary();
     }
-    else if (msg.type === 'server_log') { logEvent({ evtType: 'server', raw: { level: msg.level, message: msg.message }, ts: msg.ts }); }
-    else if (msg.type === 'log') logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
-    else logEvent({ evtType: msg.type || 'event', raw: msg });
+    else if (['server_log', 'log_history', 'log'].includes(msg.type)) HubEventLog.handleWsMessage(msg);
   };
-  ws.onclose = () => setTimeout(connect, 2000);
+  ws.onerror = () => HubConnection.notifyClose();
+  ws.onclose = () => {
+    HubConnection.notifyClose();
+    setTimeout(connect, 2000);
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3680,111 +3795,12 @@ function handleBeat(data) {
     const el = document.getElementById(`deck-${d}`);
     if (el && el.classList.contains('playing')) { el.classList.add('beat'); setTimeout(() => el.classList.remove('beat'), 80); }
   }
-  logEvent({ evtType: 'beat', raw: data });
+  HubEventLog.logEvent({ evtType: 'beat', level: 'debug', raw: data });
 }
 
-// Event log
-const eventLogEl = document.getElementById('eventLog');
-const logEntriesEl = document.getElementById('logEntries');
-const logCountEl = document.getElementById('logCount');
-const ppOverlay = document.getElementById('ppOverlay');
-const ppContent = document.getElementById('ppContent');
-const logAutoScrollEl = document.getElementById('logAutoScroll');
-const logCaptureToggle = document.getElementById('logCaptureToggle');
-let logCapturing = true;
-let logFilter = 'all';
-let logTotal = 0;
-const MAX_LOG = 2000;
-
-logCaptureToggle.addEventListener('change', () => {
-  logCapturing = logCaptureToggle.checked;
-});
-
-document.getElementById('btnClearLog').addEventListener('click', () => {
-  logEntriesEl.innerHTML = '';
-  logTotal = 0;
-  logCountEl.textContent = '0 events';
-});
-
-// Filter buttons
-eventLogEl.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    eventLogEl.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    logFilter = btn.dataset.filter;
-    // Show/hide entries based on filter
-    logEntriesEl.querySelectorAll('.log-entry').forEach(entry => {
-      if (logFilter === 'all' || entry.dataset.evtType === logFilter) {
-        entry.style.display = '';
-      } else {
-        entry.style.display = 'none';
-      }
-    });
-  });
-});
-
-// Pretty-print on double-click
-ppOverlay.addEventListener('click', (e) => { if (e.target === ppOverlay) ppOverlay.classList.remove('open'); });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    ppOverlay.classList.remove('open');
-    if (_pathEditFixture) exitPathEdit(false); // cancel path edit on Escape
-  }
-});
-
-function logEvent(info) {
-  if (!logCapturing) return;
-  const { evtType, raw, ts } = info;
-  logTotal++;
-  logCountEl.textContent = `${logTotal} events`;
-
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-  entry.dataset.evtType = evtType;
-
-  const time = ts ? new Date(ts) : new Date();
-  const timeStr = time.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(time.getMilliseconds()).padStart(3, '0');
-
-  // Build summary text based on event type
-  let summary = '';
-  if (evtType === 'subscribed' && raw) {
-    summary = `${raw.trigger || ''} = ${JSON.stringify(raw.value ?? '')}`;
-  } else if (evtType === 'beat' && raw) {
-    summary = `pos=${raw.pos ?? ''} strength=${raw.strength ?? ''} bpm=${raw.bpm ?? ''}`;
-  } else if (evtType === 'server' && raw) {
-    const lvl = raw.level === 'error' ? '❌' : raw.level === 'warn' ? '⚠️' : 'ℹ️';
-    summary = `${lvl} ${raw.message || ''}`;
-  } else if (evtType === 'connection') {
-    summary = raw?.connected ? `VDJ connected: ${raw.address || ''}` : 'VDJ disconnected';
-  } else {
-    summary = JSON.stringify(raw || info).substring(0, 200);
-  }
-
-  entry.innerHTML = `<span class="log-time">${timeStr}</span><span class="log-type ${evtType}">${evtType}</span><span class="log-data">${esc(summary)}</span>`;
-
-  // Store raw data for pretty-print
-  entry._rawData = raw || info;
-
-  entry.addEventListener('dblclick', () => {
-    ppContent.textContent = JSON.stringify(entry._rawData, null, 2);
-    ppOverlay.classList.add('open');
-  });
-
-  // Apply current filter
-  if (logFilter !== 'all' && evtType !== logFilter) {
-    entry.style.display = 'none';
-  }
-
-  logEntriesEl.appendChild(entry);
-
-  // Trim old entries
-  while (logEntriesEl.children.length > MAX_LOG) logEntriesEl.removeChild(logEntriesEl.firstChild);
-
-  // Auto-scroll
-  if (logAutoScrollEl.checked) {
-    eventLogEl.scrollTop = eventLogEl.scrollHeight;
-  }
-}
+// Event log (see js/hub-event-log.js)
+HubEventLog.init();
+function loadEventLog(full = false) { return HubEventLog.loadEventLog(full); }
 
 // ═══════════════════════════════════════════════════════════════
 //  Fixtures CRUD + Filtering
@@ -7866,6 +7882,7 @@ document.querySelectorAll('.config-sidebar-btn').forEach(btn => {
     if (btn.dataset.cfgtab === 'app-settings') loadAppSettings();
     if (btn.dataset.cfgtab === 'fixture-library') loadTypes();
     if (btn.dataset.cfgtab === 'about') loadAboutInfo();
+    if (btn.dataset.cfgtab === 'event-log') loadEventLog(true);
   });
 });
 
@@ -9629,6 +9646,9 @@ async function loadAppSettings() {
     dbgChk.checked = dbgOn;
     dbgLbl.textContent = dbgOn ? 'On' : 'Off';
 
+    const logLevelEl = document.getElementById('settingLogLevel');
+    if (logLevelEl) logLevelEl.value = config.log_level || 'info';
+
     // Analysis settings
     if (config.analysis_target_peaks)       document.getElementById('settingAnalysisPeaks').value       = config.analysis_target_peaks;
     if (config.analysis_sample_rate)        document.getElementById('settingAnalysisSampleRate').value   = config.analysis_sample_rate;
@@ -9720,6 +9740,21 @@ document.getElementById('settingDebugLogging').addEventListener('change', async 
     console.error('Failed to save debug logging setting', e);
   }
 });
+
+const settingLogLevelEl = document.getElementById('settingLogLevel');
+if (settingLogLevelEl) {
+  settingLogLevelEl.addEventListener('change', async function() {
+    try {
+      await fetch('/api/config/log_level', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: this.value }),
+      });
+    } catch (e) {
+      console.error('Failed to save log level', e);
+    }
+  });
+}
 
 // Analysis settings change handlers
 ['settingAnalysisPeaks', 'settingAnalysisSampleRate', 'settingAnalysisSensitivity', 'settingAnalysisNormalize'].forEach(id => {

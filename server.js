@@ -45,6 +45,10 @@ const mdns = require('multicast-dns');
 const db = require('./db');
 const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
+/** @type {import('./artnet-server')} */
+let artnetServer;
+/** @type {import('./dmx-usb-server')} */
+let dmxUsbServer;
 const audioAnalyzer  = require('./audio-analyzer');
 const audioInput     = require('./audio-input');
 const stemSeparator  = require('./stem-separator');
@@ -134,6 +138,9 @@ const WEB_PORT = 80;
 const SERVICE_NAME = 'Thaluxis-Hub';
 const MDNS_HOSTNAME_DEFAULT = 'thaluxis';
 const brand = require('./thaluxis-brand');
+const djProviders = require('./lib/dj-providers');
+const denonStagelinq = require('./lib/denon-stagelinq-runtime');
+const seratoDj = require('./lib/serato-dj-runtime');
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +149,7 @@ const state = {
   crossfader: 0,
   connected: false,
   vdjAddress: null,
+  djProvider: 'virtualdj',
 };
 
 for (let d = 1; d <= 4; d++) {
@@ -175,30 +183,98 @@ function broadcast(data) {
   }
 }
 
-// ─── Console Log Interception (broadcast to WebSocket clients) ────────────
+// ─── Boot progress (web UI loads before heavy startup work finishes) ─────────
 
-const _origLog = console.log;
-const _origWarn = console.warn;
-const _origError = console.error;
+const bootState = {
+  ready: false,
+  startedAt: Date.now(),
+  readyAt: null,
+  error: null,
+  steps: [
+    { id: 'database', label: 'Database', status: 'pending' },
+    { id: 'web', label: 'Web server', status: 'pending' },
+    { id: 'dmx', label: 'DMX outputs', status: 'pending' },
+    { id: 'os2l', label: 'OS2L', status: 'pending' },
+    { id: 'library', label: 'Track library', status: 'pending' },
+    { id: 'midi', label: 'MIDI controller', status: 'pending' },
+    { id: 'network', label: 'Network discovery', status: 'pending' },
+    { id: 'audio', label: 'Audio input', status: 'pending' },
+  ],
+};
 
-function _broadcastLog(level, args) {
-  const message = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  // Avoid broadcasting state/throttle noise
-  broadcast({ type: 'server_log', level, message, ts: Date.now() });
+function bootSnapshot() {
+  return {
+    ready: bootState.ready,
+    startedAt: bootState.startedAt,
+    readyAt: bootState.readyAt,
+    error: bootState.error,
+    steps: bootState.steps.map((s) => ({ ...s })),
+  };
 }
 
-console.log = function (...args) {
-  _origLog.apply(console, args);
-  _broadcastLog('info', args);
-};
-console.warn = function (...args) {
-  _origWarn.apply(console, args);
-  _broadcastLog('warn', args);
-};
-console.error = function (...args) {
-  _origError.apply(console, args);
-  _broadcastLog('error', args);
-};
+function setBootStep(id, status, detail) {
+  const step = bootState.steps.find((s) => s.id === id);
+  if (step) {
+    step.status = status;
+    if (detail != null) step.detail = detail;
+    step.updatedAt = Date.now();
+  }
+  broadcast({ type: 'boot_progress', boot: bootSnapshot() });
+}
+
+function markBootReady() {
+  bootState.ready = true;
+  bootState.readyAt = Date.now();
+  bootState.error = null;
+  for (const s of bootState.steps) {
+    if (s.status === 'pending' || s.status === 'running') s.status = 'done';
+  }
+  broadcast({ type: 'boot_ready', boot: bootSnapshot() });
+  console.log('[Boot] Hub startup complete');
+}
+
+function markBootFailed(err) {
+  const step = bootState.steps.find((s) => s.status === 'running') || bootState.steps.find((s) => s.status === 'pending');
+  if (step) step.status = 'error';
+  bootState.error = err?.message || String(err);
+  broadcast({ type: 'boot_error', boot: bootSnapshot(), error: bootState.error });
+}
+
+// ─── Event log (console + API + WebSocket stream) ─────────────────────────
+
+const eventLog = require('./lib/event-log');
+const _logWsLastAt = {};
+eventLog.init({
+  getMinLevel: () => db.getConfig('log_level') || 'info',
+  getLogColors: () => {
+    try {
+      const v = db.getConfig('log_color');
+      return v == null || v === '' ? '1' : v;
+    } catch {
+      return '1';
+    }
+  },
+  onEntry: (entry) => {
+    // Throttle high-rate OS2L debug streams on WebSocket (~10 Hz)
+    if (entry.source === 'os2l' && entry.level === 'debug') {
+      const key = entry.category || 'os2l';
+      const now = Date.now();
+      if (now - (_logWsLastAt[key] || 0) < 100) return;
+      _logWsLastAt[key] = now;
+    }
+    broadcast({
+      type: 'server_log',
+      id: entry.id,
+      level: entry.level,
+      message: entry.message,
+      ts: entry.ts,
+      source: entry.source,
+      category: entry.category,
+      raw: entry.raw,
+    });
+  },
+});
+eventLog.installConsoleHook();
 
 // Throttled state broadcast (send full state at ~15fps max)
 // 15fps is plenty for UI updates and halves the WebSocket traffic vs 30fps
@@ -376,6 +452,53 @@ function clearNowPlaying() {
 // This callback is invoked by os2l.js when a "subscribed" event arrives.
 // It stays here because it's tightly coupled with the sequencer subsystem.
 
+/** Ensure hub has a track row for the OS2L filepath (library may be incomplete or path on another drive letter). */
+function ensureTrackForOs2lPath(filepath, deckNum) {
+  if (!filepath || typeof filepath !== 'string') return null;
+  let track = db.getTrackByPath(filepath);
+  if (track) return track;
+
+  const deck = state.decks[deckNum] || {};
+  const parts = filepath.replace(/\\\\/g, '\\').split('\\');
+  const filename = parts[parts.length - 1] || filepath;
+  const stub = {
+    filepath,
+    filename,
+    file_size: 0,
+    flag: 0,
+    author: '',
+    title: filename.replace(/\.[^.]+$/, ''),
+    remix: '',
+    genre: deck.genre || '',
+    album: '',
+    year: '',
+    tag_flag: 0,
+    song_length: 0,
+    bitrate: 0,
+    last_modified: 0,
+    first_seen: 0,
+    cover: '',
+    bpm: deck.bpm || 0,
+    key: '',
+    volume: 0,
+    audio_sig: '',
+    beatgrid_pos: 0,
+    automix_point: 0,
+    poi_json: '[]',
+    netsearch: '',
+    source_type: 'local',
+  };
+
+  db.importTracks([stub]);
+  track = db.getTrackByPath(filepath);
+  if (track) {
+    console.log(
+      `[VDJ] Registered track from OS2L deck ${deckNum}: "${track.title || track.filename}" (id ${track.id})`,
+    );
+  }
+  return track;
+}
+
 function handleOs2lSubscribed(data) {
     const trigger = data.trigger;
     const value = data.value;
@@ -424,7 +547,7 @@ function handleOs2lSubscribed(data) {
       state.decks[deck].filename = parts[parts.length - 1] || value;
 
       // Resolve track_id for the UI (waveform display, etc.)
-      const resolvedTrack = db.getTrackByPath(value);
+      const resolvedTrack = ensureTrackForOs2lPath(value, deck);
       state.decks[deck].track_id = resolvedTrack ? resolvedTrack.id : null;
 
       // ─── Sequencer auto-load / auto-play / auto-generate ─────
@@ -434,7 +557,7 @@ function handleOs2lSubscribed(data) {
       const seqAutoRegenerateStale = db.getConfig('seq_auto_regenerate_stale') === '1';
       if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} auto-load=${seqAutoLoad} auto-unload=${seqAutoUnload} auto-gen=${seqAutoGenerate} stale-regen=${seqAutoRegenerateStale}`);
       if (seqAutoLoad || seqAutoUnload || seqAutoGenerate || seqAutoRegenerateStale) {
-        const track = db.getTrackByPath(value);
+        const track = resolvedTrack || ensureTrackForOs2lPath(value, deck);
         let seq = track ? db.getSequenceByTrackId(track.id) : null;
         if (db.getConfig('debug_logging') === '1') console.log(`[OS2L-DEBUG] Deck ${deck} track=${track ? track.id : 'null'} seq=${seq ? seq.id : 'null'}`);
 
@@ -478,6 +601,11 @@ function handleOs2lSubscribed(data) {
 
         // Auto-generate sequence if none exists and feature is enabled
         if (!seq && track && seqAutoGenerate) {
+          if (seqAutoGeneratePending.has(track.id)) {
+            scheduleBroadcast();
+            return;
+          }
+          seqAutoGeneratePending.add(track.id);
           // Only pause/unload when the deck is not playing (avoid interrupting live output)
           if (!isDeckPlaying(deck)) {
             pauseSequenceOutput(deck);
@@ -582,6 +710,8 @@ function handleOs2lSubscribed(data) {
               }
             } catch (ge) {
               console.error(`[SEQ] Auto-generate failed for track ${track ? track.id : '?'}: ${ge.message}`);
+            } finally {
+              seqAutoGeneratePending.delete(track.id);
             }
           })();
           // Async block handles load/play after generation completes
@@ -621,6 +751,22 @@ function handleOs2lSubscribed(data) {
         if (!anyPlaying) clearNowPlaying();
       }
     }
+    if (key === 'play') {
+      const deckNowPlaying = state.decks[deck].play === 1 || state.decks[deck].play === true;
+      if (deckNowPlaying && !activeSequences[deck]) {
+        const fp = state.decks[deck].filepath;
+        if (fp) {
+          const t = ensureTrackForOs2lPath(fp, deck);
+          if (t) state.decks[deck].track_id = t.id;
+          // Deck may have been playing before filepath was indexed — run auto-load/gen now
+          const seqAutoLoad = db.getConfig('seq_auto_load') === '1';
+          const seqAutoGenerate = db.getConfig('seq_auto_generate') === '1';
+          if (seqAutoLoad || seqAutoGenerate) {
+            handleOs2lSubscribed({ trigger: `deck ${deck} get_filepath`, value: fp });
+          }
+        }
+      }
+    }
     if (key === 'play' && activeSequences[deck]) {
       const deckNowPlaying = state.decks[deck].play;  // already normalized to 1/0
       if (deckNowPlaying && !activeSequences[deck].playing) {
@@ -638,7 +784,7 @@ function handleOs2lSubscribed(data) {
         }
         // VDJ-driven: currentTimeMs is already set by the last time event
 
-        const seqDur = ds.sequence && ds.sequence.duration_ms;
+        const seqDur = getSequencePlaybackDurationMs(ds);
         const nearEnd = seqDur && ds.currentTimeMs >= seqDur - 5000;
         const endAction = _cachedMixerConfig.endAction;
         console.log(`[SEQ] Deck ${deck} stopped. currentTimeMs=${Math.round(ds.currentTimeMs)} seqDur=${seqDur} nearEnd=${nearEnd} endAction=${endAction}`);
@@ -660,17 +806,34 @@ function handleOs2lSubscribed(data) {
     // Drive sequence playback engine on VDJ time updates (VDJ sends time in ms)
     if (key === 'time' && typeof value === 'number') {
       vdjTimeLastAt[deck] = Date.now();
+      if (isSeratoActive()) {
+        state.decks[deck].seratoAnchorTimeMs = value;
+        state.decks[deck].seratoAnchorWall = Date.now();
+        state.decks[deck].time = value;
+        // Live Serato playhead is extrapolated on the playback timer (~100 Hz).
+        scheduleBroadcast();
+        return;
+      }
       const ds = activeSequences[deck];
       if (ds) {
         ds.vdjDriven = true;
         ds.currentTimeMs = value;
-        const seqDur = ds.sequence?.duration_ms;
+        const seqDur = getSequencePlaybackDurationMs(ds);
         // Seeked back before sequence end — allow playback to resume
-        if (ds._endActionApplied && typeof seqDur === 'number' && seqDur > 0 && value < seqDur - 2000) {
+        if (ds._endActionApplied && seqDur > 0 && value < seqDur - 2000) {
           ds._endActionApplied = false;
         }
+        // Recover if end fired on bad duration / timer drift while VDJ is still playing
+        if (ds._endActionApplied && shouldUseVdjTime(deck) && isDeckPlaying(deck) && seqDur > 0 && value < seqDur - 1000) {
+          ds._endActionApplied = false;
+          if (!ds.playing) {
+            ds.playing = true;
+            broadcast({ type: 'seq_playing', deck, playing: true });
+            console.log(`[SEQ] Deck ${deck} — recovered output (VDJ still playing, playhead before sequence end)`);
+          }
+        }
         // Resume output if sequence was loaded but not yet playing — never restart after end
-        const pastEnd = typeof seqDur === 'number' && seqDur > 0 && value >= seqDur;
+        const pastEnd = sequenceTimePastEnd(ds, value);
         if (!ds.playing && isDeckPlaying(deck) && !ds._endActionApplied && !pastEnd) {
           ds.playing = true;
           if (!shouldUseVdjTime(deck)) startPlaybackTimer(deck);
@@ -692,7 +855,53 @@ app.use(express.json({ limit: '200mb' }));
 app.use('/lib', express.static(path.join(__dirname, 'node_modules/waveform-data/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.use((req, res, next) => {
+  if (bootState.ready) return next();
+  const p = req.path;
+  if (p === '/api/boot/status' || p === '/api/auth/status' || p === '/api/auth/login' || p === '/api/dj/providers') return next();
+  if (p.startsWith('/api/')) {
+    return res.status(503).json({ error: 'Hub is still starting', boot: bootSnapshot() });
+  }
+  next();
+});
+
 // ─── Auth API ───────────────────────────────────────────────────────────────
+
+app.get('/api/boot/status', (req, res) => {
+  res.json(bootSnapshot());
+});
+
+app.post('/api/dj/serato/readvertise-remote', async (req, res) => {
+  try {
+    if (!isSeratoActive()) {
+      return res.status(400).json({ error: 'Serato integration is not active' });
+    }
+    if (!seratoDj.isStarted()) {
+      return res.status(503).json({ error: 'Serato runtime not started yet' });
+    }
+    const result = await seratoDj.readvertiseRemote();
+    res.json({ ...result, status: seratoDj.getRemoteStatus() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/dj/providers', (req, res) => {
+  let configured = null;
+  try {
+    configured = db.getConfig('dj_active_provider');
+  } catch {
+    /* db not ready */
+  }
+  const getConfig = (key) => {
+    try {
+      return db.getConfig(key);
+    } catch {
+      return null;
+    }
+  };
+  res.json(djProviders.snapshot(configured, getConfig));
+});
 
 /** Check auth status — always accessible */
 app.get('/api/auth/status', (req, res) => {
@@ -773,6 +982,7 @@ app.post('/api/auth/setup', (req, res) => {
 // ─── Auth middleware for config-related write routes ────────────────────────
 const configProtectedPrefixes = [
   '/api/config',
+  '/api/dj',
   '/api/generator-config',
   '/api/mdns',
   '/api/usb-devices',
@@ -788,6 +998,69 @@ app.use((req, res, next) => {
   const isConfigPath = configProtectedPrefixes.some(p => req.path.startsWith(p));
   if (!isConfigPath) return next();
   return requireAuth(req, res, next);
+});
+
+/** Atomically save DJ provider + integration flags (avoids parallel PUT races). */
+app.post('/api/dj/provider-settings', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const providerId = djProviders.resolveActiveProviderId(body.provider);
+
+    db.setConfig('dj_active_provider', providerId);
+
+    if (providerId === 'virtualdj') {
+      db.setConfig('denon_stagelinq_enabled', '0');
+      db.setConfig('serato_integration_enabled', '0');
+      if (body.vdj && typeof body.vdj === 'object') {
+        const v = body.vdj;
+        if (v.hub_os2l_local != null) db.setConfig('hub_os2l_local', v.hub_os2l_local ? '1' : '0');
+        if (v.os2l_port != null) db.setConfig('os2l_port', String(v.os2l_port));
+        if (v.os2l_service_name != null) db.setConfig('os2l_service_name', String(v.os2l_service_name));
+        if (v.web_port != null) db.setConfig('web_port', String(v.web_port));
+        if (v.subscription_frequency != null) db.setConfig('subscription_frequency', String(v.subscription_frequency));
+        if (v.vdj_db_path != null) db.setConfig('vdj_db_path', String(v.vdj_db_path));
+        if (v.vdj_folder != null) db.setConfig('vdj_folder', String(v.vdj_folder));
+        if (v.vdj_auto_meta != null) db.setConfig('vdj_auto_meta', v.vdj_auto_meta ? '1' : '0');
+        if (v.vdj_deck_count != null) db.setConfig('vdj_deck_count', String(v.vdj_deck_count));
+        if (v.vdj_import_mode != null) db.setConfig('vdj_import_mode', String(v.vdj_import_mode));
+        if (v.now_playing_enabled != null) db.setConfig('now_playing_enabled', v.now_playing_enabled ? '1' : '0');
+        if (v.now_playing_base_url != null) db.setConfig('now_playing_base_url', String(v.now_playing_base_url));
+        if (v.now_playing_event_id != null) db.setConfig('now_playing_event_id', String(v.now_playing_event_id));
+        if (v.now_playing_artwork != null) db.setConfig('now_playing_artwork', v.now_playing_artwork ? '1' : '0');
+      }
+    } else if (providerId === 'serato') {
+      db.setConfig('denon_stagelinq_enabled', '0');
+      const seratoOn = body.serato?.enabled !== false;
+      db.setConfig('serato_integration_enabled', seratoOn ? '1' : '0');
+      const s = body.serato || {};
+      if (s.remote_enabled != null) db.setConfig('serato_remote_enabled', s.remote_enabled ? '1' : '0');
+      if (s.history_poll != null) db.setConfig('serato_history_poll', s.history_poll ? '1' : '0');
+      if (s.library_path != null) db.setConfig('serato_library_path', String(s.library_path));
+      if (s.remote_port != null) db.setConfig('serato_remote_port', String(s.remote_port));
+      if (s.peer_name != null) db.setConfig('serato_peer_name', String(s.peer_name));
+    } else if (providerId === 'denon_engine') {
+      db.setConfig('serato_integration_enabled', '0');
+      const denonOn = body.denon?.enabled !== false;
+      db.setConfig('denon_stagelinq_enabled', denonOn ? '1' : '0');
+      const d = body.denon || {};
+      if (d.player_mode != null) db.setConfig('denon_player_mode', String(d.player_mode));
+      if (d.download_library != null) db.setConfig('denon_download_library', d.download_library ? '1' : '0');
+    }
+
+    try {
+      await syncDjProviderRuntime();
+    } catch (e) {
+      console.warn('[DJ] Provider sync failed:', e.message);
+    }
+
+    const getConfig = (key) => db.getConfig(key);
+    res.json({
+      ok: true,
+      snapshot: djProviders.snapshot(providerId, getConfig),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── Fixture Library Import API ──────────────────────────────────────────────
@@ -1633,7 +1906,7 @@ app.get('/api/config', (req, res) => {
   res.json(config);
 });
 
-app.put('/api/config/:key', (req, res) => {
+app.put('/api/config/:key', async (req, res) => {
   // Block direct writes to auth keys — must use /api/auth/setup
   if (req.params.key.startsWith('auth_')) {
     return res.status(403).json({ error: 'Use /api/auth/setup to change auth settings' });
@@ -1641,7 +1914,40 @@ app.put('/api/config/:key', (req, res) => {
   db.setConfig(req.params.key, req.body.value);
   // Refresh cached mixer settings when relevant keys change
   if (req.params.key.startsWith('seq_')) refreshMixerConfig();
+  const djSyncKeys = [
+    'dj_active_provider',
+    'denon_stagelinq_enabled',
+    'serato_integration_enabled',
+    'serato_remote_enabled',
+    'serato_history_poll',
+    'hub_os2l_local',
+  ];
+  if (djSyncKeys.includes(req.params.key)) {
+    try {
+      await syncDjProviderRuntime();
+    } catch (e) {
+      console.warn('[DJ] Provider sync failed:', e.message);
+    }
+  }
   res.json({ key: req.params.key, value: req.body.value });
+});
+
+app.get('/api/logs', (req, res) => {
+  const since = parseInt(req.query.since || '0', 10) || 0;
+  const limit = parseInt(req.query.limit || '200', 10) || 200;
+  const minLevel = req.query.minLevel || req.query.level || null;
+  const items = eventLog.getEntries({ since, limit, minLevel });
+  res.json({
+    entries: items,
+    latest: items.length ? items[items.length - 1].id : since,
+    log_level: db.getConfig('log_level') || 'info',
+  });
+});
+
+app.delete('/api/logs', (req, res) => {
+  eventLog.clear();
+  eventLog.add({ level: 'info', source: 'server', category: 'server', message: '[Hub] Event log cleared' });
+  res.json({ ok: true });
 });
 
 // ─── Generator Config API ───────────────────────────────────────────────────
@@ -2615,25 +2921,57 @@ app.get('/api/tracks/:id', (req, res) => {
 });
 
 app.post('/api/tracks/import', (req, res) => {
+  if (vdjImportInProgress) return res.status(409).json({ error: 'VirtualDJ library import already running' });
+  runVdjLibraryImport({ force: true, updateBootStep: false })
+    .then((result) => {
+      if (result.error) return res.status(500).json({ error: result.error });
+      if (result.skipped) return res.status(400).json({ error: result.reason || 'Import skipped' });
+      res.json(result);
+    })
+    .catch((e) => {
+      console.error(`[VDJ] Import error: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    });
+});
+
+function getVdjImportStatsPayload() {
+  const stats = db.getTrackStats();
+  const xmlCount = parseInt(db.getConfig('vdj_import_last_xml_count') || '0', 10);
+  const hubCount = stats.total;
+  let mergedCount = parseInt(db.getConfig('vdj_import_last_merged') || '0', 10);
+  if (xmlCount > 0 && mergedCount <= 0 && hubCount > 0 && xmlCount > hubCount) {
+    mergedCount = xmlCount - hubCount;
+  }
+  return { xmlCount, hubCount, mergedCount };
+}
+
+app.get('/api/vdj/import-status', (req, res) => {
   try {
-    let xmlPath = db.getConfig('vdj_db_path');
-    if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
-    if (!xmlPath) return res.status(400).json({ error: 'VDJ database path not configured and auto-detect failed' });
-
-    const resolved = vdjParser.resolveDatabasePath(xmlPath);
-    if (!resolved.path) {
-      return res.status(400).json({ error: resolved.error, hint: resolved.hint || null });
-    }
-
-    const tracks = vdjParser.parseVdjDatabase(resolved.path);
-    const result = db.importTracks(tracks);
-    if (resolved.path !== xmlPath) db.setConfig('vdj_db_path', resolved.path);
-    console.log(`[VDJ] Imported ${result.total} tracks from ${resolved.path} (+${result.inserted} new, ~${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed)`);
-    res.json({ ...result, path: resolved.path, resolved_from: resolved.resolvedFrom || undefined });
+    const plan = planVdjImportOnStartup();
+    const importStats = getVdjImportStatsPayload();
+    res.json({
+      mode: getVdjImportMode(),
+      inProgress: vdjImportInProgress,
+      plan,
+      trackCount: importStats.hubCount,
+      ...importStats,
+      lastAt: db.getConfig('vdj_import_last_at') || '0',
+      lastSourceMtime: db.getConfig('vdj_import_source_mtime') || '0',
+    });
   } catch (e) {
-    console.error(`[VDJ] Import error: ${e.message}`);
     res.status(500).json({ error: e.message });
   }
+});
+
+app.post('/api/vdj/import', (req, res) => {
+  if (vdjImportInProgress) return res.status(409).json({ error: 'Import already running' });
+  if (isAlternateDjProviderActive()) {
+    return res.status(400).json({ error: 'VirtualDJ library import is not used while another DJ provider is active' });
+  }
+  res.json({ ok: true, started: true });
+  runVdjLibraryImport({ force: true, updateBootStep: false }).catch((e) => {
+    console.error(`[VDJ] Manual import failed: ${e.message}`);
+  });
 });
 
 app.delete('/api/tracks', (req, res) => {
@@ -2734,6 +3072,7 @@ function getAnchorPoints(track) {
 
 // Trigger analysis for a track
 const analysisInProgress = new Map(); // trackId -> true
+const seqAutoGeneratePending = new Set(); // trackId — avoid duplicate OS2L auto-gen jobs
 
 app.post('/api/tracks/:id/analyze', async (req, res) => {
   const trackId = +req.params.id;
@@ -4048,7 +4387,45 @@ function os2lTimeIsActive(deck) {
 
 /** Prefer VDJ playhead when hub has local OS2L or time is actively flowing. */
 function shouldUseVdjTime(deck) {
+  if (isDenonEngineActive() || isSeratoActive()) return os2lTimeIsActive(deck) || !!state.decks[deck]?.play;
   return isHubOs2lLocal() || os2lTimeIsActive(deck);
+}
+
+/** Longest credible end time — sequence field, cues, track length, analysis. */
+function getSequencePlaybackDurationMs(deckSeq) {
+  if (!deckSeq?.sequence) return 0;
+  const seq = deckSeq.sequence;
+  let dur = seq.duration_ms || 0;
+  for (const c of seq.cues || []) {
+    const end = (c.start_ms || 0) + (c.duration_ms || 0);
+    if (end > dur) dur = end;
+  }
+  const trackId = seq.track_id;
+  if (trackId) {
+    const track = db.getTrack(trackId);
+    if (track?.song_length > 0) {
+      const trackMs = Math.round(track.song_length * 1000);
+      if (trackMs > dur) dur = trackMs;
+    }
+    const analysis = db.getTrackAnalysis(trackId);
+    if (analysis?.duration_ms > dur) dur = analysis.duration_ms;
+  }
+  return dur;
+}
+
+function sequenceTimePastEnd(deckSeq, timeMs) {
+  const dur = getSequencePlaybackDurationMs(deckSeq);
+  return dur > 0 && timeMs >= dur;
+}
+
+/**
+ * Time-based sequence end — while VDJ still reports play=1, wait for play=0
+ * (avoids early blackout when song_length / sequence duration is short vs live play).
+ */
+function shouldEndSequenceByPlayhead(deck, deckSeq, timeMs) {
+  if (!sequenceTimePastEnd(deckSeq, timeMs)) return false;
+  if (shouldUseVdjTime(deck) && isDeckPlaying(deck)) return false;
+  return true;
 }
 
 function normalizeTrackPath(p) {
@@ -4191,13 +4568,36 @@ function startPlaybackTimer(deck) {
     const ds = activeSequences[deck];
     if (!ds || !ds.playing) { stopPlaybackTimer(deck); return; }
 
-    // If VDJ is actively sending time for this deck, skip internal timer
+    // If VDJ/Serato is driving time, extrapolate between sparse Remote playhead updates.
     if (ds.vdjDriven) {
       const lastAt = vdjTimeLastAt[deck] || 0;
-      if (Date.now() - lastAt < 500) return;
-      // Local OS2L always waits for VDJ — never advance an internal clock
+      const gap = Date.now() - lastAt;
+      if (isSeratoActive()) {
+        const d = state.decks[deck];
+        const rate = typeof d?.seratoPlayRate === 'number' ? d.seratoPlayRate : (isDeckPlaying(deck) ? 1 : 0);
+        const anchorMs = d?.seratoAnchorTimeMs ?? d?.time;
+        const anchorWall = d?.seratoAnchorWall ?? lastAt;
+        if (Math.abs(rate) > 0.01 && typeof anchorMs === 'number' && anchorWall) {
+          const t = anchorMs + (Date.now() - anchorWall) * rate;
+          d.time = t;
+          ds.currentTimeMs = t;
+          if (shouldEndSequenceByPlayhead(deck, ds, t)) {
+            applySequenceEndAction(deck);
+            return;
+          }
+          processSequenceAtTime(deck, t);
+          const now = Date.now();
+          if (now - _lastSeqTimeBroadcast >= 66) {
+            _lastSeqTimeBroadcast = now;
+            broadcast({ type: 'seq_time', deck, timeMs: t });
+            scheduleBroadcast();
+          }
+        }
+        return;
+      }
+      const vdjTimeGapMs = isHubOs2lLocal() ? 500 : 2000;
+      if (gap < vdjTimeGapMs) return;
       if (isHubOs2lLocal()) return;
-      // No recent VDJ time (satellite OS2L gap) — fall back to internal clock
       ds.vdjDriven = false;
       ds.startWall = Date.now();
       ds.startOffset = ds.currentTimeMs || 0;
@@ -4206,8 +4606,8 @@ function startPlaybackTimer(deck) {
     const elapsedMs = Date.now() - ds.startWall;
     ds.currentTimeMs = ds.startOffset + elapsedMs;
 
-    // Check if sequence has ended
-    if (ds.sequence && ds.sequence.duration_ms && ds.currentTimeMs >= ds.sequence.duration_ms) {
+    // Check if sequence has ended (ignore timer drift while VDJ deck still playing)
+    if (shouldEndSequenceByPlayhead(deck, ds, ds.currentTimeMs)) {
       applySequenceEndAction(deck);
       return;
     }
@@ -4726,7 +5126,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   const fixtureCount = allFixtures.length;
 
   // ── Sequence end detection (VDJ-driven playback) ──
-  if (seq.duration_ms && timeMs >= seq.duration_ms && !deckSeq._endActionApplied) {
+  if (shouldEndSequenceByPlayhead(deckNum, deckSeq, timeMs) && !deckSeq._endActionApplied) {
     applySequenceEndAction(deckNum);
     return;
   }
@@ -5207,8 +5607,18 @@ wss.on('connection', (ws) => {
   console.log('[WS] Browser client connected');
   wsClients.add(ws);
 
+  if (!bootState.ready) {
+    ws.send(JSON.stringify({ type: 'boot_progress', boot: bootSnapshot() }));
+  }
+
   // Send current state immediately
   ws.send(JSON.stringify({ type: 'state', state }));
+
+  // Recent hub log lines (console + OS2L) so Event Log is useful after opening Config
+  const recentLogs = eventLog.getEntries({ limit: 150 });
+  if (recentLogs.length) {
+    ws.send(JSON.stringify({ type: 'log_history', entries: recentLogs }));
+  }
 
   // Send active sequence state
   for (const [deck, seqState] of Object.entries(activeSequences)) {
@@ -5238,7 +5648,11 @@ wss.on('connection', (ws) => {
 // ─── Bonjour/mDNS Registration ─────────────────────────────────────────────
 
 function getNetConfig(key) {
-  return db.getConfig(key);
+  try {
+    return db.getConfig(key);
+  } catch {
+    return null;
+  }
 }
 
 function registerBonjour() {
@@ -5290,7 +5704,11 @@ function registerBonjour() {
 }
 
 function getMdnsHostname() {
-  return (db.getConfig('mdns_hostname') || MDNS_HOSTNAME_DEFAULT).replace(/\.local$/i, '').trim() || MDNS_HOSTNAME_DEFAULT;
+  try {
+    return (db.getConfig('mdns_hostname') || MDNS_HOSTNAME_DEFAULT).replace(/\.local$/i, '').trim() || MDNS_HOSTNAME_DEFAULT;
+  } catch {
+    return MDNS_HOSTNAME_DEFAULT;
+  }
 }
 
 // Custom mDNS responder for <hostname>.local
@@ -5328,8 +5746,52 @@ function startMdnsResponder() {
   }
 }
 
+function isDenonEngineActive() {
+  return denonStagelinq.isDenonEngineActive((key) => db.getConfig(key));
+}
+
+function isSeratoActive() {
+  return seratoDj.isSeratoActive((key) => db.getConfig(key));
+}
+
+function isAlternateDjProviderActive() {
+  return isDenonEngineActive() || isSeratoActive();
+}
+
 function isHubOs2lLocal() {
+  if (isAlternateDjProviderActive()) return false;
   return db.getConfig('hub_os2l_local') !== '0';
+}
+
+/** Stop inactive DJ integrations; restart OS2L when returning to VirtualDJ. */
+async function syncDjProviderRuntime() {
+  if (!bootState.ready) return;
+
+  let stopped = false;
+  if (denonStagelinq.isStarted() && !isDenonEngineActive()) {
+    await denonStagelinq.stop();
+    stopped = true;
+    console.log('[DJ] Denon StageLinQ stopped');
+  }
+  if (seratoDj.isStarted() && !isSeratoActive()) {
+    await seratoDj.stop();
+    stopped = true;
+    console.log('[DJ] Serato integration stopped');
+  }
+
+  if (stopped) {
+    state.djProvider = isAlternateDjProviderActive() ? db.getConfig('dj_active_provider') : 'virtualdj';
+    if (!os2l.isConnected()) {
+      state.connected = false;
+      state.vdjAddress = null;
+    }
+    scheduleBroadcast();
+  }
+
+  if (!isAlternateDjProviderActive() && isHubOs2lLocal() && !os2l.getServer()) {
+    os2l.startServer(OS2L_PORT, networkUtils.getBindHost(getNetConfig));
+    console.log(`[OS2L] TCP server listening on port ${OS2L_PORT}`);
+  }
 }
 
 // ─── Start Everything ───────────────────────────────────────────────────────
@@ -5348,45 +5810,250 @@ function autoLoadSequenceForTrack(trackId, generatedSeq) {
   }
 }
 
-// Initialise database
-db.init();
-
-hubRoutes.init({
-  db,
-  audioAnalyzer,
-  handleOs2lSubscribed,
-  handleOs2lButton: os2l.handleButtonAction,
-  broadcast,
-  getAnalysisConfig,
-  getAnchorPoints,
-  requireAuth,
-  generateSequenceForTrack: sequenceRoutes.generateSequenceForTrack,
-  onSequenceGenerated: (trackId, result) => autoLoadSequenceForTrack(trackId, result?.sequence),
-});
-
-loadTouchGroupDimmers();
-
-// Refresh cached mixer config now that DB is ready
-// (the inline call at declaration time fires before db.init() and silently fails)
-refreshMixerConfig();
-
-// Apply "DMX output on startup" setting
-(function applyStartupDmxSetting() {
+function applyStartupDmxSetting() {
   const val = db.getConfig('dmx_output_on_startup');
   if (val === '1' || val === 'true') {
     dmxOutputEnabled = true;
     console.log('[DMX] Output auto-enabled on startup (app setting)');
   }
-})();
+}
 
-// Start Art-Net output server (worker thread)
-const artnetServer = new ArtNetServer();
-const artnetNodes = db.getArtNetUniverses();
-const artnetRate = parseInt(db.getConfig('artnet_refresh_rate') || '44', 10);
-artnetServer.start(artnetNodes, artnetRate);
+async function autoConnectUsbDevices() {
+  const devices = db.getEnabledUsbDevices();
+  if (!devices.length) {
+    console.log('[DMX-USB] No enabled USB devices to auto-connect');
+    return;
+  }
+  for (const device of devices) {
+    if (!device.auto_connect) continue;
+    try {
+      console.log(`[DMX-USB] Auto-connecting "${device.label}" → universe ${device.local_universe}...`);
+      const ok = await dmxUsbServer.openDevice(device);
+      if (!ok) console.warn(`[DMX-USB] Failed to auto-connect "${device.label}"`);
+    } catch (e) {
+      console.error(`[DMX-USB] Error auto-connecting "${device.label}": ${e.message}`);
+    }
+  }
+}
 
-// Start DMX USB output server (multi-device manager)
-const dmxUsbServer = new DmxUsbServer();
+let vdjImportInProgress = false;
+
+function getVdjImportMode() {
+  const mode = db.getConfig('vdj_import_mode');
+  if (mode === 'off' || mode === 'always' || mode === 'smart') return mode;
+  if (db.getConfig('vdj_import_on_startup') === '0') return 'off';
+  if (db.getConfig('vdj_import_on_startup') === '1') return 'always';
+  return 'smart';
+}
+
+function resolveVdjXmlPath() {
+  let xmlPath = db.getConfig('vdj_db_path');
+  if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
+  return xmlPath || null;
+}
+
+/** Stable change detection — VDJ touches database.xml often; mtime alone false-triggers import. */
+function vdjDatabaseFingerprint(resolvedPath) {
+  const st = fs.statSync(resolvedPath);
+  return `${st.size}:${Math.floor(st.mtimeMs / 1000)}`;
+}
+
+function planVdjImportOnStartup() {
+  const mode = getVdjImportMode();
+  if (mode === 'off') return { run: false, reason: 'Startup import disabled in Config', mode };
+  if (mode === 'always') return { run: true, reason: 'Import on every startup', mode };
+
+  const xmlPath = resolveVdjXmlPath();
+  if (!xmlPath) return { run: false, reason: 'No VirtualDJ database path configured', mode };
+
+  const resolved = vdjParser.resolveDatabasePath(xmlPath);
+  if (!resolved.path) {
+    return { run: false, reason: resolved.error || 'Database file not found', mode };
+  }
+
+  let fingerprint = '';
+  let sourceMtime = 0;
+  try {
+    const st = fs.statSync(resolved.path);
+    sourceMtime = st.mtimeMs;
+    fingerprint = `${st.size}:${Math.floor(st.mtimeMs / 1000)}`;
+  } catch {
+    return { run: false, reason: 'Cannot read database file', mode, xmlPath: resolved.path };
+  }
+
+  const lastAt = parseInt(db.getConfig('vdj_import_last_at') || '0', 10);
+  const lastFingerprint = db.getConfig('vdj_import_source_fingerprint') || '';
+
+  if (!lastAt) {
+    return { run: true, reason: 'Library has never been imported', mode, xmlPath: resolved.path, sourceMtime, fingerprint };
+  }
+
+  if (lastFingerprint && fingerprint === lastFingerprint) {
+    return {
+      run: false,
+      reason: 'Skipped — VirtualDJ library unchanged since last import',
+      mode,
+      xmlPath: resolved.path,
+      sourceMtime,
+      fingerprint,
+      lastAt,
+    };
+  }
+
+  if (!lastFingerprint) {
+    const lastSourceMtime = parseInt(db.getConfig('vdj_import_source_mtime') || '0', 10);
+    const legacySec = Math.floor(lastSourceMtime / 1000);
+    const curSec = Math.floor(sourceMtime / 1000);
+    if (legacySec && curSec === legacySec) {
+      db.setConfig('vdj_import_source_fingerprint', fingerprint);
+      return {
+        run: false,
+        reason: 'Skipped — VirtualDJ library unchanged since last import',
+        mode,
+        xmlPath: resolved.path,
+        sourceMtime,
+        fingerprint,
+        lastAt,
+      };
+    }
+  }
+
+  return {
+    run: true,
+    reason: 'VirtualDJ database changed since last import',
+    mode,
+    xmlPath: resolved.path,
+    sourceMtime,
+    fingerprint,
+  };
+}
+
+function parseVdjDatabaseInWorker(xmlPath) {
+  const { Worker } = require('worker_threads');
+  const workerPath = path.join(__dirname, 'workers', 'vdj-parse-worker.js');
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(workerPath, { workerData: { xmlPath } });
+    let settled = false;
+    worker.on('message', (m) => {
+      settled = true;
+      if (m.ok) resolve(m.tracks || []);
+      else reject(new Error(m.error || 'VDJ parse failed (no details from worker)'));
+    });
+    worker.on('error', (err) => { if (!settled) reject(err); });
+    worker.on('exit', (code) => {
+      if (!settled && code !== 0) reject(new Error(`VDJ parse worker exited with code ${code}`));
+    });
+  });
+}
+
+async function runVdjLibraryImport({ force = false, updateBootStep = false } = {}) {
+  if (isAlternateDjProviderActive() && !force) {
+    const msg = 'Alternate DJ provider active';
+    if (updateBootStep) setBootStep('library', 'done', msg);
+    return { skipped: true, reason: msg };
+  }
+
+  const plan = planVdjImportOnStartup();
+  if (!force && !plan.run) {
+    console.log(`[VDJ] Track import skipped: ${plan.reason}`);
+    if (updateBootStep) setBootStep('library', 'done', plan.reason);
+    return { skipped: true, ...plan };
+  }
+
+  if (vdjImportInProgress) {
+    return { skipped: true, reason: 'Import already in progress' };
+  }
+  vdjImportInProgress = true;
+
+  try {
+    let xmlPath = plan.xmlPath || resolveVdjXmlPath();
+    if (!xmlPath) {
+      const msg = 'No database path configured';
+      console.log(`[VDJ] ${msg}`);
+      if (updateBootStep) setBootStep('library', 'done', msg);
+      return { skipped: true, reason: msg };
+    }
+
+    const resolved = vdjParser.resolveDatabasePath(xmlPath);
+    if (!resolved.path) {
+      const msg = resolved.error || 'Database not found';
+      if (updateBootStep) setBootStep('library', 'done', msg);
+      return { skipped: true, reason: msg };
+    }
+    xmlPath = resolved.path;
+    const configured = db.getConfig('vdj_db_path');
+    if (configured !== xmlPath) db.setConfig('vdj_db_path', xmlPath);
+
+    let sourceMtime = 0;
+    let sourceFingerprint = '';
+    try {
+      sourceFingerprint = vdjDatabaseFingerprint(xmlPath);
+      sourceMtime = fs.statSync(xmlPath).mtimeMs;
+    } catch { /* ignore */ }
+
+    console.log(`[VDJ] Loading database from ${xmlPath}...`);
+    if (updateBootStep) setBootStep('library', 'running', 'Reading VirtualDJ library…');
+
+    let tracks;
+    try {
+      tracks = await parseVdjDatabaseInWorker(xmlPath);
+    } catch (workerErr) {
+      console.warn(`[VDJ] Background parse failed (${workerErr.message}) — parsing on main thread`);
+      await require('./lib/yield').yieldToEventLoop();
+      tracks = vdjParser.parseVdjDatabase(xmlPath);
+    }
+
+    broadcast({ type: 'vdj_import', phase: 'parse', total: tracks.length });
+    if (updateBootStep) setBootStep('library', 'running', `Importing ${tracks.length} tracks…`);
+
+    const result = await db.importTracksBatched(tracks, {
+      batchSize: 150,
+      onProgress: (done, total) => {
+        const detail = `Importing tracks ${done}/${total}`;
+        if (updateBootStep) setBootStep('library', 'running', detail);
+        broadcast({ type: 'vdj_import', phase: 'import', done, total });
+      },
+    });
+
+    const xmlCount = tracks.length;
+    const hubCount = db.getTrackStats().total;
+    const mergedCount = Math.max(0, xmlCount - hubCount);
+
+    db.setConfig('vdj_import_last_at', String(Date.now()));
+    if (sourceFingerprint) db.setConfig('vdj_import_source_fingerprint', sourceFingerprint);
+    if (sourceMtime) db.setConfig('vdj_import_source_mtime', String(Math.floor(sourceMtime)));
+    db.setConfig('vdj_import_last_xml_count', String(xmlCount));
+    db.setConfig('vdj_import_last_hub_count', String(hubCount));
+    db.setConfig('vdj_import_last_merged', String(mergedCount));
+
+    console.log(
+      `[VDJ] Imported ${result.total} tracks (${result.inserted} new, ${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed) — ${xmlCount} in XML → ${hubCount} in hub (${mergedCount} merged)`,
+    );
+    const summary = {
+      ...result,
+      path: xmlPath,
+      skipped: false,
+      xmlCount,
+      hubCount,
+      mergedCount,
+    };
+    const doneDetail = `${xmlCount.toLocaleString()} in XML → ${hubCount.toLocaleString()} in hub (${mergedCount.toLocaleString()} merged)`;
+    if (updateBootStep) setBootStep('library', 'done', doneDetail);
+    broadcast({ type: 'vdj_import', phase: 'done', ...summary });
+    return summary;
+  } catch (e) {
+    console.error(`[VDJ] Failed to load database: ${e.message}`);
+    if (updateBootStep) setBootStep('library', 'done', `Import failed: ${e.message}`);
+    broadcast({ type: 'vdj_import', phase: 'error', error: e.message });
+    return { error: e.message };
+  } finally {
+    vdjImportInProgress = false;
+  }
+}
+
+async function loadVdjDatabaseAsync() {
+  return runVdjLibraryImport({ force: false, updateBootStep: true });
+}
 
 /** Block all DMX writes while blackout hold is active (emergency stop). */
 function installBlackoutDmxGuard(server) {
@@ -5407,12 +6074,6 @@ function installBlackoutDmxGuard(server) {
       origSetFullUniverse(localUniverse, data);
     };
   }
-}
-installBlackoutDmxGuard(artnetServer);
-installBlackoutDmxGuard(dmxUsbServer);
-
-if (Object.keys(touchOverrides.groupDimmers).length && dmxOutputEnabled) {
-  applyAllPersistedGroupDimmersToDmx();
 }
 
 /** Stop all live QA/scene/color output (blackout e-stop). */
@@ -5442,8 +6103,117 @@ function setBlackoutHold(active) {
   console.log(`[TOUCH] Blackout hold ${active ? 'ON' : 'OFF'}`);
 }
 
-// Initialise OS2L module with all dependencies
-os2l.init({
+async function bootstrapAfterListen() {
+  try {
+    setBootStep('dmx', 'running');
+    const artnetNodes = db.getArtNetUniverses();
+    const artnetRate = parseInt(db.getConfig('artnet_refresh_rate') || '44', 10);
+    artnetServer.start(artnetNodes, artnetRate);
+    if (Object.keys(touchOverrides.groupDimmers).length && dmxOutputEnabled) {
+      applyAllPersistedGroupDimmersToDmx();
+    }
+    await autoConnectUsbDevices();
+    setBootStep('dmx', 'done');
+
+    setBootStep('os2l', 'running');
+    if (isDenonEngineActive()) {
+      await denonStagelinq.start({
+        getConfig: (key) => db.getConfig(key),
+        onSubscribed: handleOs2lSubscribed,
+        scheduleBroadcast,
+        state,
+        eventLog,
+      });
+      console.log('[Denon] Engine OS integration active (StageLinQ). OS2L server not started.');
+    } else if (isSeratoActive()) {
+      await seratoDj.start({
+        getConfig: (key) => db.getConfig(key),
+        onSubscribed: handleOs2lSubscribed,
+        touchDeckPlayhead: (deckId) => {
+          vdjTimeLastAt[deckId] = Date.now();
+        },
+        scheduleBroadcast,
+        state,
+        eventLog,
+      });
+      console.log('[Serato] Integration active. OS2L server not started.');
+    } else if (isHubOs2lLocal()) {
+      os2l.startServer(OS2L_PORT, networkUtils.getBindHost(getNetConfig));
+    } else {
+      console.log('[OS2L] Local TCP server disabled — deck data expected from satellite via /api/hub/os2l');
+    }
+    setBootStep('os2l', 'done');
+
+    if (isAlternateDjProviderActive()) {
+      console.log('[VDJ] Skipping VirtualDJ library import (alternate DJ provider active)');
+      setBootStep('library', 'done', 'Skipped (alternate DJ provider)');
+    } else {
+      setBootStep('library', 'running', 'Checking VirtualDJ library…');
+      await loadVdjDatabaseAsync();
+    }
+
+    setBootStep('midi', 'running');
+    try {
+      await midiController.start();
+    } catch (e) {
+      console.warn(`[MIDI] Auto-start failed: ${e.message}`);
+    }
+    setBootStep('midi', 'done');
+
+    setBootStep('network', 'running');
+    bonjourInstance = registerBonjour();
+    startMdnsResponder();
+    setBootStep('network', 'done');
+
+    setBootStep('audio', 'running');
+    _applyAudioInputConfig();
+    setBootStep('audio', 'done');
+
+    markBootReady();
+  } catch (e) {
+    console.error('[Boot] Startup failed:', e);
+    markBootFailed(e);
+  }
+}
+
+async function hubStartupAfterListen() {
+  try {
+    setBootStep('database', 'running', 'Starting…');
+    await db.initAsync((detail) => setBootStep('database', 'running', detail));
+    setBootStep('database', 'done');
+
+    const djSnap = djProviders.snapshot(db.getConfig('dj_active_provider'), (key) => db.getConfig(key));
+    if (!djSnap.runtimeUsesActiveProvider) {
+      console.log(
+        `[DJ] Config: ${djSnap.activeProvider.label} (${djSnap.activeProvider.status}) — runtime uses ${djSnap.effectiveLabel} (enable Denon StageLinQ in Config → DJ Software + restart)`
+      );
+    } else {
+      console.log(`[DJ] Active provider: ${djSnap.activeProvider.label} (${djSnap.activeProvider.transport || '—'})`);
+    }
+
+    hubRoutes.init({
+      db,
+      audioAnalyzer,
+      handleOs2lSubscribed,
+      handleOs2lButton: os2l.handleButtonAction,
+      broadcast,
+      getAnalysisConfig,
+      getAnchorPoints,
+      requireAuth,
+      generateSequenceForTrack: sequenceRoutes.generateSequenceForTrack,
+      onSequenceGenerated: (trackId, result) => autoLoadSequenceForTrack(trackId, result?.sequence),
+    });
+
+    loadTouchGroupDimmers();
+    refreshMixerConfig();
+    applyStartupDmxSetting();
+
+    artnetServer = new ArtNetServer();
+    dmxUsbServer = new DmxUsbServer();
+    installBlackoutDmxGuard(artnetServer);
+    installBlackoutDmxGuard(dmxUsbServer);
+
+    os2l.init({
   db,
   broadcast,
   state,
@@ -5465,53 +6235,9 @@ os2l.init({
   isAnySequencePlaying,
   onMessage: handleOs2lSubscribed,
   setBlackoutHold,
-});
+    });
 
-// Auto-connect enabled USB devices
-(async function autoConnectUsbDevices() {
-  const devices = db.getEnabledUsbDevices();
-  if (!devices.length) {
-    console.log('[DMX-USB] No enabled USB devices to auto-connect');
-    return;
-  }
-  for (const device of devices) {
-    if (!device.auto_connect) continue;
-    try {
-      console.log(`[DMX-USB] Auto-connecting "${device.label}" → universe ${device.local_universe}...`);
-      const ok = await dmxUsbServer.openDevice(device);
-      if (!ok) console.warn(`[DMX-USB] Failed to auto-connect "${device.label}"`);
-    } catch (e) {
-      console.error(`[DMX-USB] Error auto-connecting "${device.label}": ${e.message}`);
-    }
-  }
-})();
-
-// Auto-import VDJ database if configured
-(function loadVdjDatabase() {
-  try {
-    let xmlPath = db.getConfig('vdj_db_path');
-    if (!xmlPath) xmlPath = vdjParser.findVdjDatabase();
-    if (xmlPath) {
-      console.log(`[VDJ] Loading database from ${xmlPath}...`);
-      const tracks = vdjParser.parseVdjDatabase(xmlPath);
-      const result = db.importTracks(tracks);
-      console.log(`[VDJ] Imported ${result.total} tracks (${result.inserted} new, ${result.updated} updated, ${result.pathUpdated || 0} paths updated, ${result.duplicatesRemoved || 0} stale duplicates removed)`);
-    } else {
-      console.log('[VDJ] No database path configured — skip track import');
-    }
-  } catch (e) {
-    console.error(`[VDJ] Failed to load database: ${e.message}`);
-  }
-})();
-
-if (isHubOs2lLocal()) {
-  os2l.startServer(OS2L_PORT, networkUtils.getBindHost(getNetConfig));
-} else {
-  console.log('[OS2L] Local TCP server disabled — deck data expected from satellite via /api/hub/os2l');
-}
-
-// Initialise MIDI controller module with same dependencies as OS2L
-midiController.init({
+    midiController.init({
   db,
   broadcast,
   state,
@@ -5539,16 +6265,25 @@ midiController.init({
   },
   persistTouchGroupDimmers,
   setBlackoutHold,
-});
+    });
 
-// Auto-start MIDI controller
-(async function startMidi() {
-  try {
-    await midiController.start();
+    await bootstrapAfterListen();
   } catch (e) {
-    console.warn(`[MIDI] Auto-start failed: ${e.message}`);
+    console.error('[Boot] Hub startup failed:', e);
+    markBootFailed(e);
   }
-})();
+}
+
+function startHub() {
+  setBootStep('web', 'running');
+  const bindHost = networkUtils.getBindHost(getNetConfig) || '0.0.0.0';
+  httpServer.listen(WEB_PORT, bindHost, () => {
+    const label = bindHost === '0.0.0.0' ? 'all interfaces' : bindHost;
+    console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT} (bound to ${label})`);
+    setBootStep('web', 'done');
+    hubStartupAfterListen();
+  });
+}
 
 httpServer.on('error', (err) => {
   console.error(`[HTTP] Failed to listen on port ${WEB_PORT}: ${err.message}`);
@@ -5559,11 +6294,7 @@ httpServer.on('error', (err) => {
   process.exit(1);
 });
 
-httpServer.listen(WEB_PORT, networkUtils.getBindHost(getNetConfig), () => {
-  const bindHost = networkUtils.getBindHost(getNetConfig);
-  const label = bindHost === '0.0.0.0' ? 'all interfaces' : bindHost;
-  console.log(`[HTTP] Web UI at http://localhost:${WEB_PORT} (bound to ${label})`);
-});
+startHub();
 
 process.on('uncaughtException', (err) => {
   console.error('[FATAL] Uncaught exception:', err.stack || err.message || err);
@@ -5575,22 +6306,20 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
-// Auto-start live audio input capture if it was enabled on last run
-_applyAudioInputConfig();
-
-let bonjourInstance = registerBonjour();
-startMdnsResponder();
+let bonjourInstance = null;
 
 // Graceful shutdown (SIGINT = Ctrl+C, SIGTERM = node --watch restart)
 async function shutdown() {
   console.log('\nShutting down...');
-  artnetServer.shutdown();
-  await dmxUsbServer.shutdownAll();
+  if (artnetServer) artnetServer.shutdown();
+  if (dmxUsbServer) await dmxUsbServer.shutdownAll();
   audioInput.capture.stop();
   if (mdnsResponder) mdnsResponder.destroy();
   if (bonjourInstance) bonjourInstance.destroy();
   midiController.stop();
   os2l.stopServer();
+  await denonStagelinq.stop();
+  await seratoDj.stop();
   httpServer.close();
   process.exit(0);
 }
@@ -5598,14 +6327,20 @@ async function shutdown() {
 process.on('SIGINT', () => { shutdown().catch(console.error); });
 process.on('SIGTERM', () => { shutdown().catch(console.error); });
 
-console.log(`
+try {
+  let mdnsHost = MDNS_HOSTNAME_DEFAULT;
+  try { mdnsHost = getMdnsHostname(); } catch { /* db not open yet */ }
+  console.log(`
 ╔══════════════════════════════════════════════╗
 ║          DMX Controller v1.2.0               ║
 ║                                              ║
 ║  OS2L:  port ${OS2L_PORT}                            ║
 ║  Web:   http://localhost:${WEB_PORT}                ║
-║  mDNS:  http://${getMdnsHostname()}.local:${WEB_PORT}  (${networkUtils.getLocalIPv4(getNetConfig)}) ║
+║  mDNS:  http://${mdnsHost}.local:${WEB_PORT}  (${networkUtils.getLocalIPv4(getNetConfig)}) ║
 ║                                              ║
 ║  Waiting for VirtualDJ connection...         ║
 ╚══════════════════════════════════════════════╝
 `);
+} catch {
+  console.log(`[HTTP] Thaluxis Hub — Web http://localhost:${WEB_PORT}  OS2L ${OS2L_PORT}`);
+}

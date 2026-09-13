@@ -7,6 +7,7 @@ A Node.js-based DMX lighting controller with real-time VirtualDJ integration via
 ## Features
 
 - **VirtualDJ OS2L Integration** — Connects to VirtualDJ via TCP using the OS2L protocol, receiving real-time deck data (BPM, beat position, play state, levels, loops, track info, SoundSwitch IDs)
+- **DJ software providers (beta)** — Denon ([StageLinQ](https://github.com/chrisle/StageLinq)) and Serato ([serato-connect](https://github.com/chrisle/serato-connect)). Config → DJ Software. See [docs/dj-integrations.md](docs/dj-integrations.md)
 - **Bonjour/mDNS Discovery** — Automatically advertises as an `_os2l._tcp` service so VirtualDJ can discover the controller on the network
 - **Art-Net DMX Output** — Sends DMX512 data over the network via Art-Net (UDP), with support for multiple universes and configurable frame rates
 - **USB DMX Output** — Direct DMX output via USB adapters using FTDI D2XX (Enttec Open DMX, DMXKING ultraDMX Micro) and libusb (SoundSwitch DMX Micro)

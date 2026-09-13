@@ -58,8 +58,8 @@
     </button>
 
     <span class="sidebar-group-label">DJ Integration</span>
-    <button class="config-sidebar-btn" data-cfgtab="vdj">
-      <span class="sidebar-icon">&#9835;</span> VirtualDJ
+    <button class="config-sidebar-btn" data-cfgtab="dj-software">
+      <span class="sidebar-icon">&#127911;</span> DJ Software
     </button>
     <button class="config-sidebar-btn" data-cfgtab="os2l">
       <span class="sidebar-icon">&#9889;</span> OS2L
@@ -432,62 +432,145 @@
       </div>
     </div>
 
-    <!-- ═══ VirtualDJ ═══ -->
-    <div class="config-sub-page" id="cfgpage-vdj">
+    <!-- ═══ DJ Software (provider) ═══ -->
+    <div class="config-sub-page" id="cfgpage-dj-software">
       <div class="config-section">
-        <h3><span class="section-icon">&#9835;</span> VirtualDJ Configuration</h3>
-        <p class="config-desc">Settings for the VirtualDJ connection, OS2L integration, and database paths.</p>
+        <h3><span class="section-icon">&#127911;</span> DJ Software</h3>
+        <p class="config-desc">Choose which DJ application Thaluxis integrates with. Additional providers ship as <span class="config-beta-badge">Beta</span> until fully tested.</p>
         <div class="config-card">
-          <h4>OS2L Connection</h4>
+          <h4>Active provider</h4>
           <div class="config-row">
-            <label>Enable VirtualDJ link</label>
-            <input type="checkbox" id="cfgVdjOs2lEnabled" style="width:16px;height:16px;accent-color:var(--accent)" checked>
-            <span class="config-hint">Accept OS2L from VirtualDJ on this machine. Uncheck if using a <strong>Thaluxis Satellite</strong> on another laptop. Restart required.</span>
+            <label>DJ application</label>
+            <select id="cfgDjProvider" style="min-width:220px"></select>
           </div>
-          <div class="config-row"><label>OS2L TCP Port</label><input type="number" id="cfgOs2lPort" value="8787" style="width:100px"><span class="config-hint">Default: 8787</span></div>
-          <div class="config-row"><label>Service Name</label><input type="text" id="cfgOs2lServiceName" value="DMX-Controller" style="width:200px"><span class="config-hint">mDNS/Bonjour service name</span></div>
-          <div class="config-row"><label>Web UI Port</label><input type="number" id="cfgWebPort" value="80" style="width:100px"><span class="config-hint">Restart required on change</span></div>
-          <div class="config-row"><label>Subscription Frequency</label><input type="number" id="cfgFrequency" value="25" min="1" max="60" style="width:80px"><span class="config-hint">Hz (updates per second from VDJ)</span></div>
+          <div class="config-row">
+            <label>Runtime</label>
+            <span id="cfgDjRuntimeStatus" style="font-size:13px;color:var(--text-dim)">—</span>
+          </div>
+          <p class="config-hint" id="cfgDjProviderNotes" style="margin-top:8px"></p>
+          <div id="cfgDenonOptions" hidden style="margin-top:12px">
+            <div class="config-row">
+              <label>Enable StageLinQ</label>
+              <input type="checkbox" id="cfgDenonStagelinqEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span class="config-hint">Connect to Engine OS players on the LAN. <strong>Restart required.</strong> Disables hub OS2L while active.</span>
+            </div>
+            <div class="config-row">
+              <label>Player mode</label>
+              <select id="cfgDenonPlayerMode" style="width:100px">
+                <option value="4">4 decks</option>
+                <option value="2">2 decks</option>
+              </select>
+              <span class="config-hint">Prime 4 = 4 layers on one player; twin SC6000 = 2.</span>
+            </div>
+            <div class="config-row">
+              <label>Download Engine library</label>
+              <input type="checkbox" id="cfgDenonDownloadLibrary" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span class="config-hint">Pull library DB from players (slower connect; needed later for track metadata).</span>
+            </div>
+          </div>
+          <div id="cfgSeratoOptions" hidden style="margin-top:12px">
+            <div class="config-row">
+              <label>Enable Serato</label>
+              <input type="checkbox" id="cfgSeratoIntegrationEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span class="config-hint"><strong>Restart required.</strong> Disables hub OS2L while active.</span>
+            </div>
+            <div class="config-row">
+              <label>Live OSC link</label>
+              <input type="checkbox" id="cfgSeratoRemoteEnabled" style="width:16px;height:16px;accent-color:var(--accent)" checked>
+              <span class="config-hint">Uses the <strong>legacy Serato Remote protocol</strong> (OSC over TCP) — Thaluxis acts as the Remote peer on your LAN. This is <em>not</em> the discontinued Serato Remote / Remote Mini <strong>iOS apps</strong>. Desktop Serato DJ Pro must still expose Remote pairing on your version (often older builds; Serato has discontinued the mobile apps).</span>
+            </div>
+            <div class="config-row">
+              <label>History polling</label>
+              <input type="checkbox" id="cfgSeratoHistoryPoll" style="width:16px;height:16px;accent-color:var(--accent)" checked>
+              <span class="config-hint">Recommended baseline: deck/track loads from Serato history files (Serato 3 &amp; 4). Works when Remote is unavailable — lighting follows loads; live playhead needs OSC or extrapolation.</span>
+            </div>
+            <div class="config-row"><label>Library path</label><input type="text" id="cfgSeratoLibraryPath" style="width:100%;max-width:500px" placeholder="Optional — default Music\_Serato_ or Serato 4 library"></div>
+            <div class="config-row"><label>Remote TCP port</label><input type="number" id="cfgSeratoRemotePort" value="0" min="0" max="65535" style="width:100px"><span class="config-hint">0 = auto (shown in log on startup)</span></div>
+            <div class="config-row"><label>Remote peer name</label><input type="text" id="cfgSeratoPeerName" value="Thaluxis-Hub" style="width:200px"><span class="config-hint">mDNS name Serato sees</span></div>
+            <div class="config-row">
+              <label>Remote pairing</label>
+              <button type="button" class="btn btn-secondary" id="btnSeratoReadvertiseRemote">Re-advertise on network</button>
+              <span class="config-hint" id="cfgSeratoRemoteHint">Serato usually discovers Remote peers <strong>when DJ Pro starts</strong>. If Serato was already open before the hub, use this button or toggle Remote in Serato — the hub also re-advertises every ~20s until connected.</span>
+            </div>
+          </div>
         </div>
-        <div class="config-card">
-          <h4>VirtualDJ Database</h4>
-          <div class="config-row"><label>VDJ Database Path</label><input type="text" id="cfgVdjDbPath" style="width:100%;max-width:500px" placeholder="C:\Users\...\VirtualDJ\database.xml"></div>
-          <div class="config-row"><label>VDJ Folder</label><input type="text" id="cfgVdjFolder" style="width:100%;max-width:500px" placeholder="C:\Users\...\Documents\VirtualDJ"><span class="config-hint">VDJ root folder for SoundSwitch data</span></div>
-          <div class="config-row">
-            <label>Auto-read Metadata</label>
-            <input type="checkbox" id="cfgVdjAutoMeta" style="width:16px;height:16px;accent-color:var(--accent)">
-            <span class="config-hint">Read track metadata from VDJ database when loaded</span>
+
+        <div id="cfgVdjOptions" hidden>
+          <div class="config-card" style="margin-top:16px">
+            <h4>VirtualDJ — OS2L</h4>
+            <div class="config-row">
+              <label>Enable VirtualDJ link</label>
+              <input type="checkbox" id="cfgVdjOs2lEnabled" style="width:16px;height:16px;accent-color:var(--accent)" checked>
+              <span class="config-hint">Accept OS2L from VirtualDJ on this machine. Uncheck if using a <strong>Thaluxis Satellite</strong> on another laptop. Restart required.</span>
+            </div>
+            <div class="config-row"><label>OS2L TCP Port</label><input type="number" id="cfgOs2lPort" value="8787" style="width:100px"><span class="config-hint">Default: 8787</span></div>
+            <div class="config-row"><label>Service Name</label><input type="text" id="cfgOs2lServiceName" value="DMX-Controller" style="width:200px"><span class="config-hint">mDNS/Bonjour service name</span></div>
+            <div class="config-row"><label>Web UI Port</label><input type="number" id="cfgWebPort" value="80" style="width:100px"><span class="config-hint">Restart required on change</span></div>
+            <div class="config-row"><label>Subscription Frequency</label><input type="number" id="cfgFrequency" value="25" min="1" max="60" style="width:80px"><span class="config-hint">Hz (updates per second from VDJ)</span></div>
+            <div class="config-row">
+              <label>Number of Decks</label>
+              <select id="cfgVdjDecks" style="width:80px"><option value="2">2</option><option value="4" selected>4</option></select>
+              <span class="config-hint">Restart required on change</span>
+            </div>
+          </div>
+          <div class="config-card">
+            <h4>VirtualDJ — Track library</h4>
+            <div class="config-row"><label>VDJ Database Path</label><input type="text" id="cfgVdjDbPath" style="width:100%;max-width:500px" placeholder="C:\Users\...\VirtualDJ\database.xml"></div>
+            <div class="config-row"><label>VDJ Folder</label><input type="text" id="cfgVdjFolder" style="width:100%;max-width:500px" placeholder="C:\Users\...\Documents\VirtualDJ"><span class="config-hint">VDJ root folder for SoundSwitch data</span></div>
+            <div class="config-row">
+              <label>Auto-read Metadata</label>
+              <input type="checkbox" id="cfgVdjAutoMeta" style="width:16px;height:16px;accent-color:var(--accent)">
+              <span class="config-hint">Read track metadata from VDJ database when loaded</span>
+            </div>
+            <div class="config-row">
+              <label>Import on startup</label>
+              <select id="cfgVdjImportMode" style="min-width:260px">
+                <option value="smart">Smart — only when database.xml changes</option>
+                <option value="off">Never — manual import only</option>
+                <option value="always">Every startup (full import)</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <label>Library status</label>
+              <span id="cfgVdjImportStatus" style="font-size:13px;color:var(--text-dim)">—</span>
+            </div>
+            <p class="config-hint" style="margin-top:4px;margin-left:0">After import, shows VirtualDJ <code>database.xml</code> song count vs unique rows in the hub (duplicate artist/title/path entries are merged).</p>
+            <div class="config-row" style="align-items:center">
+              <label></label>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnVdjImportLibrary">Import library now</button>
+              <span class="config-hint" id="cfgVdjImportProgress" style="margin-left:8px"></span>
+            </div>
+          </div>
+          <div class="config-card">
+            <h4>Now Playing — Requests System</h4>
+            <p class="config-desc" style="margin-bottom:8px">Publish the currently playing track to an external requests system (e.g.&nbsp;MobileDJay).</p>
+            <div class="config-row">
+              <label>Enable</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgNowPlayingEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Send now-playing updates when a track starts on a deck</span>
+              </label>
+            </div>
+            <div class="config-row"><label>Base URL</label><input type="text" id="cfgNowPlayingBaseUrl" placeholder="http://localhost:3000" style="width:100%;max-width:400px"><span class="config-hint">Root URL of the requests system (no trailing slash)</span></div>
+            <div class="config-row"><label>Event ID / Slug</label><input type="text" id="cfgNowPlayingEventId" placeholder="saturday-night-party" style="width:100%;max-width:300px"><span class="config-hint">Numeric event ID or event slug. Leave blank for global.</span></div>
+            <div class="config-row">
+              <label>Album Artwork</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfgNowPlayingArtwork" style="width:16px;height:16px;accent-color:var(--accent)">
+                <span style="font-size:12px">Look up album artwork from MusicBrainz when not already available</span>
+              </label>
+            </div>
           </div>
         </div>
-        <div class="config-card">
-          <h4>Deck Configuration</h4>
-          <div class="config-row">
-            <label>Number of Decks</label>
-            <select id="cfgVdjDecks" style="width:80px"><option value="2">2</option><option value="4" selected>4</option></select>
-            <span class="config-hint">Restart required on change</span>
-          </div>
+
+        <div class="config-card config-beta-panel" id="cfgDjBetaPanel" hidden>
+          <h4 id="cfgDjBetaTitle"><span class="config-beta-badge">Beta</span> —</h4>
+          <p class="config-desc" id="cfgDjBetaDesc" style="margin-bottom:8px"></p>
+          <h4 style="margin-top:12px;font-size:13px">Supported devices (StageLinQ)</h4>
+          <ul id="cfgDjSupportedDevices" class="config-device-list"></ul>
+          <p class="config-desc" style="margin-top:12px;margin-bottom:0">Scope: <code>docs/dj-integrations.md</code></p>
         </div>
-        <div class="config-card" style="margin-top:16px">
-          <h4>Now Playing &mdash; Requests System</h4>
-          <p class="config-desc" style="margin-bottom:8px">Publish the currently playing track to an external requests system (e.g.&nbsp;MobileDJay) so customers can see what&rsquo;s playing.</p>
-          <div class="config-row">
-            <label>Enable</label>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="cfgNowPlayingEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
-              <span style="font-size:12px">Send now-playing updates when a track starts on a deck</span>
-            </label>
-          </div>
-          <div class="config-row"><label>Base URL</label><input type="text" id="cfgNowPlayingBaseUrl" placeholder="http://localhost:3000" style="width:100%;max-width:400px"><span class="config-hint">Root URL of the requests system (no trailing slash)</span></div>
-          <div class="config-row"><label>Event ID / Slug</label><input type="text" id="cfgNowPlayingEventId" placeholder="saturday-night-party" style="width:100%;max-width:300px"><span class="config-hint">Numeric event ID or event slug. Leave blank for global.</span></div>
-          <div class="config-row">
-            <label>Album Artwork</label>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="cfgNowPlayingArtwork" style="width:16px;height:16px;accent-color:var(--accent)">
-              <span style="font-size:12px">Look up album artwork from MusicBrainz when not already available</span>
-            </label>
-          </div>
-        </div>
-        <div style="margin-top:16px"><button class="btn btn-primary btn-sm" id="btnSaveVdj">Save VDJ Settings</button></div>
+        <div style="margin-top:16px"><button class="btn btn-primary btn-sm" id="btnSaveDjProvider">Save DJ Software</button></div>
       </div>
     </div>
 
@@ -1053,28 +1136,39 @@
     <div class="config-sub-page" id="cfgpage-event-log">
       <div class="config-section">
         <h3><span class="section-icon">&#9776;</span> Event Log</h3>
-        <p class="config-desc">View real-time OS2L messages from VirtualDJ. Toggle capture on/off to control whether events are recorded.</p>
+        <p class="config-desc">Hub console output, OS2L traffic, and connection events. Server <strong>log level</strong> (App Settings) controls what is stored; use filters below to narrow the view.</p>
         <div class="subs-status-bar" style="margin-bottom:12px">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
             <input type="checkbox" id="logCaptureToggle" checked style="accent-color:var(--accent);width:16px;height:16px">
-            <strong>Capture Events</strong>
+            <strong>Live capture</strong>
           </label>
           <span id="logCount" style="font-size:11px;color:var(--accent)">0 events</span>
+          <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;margin-left:12px">
+            Show ≥
+            <select id="logUiMinLevel" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--panel-border);background:var(--panel-bg);color:var(--text)">
+              <option value="debug">Debug</option>
+              <option value="info" selected>Info</option>
+              <option value="warn">Warn</option>
+              <option value="error">Error</option>
+            </select>
+          </label>
           <span style="flex:1"></span>
           <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
             <input type="checkbox" id="logAutoScroll" checked style="accent-color:var(--accent)"> Auto-scroll
           </label>
+          <button class="btn btn-secondary btn-sm" id="btnRefreshLog">Refresh</button>
           <button class="btn btn-secondary btn-sm" id="btnClearLog">Clear</button>
         </div>
         <div class="event-log-container" id="eventLog">
           <div class="log-toolbar">
             <button class="filter-btn active" data-filter="all">All</button>
-            <button class="filter-btn" data-filter="subscribed">Subscribed</button>
+            <button class="filter-btn" data-filter="server">Server</button>
+            <button class="filter-btn" data-filter="subscribed">OS2L</button>
             <button class="filter-btn" data-filter="beat">Beat</button>
             <button class="filter-btn" data-filter="btn">Btn</button>
             <button class="filter-btn" data-filter="cmd">Cmd</button>
             <button class="filter-btn" data-filter="connection">Connection</button>
-            <button class="filter-btn" data-filter="server">Server</button>
+            <button class="filter-btn" data-filter="error">Errors</button>
           </div>
           <div id="logEntries"></div>
         </div>
@@ -1106,6 +1200,21 @@
               <tr>
                 <td><strong>Debug Logging</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Enable verbose debug logging for OS2L messages, deck subscriptions, and auto-generation.</div></td>
                 <td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="settingDebugLogging" style="accent-color:var(--accent);width:18px;height:18px"><span id="settingDebugLoggingLabel" style="font-size:12px">Off</span></label></td>
+              </tr>
+              <tr>
+                <td><strong>Server log level</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">Minimum severity stored in the hub event log and streamed to Config (error &lt; warn &lt; info &lt; debug).</div></td>
+                <td>
+                  <select id="settingLogLevel" style="width:100%;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--panel-border);background:var(--panel-bg);color:var(--text)">
+                    <option value="error">Error</option>
+                    <option value="warn">Warn</option>
+                    <option value="info" selected>Info</option>
+                    <option value="debug">Debug</option>
+                  </select>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Color terminal logs</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">ANSI colors in the dev/server console: module tags (e.g. [VDJ], [HTTP]) and error/warn highlighting. Event log UI stays plain text.</div></td>
+                <td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="settingLogColor" style="accent-color:var(--accent);width:18px;height:18px" checked><span id="settingLogColorLabel" style="font-size:12px">On</span></label></td>
               </tr>
             </tbody>
           </table>
@@ -1727,6 +1836,8 @@
 <!-- ══════ Footer ══════ -->
 <footer class="footer">&copy; Eyup Events &mdash; Thaluxis DMX &middot; Lighting control forged for live events</footer>
 
+<script src="js/hub-connection.js"></script>
+<script src="js/hub-event-log.js"></script>
 <script src="js/config.js"></script>
 </body>
 </html>

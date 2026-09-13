@@ -13,7 +13,13 @@ UI.renderTopButtons = function () {
   const out = document.getElementById('btnOutput');
   out.textContent = S.outputEnabled ? 'OUTPUT ON' : 'OUTPUT OFF';
   out.classList.toggle('off', !S.outputEnabled);
-  document.getElementById('btnBlackout').classList.toggle('active', S.blackoutActive);
+  const bk = document.getElementById('btnBlackout');
+  if (bk) {
+    bk.classList.toggle('active', S.blackoutActive);
+    bk.setAttribute('aria-pressed', S.blackoutActive ? 'true' : 'false');
+    bk.textContent = S.blackoutActive ? 'BLACKOUT ON' : 'BLACKOUT';
+  }
+  document.body.classList.toggle('blackout-mode', S.blackoutActive);
 };
 
 UI.updateDecks = function (decks) {
@@ -56,13 +62,17 @@ UI.renderActionsGrid = function () {
   grid.style.setProperty('--ag-cols', maxCol);
 
   grid.innerHTML = enabled.map((a) => {
-    const style = 'background:' + (a.color || '#333') + ';color:' + (a.text_color || '#fff') +
-      ';grid-column:' + ((a.grid_col || 0) + 1) + ' / span ' + (a.grid_w || 1) +
-      ';grid-row:' + ((a.grid_row || 0) + 1) + ' / span ' + (a.grid_h || 1);
+    const isBlackout = a.action_type === 'blackout';
+    const style = isBlackout
+      ? 'grid-column:' + ((a.grid_col || 0) + 1) + ' / span ' + (a.grid_w || 1) +
+        ';grid-row:' + ((a.grid_row || 0) + 1) + ' / span ' + (a.grid_h || 1)
+      : 'background:' + (a.color || '#333') + ';color:' + (a.text_color || '#fff') +
+        ';grid-column:' + ((a.grid_col || 0) + 1) + ' / span ' + (a.grid_w || 1) +
+        ';grid-row:' + ((a.grid_row || 0) + 1) + ' / span ' + (a.grid_h || 1);
     const isActive = a.action_type === 'scene'
       ? S.activeSceneId != null && (a.action_data || {}).scene_id === S.activeSceneId
-      : S.actionActiveStates[a.id];
-    const activeClass = isActive ? ' action-active' : '';
+      : (isBlackout ? S.blackoutActive : S.actionActiveStates[a.id]);
+    const activeClass = (isActive ? ' action-active' : '') + (isBlackout ? ' action-blackout' : '');
     return '<button class="action-btn' + activeClass + '" data-aid="' + a.id + '" style="' + style + '">' +
       (a.icon ? '<span class="ab-icon">' + a.icon + '</span>' : '') +
       '<span class="ab-label">' + esc(a.label) + '</span></button>';
@@ -82,6 +92,13 @@ UI.renderActionsGrid = function () {
         UI.renderActionsGrid();
         UI.renderScenes();
       });
+    } else if (action.action_type === 'blackout') {
+      bindHoldToggle(
+        btn,
+        () => { btn.classList.add('held'); Actions.setBlackout(true); UI.renderTopButtons(); },
+        () => { btn.classList.remove('held'); Actions.setBlackout(false); UI.renderTopButtons(); },
+        () => true,
+      );
     } else {
       bindHoldToggle(
         btn,

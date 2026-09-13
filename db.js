@@ -832,6 +832,7 @@ function init() {
   seedNewEffectsV14();
   migrateKamStratoMirrorBallCategory();
   migrateKamMirrorBallCategoriesV2();
+  migrateVdjImportConfigKeys();
 
   // Ensure fixture_target is correct for all effects (covers fresh DBs where migration didn't backfill)
   // Color-only effects target fixtures with color channels
@@ -951,6 +952,85 @@ function init() {
 
   console.log(`[DB] Opened ${DB_PATH}  (${subCount > 0 ? subCount + ' subscriptions' : 'seeded subs'}, ${count > 0 ? count + ' fixture types' : 'seeded defaults'}, ${effectCount > 0 ? effectCount + ' effects' : 'seeded effects'})`);
   return db;
+}
+
+function closeDatabase() {
+  if (db) {
+    try {
+      db.close();
+    } catch (e) {
+      console.warn('[DB] close:', e.message);
+    }
+    db = null;
+  }
+}
+
+/** Attach main-thread connection after background init worker has migrated the file. */
+function openMainDatabaseConnection() {
+  if (db) return db;
+  migrateLegacyDbLocation();
+  migrateProgramFilesDataDir();
+  if (!process.env.DMX_DB_PATH) ensureDataDir();
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  console.log(`[DB] Main thread connected to ${DB_PATH}`);
+  return db;
+}
+
+const { yieldToEventLoop } = require('./lib/yield');
+
+let _initAsyncPromise = null;
+
+/**
+ * Open the database after the HTTP server is listening so the UI stays reachable.
+ * Migrations run on the main thread (with yields) — worker-thread init was unreliable
+ * under dev watch / concurrent SQLite access on Windows.
+ */
+async function initAsync(onProgress) {
+  if (db) return db;
+  if (_initAsyncPromise) return _initAsyncPromise;
+
+  _initAsyncPromise = (async () => {
+    onProgress?.('Preparing database…');
+    await yieldToEventLoop();
+    onProgress?.('Migrating & seeding…');
+    await yieldToEventLoop();
+    init();
+    onProgress?.('Ready');
+    return db;
+  })();
+
+  try {
+    return await _initAsyncPromise;
+  } finally {
+    _initAsyncPromise = null;
+  }
+}
+
+async function importTracksBatched(trackArray, { batchSize = 150, onProgress } = {}) {
+  if (!trackArray?.length) {
+    return { inserted: 0, updated: 0, pathUpdated: 0, duplicatesRemoved: 0, total: 0 };
+  }
+
+  let inserted = 0;
+  let updated = 0;
+  let pathUpdated = 0;
+  let duplicatesRemoved = 0;
+  const total = trackArray.length;
+
+  for (let i = 0; i < total; i += batchSize) {
+    const slice = trackArray.slice(i, i + batchSize);
+    const r = importTracks(slice);
+    inserted += r.inserted || 0;
+    updated += r.updated || 0;
+    pathUpdated += r.pathUpdated || 0;
+    duplicatesRemoved += r.duplicatesRemoved || 0;
+    if (onProgress) onProgress(Math.min(i + slice.length, total), total);
+    await yieldToEventLoop();
+  }
+
+  return { inserted, updated, pathUpdated, duplicatesRemoved, total };
 }
 
 // ─── Seed Default Effects ────────────────────────────────────────────────────
@@ -1916,6 +1996,45 @@ function migrateKamMirrorBallCategoriesV2() {
   }
 }
 
+function migrateVdjImportConfigKeys() {
+  const ins = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
+  ins.run('vdj_import_mode', 'smart');
+  ins.run('vdj_import_last_at', '0');
+  ins.run('vdj_import_source_mtime', '0');
+  ins.run('vdj_import_last_xml_count', '0');
+  ins.run('vdj_import_last_hub_count', '0');
+  ins.run('vdj_import_last_merged', '0');
+  ins.run('dj_active_provider', 'virtualdj');
+  ins.run('serato_integration_enabled', '0');
+  ins.run('denon_stagelinq_enabled', '0');
+  ins.run('vdj_import_source_fingerprint', '');
+  backfillVdjImportFingerprintFromLibrary();
+}
+
+/** One-time: record library fingerprint after smart-import shipped (avoids false "changed" on next boot). */
+function backfillVdjImportFingerprintFromLibrary() {
+  const fp = db.prepare('SELECT value FROM config WHERE key = ?').get('vdj_import_source_fingerprint');
+  if (fp?.value) return;
+  const lastAt = db.prepare('SELECT value FROM config WHERE key = ?').get('vdj_import_last_at');
+  if (!lastAt?.value || lastAt.value === '0') return;
+  let xmlPath = db.prepare('SELECT value FROM config WHERE key = ?').get('vdj_db_path')?.value;
+  if (!xmlPath) return;
+  try {
+    const vdjParser = require('./vdj-parser');
+    const resolved = vdjParser.resolveDatabasePath(xmlPath);
+    if (!resolved.path) return;
+    const fs = require('fs');
+    const st = fs.statSync(resolved.path);
+    const fingerprint = `${st.size}:${Math.floor(st.mtimeMs / 1000)}`;
+    db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(
+      'vdj_import_source_fingerprint',
+      fingerprint,
+    );
+  } catch {
+    /* library path unreadable at migrate time */
+  }
+}
+
 /** Upgrade Kam shutter/strobe channels so steady output uses shutter_open ranges. */
 function migrateShutterStrobeChannelTypes() {
   const done = db.prepare("SELECT value FROM config WHERE key = 'shutter_strobe_types_v1'").get();
@@ -2387,16 +2506,23 @@ function toggleSubscription(id) {
 
 // ─── Config CRUD ────────────────────────────────────────────────────────────
 
+function isDatabaseOpen() {
+  return !!db;
+}
+
 function getConfig(key) {
+  if (!db) return null;
   const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
   return row ? row.value : null;
 }
 
 function setConfig(key, value) {
+  if (!db) throw new Error('Database is not open');
   db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, String(value));
 }
 
 function getAllConfig() {
+  if (!db) return {};
   const rows = db.prepare('SELECT * FROM config').all();
   const obj = {};
   for (const r of rows) obj[r.key] = r.value;
@@ -3450,7 +3576,12 @@ function getTrackByPath(filepath) {
   const driveMatch = normalized.match(/^[A-Za-z]:\\/);
   if (driveMatch) {
     const pathAfterDrive = normalized.substring(2);
-    return db.prepare('SELECT * FROM tracks WHERE SUBSTR(filepath, 3) = ?').get(pathAfterDrive);
+    const bySuffix = db.prepare('SELECT * FROM tracks WHERE SUBSTR(filepath, 3) = ?').get(pathAfterDrive);
+    if (bySuffix) return bySuffix;
+    const suffixLower = pathSuffixKey(normalized);
+    if (suffixLower) {
+      return db.prepare('SELECT * FROM tracks WHERE LOWER(SUBSTR(filepath, 3)) = ?').get(suffixLower);
+    }
   }
 
   return null;
@@ -5320,6 +5451,10 @@ function touchSatelliteDevice(deviceId, ip) {
 
 module.exports = {
   init,
+  initAsync,
+  closeDatabase,
+  openMainDatabaseConnection,
+  importTracksBatched,
   backupDatabase, getDbPath, getDataDir, restoreDatabase,
   getFixtureTypes, getFixtureType, createFixtureType, updateFixtureType, deleteFixtureType,
   getFixtureTypeSummaries, searchFixtureTypes,

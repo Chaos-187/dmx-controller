@@ -97,9 +97,9 @@ function initControls() {
   const bkBtn = document.getElementById('btnBlackout');
   bindHoldToggle(
     bkBtn,
-    () => { Actions.setBlackout(true); UI.renderTopButtons(); },
-    () => { Actions.setBlackout(false); UI.renderTopButtons(); },
-    () => false, // blackout is always toggle
+    () => { bkBtn.classList.add('held'); Actions.setBlackout(true); UI.renderTopButtons(); },
+    () => { bkBtn.classList.remove('held'); Actions.setBlackout(false); UI.renderTopButtons(); },
+    () => true,
   );
 
   // Color hold/toggle switch

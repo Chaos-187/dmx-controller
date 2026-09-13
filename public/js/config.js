@@ -183,6 +183,15 @@ async function ensureConfigAuth(onSuccess) {
   return false;
 }
 
+HubConnection.init({
+  onRetry: () => {
+    try {
+      if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
+    } catch { /* ignore */ }
+    connect();
+  },
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  WebSocket
 // ═══════════════════════════════════════════════════════════════
@@ -193,6 +202,7 @@ function connect() {
 
   ws.onopen = () => {
     console.log('[WS] Connected');
+    HubConnection.notifyOpen();
     const dot = document.getElementById('statusDot');
     const txt = document.getElementById('statusText');
     if (dot) dot.classList.add('connected');
@@ -253,6 +263,22 @@ function connect() {
         statusEl.textContent = `Re-sequencing… ${msg.regenerated + msg.failed}/${msg.total}`;
       }
     }
+    else if (msg.type === 'vdj_import') {
+      if (msg.phase === 'import' && msg.done != null && msg.total != null) {
+        updateVdjImportProgress(`Importing ${msg.done}/${msg.total}…`);
+      } else if (msg.phase === 'parse') {
+        updateVdjImportProgress(`Parsing ${msg.total || ''} tracks…`);
+      } else if (msg.phase === 'done') {
+        updateVdjImportProgress('');
+        loadVdjImportStatus();
+        const btn = document.getElementById('btnVdjImportLibrary');
+        if (btn) btn.disabled = false;
+      } else if (msg.phase === 'error') {
+        updateVdjImportProgress(`Failed: ${msg.error || 'unknown error'}`);
+        const btn = document.getElementById('btnVdjImportLibrary');
+        if (btn) btn.disabled = false;
+      }
+    }
     else if (msg.type === 'seq_stale_regen_complete') {
       const statusEl = document.getElementById('cfgStaleSeqRegenStatus');
       const btn = document.getElementById('btnRegenerateStaleSeqs');
@@ -262,11 +288,8 @@ function connect() {
       if (typeof refreshStaleSequenceSummary === 'function') refreshStaleSequenceSummary();
       else if (btn) btn.disabled = false;
     }
-    else if (msg.type === 'server_log') {
-      logEvent({ evtType: 'server', raw: { level: msg.level, message: msg.message }, ts: msg.ts });
-    }
-    else if (msg.type === 'log') {
-      logEvent({ evtType: msg.raw?.evt || 'event', raw: msg.raw, ts: msg.ts });
+    else if (['connection', 'server_log', 'log_history', 'log', 'beat'].includes(msg.type)) {
+      HubEventLog.handleWsMessage(msg);
     }
     else if (msg.type === 'satellite_pair_request' || msg.type === 'satellite_device_approved'
       || msg.type === 'satellite_device_rejected' || msg.type === 'satellite_device_revoked'
@@ -277,8 +300,11 @@ function connect() {
     }
   };
 
+  ws.onerror = () => HubConnection.notifyClose();
+
   ws.onclose = () => {
     console.log('[WS] Disconnected');
+    HubConnection.notifyClose();
     const dot = document.getElementById('statusDot');
     const txt = document.getElementById('statusText');
     if (dot) dot.classList.remove('connected');
@@ -288,104 +314,15 @@ function connect() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Event Log
+//  Event Log (see js/hub-event-log.js)
 // ═══════════════════════════════════════════════════════════════
-const eventLogEl = document.getElementById('eventLog');
-const logEntriesEl = document.getElementById('logEntries');
-const logCountEl = document.getElementById('logCount');
-const ppOverlay = document.getElementById('ppOverlay');
-const ppContent = document.getElementById('ppContent');
-const logAutoScrollEl = document.getElementById('logAutoScroll');
-const logCaptureToggle = document.getElementById('logCaptureToggle');
-let logCapturing = true;
-let logFilter = 'all';
-let logTotal = 0;
-const MAX_LOG = 2000;
-
-logCaptureToggle.addEventListener('change', () => {
-  logCapturing = logCaptureToggle.checked;
-});
-
-document.getElementById('btnClearLog').addEventListener('click', () => {
-  logEntriesEl.innerHTML = '';
-  logTotal = 0;
-  logCountEl.textContent = '0 events';
-});
-
-// Filter buttons
-eventLogEl.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    eventLogEl.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    logFilter = btn.dataset.filter;
-    // Show/hide entries based on filter
-    logEntriesEl.querySelectorAll('.log-entry').forEach(entry => {
-      if (logFilter === 'all' || entry.dataset.evtType === logFilter) {
-        entry.style.display = '';
-      } else {
-        entry.style.display = 'none';
-      }
-    });
-  });
-});
-
-// Pretty-print on double-click
-ppOverlay.addEventListener('click', (e) => { if (e.target === ppOverlay) ppOverlay.classList.remove('open'); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ppOverlay.classList.remove('open'); });
-
-function logEvent(info) {
-  if (!logCapturing) return;
-  const { evtType, raw, ts } = info;
-  logTotal++;
-  logCountEl.textContent = `${logTotal} events`;
-
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-  entry.dataset.evtType = evtType;
-
-  const time = ts ? new Date(ts) : new Date();
-  const timeStr = time.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(time.getMilliseconds()).padStart(3, '0');
-
-  // Build summary text based on event type
-  let summary = '';
-  if (evtType === 'subscribed' && raw) {
-    summary = `${raw.trigger || ''} = ${JSON.stringify(raw.value ?? '')}`;
-  } else if (evtType === 'beat' && raw) {
-    summary = `pos=${raw.pos ?? ''} strength=${raw.strength ?? ''} bpm=${raw.bpm ?? ''}`;
-  } else if (evtType === 'server' && raw) {
-    const lvl = raw.level === 'error' ? '❌' : raw.level === 'warn' ? '⚠️' : 'ℹ️';
-    summary = `${lvl} ${raw.message || ''}`;
-  } else if (evtType === 'connection') {
-    summary = raw?.connected ? `VDJ connected: ${raw.address || ''}` : 'VDJ disconnected';
-  } else {
-    summary = JSON.stringify(raw || info).substring(0, 200);
-  }
-
-  entry.innerHTML = `<span class="log-time">${timeStr}</span><span class="log-type ${evtType}">${evtType}</span><span class="log-data">${esc(summary)}</span>`;
-
-  // Store raw data for pretty-print
-  entry._rawData = raw || info;
-
-  entry.addEventListener('dblclick', () => {
-    ppContent.textContent = JSON.stringify(entry._rawData, null, 2);
-    ppOverlay.classList.add('open');
-  });
-
-  // Apply current filter
-  if (logFilter !== 'all' && evtType !== logFilter) {
-    entry.style.display = 'none';
-  }
-
-  logEntriesEl.appendChild(entry);
-
-  // Trim old entries
-  while (logEntriesEl.children.length > MAX_LOG) logEntriesEl.removeChild(logEntriesEl.firstChild);
-
-  // Auto-scroll
-  if (logAutoScrollEl.checked) {
-    eventLogEl.scrollTop = eventLogEl.scrollHeight;
-  }
+HubEventLog.init();
+function loadEventLog(full = false) {
+  return HubEventLog.loadEventLog(full);
 }
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.getElementById('ppOverlay')?.classList.remove('open');
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  DMX Dependencies (for strobe test / mover positioning)
@@ -517,25 +454,194 @@ function readOs2lEnabledCheckbox() {
   return true;
 }
 
-async function loadVdjConfig() {
-  try {
-    const config = await fetch('/api/config').then(r => r.json());
-    document.getElementById('cfgOs2lPort').value = config.os2l_port || 8787;
-    document.getElementById('cfgOs2lServiceName').value = config.os2l_service_name || 'DMX-Controller';
-    document.getElementById('cfgWebPort').value = config.web_port || 80;
-    document.getElementById('cfgFrequency').value = config.subscription_frequency || 25;
-    document.getElementById('cfgVdjDbPath').value = config.vdj_db_path || '';
-    document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
-    document.getElementById('cfgVdjAutoMeta').checked = config.vdj_auto_meta === '1';
-    document.getElementById('cfgVdjDecks').value = config.vdj_deck_count || '4';
-    document.getElementById('cfgNowPlayingEnabled').checked = config.now_playing_enabled === '1';
-    document.getElementById('cfgNowPlayingBaseUrl').value = config.now_playing_base_url || '';
-    document.getElementById('cfgNowPlayingEventId').value = config.now_playing_event_id || '';
-    document.getElementById('cfgNowPlayingArtwork').checked = config.now_playing_artwork !== '0';
-    syncOs2lEnabledCheckboxes(config.hub_os2l_local !== '0');
-  } catch (e) {
-    console.error('Failed to load VDJ config:', e);
+function applyDjProviderUi(snap) {
+  const sel = document.getElementById('cfgDjProvider');
+  const statusEl = document.getElementById('cfgDjRuntimeStatus');
+  const notesEl = document.getElementById('cfgDjProviderNotes');
+  const betaPanel = document.getElementById('cfgDjBetaPanel');
+  if (!sel || !snap) return;
+
+  const selectedId = sel.value || snap.active;
+  const selected = (snap.providers || []).find((p) => p.id === selectedId) || snap.activeProvider;
+
+  if (statusEl) {
+    if (snap.runtimeUsesActiveProvider && selectedId === snap.effective) {
+      statusEl.textContent = `Using ${snap.effectiveLabel} (${selected?.transport || '—'})`;
+      statusEl.style.color = 'var(--green)';
+    } else {
+      statusEl.textContent = `Saved: ${selected?.label || selectedId} — live hub still uses ${snap.effectiveLabel}`;
+      statusEl.style.color = 'var(--yellow)';
+    }
   }
+  if (notesEl) notesEl.textContent = selected?.notes || '';
+  const devList = document.getElementById('cfgDjSupportedDevices');
+  if (devList) {
+    devList.innerHTML = '';
+    const items = [
+      ...(selected?.supportedDevices || []),
+      ...(selected?.supportedProducts || []),
+    ];
+    for (const name of items) {
+      const li = document.createElement('li');
+      li.textContent = name;
+      devList.appendChild(li);
+    }
+    if (selected?.referenceUrl) {
+      const li = document.createElement('li');
+      li.innerHTML = `<a href="${selected.referenceUrl}" target="_blank" rel="noopener">Documentation on GitHub</a>`;
+      devList.appendChild(li);
+    }
+  }
+  if (betaPanel) {
+    betaPanel.hidden = !(selected && (selected.status === 'beta' || selected.status === 'planned'));
+  }
+  const denonOpts = document.getElementById('cfgDenonOptions');
+  if (denonOpts) denonOpts.hidden = selectedId !== 'denon_engine';
+  const seratoOpts = document.getElementById('cfgSeratoOptions');
+  if (seratoOpts) seratoOpts.hidden = selectedId !== 'serato';
+  const vdjOpts = document.getElementById('cfgVdjOptions');
+  if (vdjOpts) vdjOpts.hidden = selectedId !== 'virtualdj';
+
+  const betaTitle = document.getElementById('cfgDjBetaTitle');
+  const betaDesc = document.getElementById('cfgDjBetaDesc');
+  if (betaTitle && selected?.status === 'beta') {
+    betaTitle.innerHTML = `<span class="config-beta-badge">Beta</span> ${selected.label}`;
+  }
+  if (betaDesc && selected?.referenceUrl) {
+    if (selectedId === 'denon_engine') {
+      betaDesc.innerHTML = `LAN integration via <a href="${selected.referenceUrl}" target="_blank" rel="noopener">StageLinq</a>. Enable StageLinQ above, save, and restart.`;
+    } else if (selectedId === 'serato') {
+      betaDesc.innerHTML = `Uses <a href="${selected.referenceUrl}" target="_blank" rel="noopener">serato-connect</a>. <strong>History polling</strong> works on current Serato without the discontinued iOS Remote apps. Optional <strong>live OSC</strong> uses the legacy Remote protocol — only if your desktop Serato DJ Pro still offers Remote pairing. See <code>docs/dj-integrations-serato.md</code>.`;
+    } else {
+      betaDesc.textContent = selected.notes || '';
+    }
+  }
+
+}
+
+async function loadDjSoftwareConfig() {
+  try {
+    const [snap, config] = await Promise.all([
+      fetch('/api/dj/providers').then((r) => r.json()),
+      fetch('/api/config').then((r) => r.json()).catch(() => ({})),
+    ]);
+    const sel = document.getElementById('cfgDjProvider');
+    if (!sel) return;
+    sel.innerHTML = '';
+    for (const p of snap.providers || []) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.status === 'stable' ? p.label : `${p.label} (Beta)`;
+      sel.appendChild(opt);
+    }
+    sel.value = config.dj_active_provider || snap.active || 'virtualdj';
+    if (!sel.querySelector(`option[value="${sel.value}"]`)) sel.value = snap.active || 'virtualdj';
+    const denonOn = document.getElementById('cfgDenonStagelinqEnabled');
+    const denonMode = document.getElementById('cfgDenonPlayerMode');
+    const denonLib = document.getElementById('cfgDenonDownloadLibrary');
+    if (denonOn) denonOn.checked = config.denon_stagelinq_enabled === '1';
+    if (denonMode) denonMode.value = config.denon_player_mode === '2' ? '2' : '4';
+    if (denonLib) denonLib.checked = config.denon_download_library === '1';
+    const seratoOn = document.getElementById('cfgSeratoIntegrationEnabled');
+    const seratoRemote = document.getElementById('cfgSeratoRemoteEnabled');
+    const seratoHist = document.getElementById('cfgSeratoHistoryPoll');
+    const seratoPath = document.getElementById('cfgSeratoLibraryPath');
+    const seratoPort = document.getElementById('cfgSeratoRemotePort');
+    const seratoPeer = document.getElementById('cfgSeratoPeerName');
+    if (seratoOn) seratoOn.checked = config.serato_integration_enabled === '1';
+    if (seratoRemote) seratoRemote.checked = config.serato_remote_enabled !== '0';
+    if (seratoHist) seratoHist.checked = config.serato_history_poll !== '0';
+    if (seratoPath) seratoPath.value = config.serato_library_path || '';
+    if (seratoPort) seratoPort.value = config.serato_remote_port != null ? config.serato_remote_port : '0';
+    if (seratoPeer) seratoPeer.value = config.serato_peer_name || 'Thaluxis-Hub';
+    populateVdjConfigFields(config);
+    applyDjProviderUi(snap);
+    loadVdjImportStatus();
+  } catch (e) {
+    console.error('Failed to load DJ provider config:', e);
+  }
+}
+
+function populateVdjConfigFields(config) {
+  const os2lPort = document.getElementById('cfgOs2lPort');
+  if (!os2lPort) return;
+  os2lPort.value = config.os2l_port || 8787;
+  document.getElementById('cfgOs2lServiceName').value = config.os2l_service_name || 'DMX-Controller';
+  document.getElementById('cfgWebPort').value = config.web_port || 80;
+  document.getElementById('cfgFrequency').value = config.subscription_frequency || 25;
+  document.getElementById('cfgVdjDbPath').value = config.vdj_db_path || '';
+  document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
+  document.getElementById('cfgVdjAutoMeta').checked = config.vdj_auto_meta === '1';
+  document.getElementById('cfgVdjDecks').value = config.vdj_deck_count || '4';
+  const importMode = document.getElementById('cfgVdjImportMode');
+  if (importMode) {
+    const mode = config.vdj_import_mode || (config.vdj_import_on_startup === '0' ? 'off' : config.vdj_import_on_startup === '1' ? 'always' : 'smart');
+    importMode.value = mode === 'off' || mode === 'always' ? mode : 'smart';
+  }
+  document.getElementById('cfgNowPlayingEnabled').checked = config.now_playing_enabled === '1';
+  document.getElementById('cfgNowPlayingBaseUrl').value = config.now_playing_base_url || '';
+  document.getElementById('cfgNowPlayingEventId').value = config.now_playing_event_id || '';
+  document.getElementById('cfgNowPlayingArtwork').checked = config.now_playing_artwork !== '0';
+  syncOs2lEnabledCheckboxes(config.hub_os2l_local !== '0');
+}
+
+function collectVdjConfigPairs() {
+  const os2lOn = readOs2lEnabledCheckbox();
+  const importModeEl = document.getElementById('cfgVdjImportMode');
+  return [
+    ['hub_os2l_local', os2lOn ? '1' : '0'],
+    ['os2l_port', document.getElementById('cfgOs2lPort').value],
+    ['os2l_service_name', document.getElementById('cfgOs2lServiceName').value],
+    ['web_port', document.getElementById('cfgWebPort').value],
+    ['subscription_frequency', document.getElementById('cfgFrequency').value],
+    ['vdj_db_path', document.getElementById('cfgVdjDbPath').value],
+    ['vdj_folder', document.getElementById('cfgVdjFolder').value],
+    ['vdj_auto_meta', document.getElementById('cfgVdjAutoMeta').checked ? '1' : '0'],
+    ['vdj_deck_count', document.getElementById('cfgVdjDecks').value],
+    ['vdj_import_mode', importModeEl ? importModeEl.value : 'smart'],
+    ['now_playing_enabled', document.getElementById('cfgNowPlayingEnabled').checked ? '1' : '0'],
+    ['now_playing_base_url', document.getElementById('cfgNowPlayingBaseUrl').value.replace(/\/+$/, '')],
+    ['now_playing_event_id', document.getElementById('cfgNowPlayingEventId').value.trim()],
+    ['now_playing_artwork', document.getElementById('cfgNowPlayingArtwork').checked ? '1' : '0'],
+  ];
+}
+
+function formatVdjImportStatusLine(data) {
+  const parts = [];
+  const xml = data.xmlCount || 0;
+  const hub = data.hubCount ?? data.trackCount ?? 0;
+  const merged = data.mergedCount || 0;
+  if (xml > 0) {
+    parts.push(`${xml.toLocaleString()} in XML → ${hub.toLocaleString()} in hub (${merged.toLocaleString()} merged)`);
+  } else {
+    parts.push(`${hub.toLocaleString()} tracks in hub`);
+  }
+  const lastAt = parseInt(data.lastAt || '0', 10);
+  const lastStr = lastAt ? new Date(lastAt).toLocaleString() : 'Never';
+  parts.push(`Last import: ${lastStr}`);
+  if (data.plan?.run) parts.push('would import on next startup');
+  if (data.inProgress) parts.push('Import running…');
+  return parts.join(' · ');
+}
+
+async function loadVdjImportStatus() {
+  const statusEl = document.getElementById('cfgVdjImportStatus');
+  if (!statusEl) return;
+  try {
+    const data = await fetch('/api/vdj/import-status').then((r) => r.json());
+    if (data.error) {
+      statusEl.textContent = data.error;
+      return;
+    }
+    statusEl.textContent = formatVdjImportStatusLine(data);
+  } catch {
+    statusEl.textContent = 'Could not load import status';
+  }
+}
+
+function updateVdjImportProgress(msg) {
+  const el = document.getElementById('cfgVdjImportProgress');
+  if (el) el.textContent = msg || '';
 }
 
 async function loadConfigPage() {
@@ -546,15 +652,7 @@ async function loadConfigPage() {
     document.getElementById('cfgOs2lServiceName').value = config.os2l_service_name || 'DMX-Controller';
     document.getElementById('cfgWebPort').value = config.web_port || 80;
     document.getElementById('cfgFrequency').value = config.subscription_frequency || 25;
-    document.getElementById('cfgVdjDbPath').value = config.vdj_db_path || '';
-    document.getElementById('cfgVdjFolder').value = config.vdj_folder || '';
-    document.getElementById('cfgVdjAutoMeta').checked = config.vdj_auto_meta === '1';
-    document.getElementById('cfgVdjDecks').value = config.vdj_deck_count || '4';
-    document.getElementById('cfgNowPlayingEnabled').checked = config.now_playing_enabled === '1';
-    document.getElementById('cfgNowPlayingBaseUrl').value = config.now_playing_base_url || '';
-    document.getElementById('cfgNowPlayingEventId').value = config.now_playing_event_id || '';
-    document.getElementById('cfgNowPlayingArtwork').checked = config.now_playing_artwork !== '0';
-    syncOs2lEnabledCheckboxes(config.hub_os2l_local !== '0');
+    populateVdjConfigFields(config);
   } catch (e) {
     console.error('Failed to load config:', e);
   }
@@ -576,7 +674,7 @@ function loadActiveTabData() {
       if (dt && dt.dataset.devtab === 'audio')    loadAudioInputConfig();
     },
     os2l:            () => { loadSubscriptions(); loadButtonMaps(); },
-    vdj:             () => loadVdjConfig(),
+    'dj-software':   () => loadDjSoftwareConfig(),
     lighting:        () => loadLightingConfig(),
     movers:          () => loadMoverConfig(),
     sequencer:       () => { loadSequencerConfig(); const st = document.querySelector('.seq-tab-btn.active'); if (st && _seqGenTabs.has(st.dataset.seqtab)) loadGeneratorConfig(); },
@@ -589,6 +687,7 @@ function loadActiveTabData() {
     midi:            () => { loadMidiStatus(); loadMidiMappings(); },
     companion:       () => loadCompanionExportDefaults(),
     satellites:      () => loadSatelliteConfig(),
+    'event-log':     () => loadEventLog(true),
   };
   if (loaders[tab]) loaders[tab]();
 }
@@ -2447,6 +2546,15 @@ async function loadAppSettings() {
     const dbgOn = config.debug_logging === '1';
     dbgChk.checked = dbgOn;
     dbgLbl.textContent = dbgOn ? 'On' : 'Off';
+    const logLevelEl = document.getElementById('settingLogLevel');
+    if (logLevelEl) logLevelEl.value = config.log_level || 'info';
+    const logColorChk = document.getElementById('settingLogColor');
+    const logColorLbl = document.getElementById('settingLogColorLabel');
+    if (logColorChk) {
+      const colorOn = config.log_color !== '0';
+      logColorChk.checked = colorOn;
+      if (logColorLbl) logColorLbl.textContent = colorOn ? 'On' : 'Off';
+    }
     if (config.analysis_target_peaks)       document.getElementById('settingAnalysisPeaks').value       = config.analysis_target_peaks;
     if (config.analysis_sample_rate)        document.getElementById('settingAnalysisSampleRate').value   = config.analysis_sample_rate;
     if (config.analysis_section_sensitivity) document.getElementById('settingAnalysisSensitivity').value = config.analysis_section_sensitivity;
@@ -2507,6 +2615,31 @@ document.getElementById('settingDebugLogging').addEventListener('change', async 
   document.getElementById('settingDebugLoggingLabel').textContent = this.checked ? 'On' : 'Off';
   try { await fetch('/api/config/debug_logging', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: val }) }); } catch(e) { console.error('Failed to save debug logging setting', e); }
 });
+
+const settingLogLevelEl = document.getElementById('settingLogLevel');
+if (settingLogLevelEl) {
+  settingLogLevelEl.addEventListener('change', async function() {
+    try {
+      await fetch('/api/config/log_level', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: this.value }) });
+    } catch (e) {
+      console.error('Failed to save log level', e);
+    }
+  });
+}
+
+const settingLogColorEl = document.getElementById('settingLogColor');
+if (settingLogColorEl) {
+  settingLogColorEl.addEventListener('change', async function() {
+    const val = this.checked ? '1' : '0';
+    const lbl = document.getElementById('settingLogColorLabel');
+    if (lbl) lbl.textContent = this.checked ? 'On' : 'Off';
+    try {
+      await fetch('/api/config/log_color', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: val }) });
+    } catch (e) {
+      console.error('Failed to save log color setting', e);
+    }
+  });
+}
 
 ['settingAnalysisPeaks', 'settingAnalysisSampleRate', 'settingAnalysisSensitivity', 'settingAnalysisNormalize'].forEach(id => {
   const keyMap = { settingAnalysisPeaks: 'analysis_target_peaks', settingAnalysisSampleRate: 'analysis_sample_rate', settingAnalysisSensitivity: 'analysis_section_sensitivity', settingAnalysisNormalize: 'analysis_normalize_pct' };
@@ -2724,24 +2857,142 @@ document.getElementById('btnSaveArtnetRate').addEventListener('click', () => {
   saveConfigBatch([['artnet_refresh_rate', document.getElementById('cfgArtnetRefreshRate').value]], 'btnSaveArtnetRate');
 });
 
-document.getElementById('btnSaveVdj').addEventListener('click', () => {
-  const os2lOn = readOs2lEnabledCheckbox();
-  saveConfigBatch([
-    ['hub_os2l_local', os2lOn ? '1' : '0'],
-    ['os2l_port', document.getElementById('cfgOs2lPort').value],
-    ['os2l_service_name', document.getElementById('cfgOs2lServiceName').value],
-    ['web_port', document.getElementById('cfgWebPort').value],
-    ['subscription_frequency', document.getElementById('cfgFrequency').value],
-    ['vdj_db_path', document.getElementById('cfgVdjDbPath').value],
-    ['vdj_folder', document.getElementById('cfgVdjFolder').value],
-    ['vdj_auto_meta', document.getElementById('cfgVdjAutoMeta').checked ? '1' : '0'],
-    ['vdj_deck_count', document.getElementById('cfgVdjDecks').value],
-    ['now_playing_enabled', document.getElementById('cfgNowPlayingEnabled').checked ? '1' : '0'],
-    ['now_playing_base_url', document.getElementById('cfgNowPlayingBaseUrl').value.replace(/\/+$/, '')],
-    ['now_playing_event_id', document.getElementById('cfgNowPlayingEventId').value.trim()],
-    ['now_playing_artwork', document.getElementById('cfgNowPlayingArtwork').checked ? '1' : '0'],
-  ], 'btnSaveVdj');
-});
+const cfgDjProviderEl = document.getElementById('cfgDjProvider');
+if (cfgDjProviderEl) {
+  cfgDjProviderEl.addEventListener('change', () => {
+    const id = cfgDjProviderEl.value;
+    if (id === 'serato') {
+      const seratoOn = document.getElementById('cfgSeratoIntegrationEnabled');
+      if (seratoOn) seratoOn.checked = true;
+    } else if (id === 'denon_engine') {
+      const denonOn = document.getElementById('cfgDenonStagelinqEnabled');
+      if (denonOn) denonOn.checked = true;
+    }
+    fetch('/api/dj/providers')
+      .then((r) => r.json())
+      .then((snap) => {
+        snap.active = id;
+        applyDjProviderUi(snap);
+      })
+      .catch(() => {});
+  });
+}
+
+function buildDjProviderSettingsPayload() {
+  const id = document.getElementById('cfgDjProvider')?.value || 'virtualdj';
+  const payload = { provider: id };
+  if (id === 'virtualdj') {
+    const os2lOn = readOs2lEnabledCheckbox();
+    const importModeEl = document.getElementById('cfgVdjImportMode');
+    payload.vdj = {
+      hub_os2l_local: os2lOn,
+      os2l_port: document.getElementById('cfgOs2lPort')?.value,
+      os2l_service_name: document.getElementById('cfgOs2lServiceName')?.value,
+      web_port: document.getElementById('cfgWebPort')?.value,
+      subscription_frequency: document.getElementById('cfgFrequency')?.value,
+      vdj_db_path: document.getElementById('cfgVdjDbPath')?.value,
+      vdj_folder: document.getElementById('cfgVdjFolder')?.value,
+      vdj_auto_meta: document.getElementById('cfgVdjAutoMeta')?.checked,
+      vdj_deck_count: document.getElementById('cfgVdjDecks')?.value,
+      vdj_import_mode: importModeEl ? importModeEl.value : 'smart',
+      now_playing_enabled: document.getElementById('cfgNowPlayingEnabled')?.checked,
+      now_playing_base_url: document.getElementById('cfgNowPlayingBaseUrl')?.value.replace(/\/+$/, ''),
+      now_playing_event_id: document.getElementById('cfgNowPlayingEventId')?.value.trim(),
+      now_playing_artwork: document.getElementById('cfgNowPlayingArtwork')?.checked,
+    };
+  } else if (id === 'serato') {
+    payload.serato = {
+      enabled: document.getElementById('cfgSeratoIntegrationEnabled')?.checked !== false,
+      remote_enabled: document.getElementById('cfgSeratoRemoteEnabled')?.checked,
+      history_poll: document.getElementById('cfgSeratoHistoryPoll')?.checked,
+      library_path: document.getElementById('cfgSeratoLibraryPath')?.value.trim() || '',
+      remote_port: document.getElementById('cfgSeratoRemotePort')?.value || '0',
+      peer_name: document.getElementById('cfgSeratoPeerName')?.value.trim() || 'Thaluxis-Hub',
+    };
+  } else if (id === 'denon_engine') {
+    payload.denon = {
+      enabled: document.getElementById('cfgDenonStagelinqEnabled')?.checked !== false,
+      player_mode: document.getElementById('cfgDenonPlayerMode')?.value || '4',
+      download_library: document.getElementById('cfgDenonDownloadLibrary')?.checked,
+    };
+  }
+  return payload;
+}
+
+const btnSaveDjProvider = document.getElementById('btnSaveDjProvider');
+if (btnSaveDjProvider) {
+  btnSaveDjProvider.addEventListener('click', async () => {
+    const btn = btnSaveDjProvider;
+    const origText = btn.textContent;
+    try {
+      const res = await authFetch('/api/dj/provider-settings', {
+        method: 'POST',
+        body: JSON.stringify(buildDjProviderSettingsPayload()),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
+      btn.textContent = 'Saved!'; btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
+      await loadDjSoftwareConfig();
+    } catch (e) {
+      console.error('DJ provider save failed:', e);
+      btn.textContent = 'Error!'; btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)';
+    }
+    setTimeout(() => { btn.textContent = origText; btn.style.borderColor = ''; btn.style.color = ''; }, 1500);
+  });
+}
+
+const btnSeratoReadvertiseRemote = document.getElementById('btnSeratoReadvertiseRemote');
+if (btnSeratoReadvertiseRemote) {
+  btnSeratoReadvertiseRemote.addEventListener('click', async () => {
+    const hint = document.getElementById('cfgSeratoRemoteHint');
+    const orig = btnSeratoReadvertiseRemote.textContent;
+    btnSeratoReadvertiseRemote.disabled = true;
+    btnSeratoReadvertiseRemote.textContent = 'Advertising…';
+    try {
+      const res = await authFetch('/api/dj/serato/readvertise-remote', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (hint) hint.textContent = data.error || 'Re-advertise failed';
+        return;
+      }
+      if (data.ok) {
+        if (hint) {
+          hint.innerHTML = `Re-advertised on port <strong>${data.port}</strong> (${esc(data.instanceName || '')}). Enable Remote in Serato or restart DJ Pro if it still does not connect.`;
+        }
+      } else if (hint) {
+        hint.textContent = data.reason === 'already_connected'
+          ? 'Remote peer is already connected.'
+          : `Could not re-advertise (${data.reason || 'unknown'}).`;
+      }
+    } catch (e) {
+      if (hint) hint.textContent = e.message;
+    } finally {
+      btnSeratoReadvertiseRemote.disabled = false;
+      btnSeratoReadvertiseRemote.textContent = orig;
+    }
+  });
+}
+
+const btnVdjImportLibrary = document.getElementById('btnVdjImportLibrary');
+if (btnVdjImportLibrary) {
+  btnVdjImportLibrary.addEventListener('click', async () => {
+    btnVdjImportLibrary.disabled = true;
+    updateVdjImportProgress('Starting…');
+    try {
+      const res = await fetch('/api/vdj/import', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        updateVdjImportProgress(data.error || 'Import failed to start');
+        btnVdjImportLibrary.disabled = false;
+        return;
+      }
+      updateVdjImportProgress('Import started…');
+    } catch (e) {
+      updateVdjImportProgress(e.message);
+      btnVdjImportLibrary.disabled = false;
+    }
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Subscriptions CRUD

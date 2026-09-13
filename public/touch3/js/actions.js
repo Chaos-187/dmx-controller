@@ -197,7 +197,8 @@ Actions.executeTouchAction = function (action, on) {
       Actions.fire(on);
       break;
     case 'blackout':
-      if (on) Actions.setBlackout(true);
+      Actions.setBlackout(!!on);
+      UI.renderTopButtons();
       break;
     case 'master_dimmer':
       if (on && data.value !== undefined) {
