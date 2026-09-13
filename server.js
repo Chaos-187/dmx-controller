@@ -545,6 +545,7 @@ function handleOs2lSubscribed(data) {
     if (key === 'filepath' && typeof value === 'string' && value) {
       const parts = value.replace(/\\\\/g, '\\').split('\\');
       state.decks[deck].filename = parts[parts.length - 1] || value;
+      suppressDeckSequencePause(deck);
 
       // Resolve track_id for the UI (waveform display, etc.)
       const resolvedTrack = ensureTrackForOs2lPath(value, deck);
@@ -776,6 +777,11 @@ function handleOs2lSubscribed(data) {
         startSequencePlayback(deck);
         console.log(`[SEQ] Deck ${deck} playing — resuming sequence`);
       } else if (!deckNowPlaying && activeSequences[deck].playing) {
+        if (deckSequencePauseSuppressed(deck)) {
+          if (db.getConfig('debug_logging') === '1') {
+            console.log(`[SEQ] Deck ${deck} play=0 ignored (suppress window after track load)`);
+          }
+        } else {
         // Deck stopped — check if this is a natural track end or a manual pause.
         const ds = activeSequences[deck];
         // Update currentTimeMs from standlone timer if active (non-VDJ)
@@ -800,6 +806,7 @@ function handleOs2lSubscribed(data) {
           broadcast({ type: 'seq_playing', deck, playing: false });
           console.log(`[SEQ] Deck ${deck} paused — pausing sequence`);
         }
+        }
       }
     }
 
@@ -816,6 +823,7 @@ function handleOs2lSubscribed(data) {
       }
       const ds = activeSequences[deck];
       if (ds) {
+        const prevTimeMs = ds.currentTimeMs;
         ds.vdjDriven = true;
         ds.currentTimeMs = value;
         const seqDur = getSequencePlaybackDurationMs(ds);
@@ -827,17 +835,19 @@ function handleOs2lSubscribed(data) {
         if (ds._endActionApplied && shouldUseVdjTime(deck) && isDeckPlaying(deck) && seqDur > 0 && value < seqDur - 1000) {
           ds._endActionApplied = false;
           if (!ds.playing) {
-            ds.playing = true;
-            broadcast({ type: 'seq_playing', deck, playing: true });
+            startSequencePlayback(deck);
             console.log(`[SEQ] Deck ${deck} — recovered output (VDJ still playing, playhead before sequence end)`);
           }
         }
-        // Resume output if sequence was loaded but not yet playing — never restart after end
         const pastEnd = sequenceTimePastEnd(ds, value);
-        if (!ds.playing && isDeckPlaying(deck) && !ds._endActionApplied && !pastEnd) {
-          ds.playing = true;
-          if (!shouldUseVdjTime(deck)) startPlaybackTimer(deck);
-          broadcast({ type: 'seq_playing', deck, playing: true });
+        const playheadMoving = vdjPlayheadLooksPlaying(deck, value, prevTimeMs);
+        const vdjStillRunning = shouldUseVdjTime(deck) && playheadMoving && os2lTimeIsActive(deck);
+        if (!ds.playing && !ds._endActionApplied && !pastEnd && (isDeckPlaying(deck) || vdjStillRunning)) {
+          if (!isDeckPlaying(deck) && vdjStillRunning) {
+            state.decks[deck].play = 1;
+            console.log(`[SEQ] Deck ${deck} — resynced play=1 (playhead advancing, stale play=0)`);
+          }
+          startSequencePlayback(deck);
         }
       }
       processSequenceAtTime(deck, value);
@@ -4340,6 +4350,25 @@ function isAnySequencePlaying() {
 const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... } }
 const playbackTimers = {};   // { deckNum: intervalId }
 const vdjTimeLastAt = {};    // { deckNum: timestamp } — last OS2L time event per deck
+/** Ignore brief play=0 OS2L glitches right after a track/sequence load (VDJ load/cue races). */
+const deckSeqPauseSuppressUntil = {};
+
+const DECK_SEQ_PAUSE_SUPPRESS_MS = 2500;
+
+function suppressDeckSequencePause(deck, ms = DECK_SEQ_PAUSE_SUPPRESS_MS) {
+  deckSeqPauseSuppressUntil[deck] = Date.now() + ms;
+}
+
+function deckSequencePauseSuppressed(deck) {
+  return Date.now() < (deckSeqPauseSuppressUntil[deck] || 0);
+}
+
+/** Forward playhead motion between OS2L time samples (not a large seek). */
+function vdjPlayheadLooksPlaying(_deck, timeMs, prevTimeMs) {
+  if (typeof timeMs !== 'number' || typeof prevTimeMs !== 'number') return false;
+  const delta = timeMs - prevTimeMs;
+  return delta > 20 && delta < 6000;
+}
 
 // Cached mixer integration settings (refreshed on config save / startup)
 let _cachedMixerConfig = {
@@ -4511,6 +4540,7 @@ function loadGeneratedSequenceOntoDeck(deck, generatedSeq, trackId) {
       };
     }
     broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+    suppressDeckSequencePause(deck);
     const ds = activeSequences[deck];
     if (ds.playing) {
       processSequenceAtTime(deck, ds.currentTimeMs ?? state.decks[deck]?.time ?? 0);
@@ -5852,10 +5882,17 @@ function resolveVdjXmlPath() {
   return xmlPath || null;
 }
 
-/** Stable change detection — VDJ touches database.xml often; mtime alone false-triggers import. */
+/** Stable change detection — VDJ bumps mtime on many operations; size is enough for skip/re-import. */
 function vdjDatabaseFingerprint(resolvedPath) {
   const st = fs.statSync(resolvedPath);
-  return `${st.size}:${Math.floor(st.mtimeMs / 1000)}`;
+  return String(st.size);
+}
+
+/** Match current size against stored fingerprint (legacy `size:mtimeSec` or size-only). */
+function vdjFingerprintMatchesStored(storedFp, currentSizeFp) {
+  if (!storedFp || !currentSizeFp) return false;
+  const storedSize = storedFp.includes(':') ? storedFp.split(':')[0] : storedFp;
+  return String(storedSize) === String(currentSizeFp);
 }
 
 function planVdjImportOnStartup() {
@@ -5876,7 +5913,7 @@ function planVdjImportOnStartup() {
   try {
     const st = fs.statSync(resolved.path);
     sourceMtime = st.mtimeMs;
-    fingerprint = `${st.size}:${Math.floor(st.mtimeMs / 1000)}`;
+    fingerprint = vdjDatabaseFingerprint(resolved.path);
   } catch {
     return { run: false, reason: 'Cannot read database file', mode, xmlPath: resolved.path };
   }
@@ -5888,10 +5925,13 @@ function planVdjImportOnStartup() {
     return { run: true, reason: 'Library has never been imported', mode, xmlPath: resolved.path, sourceMtime, fingerprint };
   }
 
-  if (lastFingerprint && fingerprint === lastFingerprint) {
+  if (vdjFingerprintMatchesStored(lastFingerprint, fingerprint)) {
+    if (lastFingerprint.includes(':')) {
+      db.setConfig('vdj_import_source_fingerprint', fingerprint);
+    }
     return {
       run: false,
-      reason: 'Skipped — VirtualDJ library unchanged since last import',
+      reason: 'Skipped — VirtualDJ library file size unchanged since last import',
       mode,
       xmlPath: resolved.path,
       sourceMtime,
@@ -5900,27 +5940,9 @@ function planVdjImportOnStartup() {
     };
   }
 
-  if (!lastFingerprint) {
-    const lastSourceMtime = parseInt(db.getConfig('vdj_import_source_mtime') || '0', 10);
-    const legacySec = Math.floor(lastSourceMtime / 1000);
-    const curSec = Math.floor(sourceMtime / 1000);
-    if (legacySec && curSec === legacySec) {
-      db.setConfig('vdj_import_source_fingerprint', fingerprint);
-      return {
-        run: false,
-        reason: 'Skipped — VirtualDJ library unchanged since last import',
-        mode,
-        xmlPath: resolved.path,
-        sourceMtime,
-        fingerprint,
-        lastAt,
-      };
-    }
-  }
-
   return {
     run: true,
-    reason: 'VirtualDJ database changed since last import',
+    reason: 'VirtualDJ database file size changed since last import',
     mode,
     xmlPath: resolved.path,
     sourceMtime,
@@ -5928,20 +5950,61 @@ function planVdjImportOnStartup() {
   };
 }
 
+function loadTracksFromWorkerMessage(m) {
+  if (m.cacheFile) {
+    try {
+      const raw = fs.readFileSync(m.cacheFile, 'utf8');
+      return JSON.parse(raw);
+    } finally {
+      try {
+        fs.unlinkSync(m.cacheFile);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return m.tracks || [];
+}
+
 function parseVdjDatabaseInWorker(xmlPath) {
   const { Worker } = require('worker_threads');
-  const workerPath = path.join(__dirname, 'workers', 'vdj-parse-worker.js');
+  let workerPath = path.resolve(__dirname, 'workers', 'vdj-parse-worker.js');
+  if (!fs.existsSync(workerPath)) {
+    const besideExe = path.join(path.dirname(process.execPath), 'workers', 'vdj-parse-worker.js');
+    if (fs.existsSync(besideExe)) workerPath = besideExe;
+  }
+  if (!fs.existsSync(workerPath)) {
+    return Promise.reject(new Error(`VDJ parse worker not found at ${workerPath}`));
+  }
   return new Promise((resolve, reject) => {
     const worker = new Worker(workerPath, { workerData: { xmlPath } });
     let settled = false;
-    worker.on('message', (m) => {
+    const finish = (err, tracks) => {
+      if (settled) return;
       settled = true;
-      if (m.ok) resolve(m.tracks || []);
-      else reject(new Error(m.error || 'VDJ parse failed (no details from worker)'));
+      if (err) reject(err);
+      else resolve(tracks);
+    };
+    worker.on('message', (m) => {
+      if (!m || typeof m !== 'object') {
+        finish(new Error('VDJ parse worker sent invalid message'));
+        return;
+      }
+      if (m.ok) {
+        try {
+          finish(null, loadTracksFromWorkerMessage(m));
+        } catch (e) {
+          finish(e);
+        }
+        return;
+      }
+      finish(new Error(m.error || `VDJ parse worker failed (${JSON.stringify(m).slice(0, 240)})`));
     });
-    worker.on('error', (err) => { if (!settled) reject(err); });
+    worker.on('error', (err) => finish(err));
     worker.on('exit', (code) => {
-      if (!settled && code !== 0) reject(new Error(`VDJ parse worker exited with code ${code}`));
+      if (!settled && code !== 0) {
+        finish(new Error(`VDJ parse worker exited with code ${code} (no result message)`));
+      }
     });
   });
 }

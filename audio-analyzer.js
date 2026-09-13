@@ -1285,8 +1285,14 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
         const highEnergy = clusterProps[0].avgEnergy;
         const lowEnergy = clusterProps[clusterProps.length - 1].avgEnergy;
         const relPos = (midEnergy - lowEnergy) / ((highEnergy - lowEnergy) || 1);
-        // Mid-clusters close to the top get the same top label
-        const label = relPos > 0.6 ? topLabel : 'verse';
+        // Early pre-chorus lifts often cluster with the hook — require higher similarity
+        // before the first ~30% of the track to avoid chorus at bar 4–8.
+        let chorusCutoff = 0.6;
+        for (const idx of clusterProps[c].members) {
+          const trackPos = durationMs > 0 ? sectionFeats[idx].startMs / durationMs : 0.5;
+          if (trackPos < 0.32) chorusCutoff = Math.max(chorusCutoff, 0.82);
+        }
+        const label = relPos > chorusCutoff ? topLabel : 'verse';
         for (const idx of clusterProps[c].members) sectionLabels[idx] = label;
       }
     } else if (clusterProps.length === 2) {
@@ -1485,6 +1491,61 @@ function detectSections(energySegments, beats, durationMs, bpm, cfg = {}, firstB
   if (merged.length > 0) {
     merged[0].start_ms = 0;
     merged[merged.length - 1].end_ms = Math.round(durationMs);
+  }
+
+  // ── 12. Main hook alignment — demote pre-chorus "chorus" / tag ramp as buildup ──
+  // Many tracks (e.g. pre-chorus energy lift + snare ramp) get mislabeled as chorus
+  // one phrase before the real hook. Find the first sustained high-energy phrase and
+  // treat everything energetic before it as buildup, not chorus.
+  if (merged.length >= 2 && smTotal.length >= 6 && bpm > 0) {
+    const peakBarE = Math.max(...smTotal);
+    const hookThreshold = peakBarE * 0.87;
+    const sustainBars = Math.max(4, Math.min(8, Math.round(bpm / 22)));
+    let hookBar = -1;
+    for (let i = 0; i <= smTotal.length - sustainBars; i++) {
+      let sum = 0;
+      let ok = true;
+      for (let j = i; j < i + sustainBars; j++) {
+        const e = smTotal[j] || 0;
+        sum += e;
+        if (e < hookThreshold * 0.78) ok = false;
+      }
+      if (ok && sum / sustainBars >= hookThreshold) {
+        hookBar = i;
+        break;
+      }
+    }
+    if (hookBar < 0) {
+      let bestSum = 0;
+      for (let i = 0; i <= smTotal.length - 4; i++) {
+        const s = (smTotal[i] || 0) + (smTotal[i + 1] || 0) + (smTotal[i + 2] || 0) + (smTotal[i + 3] || 0);
+        if (s > bestSum) { bestSum = s; hookBar = i; }
+      }
+    }
+
+    if (hookBar >= 0 && hookBar < bars.length) {
+      const hookStartMs = bars[hookBar].start_ms;
+      const beatMs = 60000 / bpm;
+      const slackMs = beatMs * 2;
+
+      for (const sec of merged) {
+        if (sec.label === 'intro' || sec.label === 'outro') continue;
+
+        if ((sec.label === 'chorus' || sec.label === 'drop') && sec.start_ms < hookStartMs - slackMs) {
+          sec.label = 'buildup';
+          sec.color = SECTION_COLORS.buildup;
+          continue;
+        }
+
+        // Pre-hook ramp (heartbeat pulse, snare roll) — ends at or just before the hook
+        const endsNearHook = sec.end_ms >= hookStartMs - beatMs * 6 && sec.end_ms <= hookStartMs + slackMs;
+        if (endsNearHook && sec.start_ms < hookStartMs - beatMs * 0.5
+            && (sec.label === 'verse' || sec.label === 'bridge')) {
+          sec.label = 'buildup';
+          sec.color = SECTION_COLORS.buildup;
+        }
+      }
+    }
   }
 
   return merged;

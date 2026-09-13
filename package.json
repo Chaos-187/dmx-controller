@@ -45,7 +45,9 @@
       "stem-separator.js",
       "sequence-generator.js",
       "midi-controller.js",
-      "vdj-parser.js"
+      "vdj-parser.js",
+      "workers/vdj-parse-worker.js",
+      "lib/yield.js"
     ],
     "targets": [
       "node24-win-x64"

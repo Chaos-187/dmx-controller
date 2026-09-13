@@ -122,6 +122,11 @@ try {
   process.exit(1);
 }
 
+// ─── Worker scripts (worker_threads load from disk next to exe when not in snapshot) ─
+
+console.log('\nCopying worker scripts...');
+copyDirSync(path.join(ROOT, 'workers'), path.join(DIST, 'workers'));
+
 // ─── Copy native addons ─────────────────────────────────────────────────────
 
 console.log('\nCopying native addons...');

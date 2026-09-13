@@ -17,6 +17,8 @@ const SEQ = (() => {
   let moverPresets = [];
   let activeLanes = new Set();
   let expandedFixtures = new Set();
+  /** Multi-cell / WLED: per-pixel lanes (second-level expand). */
+  let expandedCellsFixtures = new Set();
 
   let zoomPxPerSec = 5;
   let snapBeats = 4;
@@ -56,6 +58,8 @@ const SEQ = (() => {
   // WebSocket
   let ws = null;
   const _pendingTime = {};
+  const _deckLivePlay = {};
+  let _liveOutputMs = null;
   let _timeDirty = false;
 
   // ── Helpers ───────────────────────────────────────────────────
@@ -218,14 +222,24 @@ const SEQ = (() => {
       const msg = JSON.parse(raw);
       if (msg.type === 'state') {
         updateConn(msg.state.connected, msg.state.vdjAddress);
-        for (let d = 1; d <= 4; d++) if (msg.state.decks[d]) _pendingTime[d] = msg.state.decks[d].time || 0;
+        for (let d = 1; d <= 4; d++) {
+          const ds = msg.state.decks[d];
+          if (!ds) continue;
+          _pendingTime[d] = ds.time || 0;
+          _deckLivePlay[d] = ds.play === 1 || ds.play === true;
+        }
+        if (deck && msg.state.decks[deck]) _liveOutputMs = msg.state.decks[deck].time || 0;
         _timeDirty = true;
       }
       else if (msg.type === 'connection') updateConn(msg.connected, msg.address);
       else if (msg.type === 'seq_loaded') handleSeqLoaded(msg);
       else if (msg.type === 'seq_unloaded') handleSeqUnloaded(msg);
       else if (msg.type === 'seq_playing') handleSeqPlaying(msg);
-      else if (msg.type === 'seq_time') { _pendingTime[msg.deck] = msg.timeMs; _timeDirty = true; }
+      else if (msg.type === 'seq_time') {
+        _pendingTime[msg.deck] = msg.timeMs;
+        if (+msg.deck === deck) _liveOutputMs = msg.timeMs;
+        _timeDirty = true;
+      }
       else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputPill(); }
       else if (msg.type === 'seq_batch_progress' || msg.type === 'seq_batch_complete') handleBatchMsg(msg);
       else if (msg.type === 'analysis_complete' || msg.type === 'analysis_error' || msg.type === 'analysis_batch_complete') handleAnalysisMsg(msg);
@@ -1059,11 +1073,24 @@ const SEQ = (() => {
     lanes.innerHTML = html;
 
     // Expand toggles
-    $$('.lane-expand', lanes).forEach(el => {
+    $$('.lane-expand:not(.lane-expand-cells)', lanes).forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = +el.dataset.fix;
-        expandedFixtures.has(id) ? expandedFixtures.delete(id) : expandedFixtures.add(id);
+        if (expandedFixtures.has(id)) {
+          expandedFixtures.delete(id);
+          expandedCellsFixtures.delete(id);
+        } else {
+          expandedFixtures.add(id);
+        }
+        renderTimeline();
+      });
+    });
+    $$('.lane-expand-cells', lanes).forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = +el.dataset.fix;
+        expandedCellsFixtures.has(id) ? expandedCellsFixtures.delete(id) : expandedCellsFixtures.add(id);
         renderTimeline();
       });
     });
@@ -1127,7 +1154,8 @@ const SEQ = (() => {
       const isMulti = fix.cell_count > 0;
       const isMover = !isMulti && fix.channels.some(c => c.type === 'pan') && fix.channels.some(c => c.type === 'tilt');
       const isExp = expandedFixtures.has(fix.id);
-      fixMeta.set(fix.id, { isMulti, isMover, isExp });
+      const isCellsExp = expandedCellsFixtures.has(fix.id);
+      fixMeta.set(fix.id, { isMulti, isMover, isExp, isCellsExp });
     }
     for (const cue of cues) {
       if (cue.duration_ms > _maxCueDurMs) _maxCueDurMs = cue.duration_ms;
@@ -1145,8 +1173,14 @@ const SEQ = (() => {
         // Collapsed: all cues on single lane
         key = `f${cue.fixture_id}`;
       } else if (meta.isMulti) {
-        // Multi-cell expanded: route by cell
-        key = `f${cue.fixture_id}:c${cue.cell || 0}`;
+        // Multi-cell expanded: FX always on FX lane; cells collapsed → one summary lane
+        if (track === 'fx' || (cue.cue_type === 'effect' && cue.effect_id && track !== 'color')) {
+          key = `f${cue.fixture_id}:fx`;
+        } else if (!meta.isCellsExp && (cue.cell || 0) > 0) {
+          key = `f${cue.fixture_id}:cells`;
+        } else {
+          key = `f${cue.fixture_id}:c${cue.cell || 0}`;
+        }
       } else {
         // Expanded into sub-tracks: route by track type
         if (track === 'fx') {
@@ -1165,7 +1199,12 @@ const SEQ = (() => {
     }
     // Merge collapsed multi-cell lanes into summary blocks
     for (const [key, arr] of _cuesByKey.entries()) {
-      if (key.includes(':')) continue; // expanded sub-lane
+      const cellsSummary = /^f(\d+):cells$/.exec(key);
+      if (cellsSummary) {
+        if (arr.length > 1) _cuesByKey.set(key, _mergeCollapsed(arr));
+        continue;
+      }
+      if (key.includes(':')) continue; // other expanded sub-lanes
       const fid = parseInt(key.substring(1));
       const meta = fixMeta.get(fid);
       if (meta && meta.isMulti && !meta.isExp && arr.length > 1) {
@@ -1190,6 +1229,21 @@ const SEQ = (() => {
     }
     if (g) merged.push(g);
     return merged;
+  }
+
+  function overlapsFixtureFx(fid, startMs, endMs) {
+    return cues.some(c =>
+      c.fixture_id === fid && c.cue_type === 'effect' && c.effect_id
+      && c.start_ms < endMs && c.start_ms + c.duration_ms > startMs,
+    );
+  }
+
+  function shouldMirrorRigFxOnLane(key) {
+    if (!key || key === 'rig:fx') return false;
+    if (key.startsWith('f') && key.includes(':fx')) return true;
+    if (/^f\d+:cells$/.test(key)) return true;
+    if (/^f\d+$/.test(key)) return true;
+    return false;
   }
 
   function paintVisibleCues() {
@@ -1233,16 +1287,44 @@ const SEQ = (() => {
         if (c.start_ms > visEndMs) break;
         html += renderCueBlock(c);
       }
+      if (shouldMirrorRigFxOnLane(key)) {
+        const fid = parseInt(key.match(/^f(\d+)/)[1], 10);
+        const rigCues = _cuesByKey.get('rig:fx');
+        if (rigCues) {
+          let rlo = 0, rhi = rigCues.length;
+          while (rlo < rhi) {
+            const mid = (rlo + rhi) >>> 1;
+            if (rigCues[mid].start_ms < visStartMs) rlo = mid + 1;
+            else rhi = mid;
+          }
+          for (let i = rlo; i < rigCues.length; i++) {
+            const rc = rigCues[i];
+            if (rc.start_ms > visEndMs) break;
+            const rcEnd = rc.start_ms + rc.duration_ms;
+            if (overlapsFixtureFx(fid, rc.start_ms, rcEnd)) continue;
+            html += renderCueBlock({ ...rc, id: `rig-${fid}-${rc.id}`, _rigGhost: true });
+          }
+        }
+      }
       track.innerHTML = html;
     }
+    updatePlayheadCueHighlights();
   }
 
   function renderCueBlock(cue) {
     const left = (cue.start_ms / 1000) * zoomPxPerSec;
     const width = Math.max(4, (cue.duration_ms / 1000) * zoomPxPerSec);
+    const atPh = playheadMs >= cue.start_ms && playheadMs < cue.start_ms + cue.duration_ms;
+    const phCls = atPh ? ' at-playhead' : '';
     if (cue._merged) {
-      return `<div class="tl-cue merged" style="left:${left}px;width:${width}px;background:${cue.display_color}" ` +
+      return `<div class="tl-cue merged${phCls}" style="left:${left}px;width:${width}px;background:${cue.display_color}" ` +
         `title="${cue._count} cues">${cue._count}</div>`;
+    }
+    if (cue._rigGhost) {
+      const sc = cue.display_color || cue.color || '#00bfa5';
+      const label = cue.label || 'Rig FX';
+      return `<div class="tl-cue rig-driven${phCls}" data-rig-ghost="1" data-start="${cue.start_ms}" data-end="${cue.start_ms + cue.duration_ms}" ` +
+        `style="left:${left}px;width:${width}px;background:${sc}" title="${esc(label)} (rig master)">${esc(label)}</div>`;
     }
     const sel = selectedIds.has(cue.id) ? ' selected' : '';
     const sc = cue.display_color || cue.color || '#e94560';
@@ -1253,8 +1335,18 @@ const SEQ = (() => {
       const mp = moverPresets.find(p => p.id === cue.mover_preset_id);
       if (mp) label = mp.name;
     }
-    return `<div class="tl-cue${sel}" data-cue="${cue.id}" style="left:${left}px;width:${width}px;${bg}" ` +
-      `title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s)">${esc(label)}<div class="tl-cue-resize"></div></div>`;
+    return `<div class="tl-cue${sel}${phCls}" data-cue="${cue.id}" data-start="${cue.start_ms}" data-end="${cue.start_ms + cue.duration_ms}" ` +
+      `style="left:${left}px;width:${width}px;${bg}" title="${esc(cue.label || cue.cue_type)} (${(cue.start_ms/1000).toFixed(2)}s)">` +
+      `${esc(label)}<div class="tl-cue-resize"></div></div>`;
+  }
+
+  function updatePlayheadCueHighlights() {
+    document.querySelectorAll('.tl-cue[data-start]').forEach(el => {
+      const start = +el.dataset.start;
+      const end = +el.dataset.end;
+      const at = playheadMs >= start && playheadMs < end;
+      el.classList.toggle('at-playhead', at);
+    });
   }
 
   function renderSingleLane(fix, lane, expBtn, hasRGB) {
@@ -1293,17 +1385,39 @@ const SEQ = (() => {
   function renderMultiCellLanes(fix, lane, expBtn, hasRGB) {
     let html = '';
     const hasMaster = fix.channels.some(ch => !ch.cell);
+    const nCells = fix.cell_count || 0;
+    const cellsExp = expandedCellsFixtures.has(fix.id);
+    const cellExpBtn = `<span class="lane-expand lane-expand-cells" data-fix="${fix.id}" ` +
+      `title="${cellsExp ? 'Hide individual cells' : 'Show individual cells'}">${cellsExp ? '&#9660;' : '&#9654;'}</span>`;
+
     if (hasMaster) {
       html += `<div class="tl-lane master-lane" data-fix="${fix.id}" data-lane="${lane}" data-cell="0">` +
         `<div class="tl-lane-hdr">${expBtn}<div class="lane-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
         `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Master</span></div>` +
         `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="0" data-lane-key="f${fix.id}:c0"></div></div>`;
     }
-    for (let cell = 1; cell <= fix.cell_count; cell++) {
-      html += `<div class="tl-lane sub-lane" data-fix="${fix.id}" data-lane="${lane}" data-cell="${cell}">` +
-        `<div class="tl-lane-hdr">${!hasMaster && cell === 1 ? expBtn : ''}<div class="lane-color" style="background:${fix.channels.some(ch => ch.cell === cell && ch.type === 'red') ? '#e94560' : '#888'}"></div>` +
-        `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Cell ${cell}</span></div>` +
-        `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="${cell}" data-lane-key="f${fix.id}:c${cell}"></div></div>`;
+
+    html += `<div class="tl-lane sub-lane fx-lane" data-fix="${fix.id}" data-lane="${lane}" data-sub="fx">` +
+      `<div class="tl-lane-hdr">${hasMaster ? '' : expBtn}` +
+      `<div class="lane-color" style="background:var(--purple,#8e24aa)"></div>` +
+      `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">FX</span></div>` +
+      `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="fx" data-lane-key="f${fix.id}:fx"></div></div>`;
+
+    if (nCells <= 0) return html;
+
+    if (cellsExp) {
+      for (let cell = 1; cell <= nCells; cell++) {
+        html += `<div class="tl-lane sub-lane cells-cell-lane" data-fix="${fix.id}" data-lane="${lane}" data-cell="${cell}">` +
+          `<div class="tl-lane-hdr">${cell === 1 ? cellExpBtn : ''}` +
+          `<div class="lane-color" style="background:${fix.channels.some(ch => ch.cell === cell && ch.type === 'red') ? '#e94560' : '#888'}"></div>` +
+          `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Cell ${cell}</span></div>` +
+          `<div class="tl-lane-track" data-fix="${fix.id}" data-cell="${cell}" data-lane-key="f${fix.id}:c${cell}"></div></div>`;
+      }
+    } else {
+      html += `<div class="tl-lane sub-lane cells-summary-lane" data-fix="${fix.id}" data-lane="${lane}" data-sub="cells">` +
+        `<div class="tl-lane-hdr">${cellExpBtn}<div class="lane-color" style="background:${hasRGB ? '#e94560' : '#888'}"></div>` +
+        `<span class="lane-name">${esc(fix.name)}</span><span class="lane-tag">Cells (${nCells})</span></div>` +
+        `<div class="tl-lane-track" data-fix="${fix.id}" data-sub="cells" data-lane-key="f${fix.id}:cells"></div></div>`;
     }
     return html;
   }
@@ -1316,6 +1430,17 @@ const SEQ = (() => {
     ph.style.left = ((playheadMs / 1000) * zoomPxPerSec + 140) + 'px';
     const s = playheadMs / 1000;
     $('timeDisplay').textContent = `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}.${Math.floor((s%1)*10)}`;
+    const td = $('timeDisplay');
+    if (td && _liveOutputMs != null && Math.abs(_liveOutputMs - playheadMs) > 400
+        && (_deckLivePlay[deck] || isPlaying)) {
+      const ls = _liveOutputMs / 1000;
+      td.title = `Live deck output: ${Math.floor(ls/60)}:${String(Math.floor(ls%60)).padStart(2,'0')} (timeline playhead differs)`;
+      td.classList.add('time-desync');
+    } else if (td) {
+      td.title = '';
+      td.classList.remove('time-desync');
+    }
+    updatePlayheadCueHighlights();
   }
 
   function seekTo(ms) {
@@ -1334,8 +1459,10 @@ const SEQ = (() => {
     if (_timeDirty) {
       _timeDirty = false;
       for (const d in _pendingTime) {
-        if (+d === deck && currentSeq && isPlaying && !draggingPlayhead) {
-          playheadMs = _pendingTime[d]; updatePlayhead();
+        if (+d === deck && currentSeq && !draggingPlayhead && (isPlaying || _deckLivePlay[d])) {
+          playheadMs = _pendingTime[d];
+          _liveOutputMs = _pendingTime[d];
+          updatePlayhead();
           autoScrollPlayhead();
         }
       }

@@ -60,7 +60,7 @@ function generatePixelTapePatterns(cues, tapeFixtures, sections, ctx) {
   const fixtureGroups = {};
   for (const fix of tapeFixtures) {
     if ((fix.cell_count || 0) < 2) continue;
-    if (fix.category !== 'pixel_tape' && fix.category !== 'led_bar') continue;
+    if (fix.category === 'multi_cell') continue;
     const key = fix.type_name || `tape_${fix.id}`;
     if (!fixtureGroups[key]) fixtureGroups[key] = [];
     fixtureGroups[key].push(fix);

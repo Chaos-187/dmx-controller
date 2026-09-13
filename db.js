@@ -2025,7 +2025,7 @@ function backfillVdjImportFingerprintFromLibrary() {
     if (!resolved.path) return;
     const fs = require('fs');
     const st = fs.statSync(resolved.path);
-    const fingerprint = `${st.size}:${Math.floor(st.mtimeMs / 1000)}`;
+    const fingerprint = String(st.size);
     db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(
       'vdj_import_source_fingerprint',
       fingerprint,

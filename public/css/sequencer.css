@@ -537,6 +537,20 @@ body {
   border: 2px solid #fff; z-index: 2;
   box-shadow: 0 0 10px var(--accent-glow), inset 0 0 8px rgba(255,255,255,.08);
 }
+.tl-cue.at-playhead {
+  outline: 2px solid #fff;
+  outline-offset: -1px;
+  z-index: 2;
+  box-shadow: 0 0 12px rgba(255,255,255,.35);
+}
+.tl-cue.rig-driven {
+  opacity: .55;
+  border-style: dashed;
+  border-color: rgba(255,255,255,.35);
+  pointer-events: none;
+  font-style: italic;
+}
+#timeDisplay.time-desync { color: var(--warning, #ffb74d); }
 
 /* Merged (collapsed multi-cell) cue summary */
 .tl-cue.merged {
@@ -627,6 +641,8 @@ body {
 /* ── Sub-Lanes ─────────────────────────────────────────────────── */
 .tl-lane.sub-lane { min-height: 30px; background: rgba(255,255,255,.008); }
 .tl-lane.sub-lane .tl-lane-hdr { padding-left: 20px; font-size: 10px; }
+.tl-lane.cells-summary-lane .tl-lane-hdr .lane-tag { color: var(--text-dim); }
+.tl-lane.cells-cell-lane .tl-lane-hdr { padding-left: 32px; }
 .tl-lane.master-lane { background: rgba(0,0,0,.08); }
 .tl-lane.fx-lane    { background: rgba(142,36,170,.04); }
 .tl-lane.rig-fx-lane { background: rgba(142,36,170,.07); border-bottom: 1px solid rgba(142,36,170,.15); }

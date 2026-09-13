@@ -219,7 +219,12 @@ function generateSequence(opts) {
   const ledBarIds = new Set(ledBars.map(b => b.id));
 
   const cellFixtures = nonMoverFixtures.filter(fix => fix.cell_count > 0 && !mirrorBallIds.has(fix.id));
-  const pixelTapeFixtures = cellFixtures.filter(fix => fix.category === 'pixel_tape' || fix.category === 'led_bar');
+  // Long 1D strips (WLED, pixel tape, LED bars) — not multi_cell matrices
+  const pixelTapeFixtures = cellFixtures.filter(fix =>
+    fix.category === 'multi_cell' ? false
+      : fix.category === 'pixel_tape' || fix.category === 'led_bar'
+        || (fix.cell_count || 0) >= 2,
+  );
   const matrixFixtures = cellFixtures.filter(fix => fix.category === 'multi_cell');
   const regularFixtures = nonMoverFixtures.filter(fix => !ledBarIds.has(fix.id) && !mirrorBallIds.has(fix.id));
 
