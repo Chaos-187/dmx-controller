@@ -359,12 +359,17 @@ function init(deps) {
 
 // ─── Device Discovery ───────────────────────────────────────────────────────
 
+function isMidiEnabled() {
+  if (!db) return true;
+  return db.getConfig('midi_enabled') !== '0';
+}
+
 /**
  * List available MIDI input/output ports.
  * @returns {{ inputs: string[], outputs: string[] }}
  */
 function listPorts() {
-  if (!JZZ) return { inputs: [], outputs: [] };
+  if (!JZZ || !isMidiEnabled()) return { inputs: [], outputs: [] };
   try {
     const info = JZZ().info();
     return {
@@ -389,9 +394,9 @@ async function start() {
     return;
   }
 
-  const enabled = db.getConfig('midi_enabled');
-  if (enabled === '0') {
-    console.log('[MIDI] MIDI controller disabled in config');
+  if (!isMidiEnabled()) {
+    console.log('[MIDI] Disabled in config — skipping device scan');
+    broadcast({ type: 'midi_status', connected: false, device: null, enabled: false });
     return;
   }
 
@@ -1596,14 +1601,17 @@ function registerRoutes(app) {
 
   // ── Status ──────────────────────────────────────────────────────────────
   app.get('/api/midi/status', (req, res) => {
+    const enabled = isMidiEnabled();
     let ports = { inputs: [], outputs: [] };
-    try { ports = listPorts(); } catch (e) { /* ignore */ }
+    if (enabled) {
+      try { ports = listPorts(); } catch (e) { /* ignore */ }
+    }
     res.json({
-      connected,
-      device: currentDeviceName,
+      connected: enabled && connected,
+      device: enabled ? currentDeviceName : null,
       shiftHeld,
       availablePorts: ports,
-      enabled: db.getConfig('midi_enabled') !== '0',
+      enabled,
       page: currentPage,
       pageName: PAGE_NAMES[currentPage - 1] || '',
       pageCount: PAGE_COUNT,
@@ -1621,10 +1629,29 @@ function registerRoutes(app) {
 
   app.post('/api/midi/disconnect', (req, res) => {
     stop();
-    res.json({ connected: false });
+    res.json({ connected: false, enabled: isMidiEnabled() });
+  });
+
+  app.post('/api/midi/settings', async (req, res) => {
+    const { enabled } = req.body || {};
+    const on = enabled !== false && enabled !== 0 && enabled !== '0';
+    db.setConfig('midi_enabled', on ? '1' : '0');
+    if (on) {
+      await reconnect();
+    } else {
+      stop();
+    }
+    res.json({
+      enabled: isMidiEnabled(),
+      connected: isMidiEnabled() && connected,
+      device: isMidiEnabled() ? currentDeviceName : null,
+    });
   });
 
   app.get('/api/midi/ports', (req, res) => {
+    if (!isMidiEnabled()) {
+      return res.json({ inputs: [], outputs: [] });
+    }
     res.json(listPorts());
   });
 
@@ -2311,7 +2338,8 @@ module.exports = {
   PAGE_NAMES,
   PAGE_COUNT,
   listPorts,
-  isConnected: () => connected,
+  isMidiEnabled,
+  isConnected: () => connected && isMidiEnabled(),
   getDeviceName: () => currentDeviceName,
   refreshAllLeds,
   clearAllLeds,

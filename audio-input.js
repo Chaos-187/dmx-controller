@@ -21,12 +21,81 @@ const SAMPLE_RATE       = 48000;   // Hz — native rate for most pro/ASIO inter
 const FRAME_SAMPLES     = 128;     // ~2.7 ms per analysis frame at 48000 Hz (~375 fps internally)
 const FRAME_BYTES       = FRAME_SAMPLES * 2;  // s16le = 2 bytes/sample
 
-const LEVEL_SMOOTH      = 0.10;    // 0 = instant, 1 = frozen — fast display response
+const LEVEL_SMOOTH      = 0.10;    // 0 = instant, 1 = frozen — fast display response (band meters)
+const ENERGY_ATTACK     = 0.24;    // UI energy bar: quick rise
+const ENERGY_DECAY      = 0.91;    // UI energy bar: slower fall (easier to read peaks)
 const DMX_ATTACK        = 0.30;    // fast rise  — α=0.30 → ~4 ms time-constant (snappy VU attack)
 const DMX_DECAY         = 0.82;    // slow fall  — α=0.82 → ~27 ms time-constant (natural bar drop)
 const BEAT_MIN_GAP_MS   = 150;     // minimum ms between detected beats
 const BEAT_DECAY_MS     = 80;      // beat indicator fade time
 const BROADCAST_MS      = 10;      // level emit interval (~100 fps to UI/effects)
+
+const BPM_MIN           = 60;
+const BPM_MAX           = 200;
+const BPM_HISTORY_SIZE  = 10;      // inter-beat intervals kept for median
+const BPM_RECENT_WINDOW = 7;       // median uses the newest N intervals
+const BPM_SMOOTH        = 0.17;    // internal tempo smoothing per beat (lower = steadier)
+const BPM_SMOOTH_FAST   = 0.34;    // when a genuine tempo shift is detected
+const BPM_DISPLAY_SMOOTH = 0.88;   // extra smoothing on BPM sent to UI / API
+const BPM_JUMP_RATIO    = 0.085;   // % change vs estimate before fast tracking
+const BPM_INTERVAL_TOL  = 0.12;    // keep intervals within this fraction of anchor when shifting
+const BPM_SHIFT_MIN_IV  = 6;       // only prune history once tempo is partially locked
+const BPM_OUTLIER_RATIO = 0.13;    // reject intervals when locked (missed/double beat)
+const BPM_IDLE_SOFT_MS  = 4500;    // gap → drop lock confidence, keep last BPM
+const BPM_IDLE_HARD_MS  = 14000;   // gap → full tempo reset
+const BPM_MIN_INTERVALS = 3;       // intervals before full median lock
+const BPM_CONF_SMOOTH   = 0.78;    // display confidence smoothing
+
+/** Half/double companions for DJ vs catalog counting (e.g. ~174 live vs ~65 Beatport). */
+/** Pick octave variant closest to current estimate (avoids 87 ↔ 174 flipping). */
+function normalizeBeatInterval(ms, anchorBpm) {
+  if (ms < BEAT_MIN_GAP_MS) return null;
+  const candidates = [];
+  for (const mul of [0.25, 0.5, 1, 2, 4]) {
+    const iv = ms * mul;
+    if (iv < BEAT_MIN_GAP_MS) continue;
+    const bpm = 60000 / iv;
+    if (bpm >= BPM_MIN && bpm <= BPM_MAX) candidates.push({ iv, bpm });
+  }
+  if (!candidates.length) return null;
+  if (anchorBpm != null && Number.isFinite(anchorBpm)) {
+    candidates.sort((a, b) => Math.abs(a.bpm - anchorBpm) - Math.abs(b.bpm - anchorBpm));
+    return candidates[0].iv;
+  }
+  // No anchor yet: prefer slow–mid tempos when doubling/halving is ambiguous.
+  const slowBand = candidates.filter((c) => c.bpm >= BPM_MIN && c.bpm <= 105);
+  if (slowBand.length) {
+    slowBand.sort((a, b) => Math.abs(a.bpm - 88) - Math.abs(b.bpm - 88));
+    return slowBand[0].iv;
+  }
+  candidates.sort((a, b) => Math.abs(a.bpm - 100) - Math.abs(b.bpm - 100));
+  return candidates[0].iv;
+}
+
+function beatMinGapMs(estimateBpm) {
+  if (estimateBpm == null || !Number.isFinite(estimateBpm) || estimateBpm <= 0) {
+    return BEAT_MIN_GAP_MS;
+  }
+  // Wider spacing for slow tracks — ignore hi-hat/subdivision onsets between kicks.
+  const fromTempo = Math.floor(60000 / (estimateBpm * 2.15));
+  return Math.max(BEAT_MIN_GAP_MS, Math.min(520, fromTempo));
+}
+
+/** Display-only bounds for half/double readouts (wider than beat-detection BPM range). */
+const BPM_ALT_MIN = 30;
+const BPM_ALT_MAX = 400;
+
+function bpmAlternates(bpm) {
+  if (bpm == null || !Number.isFinite(bpm)) {
+    return { bpm_halftime: null, bpm_doubletime: null };
+  }
+  const half = Math.round(bpm / 2);
+  const dbl = Math.round(bpm * 2);
+  return {
+    bpm_halftime: half >= BPM_ALT_MIN && half <= BPM_ALT_MAX ? half : null,
+    bpm_doubletime: dbl >= BPM_ALT_MIN && dbl <= BPM_ALT_MAX ? dbl : null,
+  };
+}
 
 // ─── ffmpeg Path ──────────────────────────────────────────────────────────────
 
@@ -310,7 +379,14 @@ class AudioInputCapture extends EventEmitter {
     this._smoothDmx     = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper_mid: 0 };
     this._beatTime      = 0;
     this._prevBass      = 0;
+    this._prevPulse     = 0;
     this._broadcastTimer = null;
+    this._lastBeatForBpm = 0;
+    this._beatIntervals  = [];
+    this._bpmEstimate    = null;
+    this._bpmDisplay     = null;
+    this._bpmConfidence  = 0;
+    this._bpmConfSmooth  = 0;
   }
 
   get running()     { return this._running; }
@@ -318,11 +394,33 @@ class AudioInputCapture extends EventEmitter {
   get deviceName()  { return this._deviceName; }
   get format()      { return this._format; }
 
-  /** Current smoothed levels including beat (0–1). Fast response — for UI display. */
+  /** Current smoothed levels including beat (0–1) and tempo estimate. Fast response — for UI display. */
   getLevels() {
+    this._tickBpmIdleReset();
     const beatAge = Date.now() - this._beatTime;
     const beat    = this._running ? Math.max(0, 1 - beatAge / BEAT_DECAY_MS) : 0;
-    return { ...this._smooth, beat };
+    const bpmOut = this._bpmDisplay != null ? this._bpmDisplay : this._bpmEstimate;
+    const alts = bpmAlternates(bpmOut);
+    return {
+      ...this._smooth,
+      beat,
+      bpm: bpmOut,
+      bpm_confidence: this._bpmConfSmooth,
+      ...alts,
+    };
+  }
+
+  /** Latest estimated tempo (BPM) from live beat onsets, or null if not enough data. */
+  getBpmEstimate() {
+    this._tickBpmIdleReset();
+    const bpmOut = this._bpmDisplay != null ? this._bpmDisplay : this._bpmEstimate;
+    const alts = bpmAlternates(bpmOut);
+    return {
+      bpm: bpmOut,
+      bpm_confidence: this._bpmConfSmooth,
+      beat_intervals: this._beatIntervals.length,
+      ...alts,
+    };
   }
 
   /** Heavily-smoothed levels for DMX effects — reduces flickering on lights. */
@@ -343,6 +441,8 @@ class AudioInputCapture extends EventEmitter {
     this._smooth     = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper_mid: 0 };
     this._smoothDmx  = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper_mid: 0 };
     this._prevBass   = 0;
+    this._prevPulse  = 0;
+    this._resetBpmState();
     this._resetFilters();
 
     const ffmpeg = getFfmpegPath();
@@ -442,10 +542,129 @@ class AudioInputCapture extends EventEmitter {
     }
     this._running = false;
     this._buf     = Buffer.alloc(0);
+    this._resetBpmState();
     this._resetFilters();
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
+
+  _resetBpmState() {
+    this._lastBeatForBpm = 0;
+    this._beatIntervals  = [];
+    this._bpmEstimate    = null;
+    this._bpmDisplay     = null;
+    this._bpmConfidence  = 0;
+    this._bpmConfSmooth  = 0;
+  }
+
+  _touchBpmDisplay() {
+    if (this._bpmEstimate == null) {
+      this._bpmDisplay = null;
+      return;
+    }
+    if (this._bpmDisplay == null) this._bpmDisplay = this._bpmEstimate;
+    else {
+      this._bpmDisplay =
+        this._bpmDisplay * BPM_DISPLAY_SMOOTH + this._bpmEstimate * (1 - BPM_DISPLAY_SMOOTH);
+    }
+  }
+
+  _softBpmIdle() {
+    this._beatIntervals = [];
+    this._lastBeatForBpm = 0;
+    this._bpmConfidence = Math.min(this._bpmConfidence, 0.18);
+    this._bpmConfSmooth = Math.min(this._bpmConfSmooth, 0.18);
+  }
+
+  _tickBpmIdleReset() {
+    if (!this._running || !this._beatTime) return;
+    const idle = Date.now() - this._beatTime;
+    const beatMs = this._bpmEstimate > 0 ? 60000 / this._bpmEstimate : 500;
+    const softMs = Math.max(BPM_IDLE_SOFT_MS, beatMs * 5.5);
+    const hardMs = Math.max(BPM_IDLE_HARD_MS, beatMs * 14);
+    if (idle > hardMs) this._resetBpmState();
+    else if (idle > softMs) this._softBpmIdle();
+  }
+
+  _noteBeatForBpm(now) {
+    if (this._lastBeatForBpm > 0) {
+      const normalized = normalizeBeatInterval(now - this._lastBeatForBpm, this._bpmEstimate);
+      if (normalized != null) {
+        const ivBpm = 60000 / normalized;
+        const ref = this._bpmDisplay != null ? this._bpmDisplay : this._bpmEstimate;
+        const locked = this._bpmConfSmooth >= 0.42 && ref != null;
+        if (!locked || Math.abs(ivBpm - ref) / ref <= BPM_OUTLIER_RATIO) {
+          this._beatIntervals.push(normalized);
+          if (this._beatIntervals.length > BPM_HISTORY_SIZE) this._beatIntervals.shift();
+          this._updateBpmEstimate();
+        }
+      }
+    }
+    this._lastBeatForBpm = now;
+  }
+
+  _updateBpmEstimate() {
+    let intervals = this._beatIntervals;
+    const n = intervals.length;
+    if (n === 0) {
+      this._bpmConfidence = 0;
+      return;
+    }
+    if (n < BPM_MIN_INTERVALS) {
+      const rawBpm = 60000 / intervals[n - 1];
+      if (this._bpmEstimate == null) this._bpmEstimate = rawBpm;
+      else this._bpmEstimate = this._bpmEstimate * 0.75 + rawBpm * 0.25;
+      const target = (n / BPM_MIN_INTERVALS) * 0.32;
+      this._bpmConfidence = target;
+      this._bpmConfSmooth = this._bpmConfSmooth * BPM_CONF_SMOOTH + target * (1 - BPM_CONF_SMOOTH);
+      this._touchBpmDisplay();
+      return;
+    }
+
+    const latestInterval = intervals[n - 1];
+    const latestBpm = 60000 / latestInterval;
+
+    // Tempo changed: drop older intervals that belong to the previous BPM.
+    let smooth = BPM_SMOOTH;
+    if (this._bpmEstimate != null && n >= BPM_SHIFT_MIN_IV && this._bpmConfidence >= 0.3) {
+      const shift = Math.abs(latestBpm - this._bpmEstimate) / this._bpmEstimate;
+      if (shift > BPM_JUMP_RATIO) {
+        smooth = BPM_SMOOTH_FAST;
+        intervals = intervals.filter(
+          (iv) => Math.abs(iv - latestInterval) / latestInterval <= BPM_INTERVAL_TOL,
+        );
+        if (intervals.length >= BPM_MIN_INTERVALS) {
+          this._beatIntervals = intervals;
+        }
+      }
+    }
+
+    const recentN = Math.min(intervals.length, BPM_RECENT_WINDOW);
+    const recent = intervals.slice(-recentN);
+    const sorted = [...recent].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const rawBpm = 60000 / median;
+
+    const mean = recent.reduce((a, b) => a + b, 0) / recentN;
+    const variance = recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recentN;
+    const cv = mean > 0 ? Math.sqrt(variance) / mean : 1;
+    const cvScale = rawBpm <= 105 ? 2.05 : 2.5;
+    const conf = Math.max(0, Math.min(1, 1 - cv * cvScale));
+
+    if (
+      this._bpmEstimate != null &&
+      this._bpmEstimate > 112 &&
+      rawBpm <= this._bpmEstimate * 0.56 &&
+      n >= 4
+    ) {
+      this._bpmEstimate = this._bpmEstimate * 0.5 + rawBpm * 0.5;
+      smooth = BPM_SMOOTH_FAST;
+    } else if (this._bpmEstimate == null) this._bpmEstimate = rawBpm;
+    else this._bpmEstimate = this._bpmEstimate * (1 - smooth) + rawBpm * smooth;
+    this._bpmConfidence = conf;
+    this._bpmConfSmooth = this._bpmConfSmooth * BPM_CONF_SMOOTH + conf * (1 - BPM_CONF_SMOOTH);
+    this._touchBpmDisplay();
+  }
 
   _resetFilters() {
     this._filters = {
@@ -464,21 +683,43 @@ class AudioInputCapture extends EventEmitter {
     //   _smoothDmx : asymmetric attack/decay — jumps up fast, falls back naturally
     //                prevents flickering while keeping VU bar snappy
     for (const k of Object.keys(raw)) {
-      this._smooth[k] = this._smooth[k] * LEVEL_SMOOTH + raw[k] * (1 - LEVEL_SMOOTH);
+      if (k === 'energy') {
+        const prev = this._smooth[k];
+        const alpha = raw[k] > prev ? ENERGY_ATTACK : ENERGY_DECAY;
+        this._smooth[k] = prev * alpha + raw[k] * (1 - alpha);
+      } else {
+        this._smooth[k] = this._smooth[k] * LEVEL_SMOOTH + raw[k] * (1 - LEVEL_SMOOTH);
+      }
       const prev = this._smoothDmx[k];
       const alpha = raw[k] > prev ? DMX_ATTACK : DMX_DECAY;
       this._smoothDmx[k] = prev * alpha + raw[k] * (1 - alpha);
     }
 
-    // Beat detection: look for a sharp attack in bass energy
-    // Threshold is lower than before because 256-sample frames have smaller per-frame deltas
-    const delta = raw.bass - this._prevBass;
+    // Beat detection: bass/sub-bass (+ soft energy) for quiet or slow material
+    const pulse = Math.max(raw.bass, raw.sub_bass, raw.energy * 0.38);
+    const delta = pulse - this._prevPulse;
     const now   = Date.now();
-    if (delta > 0.020 && raw.bass > 0.06 && (now - this._beatTime) > BEAT_MIN_GAP_MS) {
-      this._beatTime = now;
-      this.emit('beat');
+    const slowHint =
+      (this._bpmEstimate != null && this._bpmEstimate > 0 && this._bpmEstimate < 102) ||
+      (this._bpmEstimate == null && this._beatTime > 0 && (now - this._beatTime) > 520);
+    const levelFloor = Math.max(
+      slowHint ? 0.02 : 0.028,
+      this._smooth.bass * (slowHint ? 0.3 : 0.42),
+      this._smooth.energy * (slowHint ? 0.14 : 0),
+    );
+    const deltaThr = Math.max(slowHint ? 0.006 : 0.009, this._smooth.bass * (slowHint ? 0.038 : 0.055));
+    let minGap = beatMinGapMs(this._bpmEstimate);
+    if (this._bpmEstimate == null && this._beatTime > 0) {
+      const sinceBeat = now - this._beatTime;
+      if (sinceBeat > 520) minGap = Math.max(minGap, Math.floor(sinceBeat * 0.4));
     }
-    this._prevBass = raw.bass;
+    if (delta > deltaThr && pulse > levelFloor && (now - this._beatTime) > minGap) {
+      this._beatTime = now;
+      this._noteBeatForBpm(now);
+      this.emit('beat', { time: now, bpm: this._bpmEstimate, bpm_confidence: this._bpmConfidence });
+    }
+    this._prevPulse = pulse;
+    this._prevBass  = raw.bass;
   }
 
   _startBroadcast() {

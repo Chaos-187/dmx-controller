@@ -242,116 +242,145 @@
 
       <!-- Audio Input Tab -->
       <div class="device-tab-panel" id="devtab-audio">
-        <div class="config-section">
-          <h3><span class="section-icon">&#127908;</span> Audio Input</h3>
-          <p class="config-desc">
-            Configure a live audio source for sound-reactive lighting effects
-            (<em>Sound Pulse, Sound Strobe, Sound Chase</em>, etc.).
-            The server captures audio in real-time via ffmpeg and computes bass, mid,
-            and treble energy levels. When enabled this takes priority over track-analysis data.
-          </p>
-
-          <!-- ── Outgoing / Loopback hint ───────────────────────────────── -->
-          <div class="config-card" style="border-color:var(--cyan);background:rgba(0,229,255,.04)">
-            <h4 style="color:var(--cyan)">&#127783; ASIO &amp; Outgoing Audio</h4>
-            <p class="config-desc" style="margin-bottom:8px">
-              <strong style="color:var(--text)">ASIO devices</strong> — ffmpeg has no native ASIO driver,
-              but every ASIO interface also installs a WDM driver that appears in the scan as a regular device
-              (e.g. <em>"Line (Focusrite USB)"</em>, <em>"Line (MG-XU)"</em>). Select
-              <strong>OpenAL</strong> format for the most complete device list.
-              If your interface still doesn't appear, install
-              <a href="https://github.com/dechamps/FlexASIO" target="_blank" rel="noopener" style="color:var(--cyan)">FlexASIO</a>
-              or route through VoiceMeeter to bridge ASIO &rarr; WDM.
-            </p>
-            <p class="config-desc" style="margin-bottom:8px">
-              <strong style="color:var(--text)">Outgoing / system audio (Windows)</strong> — Enable
-              <strong>Stereo Mix</strong> in Windows Sound settings:
-            </p>
-            <ol style="font-size:12px;color:var(--text-dim);line-height:1.8;padding-left:18px;margin-bottom:8px">
-              <li>Right-click the <strong>speaker icon</strong> in the system tray &rarr; <strong>Sounds</strong></li>
-              <li>Open the <strong>Recording</strong> tab &rarr; right-click in the list &rarr; tick <strong>Show Disabled Devices</strong></li>
-              <li>Enable <strong>Stereo Mix</strong> (or <em>Wave Out Mix / What U Hear</em>)</li>
-              <li>Select <strong>OpenAL</strong> format above and click <strong>Scan</strong> — Stereo Mix will appear</li>
-            </ol>
-            <p class="config-desc" style="color:var(--text-dim)">
-              <strong>macOS:</strong> use <strong>BlackHole</strong> or <strong>Loopback</strong> &middot;
-              <strong>Linux:</strong> PulseAudio exposes a <code>.monitor</code> source for every output sink automatically.
+        <div class="config-section audio-page">
+          <div class="audio-page-head">
+            <h3><span class="section-icon">&#127908;</span> Audio Input</h3>
+            <p class="config-desc">
+              Live capture drives sound-reactive effects and tempo estimation. When enabled, it overrides per-track analysis.
             </p>
           </div>
 
-          <div class="config-card" style="margin-top:16px">
-            <h4>Enable Live Audio Capture</h4>
-            <div class="config-row">
-              <label>Enable</label>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" id="cfgAudioEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
-                <span style="font-size:12px">Use live audio capture for sound-reactive effects (overrides track analysis)</span>
-              </label>
+          <div class="audio-sub-tabs">
+            <button type="button" class="audio-sub-tab-btn active" data-audiotab="live">&#9679; Live Status</button>
+            <button type="button" class="audio-sub-tab-btn" data-audiotab="config">&#9881; Configuration</button>
+          </div>
+
+          <!-- Live Status -->
+          <div class="audio-sub-panel active" id="audiotab-live">
+            <div class="audio-live-dashboard">
+              <div class="audio-live-top">
+                <div class="audio-live-status" id="audioLiveStatusCard">
+                  <div class="audio-live-status-row">
+                    <div class="audio-live-status-pill" id="audioLiveStatusPill">
+                      <span class="audio-live-status-dot" id="audioStatusDot"></span>
+                      <span id="audioStatusLabel">Inactive</span>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btnStopAudioCaptureLive" hidden>Stop capture</button>
+                  </div>
+                  <div class="audio-live-device" id="audioDeviceRow" hidden>
+                    <span class="audio-live-device-label">Input</span>
+                    <span class="audio-live-device-name" id="audioDeviceDisplay"></span>
+                  </div>
+                  <div class="audio-live-error" id="audioErrorRow" hidden>
+                    <span id="audioErrorMsg"></span>
+                  </div>
+                  <p class="audio-live-idle-hint" id="audioLiveIdleHint">
+                    Enable capture under <button type="button" class="audio-link-btn" data-audiotab-jump="config">Configuration</button> to see live levels and BPM.
+                  </p>
+                </div>
+
+                <div class="audio-bpm-hero" id="audioBpmCard">
+                  <div class="audio-bpm-hero-label">Estimated tempo</div>
+                  <div class="audio-bpm-hero-row">
+                    <span class="audio-bpm-value" id="audioBpmValue">—</span>
+                    <span class="audio-bpm-unit">BPM</span>
+                    <div class="audio-bpm-beat" id="audioBpmBeatDot" title="Beat pulse"></div>
+                  </div>
+                  <p class="audio-bpm-alts" id="audioBpmAlts" hidden>
+                    <span id="audioBpmHalfWrap" hidden><span class="audio-bpm-alt-label">Half-time</span> <strong id="audioBpmHalf"></strong></span>
+                    <span class="audio-bpm-alt-sep" id="audioBpmAltSep" hidden>·</span>
+                    <span id="audioBpmDoubleWrap" hidden><span class="audio-bpm-alt-label">Double</span> <strong id="audioBpmDouble"></strong></span>
+                  </p>
+                  <div class="audio-bpm-confidence">
+                    <span class="audio-bpm-conf-label" id="audioBpmConfidenceLabel">Lock</span>
+                    <div class="audio-bpm-conf-track">
+                      <div class="audio-bpm-conf-fill" id="audioBpmConfidenceBar"></div>
+                    </div>
+                    <span class="audio-bpm-conf-pct" id="audioBpmConfidencePct">—</span>
+                  </div>
+                  <p class="audio-bpm-hint" id="audioBpmHint">Play steady music while capturing to lock tempo.</p>
+                </div>
+              </div>
+
+              <div class="audio-live-meters" id="audioMeterCard">
+                <div class="audio-live-meters-head">
+                  <h4>Live spectrum</h4>
+                  <span class="audio-live-meters-sub">Frequency bands &amp; overall energy</span>
+                </div>
+                <div class="audio-meter-master">
+                  <span class="audio-meter-label">Energy</span>
+                  <div class="audio-meter-track audio-meter-track--master">
+                    <div class="audio-meter-fill" data-band="energy" data-color="#ffd600"></div>
+                  </div>
+                  <span class="audio-meter-pct" data-band-pct="energy">0%</span>
+                </div>
+                <div id="audioMeter" class="audio-meter-grid"></div>
+              </div>
             </div>
           </div>
 
-          <div class="config-card">
-            <h4>Device</h4>
-            <div class="config-row">
-              <label>Input Format</label>
-              <select id="cfgAudioFormat" style="width:240px">
-                <option value="dshow">DirectShow (Windows)</option>
-                <option value="openal">OpenAL (Windows — includes loopback)</option>
-                <option value="pulse">PulseAudio (Linux)</option>
-                <option value="avfoundation">AVFoundation (macOS)</option>
-              </select>
-              <span class="config-hint" style="margin-left:8px">Use <em>OpenAL</em> to see Stereo&nbsp;Mix &amp; ASIO WDM devices</span>
+          <!-- Configuration -->
+          <div class="audio-sub-panel" id="audiotab-config">
+            <details class="config-card audio-setup-details">
+              <summary>&#127783; ASIO, loopback &amp; outgoing audio</summary>
+              <div class="audio-setup-details-body">
+                <p class="config-desc">
+                  <strong>ASIO</strong> — ffmpeg uses the interface&rsquo;s WDM driver in the device list (e.g. <em>Line (Focusrite USB)</em>).
+                  Choose <strong>OpenAL</strong> for the fullest list, or install
+                  <a href="https://github.com/dechamps/FlexASIO" target="_blank" rel="noopener">FlexASIO</a> / VoiceMeeter if needed.
+                </p>
+                <p class="config-desc"><strong>Windows loopback</strong> — enable <strong>Stereo Mix</strong> under Recording devices (Show disabled devices), then scan with OpenAL.</p>
+                <p class="config-desc"><strong>macOS:</strong> BlackHole or Loopback &middot; <strong>Linux:</strong> PulseAudio <code>.monitor</code> sources.</p>
+              </div>
+            </details>
+
+            <div class="config-card">
+              <h4>Capture</h4>
+              <div class="config-row">
+                <label>Enable</label>
+                <label class="audio-enable-label">
+                  <input type="checkbox" id="cfgAudioEnabled">
+                  <span>Use live audio for sound-reactive effects (overrides track analysis)</span>
+                </label>
+              </div>
             </div>
-            <div class="config-row">
-              <label>Device</label>
-              <div style="display:flex;gap:8px;align-items:center;flex:1">
-                <select id="cfgAudioDevice" style="flex:1;min-width:0">
-                  <option value="">— click Scan to list devices —</option>
+
+            <div class="config-card">
+              <h4>Device &amp; gain</h4>
+              <div class="config-row">
+                <label>Input format</label>
+                <select id="cfgAudioFormat" class="audio-config-select">
+                  <option value="dshow">DirectShow (Windows)</option>
+                  <option value="openal">OpenAL (Windows — includes loopback)</option>
+                  <option value="pulse">PulseAudio (Linux)</option>
+                  <option value="avfoundation">AVFoundation (macOS)</option>
                 </select>
-                <button class="btn btn-secondary btn-sm" id="btnScanAudioDevices">&#128269; Scan</button>
+              </div>
+              <p class="config-hint audio-config-hint">OpenAL exposes Stereo Mix and many ASIO WDM devices.</p>
+              <div class="config-row">
+                <label>Device</label>
+                <div class="audio-device-row">
+                  <select id="cfgAudioDevice" class="audio-config-select">
+                    <option value="">— click Scan to list devices —</option>
+                  </select>
+                  <button class="btn btn-secondary btn-sm" id="btnScanAudioDevices">&#128269; Scan</button>
+                </div>
+              </div>
+              <div class="config-row">
+                <label>Gain</label>
+                <div class="audio-gain-row">
+                  <input type="range" id="cfgAudioGain" min="0.5" max="10" step="0.1" value="1">
+                  <span id="cfgAudioGainVal">&times;1.0</span>
+                </div>
               </div>
             </div>
-            <div class="config-row">
-              <label>Gain / Sensitivity</label>
-              <div style="display:flex;align-items:center;gap:10px;flex:1">
-                <input type="range" id="cfgAudioGain" min="0.5" max="10" step="0.1" value="1" style="flex:1">
-                <span id="cfgAudioGainVal" style="width:36px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;color:var(--text-dim)">&times;1.0</span>
-              </div>
+
+            <div class="audio-config-actions">
+              <button class="btn btn-primary btn-sm" id="btnSaveAudioConfig">Save &amp; Apply</button>
+              <button class="btn btn-secondary btn-sm" id="btnStopAudioCapture" hidden>Stop capture</button>
+              <button type="button" class="btn btn-secondary btn-sm audio-goto-live" data-audiotab-jump="live">View live status</button>
             </div>
           </div>
-
-          <div style="display:flex;gap:8px;margin:12px 0">
-            <button class="btn btn-primary btn-sm" id="btnSaveAudioConfig">Save &amp; Apply</button>
-            <button class="btn btn-secondary btn-sm" id="btnStopAudioCapture">Stop</button>
-          </div>
-
-          <div class="config-card">
-            <h4>Capture Status</h4>
-            <div class="config-row">
-              <label>State</label>
-              <div style="display:flex;align-items:center;gap:9px">
-                <div id="audioStatusDot" style="width:10px;height:10px;border-radius:50%;background:#555;flex-shrink:0"></div>
-                <span id="audioStatusLabel" style="font-size:13px;color:var(--text-dim)">Inactive</span>
-              </div>
-            </div>
-            <div class="config-row" id="audioDeviceRow" style="display:none">
-              <label>Capturing from</label>
-              <span id="audioDeviceDisplay" style="font-size:12px;color:var(--cyan)"></span>
-            </div>
-            <div class="config-row" id="audioErrorRow" style="display:none">
-              <label>Error</label>
-              <span id="audioErrorMsg" style="font-size:12px;color:var(--danger)"></span>
-            </div>
-          </div>
-
-          <div class="config-card" id="audioMeterCard">
-            <h4>Live Level Meter</h4>
-            <p class="config-desc" style="margin-bottom:10px">Real-time frequency band activity — updates only while capturing.</p>
-            <div id="audioMeter" style="display:flex;flex-direction:column;gap:7px">
-              <!-- rendered by JS -->
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
@@ -362,6 +391,14 @@
         <h3><span class="section-icon">&#127929;</span> MIDI Controller</h3>
         <p class="config-desc">Connect and map an Akai APC Mini (or compatible MIDI controller) to trigger DMX actions.</p>
         <div class="config-card" style="margin-bottom:16px">
+          <div class="config-row" style="border-bottom:1px solid rgba(255,255,255,.06);padding-bottom:12px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;min-width:auto">
+              <input type="checkbox" id="cfgMidiEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+              Enable MIDI controller
+            </label>
+            <span class="config-hint" style="margin-left:0">When off, the hub does not scan for MIDI devices on startup or in Config.</span>
+          </div>
+          <div id="midiHardwareSection">
           <h4>Connection</h4>
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
             <div id="midiStatusDot" style="width:10px;height:10px;border-radius:50%;background:#f44"></div>
@@ -373,10 +410,11 @@
           </div>
           <div class="config-row" style="margin-bottom:6px">
             <label>Device</label>
-            <select id="midiDeviceSelect" style="width:280px"><option value="">— scanning for devices —</option></select>
+            <select id="midiDeviceSelect" style="width:280px"><option value="">— select device —</option></select>
+          </div>
           </div>
         </div>
-        <div class="config-card" style="margin-bottom:16px">
+        <div class="config-card midi-hardware-panel" style="margin-bottom:16px">
           <h4>APC Mini Layout</h4>
           <p class="config-desc" style="margin-bottom:10px">Visual representation of your APC Mini button layout. Coloured buttons have active mappings.</p>
           <div id="apcMiniGrid" style="display:grid;grid-template-columns:repeat(9,36px);grid-template-rows:repeat(10,32px) 60px;gap:2px;font-size:9px;font-family:var(--mono)"></div>
@@ -619,82 +657,84 @@
     </div>
 
     <!-- ═══ Thaluxis Satellites ═══ -->
-    <div class="config-sub-page" id="cfgpage-satellites">
-      <div class="config-section">
-        <h3><span class="section-icon">&#128225;</span> Thaluxis Hub &amp; Satellites</h3>
-        <p class="config-desc">Configure this machine as the <strong>Thaluxis Hub</strong> and manage <strong>Thaluxis Satellite</strong> nodes on VirtualDJ laptops. Satellites analyze tracks locally and sync to this hub over the LAN.</p>
+    <div class="config-sub-page sat-hub-page" id="cfgpage-satellites">
+      <div class="config-section sat-hub-section">
+        <div class="sat-hub-header">
+          <div>
+            <h3><span class="section-icon">&#128225;</span> Thaluxis Hub &amp; Satellites</h3>
+            <p class="config-desc sat-hub-lead">Hub settings and satellite pairing — analysis and OS2L sync from VirtualDJ laptops on your LAN.</p>
+          </div>
+          <div class="sat-hub-header-actions">
+            <button class="btn btn-secondary btn-sm" id="btnRefreshSatellites" type="button">Refresh</button>
+            <button class="btn btn-primary btn-sm" id="btnSaveSatelliteSettings" type="button">Save hub settings</button>
+            <span id="cfgHubSaveStatus" class="sat-save-status"></span>
+          </div>
+        </div>
 
-        <div id="satPendingBanner" class="sat-pending-banner" hidden>
-          <div class="sat-pending-banner-inner">
-            <div>
-              <strong id="satPendingBannerTitle">Satellite waiting for approval</strong>
-              <p id="satPendingBannerDesc">A Thaluxis Satellite has requested connection. Accept it below to authorize sync and OS2L forwarding.</p>
+        <div id="satPendingBanner" class="sat-pending-banner sat-pending-banner-compact" hidden>
+          <strong id="satPendingBannerTitle">Satellite waiting for approval</strong>
+          <span id="satPendingBannerDesc" class="sat-pending-banner-desc"></span>
+        </div>
+
+        <div class="sat-hub-layout">
+          <div class="sat-hub-col sat-hub-col-devices">
+            <div class="config-card sat-panel sat-priority-card" id="satPendingPanel">
+              <h4>Pending <span id="satPendingCount" class="sat-count-badge"></span></h4>
+              <div id="satPendingList" class="sat-device-list"></div>
             </div>
-            <button class="btn btn-secondary btn-sm" id="btnRefreshSatellitesTop" type="button">Refresh</button>
-          </div>
-        </div>
 
-        <div class="config-card sat-priority-card">
-          <h4>Pending connections <span id="satPendingCount" class="sat-count-badge"></span></h4>
-          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellite nodes waiting for approval. Click <strong>Accept</strong> to authorize analysis sync and OS2L forwarding.</p>
-          <div id="satPendingList" class="sat-device-list"></div>
-        </div>
-
-        <div class="config-card sat-priority-card" style="margin-top:16px">
-          <h4>Discovered on network</h4>
-          <p class="config-desc" style="margin-bottom:8px">Thaluxis Satellites seen via mDNS that may not have requested pairing yet.</p>
-          <div id="satDiscoveredList" class="sat-device-list"></div>
-        </div>
-
-        <div class="config-card" style="margin-top:16px">
-          <h4>Thaluxis Hub</h4>
-          <div class="config-row">
-            <label>Hub name</label>
-            <input type="text" id="cfgHubName" placeholder="Thaluxis Hub" style="width:100%;max-width:320px">
-            <span class="config-hint">Display name shown to satellites (Bonjour name updates after restart)</span>
-          </div>
-          <div class="config-row">
-            <label>mDNS hostname</label>
-            <input type="text" id="cfgHubMdnsHostname" placeholder="thaluxis" style="width:160px">
-            <span class="config-hint">LAN hostname — e.g. <code id="cfgHubFqdnPreview">thaluxis.local</code></span>
-          </div>
-          <div class="config-row">
-            <label>Hub URL</label>
-            <span id="cfgHubUrl" style="font-size:12px;font-family:monospace;color:var(--accent)">—</span>
-            <span class="config-hint">Used by satellites if manual setup is needed</span>
-          </div>
-          <div class="config-row">
-            <label>Bonjour name</label>
-            <span id="cfgHubBonjourName" style="font-size:12px;color:var(--text-dim)">—</span>
-          </div>
-          <div class="config-row">
-            <label>Enable Thaluxis Satellites</label>
-            <input type="checkbox" id="cfgSatelliteEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
-            <span class="config-hint">Allow satellite nodes to pair and sync</span>
-          </div>
-          <div class="config-row">
-            <label>Local OS2L on hub</label>
-            <input type="checkbox" id="cfgHubOs2lLocal" style="width:16px;height:16px;accent-color:var(--accent)">
-            <span class="config-hint">Same as <strong>VirtualDJ → Enable VirtualDJ link</strong>. Uncheck if VDJ connects to a Thaluxis Satellite. Restart required.</span>
-          </div>
-          <div class="config-row">
-            <label>Legacy fallback token</label>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <input type="text" id="cfgHubLegacyToken" readonly style="width:100%;max-width:420px;font-family:monospace;font-size:11px">
-              <button class="btn btn-secondary btn-sm" id="btnRegenerateHubToken" type="button">Regenerate</button>
+            <div class="config-card sat-panel">
+              <h4>Approved</h4>
+              <div id="satApprovedList" class="sat-device-list"></div>
             </div>
-            <span class="config-hint">Optional shared token — normal setup uses per-device pairing instead</span>
-          </div>
-          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <button class="btn btn-primary btn-sm" id="btnSaveSatelliteSettings">Save hub settings</button>
-            <button class="btn btn-secondary btn-sm" id="btnRefreshSatellites">Refresh devices</button>
-            <span id="cfgHubSaveStatus" style="font-size:11px;color:var(--text-dim)"></span>
-          </div>
-        </div>
 
-        <div class="config-card" style="margin-top:16px">
-          <h4>Approved Thaluxis Satellites</h4>
-          <div id="satApprovedList" class="sat-device-list"></div>
+            <div class="config-card sat-panel sat-panel-secondary" id="satDiscoveredPanel">
+              <h4>Discovered on network</h4>
+              <p class="sat-panel-hint">mDNS — may appear before pairing request</p>
+              <div id="satDiscoveredList" class="sat-device-list"></div>
+            </div>
+          </div>
+
+          <div class="config-card sat-panel sat-hub-settings">
+            <h4>Hub settings</h4>
+            <div class="sat-settings-grid">
+              <div class="sat-field">
+                <label for="cfgHubName">Hub name</label>
+                <input type="text" id="cfgHubName" placeholder="Thaluxis Hub">
+                <span class="config-hint">Bonjour display name (restart to apply)</span>
+              </div>
+              <div class="sat-field">
+                <label for="cfgHubMdnsHostname">mDNS hostname</label>
+                <input type="text" id="cfgHubMdnsHostname" placeholder="thaluxis">
+                <span class="config-hint">e.g. <code id="cfgHubFqdnPreview">thaluxis.local</code></span>
+              </div>
+              <div class="sat-field sat-field-readonly">
+                <label>Hub URL</label>
+                <span id="cfgHubUrl" class="sat-mono-value">—</span>
+                <span class="config-hint">Manual satellite setup</span>
+              </div>
+              <div class="sat-field sat-field-readonly">
+                <label>Bonjour name</label>
+                <span id="cfgHubBonjourName" class="sat-readonly-value">—</span>
+              </div>
+              <div class="sat-field sat-field-check">
+                <label><input type="checkbox" id="cfgSatelliteEnabled"> Enable satellites</label>
+                <span class="config-hint">Allow pair and sync</span>
+              </div>
+              <div class="sat-field sat-field-check">
+                <label><input type="checkbox" id="cfgHubOs2lLocal"> Local OS2L on hub</label>
+                <span class="config-hint">Off if VDJ uses a satellite node (restart)</span>
+              </div>
+              <div class="sat-field sat-field-wide">
+                <label for="cfgHubLegacyToken">Legacy token</label>
+                <div class="sat-token-row">
+                  <input type="text" id="cfgHubLegacyToken" readonly class="sat-token-input">
+                  <button class="btn btn-secondary btn-sm" id="btnRegenerateHubToken" type="button">Regenerate</button>
+                </div>
+                <span class="config-hint">Optional — pairing is normally per-device</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -977,9 +1017,22 @@
       <div class="config-section">
         <h3><span class="section-icon">&#10024;</span> Effects Library</h3>
         <p class="config-desc">Create and manage reusable lighting effects. Effects can be assigned to cues in the <a href="sequencer.html" style="color:var(--accent)">Sequencer</a>.</p>
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div class="cfg-effects-toolbar">
           <button class="btn btn-primary btn-sm" id="cfgAddEffectBtn">+ New Effect</button>
-          <span style="font-size:11px;color:var(--text-dim)" id="cfgEffectsCount"></span>
+          <span class="cfg-effects-total" id="cfgEffectsCount"></span>
+        </div>
+        <div class="cfg-effects-filter-bar" id="cfgEffectsFilterBar">
+          <input type="search" class="filter-input cfg-effect-filter-name" id="cfgEffectFilterName" placeholder="Search name or type…" autocomplete="off">
+          <select class="filter-input filter-select" id="cfgEffectFilterCategory" title="Category">
+            <option value="">All categories</option>
+          </select>
+          <select class="filter-input filter-select" id="cfgEffectFilterType" title="Effect type">
+            <option value="">All types</option>
+          </select>
+          <select class="filter-input filter-select" id="cfgEffectFilterTarget" title="Fixture target">
+            <option value="">All targets</option>
+          </select>
+          <button type="button" class="btn-clear-filters" id="cfgEffectFilterClear">Clear</button>
         </div>
         <div id="cfgEffectsList"></div>
       </div>
@@ -999,6 +1052,8 @@
             <div class="db-stat-card"><span class="stat-value" id="dbStatCues">—</span><span class="stat-label">Cues</span></div>
             <div class="db-stat-card"><span class="stat-value" id="dbStatFixtures">—</span><span class="stat-label">Fixtures</span></div>
             <div class="db-stat-card"><span class="stat-value" id="dbStatEffects">—</span><span class="stat-label">Effects</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatRigLayouts">—</span><span class="stat-label">Rig Presets</span></div>
+            <div class="db-stat-card"><span class="stat-value" id="dbStatRigElements">—</span><span class="stat-label">Rig Elements</span></div>
           </div>
         </div>
       </div>
@@ -1052,7 +1107,7 @@
       <!-- Export / Import -->
       <div class="config-section" style="margin-top:28px">
         <h3>Export / Import</h3>
-        <p class="config-desc">Export your fixture setup, effects, mover presets, and scenes to a JSON file. Import from a previously exported file.</p>
+        <p class="config-desc">Export your fixture setup, effects, mover presets, scenes, and rig layout presets (plus live canvas positions) to a JSON file. Import from a previously exported file.</p>
         <div class="export-section">
           <div class="export-box">
             <h4>Export</h4>
@@ -1064,6 +1119,7 @@
               <label><input type="checkbox" class="export-cb" value="effects" checked style="accent-color:var(--accent)"> Effects</label>
               <label><input type="checkbox" class="export-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets</label>
               <label><input type="checkbox" class="export-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes</label>
+              <label><input type="checkbox" class="export-cb" value="rig_layouts" checked style="accent-color:var(--accent)"> Rig Layouts</label>
             </div>
             <button class="btn btn-primary btn-sm" id="btnExport">&#128190; Download Export File</button>
           </div>
@@ -1081,6 +1137,7 @@
                 <label><input type="checkbox" class="import-cb" value="effects" checked style="accent-color:var(--accent)"> Effects</label>
                 <label><input type="checkbox" class="import-cb" value="mover_presets" checked style="accent-color:var(--accent)"> Mover Presets</label>
                 <label><input type="checkbox" class="import-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes</label>
+                <label><input type="checkbox" class="import-cb" value="rig_layouts" checked style="accent-color:var(--accent)"> Rig Layouts</label>
               </div>
             </div>
             <button class="btn btn-primary btn-sm" id="btnImport" disabled>&#128230; Import Selected</button>

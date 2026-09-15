@@ -122,6 +122,27 @@
     <button class="fixture-tab-btn active" data-fixtab="fixtures">&#9881; Fixtures</button>
     <button class="fixture-tab-btn" data-fixtab="rig">&#9638; Rig Layout</button>
     <button class="fixture-tab-btn" data-fixtab="universe">&#9783; Universe</button>
+    <div class="rig-layout-bar" id="rigLayoutBar">
+      <span class="rig-layout-bar-title">Layout preset</span>
+      <select id="rigLayoutSelect" class="rig-layout-select" title="Named snapshots of fixture positions and rigging">
+        <option value="">— Select preset —</option>
+      </select>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnRigSwitchLayout" title="Apply preset to the rig (replaces current positions)">Switch to preset</button>
+      <div class="rig-layout-menu-wrap">
+        <button type="button" class="btn btn-secondary btn-sm" id="btnRigLayoutMenu" aria-haspopup="true" aria-expanded="false">Preset actions ▾</button>
+        <div class="rig-layout-menu" id="rigLayoutMenu" hidden>
+          <button type="button" class="rig-layout-menu-item" data-rig-action="save-new">Save as new preset…</button>
+          <button type="button" class="rig-layout-menu-item" data-rig-action="update" id="rigMenuUpdatePreset" disabled>Update selected preset</button>
+          <button type="button" class="rig-layout-menu-item rig-layout-menu-danger" data-rig-action="delete" id="rigMenuDeletePreset" disabled>Delete selected preset</button>
+          <div class="rig-layout-menu-sep"></div>
+          <button type="button" class="rig-layout-menu-item" data-rig-action="export-preset" id="rigMenuExportPreset" disabled>Export selected preset (JSON)</button>
+          <button type="button" class="rig-layout-menu-item" data-rig-action="export-canvas">Export current canvas (JSON)</button>
+          <button type="button" class="rig-layout-menu-item" data-rig-action="import">Import preset (JSON)…</button>
+        </div>
+      </div>
+      <span id="rigActiveLabel" class="rig-active-badge" title="Preset last applied to the rig"></span>
+      <input type="file" id="rigLayoutImportFile" accept=".json,application/json" hidden>
+    </div>
   </div>
 
   <!-- ─── Fixtures Panel ─── -->
@@ -131,6 +152,8 @@
       <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ New Group</button>
       <button class="btn btn-secondary btn-sm" id="btnExportAddressCsv" title="Download CSV with DMX address for each channel">&#8595; Addressing CSV</button>
       <button class="btn btn-secondary btn-sm" id="btnExportAddressPrint" title="Open printable addressing sheet">&#128438; Print</button>
+      <button class="btn btn-secondary btn-sm" id="btnFixtureIdentifyWalk" title="Blink each visible fixture 3× at 50% (universe/address order). Not available during sequence playback.">&#128161; Test lights</button>
+      <span id="fixtureIdentifyWalkStatus" style="font-size:11px;color:var(--cyan);display:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
       <span style="flex:1"></span>
       <span style="font-size:12px;color:var(--text-dim)" id="fixtureCount"></span>
     </div>
@@ -194,21 +217,14 @@
         <button class="btn btn-secondary" id="btnRigResetCam" title="Reset 3D camera" style="display:none;font-size:10px;padding:3px 8px">⟳ Reset</button>
         <span style="flex:1"></span>
         <div class="rig-toolbar-sep"></div>
-        <select id="rigLayoutSelect" style="padding:4px 8px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:4px;color:var(--text);font-size:11px;min-width:130px">
-          <option value="">— Saved Layouts —</option>
-        </select>
-        <button class="btn btn-secondary" id="btnRigLoadLayout" title="Load selected layout">Load</button>
-        <button class="btn btn-secondary" id="btnRigSaveAsLayout" title="Save current layout as new preset">Save As…</button>
-        <button class="btn btn-secondary" id="btnRigOverwriteLayout" title="Overwrite selected layout with current state" style="display:none">Overwrite</button>
-        <button class="btn btn-danger btn-sm" id="btnRigDeleteLayout" title="Delete selected layout" style="display:none;padding:4px 8px;font-size:11px">✕</button>
-        <span id="rigActiveLabel" style="font-size:10px;color:var(--cyan);margin-left:4px;white-space:nowrap"></span>
-        <div class="rig-toolbar-sep"></div>
-        <button class="btn btn-primary" id="btnRigSaveLayout">Save Layout</button>
+        <button type="button" class="btn btn-primary" id="btnRigCommitPositions" title="Save canvas positions to the database. Does not change layout presets — use Preset actions in the tab bar to manage those.">Commit positions</button>
         <span class="rig-info" id="rigInfo" style="font-size:11px;color:var(--text-dim);margin-left:8px"></span>
       </div>
       <div class="rig-canvas-wrap" id="rigCanvas"></div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
         Drag fixtures on the X/Y plane. Right-click to adjust depth (Z). Double-click multicell fixtures to edit strip path with corners and wrapping. Use view buttons for Top, 3D, Front, and Side views.
+        <strong style="color:var(--text-dim);font-weight:600"> Commit positions</strong> saves the canvas to the live rig;
+        <strong style="font-weight:600">layout presets</strong> (tab bar) are named snapshots — use <em>Switch to preset</em> to apply one, or <em>Preset actions</em> to save, update, export, or import.
       </div>
     </div>
   </div>
@@ -873,6 +889,14 @@
 
           <!-- Connection status -->
           <div class="config-card" style="margin-bottom:16px">
+            <div class="config-row" style="border-bottom:1px solid rgba(255,255,255,.06);padding-bottom:12px;margin-bottom:12px">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;min-width:auto">
+                <input type="checkbox" id="cfgMidiEnabled" style="width:16px;height:16px;accent-color:var(--accent)">
+                Enable MIDI controller
+              </label>
+              <span class="config-hint" style="margin-left:0">When off, the hub does not scan for MIDI devices on startup or in Config.</span>
+            </div>
+            <div id="midiHardwareSection">
             <h4>Connection</h4>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
               <div id="midiStatusDot" style="width:10px;height:10px;border-radius:50%;background:#f44"></div>
@@ -885,13 +909,14 @@
             <div class="config-row" style="margin-bottom:6px">
               <label>Device</label>
               <select id="midiDeviceSelect" style="width:280px">
-                <option value="">— scanning for devices —</option>
+                <option value="">— select device —</option>
               </select>
+            </div>
             </div>
           </div>
 
           <!-- APC Mini visual grid -->
-          <div class="config-card" style="margin-bottom:16px">
+          <div class="config-card midi-hardware-panel" style="margin-bottom:16px">
             <h4>APC Mini Layout</h4>
             <p class="config-desc" style="margin-bottom:10px">Visual representation of your APC Mini button layout. Coloured buttons have active mappings.</p>
             <div id="apcMiniGrid" style="display:grid;grid-template-columns:repeat(9,36px);grid-template-rows:repeat(10,32px) 60px;gap:2px;font-size:9px;font-family:var(--mono)"></div>
@@ -1492,9 +1517,22 @@
         <div class="config-section">
           <h3>Effects Library</h3>
           <p class="config-desc">Create and manage reusable lighting effects. Effects can be assigned to cues in the <a href="sequencer.html" style="color:var(--accent)">Sequencer</a>.</p>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div class="cfg-effects-toolbar">
             <button class="btn btn-primary btn-sm" id="cfgAddEffectBtn">+ New Effect</button>
-            <span style="font-size:11px;color:var(--text-dim)" id="cfgEffectsCount"></span>
+            <span class="cfg-effects-total" id="cfgEffectsCount"></span>
+          </div>
+          <div class="cfg-effects-filter-bar fixtures-filter-bar" id="cfgEffectsFilterBar">
+            <input type="search" class="filter-input cfg-effect-filter-name" id="cfgEffectFilterName" placeholder="Search name or type…" autocomplete="off">
+            <select class="filter-input filter-select" id="cfgEffectFilterCategory" title="Category">
+              <option value="">All categories</option>
+            </select>
+            <select class="filter-input filter-select" id="cfgEffectFilterType" title="Effect type">
+              <option value="">All types</option>
+            </select>
+            <select class="filter-input filter-select" id="cfgEffectFilterTarget" title="Fixture target">
+              <option value="">All targets</option>
+            </select>
+            <button type="button" class="btn-clear-filters" id="cfgEffectFilterClear">Clear</button>
           </div>
           <div class="seq-effects-list" id="cfgEffectsList"></div>
         </div>
@@ -1611,6 +1649,8 @@
               <div class="db-stat-card"><span class="db-stat-val" id="dbStatCues">—</span><span class="db-stat-label">Cues</span></div>
               <div class="db-stat-card"><span class="db-stat-val" id="dbStatFixtures">—</span><span class="db-stat-label">Fixtures</span></div>
               <div class="db-stat-card"><span class="db-stat-val" id="dbStatEffects">—</span><span class="db-stat-label">Effects</span></div>
+              <div class="db-stat-card"><span class="db-stat-val" id="dbStatRigLayouts">—</span><span class="db-stat-label">Rig Presets</span></div>
+              <div class="db-stat-card"><span class="db-stat-val" id="dbStatRigElements">—</span><span class="db-stat-label">Rig Elements</span></div>
             </div>
           </div>
         </div>
@@ -1669,7 +1709,7 @@
         <!-- Export / Import (merged into Database page) -->
         <div class="config-section" style="margin-top:28px">
           <h3>Export / Import</h3>
-          <p class="config-desc">Export your fixture setup, effects, mover presets, and scenes to a JSON file for backup or transfer. Import from a previously exported file to restore or merge configurations.</p>
+          <p class="config-desc">Export your fixture setup, effects, mover presets, scenes, and rig layout presets (plus live canvas positions) for backup or transfer. Import from a previously exported file to restore or merge configurations.</p>
 
           <!-- Export -->
           <div class="config-card" style="margin-top:12px">
@@ -1694,6 +1734,9 @@
               </label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
                 <input type="checkbox" class="export-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                <input type="checkbox" class="export-cb" value="rig_layouts" checked style="accent-color:var(--accent)"> Rig Layouts
               </label>
             </div>
             <button class="btn btn-primary btn-sm" id="btnExport">&#128190; Download Export File</button>
@@ -1729,6 +1772,9 @@
                 </label>
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
                   <input type="checkbox" class="import-cb" value="scenes" checked style="accent-color:var(--accent)"> Scenes
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+                  <input type="checkbox" class="import-cb" value="rig_layouts" checked style="accent-color:var(--accent)"> Rig Layouts
                 </label>
               </div>
             </div>
@@ -3639,6 +3685,153 @@ function updateState(state) {
 // ═══════════════════════════════════════════════════════════════
 const deckSeqState = {}; // { deckNum: { id, name, playing } }
 
+function isAnyDeckSequencePlaying() {
+  return Object.values(deckSeqState).some(s => s && s.playing);
+}
+
+async function fetchSequencePlaybackActive() {
+  try {
+    const data = await fetch('/api/sequences/playback-status').then(r => r.json());
+    return !!data.anyPlaying;
+  } catch (e) {
+    return isAnyDeckSequencePlaying();
+  }
+}
+
+async function postFixtureIdentify(fixtureId) {
+  const res = await fetch(`/api/fixtures/${fixtureId}/identify`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  return {
+    ok: res.ok,
+    error: data.error,
+    duration_ms: data.duration_ms || 1500,
+  };
+}
+
+async function rigIdentifyFixture(fixture) {
+  if (await fetchSequencePlaybackActive()) {
+    alert('Identify is unavailable while a sequence is playing. Pause playback first.');
+    return;
+  }
+  try {
+    const r = await postFixtureIdentify(fixture.id);
+    if (!r.ok) {
+      if (r.error === 'sequence_playing') {
+        alert('Identify is unavailable while a sequence is playing. Pause playback first.');
+      } else if (r.error === 'dmx_output_disabled') {
+        alert('DMX output is disabled — enable output to identify fixtures.');
+      } else {
+        alert(r.error || 'Identify failed');
+      }
+    }
+  } catch (e) {
+    alert('Identify failed: ' + e.message);
+  }
+}
+
+let _fixtureIdentifyWalkActive = false;
+let _fixtureIdentifyWalkCancel = false;
+
+function _setFixtureRowHighlight(fixtureId, on) {
+  const row = document.querySelector(`tr[data-fixture-id="${fixtureId}"]`);
+  if (row) row.classList.toggle('fixture-identify-active', on);
+}
+
+function getFixturesForIdentifyWalk() {
+  return [...getFilteredFixtures()].sort((a, b) =>
+    (a.universe - b.universe) || (a.address - b.address) || a.name.localeCompare(b.name),
+  );
+}
+
+function _delayMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function runFixtureIdentifyWalk() {
+  const btn = document.getElementById('btnFixtureIdentifyWalk');
+  const statusEl = document.getElementById('fixtureIdentifyWalkStatus');
+
+  if (_fixtureIdentifyWalkActive) {
+    _fixtureIdentifyWalkCancel = true;
+    btn.disabled = true;
+    btn.textContent = 'Stopping…';
+    try { await fetch('/api/fixtures/identify/cancel', { method: 'POST' }); } catch (_) { /* ignore */ }
+    return;
+  }
+
+  if (await fetchSequencePlaybackActive()) {
+    alert('Test lights is unavailable while a sequence is playing. Pause playback first.');
+    return;
+  }
+
+  const list = getFixturesForIdentifyWalk();
+  if (!list.length) {
+    alert(_allFixtures.length ? 'No fixtures match the current filters.' : 'No fixtures configured.');
+    return;
+  }
+
+  const filterNote = list.length < _allFixtures.length
+    ? `\n\nUsing ${list.length} fixture(s) matching the current filters.`
+    : '';
+  if (!confirm(`Run identify on ${list.length} fixture(s)? Each will blink 3× at 50% brightness.${filterNote}`)) return;
+
+  _fixtureIdentifyWalkActive = true;
+  _fixtureIdentifyWalkCancel = false;
+  btn.textContent = 'Stop test';
+  statusEl.style.display = '';
+  statusEl.textContent = 'Starting…';
+
+  let stoppedEarly = false;
+  for (let i = 0; i < list.length; i++) {
+    if (_fixtureIdentifyWalkCancel) break;
+    if (await fetchSequencePlaybackActive()) {
+      alert('Sequence playback started — test stopped.');
+      stoppedEarly = true;
+      break;
+    }
+    const f = list[i];
+    _setFixtureRowHighlight(f.id, true);
+    statusEl.textContent = `${i + 1} / ${list.length}: ${f.name}`;
+    try {
+      const row = document.querySelector(`tr[data-fixture-id="${f.id}"]`);
+      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch (_) { /* ignore */ }
+
+    let r;
+    try {
+      r = await postFixtureIdentify(f.id);
+    } catch (e) {
+      alert('Identify failed: ' + e.message);
+      stoppedEarly = true;
+      break;
+    }
+    if (!r.ok) {
+      if (r.error === 'sequence_playing') {
+        alert('Sequence playback started — test stopped.');
+        stoppedEarly = true;
+      } else if (r.error === 'dmx_output_disabled') {
+        alert('DMX output is disabled — enable output to test fixtures.');
+        stoppedEarly = true;
+      } else {
+        alert(`Identify failed for "${f.name}": ${r.error || 'unknown error'}`);
+      }
+      break;
+    }
+
+    await _delayMs(r.duration_ms + 200);
+    _setFixtureRowHighlight(f.id, false);
+  }
+
+  document.querySelectorAll('tr.fixture-identify-active').forEach(el => el.classList.remove('fixture-identify-active'));
+  statusEl.textContent = _fixtureIdentifyWalkCancel ? 'Stopped' : (stoppedEarly ? 'Stopped' : 'Done');
+  setTimeout(() => { statusEl.style.display = 'none'; statusEl.textContent = ''; }, 2500);
+
+  _fixtureIdentifyWalkActive = false;
+  _fixtureIdentifyWalkCancel = false;
+  btn.disabled = false;
+  btn.textContent = 'Test lights';
+}
+
 function openDeckSequencer(deck) {
   const info = deckSeqState[deck];
   if (!info || !info.id) return;
@@ -4084,6 +4277,7 @@ function renderFixtureCards(fixtures) {
 document.getElementById('btnAddFixture').addEventListener('click', () => openFixtureModal());
 document.getElementById('btnExportAddressCsv').addEventListener('click', () => exportFixtureAddressingCsv());
 document.getElementById('btnExportAddressPrint').addEventListener('click', () => exportFixtureAddressingPrint());
+document.getElementById('btnFixtureIdentifyWalk').addEventListener('click', () => runFixtureIdentifyWalk());
 
 // ── Fixture Type Picker (searchable, server-side) ──
 let _ftPickerMeta = { manufacturers: [], categories: [], channelCounts: [], loaded: false };
@@ -6586,6 +6780,32 @@ function rigNodeDepthPopup(e, fixture) {
   });
   rangeEl.addEventListener('change', () => recalcRigOrder());
 
+  {
+    const idBtn = document.createElement('button');
+    idBtn.type = 'button';
+    idBtn.textContent = '💡 Identify light';
+    idBtn.className = 'rig-popup-btn rig-popup-btn-identify';
+    idBtn.style.cssText = 'display:block;width:100%;margin-top:8px;padding:5px 8px;' +
+      'background:rgba(255,200,80,0.12);border:1px solid #c9a227;color:#ffd54f;' +
+      'border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;text-align:center';
+    idBtn.addEventListener('click', () => {
+      popup.remove();
+      document.removeEventListener('mousedown', closePopup);
+      rigIdentifyFixture(fixture);
+    });
+    popup.appendChild(idBtn);
+    fetchSequencePlaybackActive().then(playing => {
+      idBtn.disabled = playing;
+      if (playing) {
+        idBtn.style.opacity = '0.45';
+        idBtn.style.cursor = 'not-allowed';
+        idBtn.title = 'Unavailable while a sequence is playing';
+      } else {
+        idBtn.title = 'Blink this fixture 3 times at 50% brightness';
+      }
+    });
+  }
+
   // "Edit Strip Path" button — any fixture can be laid out as a strip
   {
     const editBtn = document.createElement('button');
@@ -7518,54 +7738,105 @@ async function _saveCurrentRigToDB() {
   }
 }
 
+function _rigLayoutSelectedId() {
+  return document.getElementById('rigLayoutSelect').value;
+}
+
+function _rigLayoutById(id) {
+  return _rigLayouts.find(l => l.id === +id);
+}
+
+function _updateRigLayoutBarState() {
+  const id = _rigLayoutSelectedId();
+  const hasSel = !!id;
+  const upd = document.getElementById('rigMenuUpdatePreset');
+  const del = document.getElementById('rigMenuDeletePreset');
+  const exp = document.getElementById('rigMenuExportPreset');
+  if (upd) upd.disabled = !hasSel;
+  if (del) del.disabled = !hasSel;
+  if (exp) exp.disabled = !hasSel;
+  const switchBtn = document.getElementById('btnRigSwitchLayout');
+  if (switchBtn) switchBtn.disabled = !hasSel;
+}
+
+function _closeRigLayoutMenu() {
+  const menu = document.getElementById('rigLayoutMenu');
+  const btn = document.getElementById('btnRigLayoutMenu');
+  if (menu) menu.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function _toggleRigLayoutMenu() {
+  const menu = document.getElementById('rigLayoutMenu');
+  const btn = document.getElementById('btnRigLayoutMenu');
+  if (!menu || !btn) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function _downloadRigLayoutJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function _sanitizeRigExportFilename(name) {
+  return (name || 'rig-layout').replace(/[^\w\-]+/g, '_').slice(0, 80);
+}
+
 async function loadRigLayoutList() {
   try {
     _rigLayouts = await fetch('/api/rig-layouts').then(r => r.json());
   } catch (e) { _rigLayouts = []; }
   const sel = document.getElementById('rigLayoutSelect');
+  const prev = sel.value;
   const activeLayout = _rigLayouts.find(l => l.is_active);
-  sel.innerHTML = '<option value="">— Saved Layouts —</option>' +
-    _rigLayouts.map(l => `<option value="${l.id}"${l.is_active ? ' selected' : ''}>${l.is_active ? '● ' : ''}${esc(l.name)}</option>`).join('');
-  // Show active label
+  sel.innerHTML = '<option value="">— Select preset —</option>' +
+    _rigLayouts.map(l => `<option value="${l.id}">${l.is_active ? '● ' : ''}${esc(l.name)}</option>`).join('');
+  if (prev && _rigLayouts.some(l => String(l.id) === prev)) sel.value = prev;
+  else if (activeLayout) sel.value = String(activeLayout.id);
+
   const lbl = document.getElementById('rigActiveLabel');
   if (activeLayout) {
-    lbl.textContent = '● Active: ' + activeLayout.name;
-    document.getElementById('btnRigOverwriteLayout').style.display = '';
-    document.getElementById('btnRigDeleteLayout').style.display = '';
+    lbl.textContent = 'On rig: ' + activeLayout.name;
+    lbl.title = 'This preset was last applied to fixture positions (Switch to preset / load).';
   } else {
-    lbl.textContent = '';
+    lbl.textContent = 'On rig: (none)';
+    lbl.title = 'No preset marked active — positions may be edited only on canvas.';
   }
+  _updateRigLayoutBarState();
 }
 
-document.getElementById('rigLayoutSelect').addEventListener('change', () => {
-  const val = document.getElementById('rigLayoutSelect').value;
-  document.getElementById('btnRigOverwriteLayout').style.display = val ? '' : 'none';
-  document.getElementById('btnRigDeleteLayout').style.display = val ? '' : 'none';
-});
-
-document.getElementById('btnRigSaveAsLayout').addEventListener('click', async () => {
-  const name = prompt('Layout name:');
+async function _rigSaveAsNewPreset() {
+  const name = prompt('Name for this layout preset:', 'My rig');
   if (!name || !name.trim()) return;
   try {
-    // Build snapshot from current in-memory state and send directly
     const snapshotData = _buildRigSnapshot();
     await _saveCurrentRigToDB();
-    await fetch('/api/rig-layouts', {
+    const res = await fetch('/api/rig-layouts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name.trim(), data: snapshotData })
     });
+    const created = await res.json();
+    if (!res.ok) throw new Error(created.error || 'Save failed');
     await loadRigLayoutList();
-  } catch (e) { alert('Save failed: ' + e.message); }
-});
+    if (created.id) document.getElementById('rigLayoutSelect').value = String(created.id);
+    _updateRigLayoutBarState();
+  } catch (e) { alert('Save preset failed: ' + e.message); }
+}
 
-document.getElementById('btnRigOverwriteLayout').addEventListener('click', async () => {
-  const id = document.getElementById('rigLayoutSelect').value;
-  if (!id) return;
-  const layout = _rigLayouts.find(l => l.id === +id);
-  if (!confirm(`Overwrite "${layout ? layout.name : 'layout'}" with current positions?`)) return;
+async function _rigUpdateSelectedPreset() {
+  const id = _rigLayoutSelectedId();
+  if (!id) { alert('Select a preset in the dropdown first.'); return; }
+  const layout = _rigLayoutById(id);
+  if (!confirm(`Update preset "${layout ? layout.name : ''}" with the current canvas?\n\nThis does not change the live rig until you use Switch to preset.`)) return;
   try {
-    // Build snapshot from current in-memory state and send directly
     const snapshotData = _buildRigSnapshot();
     await _saveCurrentRigToDB();
     await fetch(`/api/rig-layouts/${id}`, {
@@ -7575,19 +7846,18 @@ document.getElementById('btnRigOverwriteLayout').addEventListener('click', async
     });
     await loadRigLayoutList();
     document.getElementById('rigLayoutSelect').value = id;
-  } catch (e) { alert('Overwrite failed: ' + e.message); }
-});
+  } catch (e) { alert('Update preset failed: ' + e.message); }
+}
 
-document.getElementById('btnRigLoadLayout').addEventListener('click', async () => {
-  const id = document.getElementById('rigLayoutSelect').value;
-  if (!id) { alert('Select a saved layout first'); return; }
-  const layout = _rigLayouts.find(l => l.id === +id);
-  if (!confirm(`Load layout "${layout ? layout.name : ''}"? This will overwrite current fixture positions and rigging.`)) return;
+async function _rigSwitchToPreset(skipConfirm) {
+  const id = _rigLayoutSelectedId();
+  if (!id) { alert('Select a preset in the dropdown first.'); return; }
+  const layout = _rigLayoutById(id);
+  if (!skipConfirm && !confirm(`Switch rig to preset "${layout ? layout.name : ''}"?\n\nCurrent fixture positions and truss/stand graphics will be replaced.`)) return;
   try {
     const res = await fetch(`/api/rig-layouts/${id}/load`, { method: 'POST' });
     const data = await res.json();
-    if (data.error) { alert('Load failed: ' + data.error); return; }
-    // Re-fetch ALL data from DB (positions were just restored server-side)
+    if (data.error) { alert('Switch failed: ' + data.error); return; }
     const [fixtures, types] = await Promise.all([
       fetch('/api/fixtures').then(r => r.json()),
       fetch('/api/fixture-types/summaries').then(r => r.json())
@@ -7595,44 +7865,132 @@ document.getElementById('btnRigLoadLayout').addEventListener('click', async () =
     fixtureTypesCache = types;
     _allFixtures = fixtures;
     renderFilteredFixtures();
-    // Refresh rig elements (also restored by load)
     await loadRigElements();
-    // Re-render rig canvas with restored positions
     renderRigLayout();
-    // Keep dropdown on the loaded layout
     await loadRigLayoutList();
     document.getElementById('rigLayoutSelect').value = id;
-    document.getElementById('btnRigOverwriteLayout').style.display = '';
-    document.getElementById('btnRigDeleteLayout').style.display = '';
-  } catch (e) { alert('Load failed: ' + e.message); }
-});
+  } catch (e) { alert('Switch failed: ' + e.message); }
+}
 
-document.getElementById('btnRigDeleteLayout').addEventListener('click', async () => {
-  const id = document.getElementById('rigLayoutSelect').value;
+async function _rigDeleteSelectedPreset() {
+  const id = _rigLayoutSelectedId();
   if (!id) return;
-  const layout = _rigLayouts.find(l => l.id === +id);
-  if (!confirm(`Delete saved layout "${layout ? layout.name : ''}"?`)) return;
+  const layout = _rigLayoutById(id);
+  if (!confirm(`Delete preset "${layout ? layout.name : ''}"?\n\nThe live rig is not changed.`)) return;
   try {
     await fetch(`/api/rig-layouts/${id}`, { method: 'DELETE' });
     await loadRigLayoutList();
-    document.getElementById('btnRigOverwriteLayout').style.display = 'none';
-    document.getElementById('btnRigDeleteLayout').style.display = 'none';
   } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+async function _rigExportSelectedPreset() {
+  const id = _rigLayoutSelectedId();
+  if (!id) { alert('Select a preset to export.'); return; }
+  try {
+    const layout = await fetch(`/api/rig-layouts/${id}`).then(r => r.json());
+    if (layout.error) throw new Error(layout.error);
+    _downloadRigLayoutJson(_sanitizeRigExportFilename(layout.name) + '.json', {
+      format: 'thaluxis-rig-layout',
+      version: 1,
+      name: layout.name,
+      exported_at: new Date().toISOString(),
+      data: layout.data
+    });
+  } catch (e) { alert('Export failed: ' + e.message); }
+}
+
+function _rigExportCurrentCanvas() {
+  const defaultName = _rigLayoutById(_rigLayoutSelectedId())?.name || 'current-canvas';
+  const name = prompt('Export filename label:', defaultName);
+  if (name === null) return;
+  const snapshotData = _buildRigSnapshot();
+  _downloadRigLayoutJson(_sanitizeRigExportFilename(name || 'rig-layout') + '.json', {
+    format: 'thaluxis-rig-layout',
+    version: 1,
+    name: (name || 'Canvas snapshot').trim(),
+    exported_at: new Date().toISOString(),
+    data: snapshotData
+  });
+}
+
+async function _rigImportPresetFromFile(file) {
+  if (!file) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch (e) {
+    alert('Invalid JSON file.');
+    return;
+  }
+  const data = parsed.data || parsed;
+  if (!data || !Array.isArray(data.fixtures)) {
+    alert('Not a rig layout file — expected { data: { fixtures: [...] } }.');
+    return;
+  }
+  const defaultName = parsed.name || file.name.replace(/\.json$/i, '') || 'Imported layout';
+  const name = prompt('Import as preset named:', defaultName);
+  if (!name || !name.trim()) return;
+  try {
+    const res = await fetch('/api/rig-layouts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), data })
+    });
+    const created = await res.json();
+    if (!res.ok) throw new Error(created.error || 'Import failed');
+    await loadRigLayoutList();
+    if (created.id) document.getElementById('rigLayoutSelect').value = String(created.id);
+    if (confirm(`Preset "${name.trim()}" imported.\n\nSwitch rig to this preset now?`)) {
+      await _rigSwitchToPreset(true);
+    }
+  } catch (e) { alert('Import failed: ' + e.message); }
+}
+
+document.getElementById('rigLayoutSelect').addEventListener('change', _updateRigLayoutBarState);
+
+document.getElementById('btnRigSwitchLayout').addEventListener('click', () => _rigSwitchToPreset());
+
+document.getElementById('btnRigLayoutMenu').addEventListener('click', (e) => {
+  e.stopPropagation();
+  _toggleRigLayoutMenu();
 });
 
-// Save layout (fixtures + rigging)
-document.getElementById('btnRigSaveLayout').addEventListener('click', async () => {
-  const btn = document.getElementById('btnRigSaveLayout');
+document.getElementById('rigLayoutMenu').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-rig-action]');
+  if (!btn || btn.disabled) return;
+  _closeRigLayoutMenu();
+  const action = btn.dataset.rigAction;
+  if (action === 'save-new') _rigSaveAsNewPreset();
+  else if (action === 'update') _rigUpdateSelectedPreset();
+  else if (action === 'delete') _rigDeleteSelectedPreset();
+  else if (action === 'export-preset') _rigExportSelectedPreset();
+  else if (action === 'export-canvas') _rigExportCurrentCanvas();
+  else if (action === 'import') document.getElementById('rigLayoutImportFile').click();
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.rig-layout-menu-wrap')) return;
+  _closeRigLayoutMenu();
+});
+
+document.getElementById('rigLayoutImportFile').addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  _rigImportPresetFromFile(file);
+});
+
+document.getElementById('btnRigCommitPositions').addEventListener('click', async () => {
+  const btn = document.getElementById('btnRigCommitPositions');
   btn.disabled = true;
-  btn.textContent = 'Saving…';
+  const prev = btn.textContent;
+  btn.textContent = 'Committing…';
   try {
-    // _saveCurrentRigToDB saves both fixture positions AND rig element positions
     await _saveCurrentRigToDB();
-    btn.textContent = '✓ Saved';
-    setTimeout(() => { btn.textContent = 'Save Layout'; }, 1500);
-  } catch(e) {
-    alert('Save failed: ' + e.message);
-    btn.textContent = 'Save Layout';
+    btn.textContent = '✓ Committed';
+    setTimeout(() => { btn.textContent = prev; }, 1500);
+  } catch (e) {
+    alert('Commit failed: ' + e.message);
+    btn.textContent = prev;
   } finally {
     btn.disabled = false;
   }
@@ -8780,22 +9138,109 @@ async function setDefaultTemplate(id) { await fetch('/api/sequence-templates/'+i
 // ═══════════════════════════════════════════════════════════════
 let cfgEffects = [];
 let cfgEditingEffectId = null;
+let cfgEffectsFiltersBound = false;
+
+function cfgEffectFilterLabel(s) {
+  return String(s || '').replace(/_/g, ' ');
+}
+
+function getFilteredCfgEffects() {
+  const q = (document.getElementById('cfgEffectFilterName')?.value || '').trim().toLowerCase();
+  const cat = document.getElementById('cfgEffectFilterCategory')?.value || '';
+  const type = document.getElementById('cfgEffectFilterType')?.value || '';
+  const target = document.getElementById('cfgEffectFilterTarget')?.value || '';
+  return cfgEffects.filter((eff) => {
+    if (q) {
+      const hay = `${eff.name || ''} ${eff.type || ''} ${eff.category || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (cat && (eff.category || 'color') !== cat) return false;
+    if (type && eff.type !== type) return false;
+    if (target && (eff.fixture_target || 'all') !== target) return false;
+    return true;
+  });
+}
+
+function populateCfgEffectFilterOptions() {
+  const catSel = document.getElementById('cfgEffectFilterCategory');
+  const typeSel = document.getElementById('cfgEffectFilterType');
+  const targetSel = document.getElementById('cfgEffectFilterTarget');
+  if (!catSel || !typeSel || !targetSel) return;
+
+  const curCat = catSel.value;
+  const curType = typeSel.value;
+  const curTarget = targetSel.value;
+
+  const cats = [...new Set(cfgEffects.map((e) => e.category || 'color'))].sort();
+  const types = [...new Set(cfgEffects.map((e) => e.type))].sort();
+  const targets = [...new Set(cfgEffects.map((e) => e.fixture_target || 'all'))].sort();
+
+  const fillSelect = (sel, allLabel, values, current) => {
+    sel.innerHTML = `<option value="">${allLabel}</option>` +
+      values.map((v) => {
+        const selAttr = v === current ? ' selected' : '';
+        return `<option value="${esc(v)}"${selAttr}>${esc(cfgEffectFilterLabel(v))}</option>`;
+      }).join('');
+  };
+
+  fillSelect(catSel, 'All categories', cats, curCat);
+  fillSelect(typeSel, 'All types', types, curType);
+  fillSelect(targetSel, 'All targets', targets, curTarget);
+}
+
+function bindCfgEffectsFilters() {
+  if (cfgEffectsFiltersBound) return;
+  cfgEffectsFiltersBound = true;
+  const onFilter = () => renderCfgEffectsList();
+  for (const id of ['cfgEffectFilterName', 'cfgEffectFilterCategory', 'cfgEffectFilterType', 'cfgEffectFilterTarget']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener('input', onFilter);
+    el.addEventListener('change', onFilter);
+  }
+  document.getElementById('cfgEffectFilterClear')?.addEventListener('click', () => {
+    const nameEl = document.getElementById('cfgEffectFilterName');
+    if (nameEl) nameEl.value = '';
+    for (const id of ['cfgEffectFilterCategory', 'cfgEffectFilterType', 'cfgEffectFilterTarget']) {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    }
+    renderCfgEffectsList();
+  });
+}
 
 async function loadEffectsConfig() {
   cfgEffects = await fetch('/api/effects').then(r => r.json());
+  bindCfgEffectsFilters();
+  populateCfgEffectFilterOptions();
   renderCfgEffectsList();
 }
 
 function renderCfgEffectsList() {
   const list = document.getElementById('cfgEffectsList');
-  document.getElementById('cfgEffectsCount').textContent = `${cfgEffects.length} effect(s)`;
+  const countEl = document.getElementById('cfgEffectsCount');
   if (cfgEffects.length === 0) {
+    if (countEl) countEl.textContent = '0 effect(s)';
     list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects yet. Click "+ New Effect" to create one.</div>';
+    return;
+  }
+  const filtered = getFilteredCfgEffects();
+  const total = cfgEffects.length;
+  if (countEl) {
+    countEl.textContent = filtered.length === total
+      ? `${total} effect(s)`
+      : `Showing ${filtered.length} of ${total}`;
+  }
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects match the current filters. <button type="button" class="btn btn-sm" id="cfgEffectFilterClearInline">Clear filters</button></div>';
+    document.getElementById('cfgEffectFilterClearInline')?.addEventListener('click', () => {
+      document.getElementById('cfgEffectFilterClear')?.click();
+    });
     return;
   }
   const TARGET_BADGE = { all: '', color: '🎨', moving_head: '🔦', moving_head_wash: '🔦', moving_head_spot: '🔦', multicell: '▓' };
   let html = '<table class="subs-table"><thead><tr><th>Type</th><th>Name</th><th>Target</th><th>Duration</th><th>Actions</th></tr></thead><tbody>';
-  for (const eff of cfgEffects) {
+  for (const eff of filtered) {
     const badge = TARGET_BADGE[eff.fixture_target] || '';
     html += `<tr>` +
       `<td><span class="eff-type ${eff.type}" style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--panel-border)">${eff.type.replace(/_/g, ' ')}</span></td>` +
@@ -9079,6 +9524,7 @@ async function cfgSaveEffect() {
     cfgEffects.push(result);
   }
   document.getElementById('effectModal').classList.remove('open');
+  populateCfgEffectFilterOptions();
   renderCfgEffectsList();
 }
 
@@ -9091,6 +9537,7 @@ async function cfgDeleteEffect(id) {
   if (!confirm('Delete this effect?')) return;
   await fetch(`/api/effects/${id}`, { method: 'DELETE' });
   cfgEffects = cfgEffects.filter(e => e.id !== id);
+  populateCfgEffectFilterOptions();
   renderCfgEffectsList();
 }
 
@@ -9122,6 +9569,10 @@ async function loadDatabaseConfig() {
     document.getElementById('dbStatCues').textContent = stats.cues || 0;
     document.getElementById('dbStatFixtures').textContent = stats.fixtures || 0;
     document.getElementById('dbStatEffects').textContent = stats.effects || 0;
+    const rl = document.getElementById('dbStatRigLayouts');
+    const re = document.getElementById('dbStatRigElements');
+    if (rl) rl.textContent = stats.rig_layout_presets ?? 0;
+    if (re) re.textContent = stats.rig_elements ?? 0;
 
     // Reset track search
     document.getElementById('dbTrackSearch').value = '';
@@ -12855,6 +13306,16 @@ function handleSceneWsMessage(msg) {
 //  Export / Import
 // ═══════════════════════════════════════════════════════════════
 
+function formatExportRigLayoutsSummary(rigLayouts) {
+  if (!rigLayouts) return null;
+  const n = (rigLayouts.presets || []).length;
+  const liveN = (rigLayouts.live?.fixtures || []).length;
+  if (n === 0 && liveN === 0) return null;
+  let s = `${n} Rig Layout preset${n === 1 ? '' : 's'}`;
+  if (liveN) s += ` + live canvas (${liveN} fixtures)`;
+  return s;
+}
+
 document.getElementById('btnExport').addEventListener('click', async () => {
   try {
     const resp = await fetch('/api/export');
@@ -12923,6 +13384,15 @@ document.getElementById('importFile').addEventListener('change', (e) => {
           if (cb) { cb.closest('label').style.display = 'none'; cb.checked = false; }
         }
       }
+      const rigCb = preview.querySelector('.import-cb[value="rig_layouts"]');
+      const rigSummary = formatExportRigLayoutsSummary(data.rig_layouts);
+      if (rigSummary) {
+        counts.push(rigSummary);
+        if (rigCb) { rigCb.closest('label').style.display = ''; rigCb.checked = true; }
+      } else if (rigCb) {
+        rigCb.closest('label').style.display = 'none';
+        rigCb.checked = false;
+      }
       previewList.textContent = counts.join(', ') || 'No data found';
       if (data._exported) {
         previewList.textContent += ` (exported ${new Date(data._exported).toLocaleString()})`;
@@ -12965,6 +13435,8 @@ document.getElementById('btnImport').addEventListener('click', async () => {
     if (result.effects) lines.push(`${result.effects} effects`);
     if (result.mover_presets) lines.push(`${result.mover_presets} mover presets`);
     if (result.scenes) lines.push(`${result.scenes} scenes`);
+    if (result.rig_layout_presets) lines.push(`${result.rig_layout_presets} rig layout presets`);
+    if (result.rig_live) lines.push('live rig canvas applied');
 
     resultDiv.style.display = '';
     resultDiv.style.background = 'rgba(0,180,80,.12)';
@@ -13036,10 +13508,35 @@ function midiTextColor(hexBg) {
   return lum > 140 ? '#000' : '#fff';
 }
 
+function applyMidiHardwareUi(enabled) {
+  const on = enabled !== false;
+  const cb = document.getElementById('cfgMidiEnabled');
+  if (cb && cb.checked !== on) cb.checked = on;
+  document.querySelectorAll('#midiHardwareSection, .midi-hardware-panel').forEach(el => {
+    el.classList.toggle('midi-hardware-disabled', !on);
+  });
+  const learn = document.getElementById('btnMidiLearn');
+  if (learn) learn.disabled = !on;
+}
+
 function updateMidiStatus(data) {
   const dot = document.getElementById('midiStatusDot');
   const label = document.getElementById('midiStatusLabel');
   if (!dot) return;
+  const midiEnabled = data.enabled !== false;
+  applyMidiHardwareUi(midiEnabled);
+  if (!midiEnabled) {
+    dot.style.background = '#666';
+    label.textContent = 'MIDI disabled';
+    label.style.color = 'var(--text-dim)';
+    const connectBtn = document.getElementById('btnMidiConnect');
+    const discBtn = document.getElementById('btnMidiDisconnect');
+    if (connectBtn) connectBtn.style.display = 'none';
+    if (discBtn) discBtn.style.display = 'none';
+    const sel = document.getElementById('midiDeviceSelect');
+    if (sel) sel.innerHTML = '<option value="">— MIDI disabled —</option>';
+    return;
+  }
   if (data.connected) {
     dot.style.background = '#0c0';
     label.textContent = `Connected: ${data.device}`;
@@ -13056,6 +13553,8 @@ function updateMidiStatus(data) {
 }
 
 async function refreshMidiPorts() {
+  const cb = document.getElementById('cfgMidiEnabled');
+  if (cb && !cb.checked) return;
   try {
     const ports = await (await fetch('/api/midi/ports')).json();
     const sel = document.getElementById('midiDeviceSelect');
@@ -13466,6 +13965,24 @@ document.getElementById('btnMidiDisconnect').addEventListener('click', async () 
 });
 
 document.getElementById('btnMidiRefreshPorts').addEventListener('click', refreshMidiPorts);
+
+document.getElementById('cfgMidiEnabled')?.addEventListener('change', async (e) => {
+  const enabled = e.target.checked;
+  try {
+    const res = await fetch('/api/midi/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json();
+    updateMidiStatus(data);
+    if (enabled) await loadMidiStatus();
+  } catch (err) {
+    alert('Failed to update MIDI setting: ' + err.message);
+    e.target.checked = !enabled;
+    applyMidiHardwareUi(e.target.checked);
+  }
+});
 
 document.getElementById('btnMidiDefaults').addEventListener('click', async () => {
   if (!confirm('This will replace all existing MIDI mappings with the default APC Mini layout. Continue?')) return;

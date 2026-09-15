@@ -4950,6 +4950,14 @@ function deleteAllSequences() {
 }
 
 function getDbStats() {
+  let rigLayoutPresets = 0;
+  let rigElements = 0;
+  try {
+    rigLayoutPresets = db.prepare('SELECT COUNT(*) as cnt FROM rig_layouts').get().cnt;
+  } catch (_) { /* table may not exist on very old DBs */ }
+  try {
+    rigElements = db.prepare('SELECT COUNT(*) as cnt FROM rig_elements').get().cnt;
+  } catch (_) { /* ignore */ }
   return {
     tracks: db.prepare('SELECT COUNT(*) as cnt FROM tracks').get().cnt,
     sequences: db.prepare('SELECT COUNT(*) as cnt FROM light_sequences').get().cnt,
@@ -4957,6 +4965,8 @@ function getDbStats() {
     analyses: db.prepare('SELECT COUNT(*) as cnt FROM track_analysis').get().cnt,
     fixtures: db.prepare('SELECT COUNT(*) as cnt FROM fixtures').get().cnt,
     effects: db.prepare('SELECT COUNT(*) as cnt FROM effects').get().cnt,
+    rig_layout_presets: rigLayoutPresets,
+    rig_elements: rigElements,
   };
 }
 

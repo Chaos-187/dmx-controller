@@ -33,6 +33,8 @@ function showEmpty(el, msg, cols) {
   if (el.tagName === 'TBODY') {
     const c = cols || el.closest('table')?.querySelector('thead tr')?.children.length || 3;
     el.innerHTML = `<tr><td colspan="${c}" style="text-align:center;padding:24px;color:var(--text-dim);font-size:12px">${msg}</td></tr>`;
+  } else if (el.classList?.contains('sat-device-list')) {
+    el.innerHTML = `<div class="sat-empty">${esc(msg)}</div>`;
   } else {
     el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-dim);font-size:12px">${msg}</div>`;
   }
@@ -403,6 +405,22 @@ document.querySelectorAll('.device-tab-btn').forEach(btn => {
     if (btn.dataset.devtab === 'network') loadNetworkConfig();
     if (btn.dataset.devtab === 'audio')   loadAudioInputConfig();
   });
+});
+
+function switchAudioSubTab(tab) {
+  document.querySelectorAll('.audio-sub-tab-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.audiotab === tab);
+  });
+  document.querySelectorAll('.audio-sub-panel').forEach((p) => p.classList.remove('active'));
+  const panel = document.getElementById('audiotab-' + tab);
+  if (panel) panel.classList.add('active');
+}
+
+document.querySelectorAll('.audio-sub-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchAudioSubTab(btn.dataset.audiotab));
+});
+document.querySelectorAll('[data-audiotab-jump]').forEach((btn) => {
+  btn.addEventListener('click', () => switchAudioSubTab(btn.dataset.audiotabJump));
 });
 
 const _seqGenTabs = new Set(['colors','genres','movement','intensity','effects','templates']);
@@ -1478,22 +1496,109 @@ window.setDefaultTemplate = async (id) => { await fetch('/api/sequence-templates
 // ═══════════════════════════════════════════════════════════════
 let cfgEffects = [];
 let cfgEditingEffectId = null;
+let cfgEffectsFiltersBound = false;
+
+function cfgEffectFilterLabel(s) {
+  return String(s || '').replace(/_/g, ' ');
+}
+
+function getFilteredCfgEffects() {
+  const q = (document.getElementById('cfgEffectFilterName')?.value || '').trim().toLowerCase();
+  const cat = document.getElementById('cfgEffectFilterCategory')?.value || '';
+  const type = document.getElementById('cfgEffectFilterType')?.value || '';
+  const target = document.getElementById('cfgEffectFilterTarget')?.value || '';
+  return cfgEffects.filter((eff) => {
+    if (q) {
+      const hay = `${eff.name || ''} ${eff.type || ''} ${eff.category || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (cat && (eff.category || 'color') !== cat) return false;
+    if (type && eff.type !== type) return false;
+    if (target && (eff.fixture_target || 'all') !== target) return false;
+    return true;
+  });
+}
+
+function populateCfgEffectFilterOptions() {
+  const catSel = document.getElementById('cfgEffectFilterCategory');
+  const typeSel = document.getElementById('cfgEffectFilterType');
+  const targetSel = document.getElementById('cfgEffectFilterTarget');
+  if (!catSel || !typeSel || !targetSel) return;
+
+  const curCat = catSel.value;
+  const curType = typeSel.value;
+  const curTarget = targetSel.value;
+
+  const cats = [...new Set(cfgEffects.map((e) => e.category || 'color'))].sort();
+  const types = [...new Set(cfgEffects.map((e) => e.type))].sort();
+  const targets = [...new Set(cfgEffects.map((e) => e.fixture_target || 'all'))].sort();
+
+  const fillSelect = (sel, allLabel, values, current) => {
+    sel.innerHTML = `<option value="">${allLabel}</option>` +
+      values.map((v) => {
+        const selAttr = v === current ? ' selected' : '';
+        return `<option value="${esc(v)}"${selAttr}>${esc(cfgEffectFilterLabel(v))}</option>`;
+      }).join('');
+  };
+
+  fillSelect(catSel, 'All categories', cats, curCat);
+  fillSelect(typeSel, 'All types', types, curType);
+  fillSelect(targetSel, 'All targets', targets, curTarget);
+}
+
+function bindCfgEffectsFilters() {
+  if (cfgEffectsFiltersBound) return;
+  cfgEffectsFiltersBound = true;
+  const onFilter = () => renderCfgEffectsList();
+  for (const id of ['cfgEffectFilterName', 'cfgEffectFilterCategory', 'cfgEffectFilterType', 'cfgEffectFilterTarget']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener('input', onFilter);
+    el.addEventListener('change', onFilter);
+  }
+  document.getElementById('cfgEffectFilterClear')?.addEventListener('click', () => {
+    const nameEl = document.getElementById('cfgEffectFilterName');
+    if (nameEl) nameEl.value = '';
+    for (const id of ['cfgEffectFilterCategory', 'cfgEffectFilterType', 'cfgEffectFilterTarget']) {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    }
+    renderCfgEffectsList();
+  });
+}
 
 async function loadEffectsConfig() {
   cfgEffects = await fetch('/api/effects').then(r => r.json());
+  bindCfgEffectsFilters();
+  populateCfgEffectFilterOptions();
   renderCfgEffectsList();
 }
 
 function renderCfgEffectsList() {
   const list = document.getElementById('cfgEffectsList');
-  document.getElementById('cfgEffectsCount').textContent = `${cfgEffects.length} effect(s)`;
+  const countEl = document.getElementById('cfgEffectsCount');
   if (cfgEffects.length === 0) {
+    if (countEl) countEl.textContent = '0 effect(s)';
     list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects yet. Click "+ New Effect" to create one.</div>';
+    return;
+  }
+  const filtered = getFilteredCfgEffects();
+  const total = cfgEffects.length;
+  if (countEl) {
+    countEl.textContent = filtered.length === total
+      ? `${total} effect(s)`
+      : `Showing ${filtered.length} of ${total}`;
+  }
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No effects match the current filters. <button type="button" class="btn btn-sm" id="cfgEffectFilterClearInline">Clear filters</button></div>';
+    document.getElementById('cfgEffectFilterClearInline')?.addEventListener('click', () => {
+      document.getElementById('cfgEffectFilterClear')?.click();
+    });
     return;
   }
   const TARGET_BADGE = { all: '', color: '\u{1F3A8}', moving_head: '\u{1F526}', moving_head_wash: '\u{1F526}', moving_head_spot: '\u{1F526}', multicell: '\u2593', mirror_ball: '\u{1FA9F}' };
   let html = '<table class="subs-table"><thead><tr><th>Type</th><th>Name</th><th>Target</th><th>Duration</th><th>Actions</th></tr></thead><tbody>';
-  for (const eff of cfgEffects) {
+  for (const eff of filtered) {
     const badge = TARGET_BADGE[eff.fixture_target] || '';
     html += `<tr>` +
       `<td><span class="eff-type ${eff.type}" style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--panel-border)">${eff.type.replace(/_/g, ' ')}</span></td>` +
@@ -1731,11 +1836,12 @@ async function cfgSaveEffect() {
     cfgEffects.push(result);
   }
   document.getElementById('effectModal').classList.remove('open');
+  populateCfgEffectFilterOptions();
   renderCfgEffectsList();
 }
 
 window.cfgEditEffect = (id) => { const eff = cfgEffects.find(e => e.id === id); if (eff) cfgOpenEffectModal(eff); };
-window.cfgDeleteEffect = async (id) => { if (!confirm('Delete this effect?')) return; await fetch(`/api/effects/${id}`, { method: 'DELETE' }); cfgEffects = cfgEffects.filter(e => e.id !== id); renderCfgEffectsList(); };
+window.cfgDeleteEffect = async (id) => { if (!confirm('Delete this effect?')) return; await fetch(`/api/effects/${id}`, { method: 'DELETE' }); cfgEffects = cfgEffects.filter(e => e.id !== id); populateCfgEffectFilterOptions(); renderCfgEffectsList(); };
 
 document.getElementById('cfgAddEffectBtn').addEventListener('click', () => cfgOpenEffectModal(null));
 document.getElementById('effSaveBtn').addEventListener('click', cfgSaveEffect);
@@ -1763,6 +1869,10 @@ async function loadDatabaseConfig() {
     document.getElementById('dbStatCues').textContent = stats.cues || 0;
     document.getElementById('dbStatFixtures').textContent = stats.fixtures || 0;
     document.getElementById('dbStatEffects').textContent = stats.effects || 0;
+    const rl = document.getElementById('dbStatRigLayouts');
+    const re = document.getElementById('dbStatRigElements');
+    if (rl) rl.textContent = stats.rig_layout_presets ?? 0;
+    if (re) re.textContent = stats.rig_elements ?? 0;
     document.getElementById('dbTrackSearch').value = '';
     document.getElementById('dbTrackSelectedId').value = '';
     document.getElementById('dbTrackResults').style.display = 'none';
@@ -2231,7 +2341,12 @@ async function loadAudioInputConfig() {
       sel.value = cfg.device_name;
     }
     updateAudioStatus(status);
-    if (status.running && status.levels) updateAudioMeter(status.levels);
+    if (status.running && status.levels) {
+      updateAudioMeter(status.levels);
+      updateAudioBpmDisplay(status.levels);
+    } else {
+      updateAudioBpmDisplay(null);
+    }
   } catch(e) {
     console.error('Failed to load audio input config', e);
   }
@@ -2267,46 +2382,57 @@ async function scanAudioDevices() {
 }
 
 function updateAudioStatus(s) {
-  const dot     = document.getElementById('audioStatusDot');
+  const card    = document.getElementById('audioLiveStatusCard');
   const label   = document.getElementById('audioStatusLabel');
   const devRow  = document.getElementById('audioDeviceRow');
   const devDisp = document.getElementById('audioDeviceDisplay');
   const errRow  = document.getElementById('audioErrorRow');
   const errMsg  = document.getElementById('audioErrorMsg');
-  if (!dot) return;
+  if (!label) return;
+
+  const stopIds = ['btnStopAudioCapture', 'btnStopAudioCaptureLive'];
 
   if (s.running) {
-    dot.style.background = 'var(--green)';
-    dot.style.boxShadow  = '0 0 6px var(--green)';
-    label.style.color    = 'var(--green)';
-    label.textContent    = 'Capturing';
-    devRow.style.display = '';
-    devDisp.textContent  = s.device_name || '\u2014';
+    card?.classList.add('is-live');
+    label.textContent = 'Capturing live';
+    if (devRow) devRow.hidden = false;
+    if (devDisp) devDisp.textContent = s.device_name || '\u2014';
+    stopIds.forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = false; });
   } else {
-    dot.style.background = '#555';
-    dot.style.boxShadow  = 'none';
-    label.style.color    = 'var(--text-dim)';
-    label.textContent    = 'Inactive';
-    devRow.style.display = 'none';
+    card?.classList.remove('is-live');
+    label.textContent = 'Inactive';
+    if (devRow) devRow.hidden = true;
+    stopIds.forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = true; });
+    updateAudioBpmDisplay(null);
+    clearAudioMeterDisplay();
   }
 
   if (s.error) {
-    errRow.style.display = '';
-    errMsg.textContent   = s.error;
-  } else {
-    errRow.style.display = 'none';
+    if (errRow) errRow.hidden = false;
+    if (errMsg) errMsg.textContent = s.error;
+  } else if (errRow) {
+    errRow.hidden = true;
   }
 }
 
 // Bands shown in the live level meter (display order)
 const AUDIO_METER_BANDS = [
-  { key: 'sub_bass',  label: 'Sub Bass',  color: '#d050ff' },
+  { key: 'sub_bass',  label: 'Sub',       color: '#d050ff' },
   { key: 'bass',      label: 'Bass',      color: '#ff5400' },
   { key: 'mid',       label: 'Mid',       color: '#00e676' },
-  { key: 'upper_mid', label: 'Upper Mid', color: '#448aff' },
+  { key: 'upper_mid', label: 'Upper',     color: '#448aff' },
   { key: 'treble',    label: 'Treble',    color: '#fb7185' },
-  { key: 'energy',    label: 'Energy',    color: '#ffd600' },
 ];
+
+function clearAudioMeterDisplay() {
+  const meterRoot = document.getElementById('audioMeterCard');
+  if (!meterRoot) return;
+  for (const bar of meterRoot.querySelectorAll('[data-band]')) {
+    bar.style.width = '0%';
+    const pctEl = meterRoot.querySelector(`[data-band-pct="${bar.dataset.band}"]`);
+    if (pctEl) pctEl.textContent = '0%';
+  }
+}
 
 function ensureAudioMeterDom() {
   const container = document.getElementById('audioMeter');
@@ -2315,20 +2441,25 @@ function ensureAudioMeterDom() {
   for (const band of AUDIO_METER_BANDS) {
     const row = document.createElement('div');
     row.className = 'audio-meter-row';
-    row.style.cssText = 'display:flex;align-items:center;gap:8px';
     row.innerHTML =
-      `<span style="width:72px;font-size:11px;color:var(--text-dim);text-align:right;flex-shrink:0">${band.label}</span>` +
-      `<div style="flex:1;height:10px;background:#1a1a1a;border-radius:4px;overflow:hidden">` +
-        `<div data-band="${band.key}" style="height:100%;width:0%;background:${band.color};border-radius:4px"></div>` +
-      `</div>`;
+      `<span class="audio-meter-label">${band.label}</span>` +
+      `<div class="audio-meter-track">` +
+        `<div class="audio-meter-fill" data-band="${band.key}" style="background:${band.color}"></div>` +
+      `</div>` +
+      `<span class="audio-meter-pct" data-band-pct="${band.key}">0%</span>`;
     container.appendChild(row);
   }
+  const masterFill = document.querySelector('.audio-meter-master .audio-meter-fill[data-band="energy"]');
+  if (masterFill) masterFill.style.background = '#ffd600';
 }
 
 // Buffer latest levels and flush on animation frame to keep DOM updates
 // in sync with the browser's paint cycle (avoids ~60fps WebSocket jank).
 let _audioMeterPending = null;
 let _audioMeterRafId   = null;
+let _audioBpmHintTier  = -1;
+let _audioBpmDisplayConf = 0;
+let _audioBpmDisplayVal  = null;
 
 function _flushAudioMeter() {
   _audioMeterRafId = null;
@@ -2336,11 +2467,14 @@ function _flushAudioMeter() {
   _audioMeterPending = null;
   if (!levels) return;
   ensureAudioMeterDom();
-  const container = document.getElementById('audioMeter');
-  if (!container) return;
-  for (const bar of container.querySelectorAll('[data-band]')) {
+  const meterRoot = document.getElementById('audioMeterCard');
+  if (!meterRoot) return;
+  for (const bar of meterRoot.querySelectorAll('[data-band]')) {
     const val = levels[bar.dataset.band] || 0;
-    bar.style.width = Math.min(100, Math.round(val * 100)) + '%';
+    const pct = Math.min(100, Math.round(val * 100));
+    bar.style.width = pct + '%';
+    const pctEl = meterRoot.querySelector(`[data-band-pct="${bar.dataset.band}"]`);
+    if (pctEl) pctEl.textContent = pct + '%';
   }
 }
 
@@ -2349,6 +2483,104 @@ function updateAudioMeter(levels) {
   _audioMeterPending = levels;
   if (!_audioMeterRafId) {
     _audioMeterRafId = requestAnimationFrame(_flushAudioMeter);
+  }
+  updateAudioBpmDisplay(levels);
+}
+
+function updateAudioBpmDisplay(levels) {
+  const valEl = document.getElementById('audioBpmValue');
+  if (!valEl) return;
+
+  const beatDot = document.getElementById('audioBpmBeatDot');
+  const barEl = document.getElementById('audioBpmConfidenceBar');
+  const pctEl = document.getElementById('audioBpmConfidencePct');
+  const hintEl = document.getElementById('audioBpmHint');
+  const altsEl = document.getElementById('audioBpmAlts');
+  const halfEl = document.getElementById('audioBpmHalf');
+  const doubleEl = document.getElementById('audioBpmDouble');
+  const halfWrap = document.getElementById('audioBpmHalfWrap');
+  const doubleWrap = document.getElementById('audioBpmDoubleWrap');
+  const altSep = document.getElementById('audioBpmAltSep');
+
+  if (!levels) {
+    valEl.textContent = '—';
+    if (barEl) barEl.style.width = '0%';
+    if (pctEl) pctEl.textContent = '—';
+    if (beatDot) beatDot.classList.remove('on');
+    if (altsEl) altsEl.hidden = true;
+    if (hintEl) hintEl.textContent = 'Play steady music while capturing to lock tempo.';
+    _audioBpmHintTier = -1;
+    _audioBpmDisplayConf = 0;
+    _audioBpmDisplayVal = null;
+    return;
+  }
+
+  const bpm = levels.bpm;
+  const rawConf = typeof levels.bpm_confidence === 'number' ? levels.bpm_confidence : 0;
+  _audioBpmDisplayConf = _audioBpmDisplayConf * 0.86 + rawConf * 0.14;
+  const conf = _audioBpmDisplayConf;
+
+  const BPM_HINTS = [
+    'Detecting beats… try raising gain if the bass meter looks low.',
+    'Rough tempo — a few more steady beats will improve lock.',
+    'Tempo locked — adjusts when the track changes BPM.',
+    'Half-time grid — use the double-time readout when mixing faster sections.',
+    'Fast beat grid detected — use half-time for halftime / store-style counting.',
+  ];
+
+  function pickHintTier(rounded, c) {
+    if (c >= 0.52 && rounded >= 130) return 4;
+    if (c >= 0.52 && rounded <= 90) return 3;
+    if (c >= 0.52) return 2;
+    if (c >= 0.22) return 1;
+    return 0;
+  }
+
+  function applyHintTier(tier) {
+    if (tier === _audioBpmHintTier) return;
+    if (_audioBpmHintTier >= 0 && Math.abs(tier - _audioBpmHintTier) === 1) {
+      const needUp = tier > _audioBpmHintTier;
+      const c = _audioBpmDisplayConf;
+      if (needUp && c < 0.58) return;
+      if (!needUp && c > 0.48) return;
+    }
+    _audioBpmHintTier = tier;
+    if (hintEl) hintEl.textContent = BPM_HINTS[tier];
+  }
+
+  if (bpm != null && Number.isFinite(bpm)) {
+    if (_audioBpmDisplayVal == null) _audioBpmDisplayVal = bpm;
+    else _audioBpmDisplayVal = _audioBpmDisplayVal * 0.9 + bpm * 0.1;
+    const rounded = Math.round(_audioBpmDisplayVal);
+    valEl.textContent = conf < 0.4 ? '~' + rounded : String(rounded);
+    const half = levels.bpm_halftime;
+    const dbl = levels.bpm_doubletime;
+    const showHalf = half != null && half !== rounded;
+    const showDouble = dbl != null && dbl !== rounded;
+    if (altsEl && conf >= 0.4 && (showHalf || showDouble)) {
+      altsEl.hidden = false;
+      if (halfWrap) halfWrap.hidden = !showHalf;
+      if (doubleWrap) doubleWrap.hidden = !showDouble;
+      if (altSep) altSep.hidden = !(showHalf && showDouble);
+      if (halfEl && showHalf) halfEl.textContent = String(half) + ' BPM';
+      if (doubleEl && showDouble) doubleEl.textContent = String(dbl) + ' BPM';
+    } else if (altsEl) {
+      altsEl.hidden = true;
+    }
+    applyHintTier(pickHintTier(rounded, conf));
+  } else {
+    valEl.textContent = '…';
+    if (altsEl) altsEl.hidden = true;
+    applyHintTier(0);
+  }
+
+  const pct = Math.round(conf * 100);
+  if (barEl) barEl.style.width = pct + '%';
+  if (pctEl) pctEl.textContent = bpm != null ? (conf < 0.4 ? '~' + pct + '%' : pct + '%') : '—';
+
+  if (beatDot) {
+    if ((levels.beat || 0) > 0.15) beatDot.classList.add('on');
+    else beatDot.classList.remove('on');
   }
 }
 
@@ -2383,6 +2615,7 @@ document.getElementById('btnSaveAudioConfig').addEventListener('click', async ()
     }, 2000);
     const status = await fetch('/api/audio-input/status').then(r => r.json());
     updateAudioStatus(status);
+    if (status.running) switchAudioSubTab('live');
   } catch(e) {
     btn.textContent   = 'Error';
     btn.style.color   = 'var(--danger)';
@@ -2392,11 +2625,14 @@ document.getElementById('btnSaveAudioConfig').addEventListener('click', async ()
   }
 });
 
-document.getElementById('btnStopAudioCapture').addEventListener('click', async () => {
+async function stopAudioCapture() {
   await authFetch('/api/audio-input/stop', { method: 'POST' });
   const status = await fetch('/api/audio-input/status').then(r => r.json());
   updateAudioStatus(status);
-});
+}
+
+document.getElementById('btnStopAudioCapture')?.addEventListener('click', stopAudioCapture);
+document.getElementById('btnStopAudioCaptureLive')?.addEventListener('click', stopAudioCapture);
 
 // ═══════════════════════════════════════════════════════════════
 //  About
@@ -3606,6 +3842,16 @@ document.getElementById('btnSaveBtnMap').addEventListener('click', async () => {
 // ═══════════════════════════════════════════════════════════════
 //  Export / Import
 // ═══════════════════════════════════════════════════════════════
+function formatExportRigLayoutsSummary(rigLayouts) {
+  if (!rigLayouts) return null;
+  const n = (rigLayouts.presets || []).length;
+  const liveN = (rigLayouts.live?.fixtures || []).length;
+  if (n === 0 && liveN === 0) return null;
+  let s = `${n} Rig Layout preset${n === 1 ? '' : 's'}`;
+  if (liveN) s += ` + live canvas (${liveN} fixtures)`;
+  return s;
+}
+
 document.getElementById('btnExport').addEventListener('click', async () => {
   try {
     const resp = await fetch('/api/export');
@@ -3652,6 +3898,15 @@ document.getElementById('importFile').addEventListener('change', (e) => {
           if (cb) { cb.closest('label').style.display = 'none'; cb.checked = false; }
         }
       }
+      const rigCb = preview.querySelector('.import-cb[value="rig_layouts"]');
+      const rigSummary = formatExportRigLayoutsSummary(data.rig_layouts);
+      if (rigSummary) {
+        counts.push(rigSummary);
+        if (rigCb) { rigCb.closest('label').style.display = ''; rigCb.checked = true; }
+      } else if (rigCb) {
+        rigCb.closest('label').style.display = 'none';
+        rigCb.checked = false;
+      }
       previewList.textContent = counts.join(', ') || 'No data found';
       if (data._exported) previewList.textContent += ` (exported ${new Date(data._exported).toLocaleString()})`;
       preview.style.display = '';
@@ -3679,6 +3934,8 @@ document.getElementById('btnImport').addEventListener('click', async () => {
     if (result.effects) lines.push(`${result.effects} effects`);
     if (result.mover_presets) lines.push(`${result.mover_presets} mover presets`);
     if (result.scenes) lines.push(`${result.scenes} scenes`);
+    if (result.rig_layout_presets) lines.push(`${result.rig_layout_presets} rig layout presets`);
+    if (result.rig_live) lines.push('live rig canvas applied');
     resultDiv.style.display = '';
     resultDiv.style.background = 'rgba(0,180,80,.12)';
     resultDiv.style.border = '1px solid rgba(0,180,80,.3)';
@@ -3742,10 +3999,35 @@ function midiTextColor(hexBg) {
   return (r * 0.299 + g * 0.587 + b * 0.114) > 140 ? '#000' : '#fff';
 }
 
+function applyMidiHardwareUi(enabled) {
+  const on = enabled !== false;
+  const cb = document.getElementById('cfgMidiEnabled');
+  if (cb && cb.checked !== on) cb.checked = on;
+  document.querySelectorAll('#midiHardwareSection, .midi-hardware-panel').forEach(el => {
+    el.classList.toggle('midi-hardware-disabled', !on);
+  });
+  const learn = document.getElementById('btnMidiLearn');
+  if (learn) learn.disabled = !on;
+}
+
 function updateMidiStatus(data) {
   const dot = document.getElementById('midiStatusDot');
   const label = document.getElementById('midiStatusLabel');
   if (!dot) return;
+  const midiEnabled = data.enabled !== false;
+  applyMidiHardwareUi(midiEnabled);
+  if (!midiEnabled) {
+    dot.style.background = '#666';
+    label.textContent = 'MIDI disabled';
+    label.style.color = 'var(--text-dim)';
+    const connectBtn = document.getElementById('btnMidiConnect');
+    const discBtn = document.getElementById('btnMidiDisconnect');
+    if (connectBtn) connectBtn.style.display = 'none';
+    if (discBtn) discBtn.style.display = 'none';
+    const sel = document.getElementById('midiDeviceSelect');
+    if (sel) sel.innerHTML = '<option value="">— MIDI disabled —</option>';
+    return;
+  }
   if (data.connected) {
     dot.style.background = '#0c0';
     label.textContent = `Connected: ${data.device}`;
@@ -3762,6 +4044,8 @@ function updateMidiStatus(data) {
 }
 
 async function refreshMidiPorts() {
+  const cb = document.getElementById('cfgMidiEnabled');
+  if (cb && !cb.checked) return;
   try {
     const ports = await (await fetch('/api/midi/ports')).json();
     const sel = document.getElementById('midiDeviceSelect');
@@ -4103,6 +4387,24 @@ document.getElementById('btnMidiDisconnect').addEventListener('click', async () 
 });
 
 document.getElementById('btnMidiRefreshPorts').addEventListener('click', refreshMidiPorts);
+
+document.getElementById('cfgMidiEnabled')?.addEventListener('change', async (e) => {
+  const enabled = e.target.checked;
+  try {
+    const res = await fetch('/api/midi/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json();
+    updateMidiStatus(data);
+    if (enabled) await loadMidiStatus();
+  } catch (err) {
+    alert('Failed to update MIDI setting: ' + err.message);
+    e.target.checked = !enabled;
+    applyMidiHardwareUi(e.target.checked);
+  }
+});
 
 document.getElementById('btnMidiDefaults').addEventListener('click', async () => {
   if (!confirm('This will replace all existing MIDI mappings with the default APC Mini layout. Continue?')) return;
@@ -5113,21 +5415,25 @@ function _renderSatDeviceList(elId, items, emptyMsg) {
   el.innerHTML = items.map(d => {
     const ip = d.ip || d.host || '—';
     const ports = [d.web_port && `web ${d.web_port}`, d.os2l_port && `os2l ${d.os2l_port}`].filter(Boolean).join(' · ');
-    const actions = d.id ? `
-      <div style="display:flex;gap:6px;margin-top:8px">
-        ${d.status === 'pending' ? `<button class="btn btn-primary btn-sm" data-sat-action="approve" data-sat-id="${d.id}">Accept</button><button class="btn btn-secondary btn-sm" data-sat-action="reject" data-sat-id="${d.id}">Reject</button>` : ''}
-        ${d.status === 'approved' ? `<button class="btn btn-secondary btn-sm" data-sat-action="revoke" data-sat-id="${d.id}">Revoke</button>` : ''}
-      </div>` : '<p style="margin:8px 0 0;font-size:11px;color:var(--text-dim)">Not paired yet — waiting for satellite to request connection</p>';
-    return `<div class="config-card" style="margin:0 0 10px;padding:12px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-        <div>
+    let actionsHtml = '';
+    if (d.id) {
+      const btns = [
+        d.status === 'pending' ? `<button class="btn btn-primary btn-sm" data-sat-action="approve" data-sat-id="${d.id}">Accept</button><button class="btn btn-secondary btn-sm" data-sat-action="reject" data-sat-id="${d.id}">Reject</button>` : '',
+        d.status === 'approved' ? `<button class="btn btn-secondary btn-sm" data-sat-action="revoke" data-sat-id="${d.id}">Revoke</button>` : '',
+      ].filter(Boolean).join('');
+      if (btns) actionsHtml = `<div class="sat-device-actions">${btns}</div>`;
+    } else {
+      actionsHtml = '<div class="sat-device-note">Waiting for pairing request</div>';
+    }
+    return `<div class="sat-device-item">
+      <div class="sat-device-main">
+        <div class="sat-device-title">
           <strong>${esc(d.name || 'Thaluxis Satellite')}</strong>
           ${d.status ? _satStatusPill(d.status) : ''}
-          <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(ip)}${ports ? ' · ' + esc(ports) : ''}</div>
-          ${d.device_id ? `<div style="font-size:10px;color:var(--text-dim);margin-top:2px;font-family:monospace">${esc(d.device_id.slice(0, 18))}…</div>` : ''}
         </div>
+        <div class="sat-device-meta">${esc(ip)}${ports ? ' · ' + esc(ports) : ''}${d.device_id ? ` · <span class="sat-device-id">${esc(d.device_id.slice(0, 12))}…</span>` : ''}</div>
       </div>
-      ${actions}
+      ${actionsHtml}
     </div>`;
   }).join('');
 }
@@ -5177,7 +5483,8 @@ async function loadSatelliteConfig() {
     const banner = document.getElementById('satPendingBanner');
     const bannerTitle = document.getElementById('satPendingBannerTitle');
     const bannerDesc = document.getElementById('satPendingBannerDesc');
-    const pendingCard = document.querySelector('#satPendingList')?.closest('.sat-priority-card');
+    const pendingCard = document.getElementById('satPendingPanel');
+    const discoveredPanel = document.getElementById('satDiscoveredPanel');
     if (banner) {
       const hasPending = pending.length > 0;
       banner.hidden = !hasPending;
@@ -5187,17 +5494,18 @@ async function loadSatelliteConfig() {
           : `${pending.length} satellites waiting for approval`;
       }
       if (hasPending && bannerDesc) {
-        const names = pending.slice(0, 3).map(d => d.name || 'Thaluxis Satellite').join(', ');
+        const names = pending.slice(0, 2).map(d => d.name || 'Satellite').join(', ');
         bannerDesc.textContent = pending.length === 1
-          ? `${names} has requested connection — accept below to authorize sync and OS2L forwarding.`
-          : `${names}${pending.length > 3 ? ` and ${pending.length - 3} more` : ''} — accept below to authorize sync and OS2L forwarding.`;
+          ? `${names} — Accept in the list below.`
+          : `${names}${pending.length > 2 ? ` +${pending.length - 2} more` : ''}`;
       }
     }
     if (pendingCard) pendingCard.classList.toggle('has-pending', pending.length > 0);
+    if (discoveredPanel) discoveredPanel.hidden = discovered.length === 0;
 
-    _renderSatDeviceList('satPendingList', pending, 'No pending connection requests');
-    _renderSatDeviceList('satDiscoveredList', discovered, 'No Thaluxis Satellites discovered on the network');
-    _renderSatDeviceList('satApprovedList', approved, 'No approved Thaluxis Satellites yet');
+    _renderSatDeviceList('satPendingList', pending, 'No pending requests');
+    _renderSatDeviceList('satDiscoveredList', discovered, 'None discovered');
+    _renderSatDeviceList('satApprovedList', approved, 'No approved satellites yet');
   } catch (e) {
     console.error('Satellite config load failed:', e);
   }
@@ -5256,7 +5564,6 @@ document.getElementById('btnRegenerateHubToken')?.addEventListener('click', asyn
 });
 
 document.getElementById('btnRefreshSatellites')?.addEventListener('click', () => loadSatelliteConfig());
-document.getElementById('btnRefreshSatellitesTop')?.addEventListener('click', () => loadSatelliteConfig());
 
 document.getElementById('cfgpage-satellites')?.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-sat-action]');

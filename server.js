@@ -1636,9 +1636,82 @@ app.post('/api/update/apply', (req, res) => {
 
 // ─── Export / Import API ────────────────────────────────────────────────────
 
+function parseExportCellPath(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'object') return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+/** Rig snapshot for export — fixture positions keyed by fixture name. */
+function exportRigSnapshotPortable(snapshot, allFix) {
+  const idToName = new Map(allFix.map(f => [f.id, f.name]));
+  return {
+    fixtures: (snapshot.fixtures || []).map(f => ({
+      fixture_name: f.fixture_name || idToName.get(f.id),
+      rig_x: f.rig_x ?? 0.5,
+      rig_y: f.rig_y ?? 0.5,
+      rig_z: f.rig_z ?? 0.5,
+      rig_order: f.rig_order ?? 0,
+      cell_path: parseExportCellPath(f.cell_path),
+    })).filter(f => f.fixture_name),
+    elements: (snapshot.elements || []).map(el => ({
+      type: el.type,
+      label: el.label || '',
+      x: el.x ?? 0.5,
+      y: el.y ?? 0.5,
+      z: el.z ?? 0.5,
+      width: el.width ?? 0.4,
+      height: el.height ?? 0.02,
+      rotation: el.rotation ?? 0,
+      sort_order: el.sort_order ?? 0,
+    })),
+  };
+}
+
+function resolveRigSnapshotImport(snapshot, allFix) {
+  const fixtures = [];
+  for (const f of snapshot.fixtures || []) {
+    const fix = allFix.find(x => x.name === f.fixture_name);
+    if (!fix) continue;
+    fixtures.push({
+      id: fix.id,
+      rig_x: f.rig_x ?? 0.5,
+      rig_y: f.rig_y ?? 0.5,
+      rig_z: f.rig_z ?? 0.5,
+      rig_order: f.rig_order ?? 0,
+      cell_path: parseExportCellPath(f.cell_path),
+    });
+  }
+  return {
+    fixtures,
+    elements: (snapshot.elements || []).map(el => ({
+      type: el.type,
+      label: el.label || '',
+      x: el.x ?? 0.5,
+      y: el.y ?? 0.5,
+      z: el.z ?? 0.5,
+      width: el.width ?? 0.4,
+      height: el.height ?? 0.02,
+      rotation: el.rotation ?? 0,
+      sort_order: el.sort_order ?? 0,
+    })),
+  };
+}
+
+function applyImportedRigLive(resolved) {
+  if (resolved.fixtures.length > 0) {
+    db.updateFixtureRigPositions(resolved.fixtures);
+  }
+  db.prepare('DELETE FROM rig_elements').run();
+  for (const el of resolved.elements) {
+    db.createRigElement(el);
+  }
+}
+
 app.get('/api/export', (req, res) => {
   // Export fixture types, fixtures, groups, effects, mover presets, and scenes
   const fixtureTypes = db.getFixtureTypes();
+  const allFixForRig = db.getFixtures();
   const fixtures = db.getFixtures().map(f => {
     // Include full fixture info with type reference by name+manufacturer+mode
     const ft = fixtureTypes.find(t => t.id === f.fixture_type_id);
@@ -1717,6 +1790,31 @@ app.get('/api/export', (req, res) => {
     };
   });
 
+  const rigLayoutPresets = db.getRigLayouts().map(row => {
+    const full = db.getRigLayout(row.id);
+    if (!full) return null;
+    return {
+      name: full.name,
+      is_active: !!full.is_active,
+      data: exportRigSnapshotPortable(full.data || {}, allFixForRig),
+    };
+  }).filter(Boolean);
+
+  const rigLayouts = {
+    presets: rigLayoutPresets,
+    live: exportRigSnapshotPortable({
+      fixtures: allFixForRig.map(f => ({
+        id: f.id,
+        rig_x: f.rig_x,
+        rig_y: f.rig_y,
+        rig_z: f.rig_z,
+        rig_order: f.rig_order,
+        cell_path: f.cell_path,
+      })),
+      elements: db.getRigElements(),
+    }, allFixForRig),
+  };
+
   const data = {
     _format: 'dmx-controller-export',
     _version: 1,
@@ -1746,6 +1844,7 @@ app.get('/api/export', (req, res) => {
     effects,
     mover_presets: moverPresets,
     scenes,
+    rig_layouts: rigLayouts,
   };
   res.setHeader('Content-Disposition', `attachment; filename="dmx-export-${Date.now()}.json"`);
   res.json(data);
@@ -1758,7 +1857,10 @@ app.post('/api/import', (req, res) => {
       return res.status(400).json({ error: 'Invalid export file format' });
     }
 
-    const results = { fixture_types: 0, fixtures: 0, groups: 0, effects: 0, mover_presets: 0, scenes: 0, errors: [] };
+    const results = {
+      fixture_types: 0, fixtures: 0, groups: 0, effects: 0, mover_presets: 0, scenes: 0,
+      rig_layout_presets: 0, rig_live: 0, errors: [],
+    };
     const sections = Array.isArray(data._import_sections) ? data._import_sections : null;
 
     // 1. Import fixture types
@@ -1894,6 +1996,44 @@ app.post('/api/import', (req, res) => {
           }
           results.scenes++;
         } catch (e) { results.errors.push(`Scene "${sc.name}": ${e.message}`); }
+      }
+    }
+
+    // 7. Import rig layouts (named presets + optional live canvas)
+    if (data.rig_layouts && (!sections || sections.includes('rig_layouts'))) {
+      const bundle = data.rig_layouts;
+      const allFix = db.getFixtures();
+      let activePresetId = null;
+
+      for (const preset of bundle.presets || []) {
+        try {
+          const resolved = resolveRigSnapshotImport(preset.data || {}, allFix);
+          const dbData = { fixtures: resolved.fixtures, elements: resolved.elements };
+          const existing = db.getRigLayouts().find(l => l.name === preset.name);
+          let presetId;
+          if (existing) {
+            db.updateRigLayout(existing.id, { name: preset.name, data: dbData });
+            presetId = existing.id;
+          } else {
+            presetId = db.createRigLayout(preset.name, dbData).id;
+          }
+          if (preset.is_active) activePresetId = presetId;
+          results.rig_layout_presets++;
+        } catch (e) {
+          results.errors.push(`Rig preset "${preset.name}": ${e.message}`);
+        }
+      }
+
+      if (activePresetId) db.setActiveRigLayout(activePresetId);
+
+      if (bundle.live && (bundle.live.fixtures?.length || bundle.live.elements?.length)) {
+        try {
+          const resolved = resolveRigSnapshotImport(bundle.live, allFix);
+          applyImportedRigLive(resolved);
+          results.rig_live = 1;
+        } catch (e) {
+          results.errors.push(`Rig live canvas: ${e.message}`);
+        }
       }
     }
 
@@ -4194,6 +4334,101 @@ function sendChannelUpdates(channelUpdates) {
   }
 }
 
+/** Rig layout “identify” blink — one job per fixture. */
+const fixtureIdentifyJobs = new Map();
+const FIXTURE_IDENTIFY_ON_MS = 280;
+const FIXTURE_IDENTIFY_OFF_MS = 220;
+const FIXTURE_IDENTIFY_PULSES = 3;
+const FIXTURE_IDENTIFY_DURATION_MS = FIXTURE_IDENTIFY_PULSES * (FIXTURE_IDENTIFY_ON_MS + FIXTURE_IDENTIFY_OFF_MS);
+
+function cancelFixtureIdentify(fixtureId) {
+  const job = fixtureIdentifyJobs.get(fixtureId);
+  if (!job) return;
+  for (const id of job.timeouts) clearTimeout(id);
+  fixtureIdentifyJobs.delete(fixtureId);
+}
+
+function buildFixtureIdentifyUpdates(fix, on) {
+  const channelUpdates = {};
+  if (on) {
+    applyChannelValues(fix, { red: 255, green: 255, blue: 255, white: 255, dimmer: 128 }, channelUpdates);
+  } else {
+    const u = fix.universe;
+    if (!channelUpdates[u]) channelUpdates[u] = {};
+    for (const ch of fix.channels) {
+      if (PAN_TILT.has(ch.type)) continue;
+      channelUpdates[u][ch.dmx_address] = applyInvert(0, ch);
+    }
+  }
+  return channelUpdates;
+}
+
+function startFixtureIdentify(fixtureId) {
+  if (isAnySequencePlaying()) return { ok: false, error: 'sequence_playing' };
+  if (!dmxOutputEnabled) return { ok: false, error: 'dmx_output_disabled' };
+
+  const fix = getFixtureChannelMapByIdCached(normalizeFixtureId(fixtureId));
+  if (!fix) return { ok: false, error: 'fixture_not_found' };
+
+  cancelFixtureIdentify(fix.id);
+  const timeouts = [];
+  const job = { timeouts };
+  fixtureIdentifyJobs.set(fix.id, job);
+
+  const step = (on) => {
+    if (isAnySequencePlaying()) {
+      cancelFixtureIdentify(fix.id);
+      sendChannelUpdates(buildFixtureIdentifyUpdates(fix, false));
+      return true;
+    }
+    sendChannelUpdates(buildFixtureIdentifyUpdates(fix, on));
+    return false;
+  };
+
+  let delay = 0;
+  for (let pulse = 0; pulse < FIXTURE_IDENTIFY_PULSES; pulse++) {
+    const onDelay = delay;
+    timeouts.push(setTimeout(() => { if (!step(true)) { /* ok */ } }, onDelay));
+    delay += FIXTURE_IDENTIFY_ON_MS;
+    const offDelay = delay;
+    timeouts.push(setTimeout(() => { step(false); }, offDelay));
+    delay += FIXTURE_IDENTIFY_OFF_MS;
+  }
+  timeouts.push(setTimeout(() => {
+    step(false);
+    fixtureIdentifyJobs.delete(fix.id);
+  }, delay));
+
+  return { ok: true, pulses: FIXTURE_IDENTIFY_PULSES, duration_ms: FIXTURE_IDENTIFY_DURATION_MS };
+}
+
+function cancelAllFixtureIdentify() {
+  for (const fid of [...fixtureIdentifyJobs.keys()]) {
+    cancelFixtureIdentify(fid);
+  }
+}
+
+app.get('/api/sequences/playback-status', (req, res) => {
+  res.json({ anyPlaying: isAnySequencePlaying() });
+});
+
+app.post('/api/fixtures/:id/identify', (req, res) => {
+  const result = startFixtureIdentify(+req.params.id);
+  if (!result.ok) {
+    const status = result.error === 'sequence_playing' ? 409
+      : result.error === 'fixture_not_found' ? 404
+        : result.error === 'dmx_output_disabled' ? 503
+          : 400;
+    return res.status(status).json({ error: result.error });
+  }
+  res.json(result);
+});
+
+app.post('/api/fixtures/identify/cancel', (req, res) => {
+  cancelAllFixtureIdentify();
+  res.json({ ok: true });
+});
+
 /**
  * Blackout all fixtures used by a scene.
  */
@@ -6216,12 +6451,17 @@ async function bootstrapAfterListen() {
     }
 
     setBootStep('midi', 'running');
-    try {
-      await midiController.start();
-    } catch (e) {
-      console.warn(`[MIDI] Auto-start failed: ${e.message}`);
+    if (db.getConfig('midi_enabled') === '0') {
+      console.log('[MIDI] Disabled in config — skipping startup scan');
+      setBootStep('midi', 'done', 'Disabled');
+    } else {
+      try {
+        await midiController.start();
+      } catch (e) {
+        console.warn(`[MIDI] Auto-start failed: ${e.message}`);
+      }
+      setBootStep('midi', 'done');
     }
-    setBootStep('midi', 'done');
 
     setBootStep('network', 'running');
     bonjourInstance = registerBonjour();
