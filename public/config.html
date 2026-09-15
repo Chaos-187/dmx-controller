@@ -1443,7 +1443,7 @@
       <div class="config-section experimental-page">
         <h3><span class="section-icon">&#9883;</span> Experimental Features</h3>
         <p class="config-desc">
-          Toggle each feature on when you want to try it. Settings stay saved while off.
+          Toggle each feature on when you want to try it. Use <strong>Configure…</strong> for settings in a dialog.
           Plugins live in <code>plugins/</code> — restart the hub after add/remove.
         </p>
         <p class="config-desc experimental-plugins-path" id="expPluginsPathHint"></p>
@@ -1904,6 +1904,20 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('typeModal')">Cancel</button>
       <button class="btn btn-primary" id="btnSaveType">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Experimental plugin settings -->
+<div class="modal-overlay" id="expPluginSettingsModal">
+  <div class="modal exp-plugin-modal" role="dialog" aria-labelledby="expPluginModalTitle">
+    <h3 id="expPluginModalTitle">Experimental plugin</h3>
+    <p class="exp-plugin-modal-desc" id="expPluginModalDesc"></p>
+    <div class="exp-plugin-modal-body" id="expPluginModalBody"></div>
+    <div class="modal-actions exp-plugin-modal-actions">
+      <span class="exp-plugin-save-hint">Enable toggle on the card saves immediately.</span>
+      <button type="button" class="btn btn-secondary" id="expPluginModalCancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="expPluginModalSave">Save settings</button>
     </div>
   </div>
 </div>

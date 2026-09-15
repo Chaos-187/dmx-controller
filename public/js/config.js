@@ -2660,8 +2660,83 @@ async function postPluginConfig(pluginId, body) {
 function setExperimentalCardEnabled(card, enabled) {
   card.classList.toggle('is-on', enabled);
   card.classList.toggle('is-off', !enabled);
-  const panel = card.querySelector('.exp-plugin-settings');
-  if (panel) panel.classList.toggle('is-collapsed', !enabled);
+}
+
+let _expPluginModalWired = false;
+
+function closeExpPluginSettingsModal() {
+  document.getElementById('expPluginSettingsModal')?.classList.remove('open');
+}
+
+async function openExpPluginSettingsModal(meta) {
+  const pluginId = meta.id;
+  const cfg = await fetchPluginConfig(pluginId);
+  const modal = document.getElementById('expPluginSettingsModal');
+  const titleEl = document.getElementById('expPluginModalTitle');
+  const descEl = document.getElementById('expPluginModalDesc');
+  const bodyEl = document.getElementById('expPluginModalBody');
+  if (!modal || !bodyEl) return;
+
+  if (titleEl) {
+    titleEl.textContent = meta.name || pluginId;
+  }
+  if (descEl) {
+    descEl.textContent = meta.description || '';
+    descEl.style.display = meta.description ? '' : 'none';
+  }
+
+  bodyEl.dataset.pluginId = pluginId;
+  bodyEl.innerHTML = renderPluginSettingsHtml(pluginId, cfg);
+  wireExperimentalPluginSettings(bodyEl, pluginId);
+  modal.classList.add('open');
+}
+
+function ensureExpPluginModalWired() {
+  if (_expPluginModalWired) return;
+  _expPluginModalWired = true;
+
+  const overlay = document.getElementById('expPluginSettingsModal');
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeExpPluginSettingsModal();
+  });
+
+  document.getElementById('expPluginModalCancel')?.addEventListener('click', closeExpPluginSettingsModal);
+
+  document.getElementById('expPluginModalSave')?.addEventListener('click', async () => {
+    const bodyEl = document.getElementById('expPluginModalBody');
+    const btn = document.getElementById('expPluginModalSave');
+    if (!bodyEl || !btn) return;
+    const pluginId = bodyEl.dataset.pluginId;
+    if (!pluginId) return;
+
+    const card = document.querySelector(`.exp-plugin-card[data-plugin-id="${CSS.escape(pluginId)}"]`);
+    const enabled = card?.querySelector('.exp-plugin-enable')?.checked;
+    const body = { ...collectPluginSettingsFromContainer(bodyEl, pluginId), enabled };
+
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Saving…';
+    try {
+      await postPluginConfig(pluginId, body);
+      btn.textContent = 'Saved ✓';
+      refreshExperimentalRuntime([pluginId]);
+      setTimeout(() => {
+        closeExpPluginSettingsModal();
+        btn.textContent = prev;
+      }, 500);
+    } catch (e) {
+      btn.textContent = 'Error';
+      setTimeout(() => { btn.textContent = prev; }, 2000);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('expPluginSettingsModal')?.classList.contains('open')) {
+      closeExpPluginSettingsModal();
+    }
+  });
 }
 
 const BPM_LIVE_LOOKS = [
@@ -2673,7 +2748,8 @@ const BPM_LIVE_LOOKS = [
   { id: 'sound_strobe_bass', label: 'Bass strobe' },
   { id: 'sound_chase', label: 'Bass chase (BPM)' },
   { id: 'sound_wave', label: 'Energy color wave (BPM)' },
-  { id: 'sound_vu', label: 'VU meter (rig height)' },
+  { id: 'sound_vu', label: 'VU meter (rig + cells)' },
+  { id: 'sound_vu_multicell', label: 'VU meter (multicell only)' },
   { id: 'sound_vu_lr', label: 'VU meter (left → right)' },
   { id: 'sound_vu_tb', label: 'VU meter (top → bottom)' },
   { id: 'spectrum', label: 'Spectrum (4-band)' },
@@ -2682,6 +2758,17 @@ const BPM_LIVE_LOOKS = [
   { id: 'sub_flash', label: 'Sub flash' },
   { id: 'auto_rotate', label: 'Auto rotate sound looks' },
 ];
+
+const BPM_VU_LOOK_IDS = new Set([
+  'sound_vu',
+  'sound_vu_multicell',
+  'sound_vu_lr',
+  'sound_vu_tb',
+]);
+
+function isBpmVuLookId(lookId) {
+  return BPM_VU_LOOK_IDS.has(lookId);
+}
 
 function renderBpmLiveSequenceSettings(cfg, pluginId) {
   const pid = esc(pluginId);
@@ -2711,6 +2798,33 @@ function renderBpmLiveSequenceSettings(cfg, pluginId) {
           <span data-effect-speed-label>${cfg.effect_speed ?? 1}×</span>
         </div>
       </div>
+      <div class="exp-plugin-vu-settings${isBpmVuLookId(look) ? '' : ' is-hidden'}" data-vu-settings>
+        <div class="exp-plugin-settings-head" style="padding-top:4px">VU meter</div>
+        <div class="exp-plugin-field">
+          <span class="exp-plugin-field-label">React gain</span>
+          <div class="audio-gain-row">
+            <input type="range" data-field="react_gain" min="0.25" max="3" step="0.05" value="${cfg.react_gain ?? 1}">
+            <span data-react-gain-label>${parseFloat(cfg.react_gain ?? 1).toFixed(2)}×</span>
+          </div>
+          <p class="exp-plugin-field-hint">Scales audio before the meter — higher fills more cells on quieter tracks.</p>
+        </div>
+        <div class="exp-plugin-field">
+          <span class="exp-plugin-field-label">Fall delay</span>
+          <div class="audio-gain-row">
+            <input type="range" data-field="react_delay_ms" min="0" max="1200" step="20" value="${cfg.react_delay_ms ?? 180}">
+            <span data-react-delay-label>${cfg.react_delay_ms ?? 180} ms</span>
+          </div>
+          <p class="exp-plugin-field-hint">How long the bar takes to drop after peaks (0 = instant). Attack stays fast like a classic VU.</p>
+        </div>
+        <div class="exp-plugin-field">
+          <span class="exp-plugin-field-label">Multicell scale</span>
+          <div class="audio-gain-row">
+            <input type="range" data-field="multicell_scale" min="0.05" max="1" step="0.05" value="${cfg.multicell_scale ?? 1}">
+            <span data-multicell-scale-label>${Math.round((cfg.multicell_scale ?? 1) * 100)}%</span>
+          </div>
+          <p class="exp-plugin-field-hint">Uses only the bottom portion of each multicell strip for the meter. At full level, red stays on the top active cell (not the physical top of the fixture).</p>
+        </div>
+      </div>
       <label class="exp-plugin-check">
         <input type="checkbox" data-field="yield_sequence" ${cfg.yield_sequence !== false ? 'checked' : ''}>
         <span><strong>Yield to deck sequences</strong><br><span class="exp-plugin-field-hint">Pause this effect while a sequencer deck is playing.</span></span>
@@ -2738,14 +2852,35 @@ function renderGenericPluginSettings(_cfg, pluginId) {
   return `<p class="exp-plugin-field-hint">No settings UI for <code>${esc(pluginId)}</code> yet.</p>`;
 }
 
+function renderAudioVisualizerSettings(_cfg, pluginId) {
+  const pid = esc(pluginId);
+  const viewerPath = `/api/plugins/${pid}/`;
+  return `
+    <div class="exp-plugin-settings-grid" data-settings-for="${pid}">
+      <p class="exp-plugin-field-hint">
+        Music-reactive 32-band spectrum with segmented EQ and mirrored waveform. Requires Audio Input capture running.
+      </p>
+      <button type="button" class="btn btn-primary btn-sm" data-action="open-viewer-inline" data-viewer-path="${esc(viewerPath)}">
+        Open visualizer in new tab
+      </button>
+    </div>`;
+}
+
 function renderPluginSettingsHtml(pluginId, cfg) {
   if (pluginId === 'bpm-live-sequence') return renderBpmLiveSequenceSettings(cfg, pluginId);
+  if (pluginId === 'audio-visualizer') return renderAudioVisualizerSettings(cfg, pluginId);
   return renderGenericPluginSettings(cfg, pluginId);
 }
 
-function collectPluginSettingsFromCard(card, pluginId) {
+function openExperimentalViewer(viewerPath) {
+  const url = viewerPath || '';
+  if (!url) return;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function collectPluginSettingsFromContainer(root, pluginId) {
   const body = {};
-  const grid = card.querySelector('[data-settings-for]') || card.querySelector('.exp-plugin-settings-grid');
+  const grid = root.querySelector('[data-settings-for]') || root.querySelector('.exp-plugin-settings-grid');
   if (!grid) return body;
 
   if (pluginId === 'bpm-live-sequence') {
@@ -2756,11 +2891,83 @@ function collectPluginSettingsFromCard(card, pluginId) {
     body.intensity = parseInt(grid.querySelector('[data-field="intensity"]')?.value || '85', 10);
     body.cycle_beats = parseInt(grid.querySelector('[data-field="cycle_beats"]')?.value || '4', 10);
     body.effect_speed = parseFloat(grid.querySelector('[data-field="effect_speed"]')?.value || '1');
+    body.react_gain = parseFloat(grid.querySelector('[data-field="react_gain"]')?.value || '1');
+    body.react_delay_ms = parseInt(grid.querySelector('[data-field="react_delay_ms"]')?.value || '180', 10);
+    body.multicell_scale = parseFloat(grid.querySelector('[data-field="multicell_scale"]')?.value || '1');
   }
   return body;
 }
 
-function wireExperimentalPluginCard(card, pluginId) {
+function syncBpmLiveVuSettingsPanel(root) {
+  const look = root.querySelector('[data-field="look"]')?.value || '';
+  const panel = root.querySelector('[data-vu-settings]');
+  if (!panel) return;
+  panel.classList.toggle('is-hidden', !isBpmVuLookId(look));
+}
+
+function wireExperimentalPluginSettings(root, pluginId) {
+  const intensity = root.querySelector('[data-field="intensity"]');
+  const intensityLabel = root.querySelector('[data-intensity-label]');
+  intensity?.addEventListener('input', () => {
+    if (intensityLabel) intensityLabel.textContent = intensity.value + '%';
+  });
+
+  const cycleBeats = root.querySelector('[data-field="cycle_beats"]');
+  const cycleBeatsLabel = root.querySelector('[data-cycle-beats-label]');
+  cycleBeats?.addEventListener('input', () => {
+    if (cycleBeatsLabel) {
+      const n = parseInt(cycleBeats.value, 10);
+      cycleBeatsLabel.textContent = `${n} beat${n === 1 ? '' : 's'}`;
+    }
+  });
+
+  const effectSpeed = root.querySelector('[data-field="effect_speed"]');
+  const effectSpeedLabel = root.querySelector('[data-effect-speed-label]');
+  effectSpeed?.addEventListener('input', () => {
+    if (effectSpeedLabel) effectSpeedLabel.textContent = `${effectSpeed.value}×`;
+  });
+
+  const reactGain = root.querySelector('[data-field="react_gain"]');
+  const reactGainLabel = root.querySelector('[data-react-gain-label]');
+  reactGain?.addEventListener('input', () => {
+    if (reactGainLabel) reactGainLabel.textContent = `${parseFloat(reactGain.value).toFixed(2)}×`;
+  });
+
+  const reactDelay = root.querySelector('[data-field="react_delay_ms"]');
+  const reactDelayLabel = root.querySelector('[data-react-delay-label]');
+  reactDelay?.addEventListener('input', () => {
+    if (reactDelayLabel) reactDelayLabel.textContent = `${reactDelay.value} ms`;
+  });
+
+  const multicellScale = root.querySelector('[data-field="multicell_scale"]');
+  const multicellScaleLabel = root.querySelector('[data-multicell-scale-label]');
+  multicellScale?.addEventListener('input', () => {
+    if (multicellScaleLabel) {
+      multicellScaleLabel.textContent = `${Math.round(parseFloat(multicellScale.value) * 100)}%`;
+    }
+  });
+
+  const lookSelect = root.querySelector('[data-field="look"]');
+  lookSelect?.addEventListener('change', () => syncBpmLiveVuSettingsPanel(root));
+  if (pluginId === 'bpm-live-sequence') syncBpmLiveVuSettingsPanel(root);
+
+  root.querySelector('[data-action="open-audio"]')?.addEventListener('click', () => {
+    closeExpPluginSettingsModal();
+    document.querySelector('.config-sidebar-btn[data-cfgtab="devices"]')?.click();
+    setTimeout(() => {
+      document.querySelector('.device-tab-btn[data-devtab="audio"]')?.click();
+      switchAudioSubTab('config');
+    }, 50);
+  });
+
+  root.querySelector('[data-action="open-viewer-inline"]')?.addEventListener('click', (e) => {
+    openExperimentalViewer(e.currentTarget.dataset.viewerPath);
+  });
+}
+
+function wireExperimentalPluginCard(card, pluginId, meta) {
+  ensureExpPluginModalWired();
+
   const enableInput = card.querySelector('.exp-plugin-enable');
   enableInput?.addEventListener('change', async () => {
     const on = enableInput.checked;
@@ -2775,52 +2982,12 @@ function wireExperimentalPluginCard(card, pluginId) {
     }
   });
 
-  const intensity = card.querySelector('[data-field="intensity"]');
-  const intensityLabel = card.querySelector('[data-intensity-label]');
-  intensity?.addEventListener('input', () => {
-    if (intensityLabel) intensityLabel.textContent = intensity.value + '%';
+  card.querySelector('[data-action="configure-plugin"]')?.addEventListener('click', () => {
+    openExpPluginSettingsModal(meta);
   });
 
-  const cycleBeats = card.querySelector('[data-field="cycle_beats"]');
-  const cycleBeatsLabel = card.querySelector('[data-cycle-beats-label]');
-  cycleBeats?.addEventListener('input', () => {
-    if (cycleBeatsLabel) {
-      const n = parseInt(cycleBeats.value, 10);
-      cycleBeatsLabel.textContent = `${n} beat${n === 1 ? '' : 's'}`;
-    }
-  });
-
-  const effectSpeed = card.querySelector('[data-field="effect_speed"]');
-  const effectSpeedLabel = card.querySelector('[data-effect-speed-label]');
-  effectSpeed?.addEventListener('input', () => {
-    if (effectSpeedLabel) effectSpeedLabel.textContent = `${effectSpeed.value}×`;
-  });
-
-  card.querySelector('.exp-plugin-save')?.addEventListener('click', async () => {
-    const btn = card.querySelector('.exp-plugin-save');
-    const enabled = card.querySelector('.exp-plugin-enable')?.checked;
-    const body = { ...collectPluginSettingsFromCard(card, pluginId), enabled };
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
-    try {
-      await postPluginConfig(pluginId, body);
-      btn.textContent = 'Saved ✓';
-      setTimeout(() => { btn.textContent = 'Save settings'; }, 1800);
-      refreshExperimentalRuntime([pluginId]);
-    } catch (e) {
-      btn.textContent = 'Error';
-      setTimeout(() => { btn.textContent = 'Save settings'; }, 2000);
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  card.querySelector('[data-action="open-audio"]')?.addEventListener('click', () => {
-    document.querySelector('.config-sidebar-btn[data-cfgtab="devices"]')?.click();
-    setTimeout(() => {
-      document.querySelector('.device-tab-btn[data-devtab="audio"]')?.click();
-      switchAudioSubTab('config');
-    }, 50);
+  card.querySelector('[data-action="open-viewer"]')?.addEventListener('click', () => {
+    openExperimentalViewer(meta.viewerPath || `/api/plugins/${pluginId}/`);
   });
 }
 
@@ -2832,6 +2999,11 @@ async function renderExperimentalPluginCard(meta) {
   const card = document.createElement('article');
   card.className = 'exp-plugin-card' + (enabled ? ' is-on' : ' is-off');
   card.dataset.pluginId = pluginId;
+  if (meta.viewerPath) card.dataset.viewerPath = meta.viewerPath;
+
+  const viewerBtn = meta.viewerPath
+    ? `<button type="button" class="btn btn-primary btn-sm" data-action="open-viewer">Open visualizer</button>`
+    : '';
 
   card.innerHTML =
     `<header class="exp-plugin-header">` +
@@ -2846,18 +3018,12 @@ async function renderExperimentalPluginCard(meta) {
     `</header>` +
     `<p class="exp-plugin-desc">${esc(meta.description || '')}</p>` +
     `<div class="exp-plugin-status" data-runtime-for="${esc(pluginId)}"></div>` +
-    `<div class="exp-plugin-settings${enabled ? '' : ' is-collapsed'}">` +
-      `<div class="exp-plugin-settings-head">Settings</div>` +
-      `<div class="exp-plugin-settings-body">` +
-        renderPluginSettingsHtml(pluginId, cfg) +
-      `</div>` +
-      `<div class="exp-plugin-actions">` +
-        `<button type="button" class="btn btn-primary btn-sm exp-plugin-save">Save settings</button>` +
-        `<span class="exp-plugin-save-hint">Enable toggle saves immediately; other fields need Save.</span>` +
-      `</div>` +
+    `<div class="exp-plugin-card-footer">` +
+      viewerBtn +
+      `<button type="button" class="btn btn-secondary btn-sm" data-action="configure-plugin">Configure…</button>` +
     `</div>`;
 
-  wireExperimentalPluginCard(card, pluginId);
+  wireExperimentalPluginCard(card, pluginId, meta);
   refreshExperimentalRuntime([pluginId]);
   return card;
 }
@@ -2866,6 +3032,8 @@ async function loadExperimentalConfig(quiet) {
   const list = document.getElementById('experimentalPluginsList');
   const pathHint = document.getElementById('expPluginsPathHint');
   if (!list) return;
+
+  ensureExpPluginModalWired();
 
   if (_experimentalPollTimer) {
     clearInterval(_experimentalPollTimer);

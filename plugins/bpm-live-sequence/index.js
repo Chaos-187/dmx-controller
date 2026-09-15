@@ -15,7 +15,12 @@ const {
   sortedColorFixtures,
 } = require('./patterns');
 
-const { levelsToAudio, soundLookCatalog } = require('./sound-looks');
+const {
+  levelsToAudio,
+  soundLookCatalog,
+  shouldApplyVuReact,
+} = require('./sound-looks');
+const { processVuAudio, resetVuAudioSmooth } = require('./audio-react');
 
 
 
@@ -166,6 +171,12 @@ function tick() {
 
   const effectSpeed = Math.max(0.25, Math.min(4, cfgNum(ctxRef, 'effect_speed', 1)));
 
+  const reactGain = Math.max(0.25, Math.min(3, cfgNum(ctxRef, 'react_gain', 1)));
+
+  const reactDelayMs = Math.max(0, Math.min(2000, Math.round(cfgNum(ctxRef, 'react_delay_ms', 180))));
+
+  const multicellScale = Math.max(0.05, Math.min(1, cfgNum(ctxRef, 'multicell_scale', 1)));
+
   const services = { artnetServer, dmxUsbServer, getDmxOutputEnabled };
 
 
@@ -190,7 +201,11 @@ function tick() {
 
   const levels = audioInput.capture.getLevels();
 
-  const audio = levelsToAudio(audioInput.capture.getDmxLevels());
+  let audio = levelsToAudio(audioInput.capture.getDmxLevels());
+
+  if (shouldApplyVuReact(look, autoLookIndex)) {
+    audio = processVuAudio(audio, reactGain, reactDelayMs, TICK_MS);
+  }
 
   const bpm = resolveBpm(levels, useHalftime);
 
@@ -254,7 +269,7 @@ function tick() {
 
 
 
-  const { fixtureColors, effectiveLook } = computeLook(look, {
+  const lookResult = computeLook(look, {
 
     fixtures,
 
@@ -272,11 +287,22 @@ function tick() {
 
     autoLookIndex,
 
+    multicellScale,
+
   });
 
+  const effectiveLook = lookResult?.effectiveLook ?? look;
+  const perChannel = !!lookResult?.perChannel;
+  const channelUpdates = lookResult?.channelUpdates;
+  const fixtureColors = lookResult?.fixtureColors;
 
-
-  pushUpdates(fixtureColorsToChannelUpdates(fixtures, fixtureColors), services);
+  let dmxUpdates = {};
+  if (perChannel && channelUpdates) {
+    dmxUpdates = channelUpdates;
+  } else if (fixtureColors instanceof Map) {
+    dmxUpdates = fixtureColorsToChannelUpdates(fixtures, fixtureColors);
+  }
+  pushUpdates(dmxUpdates, services);
 
 
 
@@ -300,9 +326,17 @@ function tick() {
 
     beat_pulse: Math.round(beatPulse * 100) / 100,
 
-    fixtures: fixtureColors.size,
+    fixtures: perChannel
+      ? Object.values(channelUpdates || {}).reduce((n, m) => n + Object.keys(m).length, 0)
+      : (fixtureColors instanceof Map ? fixtureColors.size : 0),
 
     use_halftime: useHalftime,
+
+    react_gain: reactGain,
+
+    react_delay_ms: reactDelayMs,
+
+    multicell_scale: multicellScale,
 
   };
 
@@ -340,6 +374,8 @@ function stopTimer() {
 
   autoLookIndex = 0;
 
+  resetVuAudioSmooth();
+
   lastStatus = { active: false };
 
 }
@@ -365,6 +401,12 @@ function configPayload(ctx) {
     cycle_beats: Math.round(cfgNum(ctx, 'cycle_beats', 4)),
 
     effect_speed: cfgNum(ctx, 'effect_speed', 1),
+
+    react_gain: cfgNum(ctx, 'react_gain', 1),
+
+    react_delay_ms: Math.round(cfgNum(ctx, 'react_delay_ms', 180)),
+
+    multicell_scale: cfgNum(ctx, 'multicell_scale', 1),
 
   };
 
@@ -458,6 +500,8 @@ module.exports = {
 
         beatCounter = 0;
 
+        resetVuAudioSmooth();
+
       }
 
       if (body.intensity !== undefined) {
@@ -475,6 +519,26 @@ module.exports = {
       if (body.effect_speed !== undefined) {
 
         ctx.setConfig('effect_speed', String(Math.max(0.25, Math.min(4, +body.effect_speed || 1))));
+
+      }
+
+      if (body.react_gain !== undefined) {
+
+        ctx.setConfig('react_gain', String(Math.max(0.25, Math.min(3, +body.react_gain || 1))));
+
+        resetVuAudioSmooth();
+
+      }
+
+      if (body.react_delay_ms !== undefined) {
+
+        ctx.setConfig('react_delay_ms', String(Math.max(0, Math.min(2000, Math.round(+body.react_delay_ms || 180)))));
+
+      }
+
+      if (body.multicell_scale !== undefined) {
+
+        ctx.setConfig('multicell_scale', String(Math.max(0.05, Math.min(1, +body.multicell_scale || 1))));
 
       }
 

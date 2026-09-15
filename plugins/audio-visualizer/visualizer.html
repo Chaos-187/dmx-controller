@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio Visualizer — Thaluxis DMX</title>
+  <style>
+    :root {
+      --bg: #030306;
+      --text: #eeeef2;
+      --dim: #6e6e7a;
+      --accent: #00e676;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; }
+    .hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 2;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 16px 22px;
+      pointer-events: none;
+    }
+    .hud-left {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .hud-device { font-size: 11px; color: #55556a; margin-top: 4px; max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hud-bpm {
+      font-size: clamp(32px, 6vw, 52px);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      color: var(--accent);
+      text-shadow: 0 0 32px rgba(0, 230, 118, 0.4);
+      transition: transform 0.07s ease, filter 0.07s ease;
+    }
+    .hud-bpm.beat { transform: scale(1.05); filter: brightness(1.15); }
+    .hud-sub { font-size: 10px; color: var(--dim); text-align: right; margin-top: 6px; letter-spacing: 0.04em; }
+    .warn {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(3, 3, 6, 0.82);
+      padding: 24px;
+    }
+    .warn.show { display: flex; }
+    .warn-inner {
+      max-width: 400px;
+      padding: 20px 24px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 193, 7, 0.35);
+      background: rgba(18, 14, 10, 0.95);
+      color: #ffc107;
+      font-size: 14px;
+      line-height: 1.55;
+      text-align: center;
+    }
+    #viz { width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div>
+      <div class="hud-left">Live spectrum</div>
+      <div class="hud-device" id="deviceLabel">—</div>
+    </div>
+    <div style="text-align:right">
+      <div class="hud-bpm" id="bpmDisplay">—</div>
+      <div class="hud-sub" id="bpmMeta"></div>
+    </div>
+  </div>
+  <div class="warn" id="warnBox">
+    <div class="warn-inner">Start <strong>Audio Input</strong> in Config → Devices → Audio so the visualizer can react to your music.</div>
+  </div>
+  <canvas id="viz"></canvas>
+  <script>
+    const COLS = 56;
+    const SEGMENTS = 32;
+    const GAP = 1.5;
+    const RADIUS = 1.5;
+
+    const canvas = document.getElementById('viz');
+    const ctx = canvas.getContext('2d');
+    const smooth = new Array(COLS).fill(0);
+    const peaks = new Array(COLS).fill(0);
+    let peakHold = 0.001;
+    let lastFetch = 0;
+    let latest = { spectrum: new Array(COLS).fill(0), beat: 0, energy: 0 };
+
+    function fallbackSpectrum(levels) {
+      const bands = [
+        levels.sub_bass ?? levels.bass ?? 0,
+        levels.bass ?? 0,
+        levels.mid ?? 0,
+        levels.upper_mid ?? levels.mid ?? 0,
+        levels.treble ?? 0,
+      ];
+      const out = new Array(COLS).fill(0);
+      for (let i = 0; i < COLS; i++) {
+        const t = i / (COLS - 1);
+        const bi = t * (bands.length - 1);
+        const i0 = Math.floor(bi);
+        const i1 = Math.min(bands.length - 1, i0 + 1);
+        const mix = bi - i0;
+        out[i] = bands[i0] * (1 - mix) + bands[i1] * mix;
+      }
+      return out;
+    }
+
+    function upsampleRaw(raw) {
+      const out = new Array(COLS).fill(0);
+      if (!raw.length) return out;
+      for (let i = 0; i < COLS; i++) {
+        const t = i / (COLS - 1);
+        const si = t * (raw.length - 1);
+        const i0 = Math.floor(si);
+        const i1 = Math.min(raw.length - 1, i0 + 1);
+        const mix = si - i0;
+        out[i] = raw[i0] * (1 - mix) + raw[i1] * mix;
+      }
+      return out;
+    }
+
+    function prepareDisplay(raw, beat, energy) {
+      const bins = upsampleRaw(raw);
+      let max = 0.0001;
+      for (let i = 0; i < bins.length; i++) max = Math.max(max, bins[i]);
+      peakHold = Math.max(max * 0.92, peakHold * 0.992);
+      const norm = Math.max(peakHold, 0.08);
+      const boost = 1 + beat * 0.28 + energy * 0.12;
+
+      for (let i = 0; i < COLS; i++) {
+        const src = bins[i];
+        let v = Math.min(1, (src / norm) * boost);
+        v = Math.pow(v, 0.58);
+        const prev = smooth[i];
+        const alpha = v > prev ? 0.42 : 0.18;
+        smooth[i] = prev + (v - prev) * alpha;
+        peaks[i] = Math.max(smooth[i], peaks[i] * 0.965);
+      }
+      return smooth;
+    }
+
+    function colorAt(t) {
+      const hue = t * 300;
+      return `hsl(${hue}, 92%, 55%)`;
+    }
+
+    function colorAtDim(t, lit) {
+      const hue = t * 300;
+      return `hsl(${hue}, ${lit ? 88 : 25}%, ${lit ? 52 : 10}%)`;
+    }
+
+    function roundRect(x, y, w, h, r) {
+      if (w < 2 * r) r = w / 2;
+      if (h < 2 * r) r = h / 2;
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function sampleSpec(spec, t) {
+      const si = t * (COLS - 1);
+      const i0 = Math.floor(si);
+      const i1 = Math.min(COLS - 1, i0 + 1);
+      const mix = si - i0;
+      return spec[i0] * (1 - mix) + spec[i1] * mix;
+    }
+
+    function drawEqStrip(x0, y0, w, h, spec, fromTop) {
+      const colW = (w - GAP * (COLS + 1)) / COLS;
+      const segH = (h - GAP * (SEGMENTS + 1)) / SEGMENTS;
+
+      for (let c = 0; c < COLS; c++) {
+        const v = Math.min(1, spec[c]);
+        const litSegs = Math.ceil(v * SEGMENTS);
+        const x = x0 + GAP + c * (colW + GAP);
+        const t = c / (COLS - 1);
+
+        for (let s = 0; s < SEGMENTS; s++) {
+          const on = s < litSegs;
+          const isPeak = on && s === Math.min(SEGMENTS - 1, Math.ceil(peaks[c] * SEGMENTS) - 1);
+          let y;
+          if (fromTop) {
+            y = y0 + GAP + s * (segH + GAP);
+          } else {
+            y = y0 + h - GAP - (s + 1) * (segH + GAP);
+          }
+          ctx.fillStyle = isPeak ? '#ffffff' : colorAtDim(t, on);
+          if (on && !isPeak) ctx.globalAlpha = 0.85 + (s / SEGMENTS) * 0.15;
+          else ctx.globalAlpha = on ? 1 : 0.35;
+          roundRect(x, y, colW, segH, RADIUS);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    function drawWaveform(cx, cy, w, h, spec, beat) {
+      const pts = 160;
+      const amp = h * 0.48 * (1 + beat * 0.15);
+
+      function buildPath(sign) {
+        ctx.beginPath();
+        for (let p = 0; p < pts; p++) {
+          const t = p / (pts - 1);
+          const v = sampleSpec(spec, t);
+          const x = cx + t * w;
+          const y = cy - sign * v * amp;
+          if (p === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+      }
+
+      ctx.save();
+      ctx.filter = 'blur(18px)';
+      ctx.globalAlpha = 0.45;
+      buildPath(1);
+      ctx.lineTo(cx + w, cy);
+      ctx.lineTo(cx, cy);
+      ctx.closePath();
+      const glow = ctx.createLinearGradient(cx, cy - amp, cx + w, cy + amp);
+      glow.addColorStop(0, 'rgba(255, 100, 40, 0.9)');
+      glow.addColorStop(0.45, 'rgba(255, 50, 160, 0.85)');
+      glow.addColorStop(0.75, 'rgba(90, 110, 255, 0.9)');
+      glow.addColorStop(1, 'rgba(180, 50, 200, 0.75)');
+      ctx.fillStyle = glow;
+      ctx.fill();
+      ctx.restore();
+
+      ctx.beginPath();
+      for (let p = 0; p < pts; p++) {
+        const t = p / (pts - 1);
+        const v = sampleSpec(spec, t);
+        const x = cx + t * w;
+        const yTop = cy - v * amp;
+        if (p === 0) ctx.moveTo(x, yTop);
+        else ctx.lineTo(x, yTop);
+      }
+      for (let p = pts - 1; p >= 0; p--) {
+        const t = p / (pts - 1);
+        const v = sampleSpec(spec, t);
+        const x = cx + t * w;
+        const yBot = cy + v * amp;
+        ctx.lineTo(x, yBot);
+      }
+      ctx.closePath();
+
+      const fill = ctx.createLinearGradient(cx, 0, cx + w, 0);
+      fill.addColorStop(0, 'rgba(255, 130, 50, 0.95)');
+      fill.addColorStop(0.32, 'rgba(255, 60, 170, 0.92)');
+      fill.addColorStop(0.58, 'rgba(100, 130, 255, 0.92)');
+      fill.addColorStop(1, 'rgba(200, 70, 180, 0.88)');
+      ctx.fillStyle = fill;
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    function drawFrame() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const spec = latest.spectrum;
+      const beat = latest.beat || 0;
+
+      ctx.fillStyle = '#030306';
+      ctx.fillRect(0, 0, w, h);
+
+      const padX = Math.max(8, w * 0.012);
+      const stripH = Math.min(h * 0.2, 140);
+      const waveTop = stripH + 8;
+      const waveH = h - stripH * 2 - 24;
+      const waveW = w - padX * 2;
+
+      drawEqStrip(padX, 6, waveW, stripH, spec, true);
+      drawEqStrip(padX, h - stripH - 6, waveW, stripH, spec, false);
+
+      const midY = waveTop + waveH * 0.5;
+      drawWaveform(padX, midY, waveW, waveH, spec, beat);
+
+      const vig = ctx.createRadialGradient(w * 0.5, h * 0.5, h * 0.2, w * 0.5, h * 0.5, h * 0.85);
+      vig.addColorStop(0, 'rgba(0,0,0,0)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    function resize() {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.floor(window.innerWidth * dpr);
+      canvas.height = Math.floor(window.innerHeight * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    async function pollAudio() {
+      const now = performance.now();
+      if (now - lastFetch < 28) return;
+      lastFetch = now;
+      try {
+        const json = await fetch('/api/audio-input/status').then((r) => r.json());
+        const lv = json.levels || {};
+        const running = !!json.running;
+
+        document.getElementById('warnBox').classList.toggle('show', !running);
+        document.getElementById('deviceLabel').textContent =
+          json.device_name || (running ? 'Capture active' : 'Not running');
+
+        const bpmEl = document.getElementById('bpmDisplay');
+        const bpm = lv.bpm;
+        bpmEl.textContent = bpm != null && Number.isFinite(bpm) ? Math.round(bpm) : '—';
+        bpmEl.classList.toggle('beat', (lv.beat || 0) > 0.35);
+
+        const alts = [];
+        if (lv.bpm_halftime) alts.push(`½ ${Math.round(lv.bpm_halftime)}`);
+        if (lv.bpm_doubletime) alts.push(`2× ${Math.round(lv.bpm_doubletime)}`);
+        document.getElementById('bpmMeta').textContent = alts.join('  ·  ');
+
+        let raw = lv.spectrum;
+        if (!raw || !raw.length) raw = fallbackSpectrum(lv);
+        latest.spectrum = prepareDisplay(raw, lv.beat || 0, lv.energy || 0);
+        latest.beat = lv.beat || 0;
+        latest.energy = lv.energy || 0;
+      } catch (_) { /* keep animating */ }
+    }
+
+    function loop() {
+      pollAudio();
+      drawFrame();
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

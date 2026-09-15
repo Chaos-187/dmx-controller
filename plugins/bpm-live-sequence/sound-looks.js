@@ -3,6 +3,7 @@
  */
 
 const { computeEffectValue, hslToRgb } = require('../../effects-engine');
+const { buildChannelCtx } = require('./channel-ctx');
 
 const COLOR_TYPES = new Set(['red', 'green', 'blue', 'white', 'amber', 'uv', 'dimmer']);
 
@@ -60,21 +61,32 @@ const SOUND_ENGINE_SPECS = {
   },
   sound_vu: {
     type: 'sound_vu',
-    label: 'VU meter (rig height)',
+    label: 'VU meter (rig + cells)',
     params: {},
     needsProgress: false,
+    perChannel: true,
+  },
+  sound_vu_multicell: {
+    type: 'sound_vu',
+    label: 'VU meter (multicell only)',
+    params: {},
+    needsProgress: false,
+    perChannel: true,
+    multicellOnly: true,
   },
   sound_vu_lr: {
     type: 'sound_vu_lr',
     label: 'VU meter (left → right)',
     params: {},
     needsProgress: false,
+    perChannel: true,
   },
   sound_vu_tb: {
     type: 'sound_vu_tb',
     label: 'VU meter (top → bottom)',
     params: {},
     needsProgress: false,
+    perChannel: true,
   },
 };
 
@@ -87,11 +99,34 @@ const AUTO_ROTATE_MODES = [
   'sound_wave',
   'spectrum',
   'kick_chase',
+  'sound_vu_multicell',
   'sound_vu_lr',
   'mid_treble_alternate',
 ];
 
 const LOOKS = [...SOUND_ENGINE_LOOKS, ...CUSTOM_SOUND_LOOKS, 'auto_rotate'];
+
+const VU_LOOKS = new Set([
+  'sound_vu',
+  'sound_vu_multicell',
+  'sound_vu_lr',
+  'sound_vu_tb',
+]);
+
+function isVuLook(lookId) {
+  return VU_LOOKS.has(lookId);
+}
+
+function resolveLookForMode(lookId, autoLookIndex) {
+  if (lookId === 'auto_rotate') {
+    return AUTO_ROTATE_MODES[autoLookIndex % AUTO_ROTATE_MODES.length];
+  }
+  return lookId;
+}
+
+function shouldApplyVuReact(lookId, autoLookIndex) {
+  return isVuLook(resolveLookForMode(lookId, autoLookIndex));
+}
 
 function sortedColorFixtures(fixtures) {
   return fixtures
@@ -149,8 +184,51 @@ function applyIntensity(r, g, b, dim, intensity) {
   };
 }
 
+function computePerChannelEngineLook(lookId, spec, params) {
+  const { fixtures, effectProgress, intensity, audio, multicellScale } = params;
+  const list = sortedColorFixtures(fixtures);
+  const rigCount = Math.max(1, list.length);
+  const channelUpdates = {};
+  const effect = { type: spec.type, effect_data: {} };
+  const scale = Math.max(0.05, Math.min(1, multicellScale ?? 1));
+  const fxParams = { ...(spec.params || {}), audio, multicell_scale: scale };
+  const progress = spec.needsProgress ? (effectProgress ?? 0) : 0;
+  const baseValues = { red: 255, green: 255, blue: 255, white: 255, dimmer: 255 };
+
+  for (let fi = 0; fi < list.length; fi++) {
+    const fix = list[fi];
+    if (spec.multicellOnly && !(fix.cell_count > 0)) continue;
+
+    for (const ch of fix.channels) {
+      if (!COLOR_TYPES.has(ch.type)) continue;
+      const ctx = buildChannelCtx(ch, fix);
+      ctx._fixtureOrdinal = fi;
+      ctx._fixtureCount = rigCount;
+      ctx._rigFixtureCount = rigCount;
+
+      const val = computeEffectValue(effect, ch.type, progress, baseValues, fxParams, ctx);
+      if (val == null) continue;
+      const scaled = Math.max(0, Math.min(255, Math.round(val * intensity)));
+      const u = fix.universe;
+      if (!channelUpdates[u]) channelUpdates[u] = {};
+      channelUpdates[u][ch.dmx_address] = scaled;
+    }
+  }
+
+  return {
+    channelUpdates,
+    fixtureColors: new Map(),
+    effectiveLook: lookId,
+    perChannel: true,
+  };
+}
+
 function computeEngineSoundLook(lookId, params) {
   const spec = SOUND_ENGINE_SPECS[lookId];
+  if (spec.perChannel) {
+    return computePerChannelEngineLook(lookId, spec, params);
+  }
+
   const { fixtures, effectProgress, intensity, audio } = params;
   const list = sortedColorFixtures(fixtures);
   const out = new Map();
@@ -301,6 +379,10 @@ function soundLookCatalog() {
 module.exports = {
   LOOKS,
   AUTO_ROTATE_MODES,
+  VU_LOOKS,
+  isVuLook,
+  resolveLookForMode,
+  shouldApplyVuReact,
   levelsToAudio,
   computeSoundLook,
   soundLookCatalog,

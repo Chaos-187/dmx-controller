@@ -362,7 +362,35 @@ async function _listPulse(ffmpeg) {
 
 // ─── AudioInputCapture ────────────────────────────────────────────────────────
 
+const SPECTRUM_BINS = 48;
+const SPECTRUM_FFT_SIZE = 128;
+
 const ZERO_LEVELS = { bass: 0, mid: 0, treble: 0, energy: 0, sub_bass: 0, upper_mid: 0, beat: 0 };
+
+/** Magnitude bins from a short PCM frame (music-reactive visualizer). */
+function computeMagnitudeSpectrum(frameBuf, gain, numBins) {
+  const count = Math.min(SPECTRUM_FFT_SIZE, Math.floor(frameBuf.length / 2));
+  if (count < 8) return new Array(numBins).fill(0);
+
+  const out = new Array(numBins).fill(0);
+  for (let k = 0; k < numBins; k++) {
+    const bin = k + 1;
+    let re = 0;
+    let im = 0;
+    for (let t = 0; t < count; t++) {
+      const raw = frameBuf.readInt16LE(t * 2) / 32768;
+      const x = Math.max(-1, Math.min(1, raw * gain));
+      const ang = (2 * Math.PI * bin * t) / count;
+      re += x * Math.cos(ang);
+      im -= x * Math.sin(ang);
+    }
+    const mag = Math.sqrt(re * re + im * im) / count;
+    // Log-style lift + slight treble emphasis so the full bar row reacts to music.
+    const trebleBoost = 0.75 + (k / Math.max(1, numBins - 1)) * 0.55;
+    out[k] = Math.min(1, Math.pow(mag * 7 * trebleBoost, 0.72));
+  }
+  return out;
+}
 
 class AudioInputCapture extends EventEmitter {
   constructor() {
@@ -387,6 +415,7 @@ class AudioInputCapture extends EventEmitter {
     this._bpmDisplay     = null;
     this._bpmConfidence  = 0;
     this._bpmConfSmooth  = 0;
+    this._spectrumSmooth = new Array(SPECTRUM_BINS).fill(0);
   }
 
   get running()     { return this._running; }
@@ -406,6 +435,7 @@ class AudioInputCapture extends EventEmitter {
       beat,
       bpm: bpmOut,
       bpm_confidence: this._bpmConfSmooth,
+      spectrum: this._spectrumSmooth.slice(),
       ...alts,
     };
   }
@@ -542,6 +572,7 @@ class AudioInputCapture extends EventEmitter {
     }
     this._running = false;
     this._buf     = Buffer.alloc(0);
+    this._spectrumSmooth.fill(0);
     this._resetBpmState();
     this._resetFilters();
   }
@@ -677,6 +708,14 @@ class AudioInputCapture extends EventEmitter {
 
   _onFrame(frameBuf) {
     const raw = analyzeFrame(frameBuf, this._filters, this._gain);
+
+    const specs = computeMagnitudeSpectrum(frameBuf, this._gain, SPECTRUM_BINS);
+    for (let i = 0; i < SPECTRUM_BINS; i++) {
+      const v = specs[i];
+      const prev = this._spectrumSmooth[i];
+      const alpha = v > prev ? 0.38 : 0.72;
+      this._spectrumSmooth[i] = prev * alpha + v * (1 - alpha);
+    }
 
     // Exponential smoothing — two separate strategies:
     //   _smooth    : single alpha, fast, for the UI meter

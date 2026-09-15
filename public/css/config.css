@@ -2169,9 +2169,39 @@ textarea.gen-raw-editor {
 .exp-toggle input:focus-visible + .exp-toggle-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .exp-plugin-status {
-  margin: 0 18px 14px; padding: 10px 12px; border-radius: var(--radius-sm);
+  margin: 0 18px 0; padding: 10px 12px; border-radius: var(--radius-sm);
   background: rgba(0,0,0,.25); border: 1px solid var(--panel-border);
   font-size: 12px; color: var(--text-dim); min-height: 20px; line-height: 1.45;
+}
+.exp-plugin-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--panel-border);
+  margin-top: 14px;
+  background: rgba(0,0,0,.08);
+}
+.exp-plugin-modal { max-width: 520px; }
+.exp-plugin-modal-desc {
+  font-size: 12px; line-height: 1.55; color: var(--text-dim); margin: -8px 0 18px;
+}
+.exp-plugin-modal-body {
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+.exp-plugin-modal-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.exp-plugin-modal-actions .exp-plugin-save-hint {
+  margin-left: 0;
+  margin-right: auto;
+  flex: 1 1 180px;
 }
 .experimental-runtime-pill {
   display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 600;
@@ -2182,30 +2212,9 @@ textarea.gen-raw-editor {
   border-color: rgba(0, 230, 118, .35); color: var(--green); background: rgba(0, 230, 118, .08);
 }
 
-.exp-plugin-settings {
-  border-top: 1px solid var(--panel-border);
-  background: rgba(0,0,0,.15);
-  opacity: 1;
-  transition: max-height 0.35s ease, opacity 0.25s, padding 0.25s;
-  padding: 0 18px 0;
-  display: flex;
-  flex-direction: column;
-}
-.exp-plugin-settings.is-collapsed {
-  max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; border-top-color: transparent;
-}
 .exp-plugin-settings-head {
   font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--text-muted); padding: 14px 0 10px;
-  flex-shrink: 0;
-}
-.exp-plugin-settings-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: min(52vh, 420px);
-  overflow-y: auto;
-  padding-bottom: 4px;
-  scrollbar-gutter: stable;
+  color: var(--text-muted); padding: 0 0 10px;
 }
 .exp-plugin-settings-grid { display: flex; flex-direction: column; gap: 12px; }
 .exp-plugin-field {
@@ -2219,12 +2228,10 @@ textarea.gen-raw-editor {
   display: flex; align-items: flex-start; gap: 10px; cursor: pointer; font-size: 12px; line-height: 1.45;
 }
 .exp-plugin-check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
-.exp-plugin-actions {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  flex-shrink: 0;
-  margin-top: 0;
-  padding: 14px 0 16px;
-  border-top: 1px solid var(--panel-border);
-  background: rgba(0,0,0,.15);
-}
 .exp-plugin-save-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+.exp-plugin-vu-settings {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--panel-border);
+}
+.exp-plugin-vu-settings.is-hidden { display: none; }

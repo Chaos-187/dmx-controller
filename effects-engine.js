@@ -1618,16 +1618,22 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       }
 
       // pos: 0 = bottom of bar (easiest to light), 1 = top (hardest)
-      let pos, count;
+      let pos, count, colorPos, barEnergyPos;
       if (cellCount > 1) {
         // Multicell fixture — cells form the whole bar themselves
         pos   = cellIndex / Math.max(1, cellCount - 1);
         count = cellCount;
+        const scale = Math.max(0.05, Math.min(1, params.multicell_scale ?? data.multicell_scale ?? 1));
+        if (pos > scale) return 0;
+        colorPos = scale > 0 ? pos / scale : 0;
+        barEnergyPos = colorPos;
       } else {
         // Single-cell fixtures — rig position forms the bar
         const fixtureCount = channelCtx._rigFixtureCount || channelCtx._fixtureCount || 1;
         pos   = channelCtx._rigPosition ?? (channelCtx._fixtureOrdinal || 0) / Math.max(1, fixtureCount - 1);
         count = fixtureCount;
+        colorPos = pos;
+        barEnergyPos = pos;
       }
 
       // Audio energy (0–1) drives the bar height.
@@ -1635,20 +1641,23 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
       const energy = Math.sqrt(audio.energy || 0);
 
       // Hard on/off segment: lit if bar height exceeds this cell's threshold
-      if (energy < pos) return 0;
+      if (energy < barEnergyPos) return 0;
 
       const palette = getEffectPaletteRgb(data, params);
       let r; let g; let b;
       if (usePaletteColors(data, params) && palette) {
-        [r, g, b] = rgbAtPalettePhase(1 - pos, palette);
+        [r, g, b] = rgbAtPalettePhase(1 - colorPos, palette);
       } else {
-        const hue = (1 - pos) * 120;
+        const hue = (1 - colorPos) * 120;
         [r, g, b] = hslToRgb(hue / 360, 1, 0.5);
       }
 
       // Top lit cell gets a brightness boost so the leading edge is bright
-      const cellThreshold = 1 / Math.max(1, count - 1);
-      const isTop = (energy - pos) < cellThreshold;
+      const activeSteps = cellCount > 1
+        ? Math.max(1, Math.round((count - 1) * Math.max(0.05, Math.min(1, params.multicell_scale ?? data.multicell_scale ?? 1))))
+        : Math.max(1, count - 1);
+      const cellThreshold = 1 / activeSteps;
+      const isTop = (energy - barEnergyPos) < cellThreshold;
       const bright = isTop ? 1.0 : 0.75;
 
       if (channelType === 'red')    return Math.round(r * bright);
