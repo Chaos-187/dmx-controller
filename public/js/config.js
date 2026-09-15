@@ -2852,14 +2852,42 @@ function renderGenericPluginSettings(_cfg, pluginId) {
   return `<p class="exp-plugin-field-hint">No settings UI for <code>${esc(pluginId)}</code> yet.</p>`;
 }
 
-function renderAudioVisualizerSettings(_cfg, pluginId) {
+const AUDIO_VIZ_MODES = [
+  { id: 'studio', label: 'Studio (EQ + waveform)' },
+  { id: 'waveform', label: 'Waveform (full screen)' },
+  { id: 'eq_full', label: 'EQ bars (large)' },
+  { id: 'mirror', label: 'Mirror bars (center)' },
+  { id: 'radial', label: 'Radial spectrum' },
+  { id: 'scope', label: 'Oscilloscope trace' },
+];
+
+function renderAudioVisualizerSettings(cfg, pluginId) {
   const pid = esc(pluginId);
   const viewerPath = `/api/plugins/${pid}/`;
+  const mode = cfg.visual_mode || 'studio';
+  const modeOptions = AUDIO_VIZ_MODES.map((o) =>
+    `<option value="${esc(o.id)}"${o.id === mode ? ' selected' : ''}>${esc(o.label)}</option>`,
+  ).join('');
   return `
     <div class="exp-plugin-settings-grid" data-settings-for="${pid}">
       <p class="exp-plugin-field-hint">
-        Music-reactive 32-band spectrum with segmented EQ and mirrored waveform. Requires Audio Input capture running.
+        Pick a visual layout below. The open tab picks up changes within ~2 seconds after Save (no reload needed).
       </p>
+      <div class="exp-plugin-field">
+        <span class="exp-plugin-field-label">Visual style</span>
+        <select class="audio-config-select" data-field="visual_mode" style="max-width:100%">${modeOptions}</select>
+      </div>
+      <div class="exp-plugin-field">
+        <span class="exp-plugin-field-label">Sensitivity</span>
+        <div class="audio-gain-row">
+          <input type="range" data-field="sensitivity" min="0.5" max="2" step="0.05" value="${cfg.sensitivity ?? 1}">
+          <span data-viz-sensitivity-label>${parseFloat(cfg.sensitivity ?? 1).toFixed(2)}×</span>
+        </div>
+      </div>
+      <label class="exp-plugin-check">
+        <input type="checkbox" data-field="show_bpm_alts" ${cfg.show_bpm_alts !== false ? 'checked' : ''}>
+        <span><strong>Show half / double BPM</strong><br><span class="exp-plugin-field-hint">Extra tempo readouts under the BPM number.</span></span>
+      </label>
       <button type="button" class="btn btn-primary btn-sm" data-action="open-viewer-inline" data-viewer-path="${esc(viewerPath)}">
         Open visualizer in new tab
       </button>
@@ -2894,6 +2922,11 @@ function collectPluginSettingsFromContainer(root, pluginId) {
     body.react_gain = parseFloat(grid.querySelector('[data-field="react_gain"]')?.value || '1');
     body.react_delay_ms = parseInt(grid.querySelector('[data-field="react_delay_ms"]')?.value || '180', 10);
     body.multicell_scale = parseFloat(grid.querySelector('[data-field="multicell_scale"]')?.value || '1');
+  }
+  if (pluginId === 'audio-visualizer') {
+    body.visual_mode = grid.querySelector('[data-field="visual_mode"]')?.value || 'studio';
+    body.sensitivity = parseFloat(grid.querySelector('[data-field="sensitivity"]')?.value || '1');
+    body.show_bpm_alts = !!grid.querySelector('[data-field="show_bpm_alts"]')?.checked;
   }
   return body;
 }
@@ -2962,6 +2995,12 @@ function wireExperimentalPluginSettings(root, pluginId) {
 
   root.querySelector('[data-action="open-viewer-inline"]')?.addEventListener('click', (e) => {
     openExperimentalViewer(e.currentTarget.dataset.viewerPath);
+  });
+
+  const vizSens = root.querySelector('[data-field="sensitivity"]');
+  const vizSensLabel = root.querySelector('[data-viz-sensitivity-label]');
+  vizSens?.addEventListener('input', () => {
+    if (vizSensLabel) vizSensLabel.textContent = `${parseFloat(vizSens.value).toFixed(2)}×`;
   });
 }
 

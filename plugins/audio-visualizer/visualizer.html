@@ -95,7 +95,11 @@
     const peaks = new Array(COLS).fill(0);
     let peakHold = 0.001;
     let lastFetch = 0;
+    let lastCfgFetch = 0;
     let latest = { spectrum: new Array(COLS).fill(0), beat: 0, energy: 0 };
+    let settings = { visual_mode: 'studio', sensitivity: 1, show_bpm_alts: true };
+    const scopeHistory = [];
+    const SCOPE_LEN = 512;
 
     function fallbackSpectrum(levels) {
       const bands = [
@@ -137,7 +141,8 @@
       for (let i = 0; i < bins.length; i++) max = Math.max(max, bins[i]);
       peakHold = Math.max(max * 0.92, peakHold * 0.992);
       const norm = Math.max(peakHold, 0.08);
-      const boost = 1 + beat * 0.28 + energy * 0.12;
+      const sens = settings.sensitivity || 1;
+      const boost = (1 + beat * 0.28 + energy * 0.12) * sens;
 
       for (let i = 0; i < COLS; i++) {
         const src = bins[i];
@@ -273,32 +278,124 @@
       ctx.stroke();
     }
 
+    function drawVignette(w, h) {
+      const vig = ctx.createRadialGradient(w * 0.5, h * 0.5, h * 0.15, w * 0.5, h * 0.5, h * 0.88);
+      vig.addColorStop(0, 'rgba(0,0,0,0)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.5)');
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    function drawMirrorBars(padX, w, h, spec) {
+      const cy = h * 0.5;
+      const barW = (w - GAP * (COLS + 1)) / COLS;
+      const maxH = h * 0.42;
+      for (let c = 0; c < COLS; c++) {
+        const v = Math.min(1, spec[c]);
+        const bh = v * maxH;
+        const x = padX + GAP + c * (barW + GAP);
+        const t = c / (COLS - 1);
+        const grad = ctx.createLinearGradient(x, cy - bh, x, cy + bh);
+        grad.addColorStop(0, colorAtDim(t, true));
+        grad.addColorStop(0.5, '#ffffff');
+        grad.addColorStop(1, colorAtDim(t, true));
+        ctx.fillStyle = grad;
+        roundRect(x, cy - bh, barW, bh * 2, RADIUS);
+        ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.moveTo(padX, cy);
+      ctx.lineTo(padX + w, cy);
+      ctx.stroke();
+    }
+
+    function drawRadial(w, h, spec, beat) {
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      const inner = Math.min(w, h) * 0.12;
+      const outer = Math.min(w, h) * 0.44 * (1 + beat * 0.08);
+      for (let c = 0; c < COLS; c++) {
+        const v = Math.min(1, spec[c]);
+        const a0 = (c / COLS) * Math.PI * 2 - Math.PI / 2;
+        const a1 = ((c + 1) / COLS) * Math.PI * 2 - Math.PI / 2;
+        const r1 = inner + v * (outer - inner);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a0) * inner, cy + Math.sin(a0) * inner);
+        ctx.lineTo(cx + Math.cos(a0) * r1, cy + Math.sin(a0) * r1);
+        ctx.lineTo(cx + Math.cos(a1) * r1, cy + Math.sin(a1) * r1);
+        ctx.lineTo(cx + Math.cos(a1) * inner, cy + Math.sin(a1) * inner);
+        ctx.closePath();
+        ctx.fillStyle = colorAtDim(c / (COLS - 1), v > 0.04);
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(cx, cy, inner * 0.85, 0, Math.PI * 2);
+      ctx.fillStyle = '#030306';
+      ctx.fill();
+    }
+
+    function drawScope(w, h, spec, beat) {
+      let avg = 0;
+      for (let i = 0; i < spec.length; i++) avg += spec[i];
+      avg /= spec.length;
+      scopeHistory.push(avg * (1 + beat * 0.25));
+      if (scopeHistory.length > SCOPE_LEN) scopeHistory.shift();
+
+      const cy = h * 0.5;
+      const amp = h * 0.38;
+      ctx.strokeStyle = 'rgba(0, 230, 118, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(0, 230, 118, 0.6)';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      for (let i = 0; i < scopeHistory.length; i++) {
+        const x = (i / (SCOPE_LEN - 1)) * w;
+        const y = cy - scopeHistory[i] * amp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      const stripH = Math.min(100, h * 0.14);
+      drawEqStrip(12, h - stripH - 10, w - 24, stripH, spec, false);
+    }
+
     function drawFrame() {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const spec = latest.spectrum;
       const beat = latest.beat || 0;
+      const mode = settings.visual_mode || 'studio';
 
       ctx.fillStyle = '#030306';
       ctx.fillRect(0, 0, w, h);
 
       const padX = Math.max(8, w * 0.012);
-      const stripH = Math.min(h * 0.2, 140);
-      const waveTop = stripH + 8;
-      const waveH = h - stripH * 2 - 24;
       const waveW = w - padX * 2;
 
-      drawEqStrip(padX, 6, waveW, stripH, spec, true);
-      drawEqStrip(padX, h - stripH - 6, waveW, stripH, spec, false);
+      if (mode === 'waveform') {
+        drawWaveform(padX, h * 0.5, waveW, h * 0.88, spec, beat);
+      } else if (mode === 'eq_full') {
+        const stripH = Math.min(h * 0.72, h - 40);
+        drawEqStrip(padX, (h - stripH) * 0.5, waveW, stripH, spec, false);
+      } else if (mode === 'mirror') {
+        drawMirrorBars(padX, waveW, h, spec);
+      } else if (mode === 'radial') {
+        drawRadial(w, h, spec, beat);
+      } else if (mode === 'scope') {
+        drawScope(w, h, spec, beat);
+      } else {
+        const stripH = Math.min(h * 0.2, 140);
+        const waveTop = stripH + 8;
+        const waveH = h - stripH * 2 - 24;
+        drawEqStrip(padX, 6, waveW, stripH, spec, true);
+        drawEqStrip(padX, h - stripH - 6, waveW, stripH, spec, false);
+        drawWaveform(padX, waveTop + waveH * 0.5, waveW, waveH, spec, beat);
+      }
 
-      const midY = waveTop + waveH * 0.5;
-      drawWaveform(padX, midY, waveW, waveH, spec, beat);
-
-      const vig = ctx.createRadialGradient(w * 0.5, h * 0.5, h * 0.2, w * 0.5, h * 0.5, h * 0.85);
-      vig.addColorStop(0, 'rgba(0,0,0,0)');
-      vig.addColorStop(1, 'rgba(0,0,0,0.55)');
-      ctx.fillStyle = vig;
-      ctx.fillRect(0, 0, w, h);
+      drawVignette(w, h);
     }
 
     function resize() {
@@ -331,8 +428,10 @@
         bpmEl.classList.toggle('beat', (lv.beat || 0) > 0.35);
 
         const alts = [];
-        if (lv.bpm_halftime) alts.push(`½ ${Math.round(lv.bpm_halftime)}`);
-        if (lv.bpm_doubletime) alts.push(`2× ${Math.round(lv.bpm_doubletime)}`);
+        if (settings.show_bpm_alts) {
+          if (lv.bpm_halftime) alts.push(`½ ${Math.round(lv.bpm_halftime)}`);
+          if (lv.bpm_doubletime) alts.push(`2× ${Math.round(lv.bpm_doubletime)}`);
+        }
         document.getElementById('bpmMeta').textContent = alts.join('  ·  ');
 
         let raw = lv.spectrum;
@@ -343,11 +442,25 @@
       } catch (_) { /* keep animating */ }
     }
 
+    async function pollPluginConfig() {
+      const now = performance.now();
+      if (now - lastCfgFetch < 2000) return;
+      lastCfgFetch = now;
+      try {
+        const cfg = await fetch('/api/plugins/audio-visualizer/config').then((r) => r.json());
+        if (cfg.visual_mode) settings.visual_mode = cfg.visual_mode;
+        if (cfg.sensitivity != null) settings.sensitivity = cfg.sensitivity;
+        if (cfg.show_bpm_alts != null) settings.show_bpm_alts = !!cfg.show_bpm_alts;
+      } catch (_) { /* defaults */ }
+    }
+
     function loop() {
+      pollPluginConfig();
       pollAudio();
       drawFrame();
       requestAnimationFrame(loop);
     }
+    pollPluginConfig();
     loop();
   </script>
 </body>
