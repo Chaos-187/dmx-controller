@@ -99,6 +99,9 @@
 
     <div style="flex:1"></div>
 
+    <button class="config-sidebar-btn" data-cfgtab="experimental">
+      <span class="sidebar-icon">&#9883;</span> Experimental
+    </button>
     <button class="config-sidebar-btn" data-cfgtab="event-log">
       <span class="sidebar-icon">&#9776;</span> Event Log
     </button>
@@ -1432,6 +1435,21 @@
           </table>
         </div>
         <div class="lib-pagination" id="libraryPagination"></div>
+      </div>
+    </div>
+
+    <!-- ═══ Experimental ═══ -->
+    <div class="config-sub-page" id="cfgpage-experimental">
+      <div class="config-section experimental-page">
+        <h3><span class="section-icon">&#9883;</span> Experimental Features</h3>
+        <p class="config-desc">
+          Toggle each feature on when you want to try it. Settings stay saved while off.
+          Plugins live in <code>plugins/</code> — restart the hub after add/remove.
+        </p>
+        <p class="config-desc experimental-plugins-path" id="expPluginsPathHint"></p>
+        <div id="experimentalPluginsList" class="experimental-plugins-list">
+          <p class="config-desc" style="color:var(--text-dim)">Loading plugins…</p>
+        </div>
       </div>
     </div>
 

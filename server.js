@@ -51,6 +51,7 @@ let artnetServer;
 let dmxUsbServer;
 const audioAnalyzer  = require('./audio-analyzer');
 const audioInput     = require('./audio-input');
+const plugins        = require('./lib/plugins');
 const stemSeparator  = require('./stem-separator');
 const os2l = require('./os2l');
 const midiController = require('./midi-controller');
@@ -998,6 +999,7 @@ const configProtectedPrefixes = [
   '/api/usb-devices',
   '/api/artnet',
   '/api/audio-input',
+  '/api/plugins',
   '/api/fixture-types',
   '/api/fixture-library',
   '/api/hub',
@@ -6472,6 +6474,17 @@ async function bootstrapAfterListen() {
     _applyAudioInputConfig();
     setBootStep('audio', 'done');
 
+    plugins.initPlugins(app, {
+      db,
+      broadcast,
+      audioInput,
+      artnetServer,
+      dmxUsbServer,
+      getDmxOutputEnabled: () => dmxOutputEnabled,
+      getFixtureChannelMapCached,
+      isAnySequencePlaying,
+    });
+
     markBootReady();
   } catch (e) {
     console.error('[Boot] Startup failed:', e);
@@ -6617,6 +6630,7 @@ async function shutdown() {
   if (artnetServer) artnetServer.shutdown();
   if (dmxUsbServer) await dmxUsbServer.shutdownAll();
   audioInput.capture.stop();
+  plugins.shutdownPlugins();
   if (mdnsResponder) mdnsResponder.destroy();
   if (bonjourInstance) bonjourInstance.destroy();
   midiController.stop();

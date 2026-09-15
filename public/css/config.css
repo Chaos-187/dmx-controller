@@ -2112,3 +2112,119 @@ textarea.gen-raw-editor {
   cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
 }
 .audio-link-btn:hover { color: var(--cyan); }
+
+/* Experimental plugins */
+.experimental-page { max-width: 720px; }
+.experimental-page .config-desc code { font-size: 11px; }
+.experimental-plugins-list { display: flex; flex-direction: column; gap: 16px; }
+.experimental-plugins-path { font-size: 11px; color: var(--text-muted); margin-bottom: 16px; }
+
+.exp-plugin-card {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  overflow: hidden;
+  transition: border-color 0.2s, opacity 0.2s;
+}
+.exp-plugin-card.is-off { opacity: 0.92; }
+.exp-plugin-card.is-on { border-color: rgba(255, 193, 7, 0.28); }
+
+.exp-plugin-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 16px 18px 12px;
+}
+.exp-plugin-title h4 {
+  margin: 0 0 4px; font-size: 15px; font-weight: 600; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+}
+.exp-plugin-desc {
+  margin: 0; padding: 0 18px 12px; font-size: 12px; line-height: 1.55; color: var(--text-dim);
+}
+.experimental-badge {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(255, 193, 7, 0.15); color: #ffc107;
+}
+.exp-plugin-version { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.exp-toggle {
+  position: relative; display: inline-flex; align-items: center; cursor: pointer; flex-shrink: 0;
+  margin-top: 2px;
+}
+.exp-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.exp-toggle-track {
+  width: 44px; height: 24px; border-radius: 999px; background: #2a2a2a;
+  border: 1px solid var(--panel-border); transition: background 0.2s, border-color 0.2s;
+  position: relative;
+}
+.exp-toggle-track::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: #888; transition: transform 0.2s, background 0.2s;
+}
+.exp-toggle input:checked + .exp-toggle-track {
+  background: rgba(0, 230, 118, 0.25); border-color: rgba(0, 230, 118, 0.45);
+}
+.exp-toggle input:checked + .exp-toggle-track::after {
+  transform: translateX(20px); background: var(--green);
+}
+.exp-toggle input:focus-visible + .exp-toggle-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.exp-plugin-status {
+  margin: 0 18px 14px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,.25); border: 1px solid var(--panel-border);
+  font-size: 12px; color: var(--text-dim); min-height: 20px; line-height: 1.45;
+}
+.experimental-runtime-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-right: 8px; vertical-align: middle;
+  background: rgba(255,255,255,.06); border: 1px solid var(--panel-border); color: var(--text-dim);
+}
+.experimental-runtime-pill.active {
+  border-color: rgba(0, 230, 118, .35); color: var(--green); background: rgba(0, 230, 118, .08);
+}
+
+.exp-plugin-settings {
+  border-top: 1px solid var(--panel-border);
+  background: rgba(0,0,0,.15);
+  opacity: 1;
+  transition: max-height 0.35s ease, opacity 0.25s, padding 0.25s;
+  padding: 0 18px 0;
+  display: flex;
+  flex-direction: column;
+}
+.exp-plugin-settings.is-collapsed {
+  max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; border-top-color: transparent;
+}
+.exp-plugin-settings-head {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); padding: 14px 0 10px;
+  flex-shrink: 0;
+}
+.exp-plugin-settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  padding-bottom: 4px;
+  scrollbar-gutter: stable;
+}
+.exp-plugin-settings-grid { display: flex; flex-direction: column; gap: 12px; }
+.exp-plugin-field {
+  display: grid; grid-template-columns: 1fr; gap: 6px;
+}
+.exp-plugin-field-label {
+  font-size: 12px; font-weight: 500; color: var(--text);
+}
+.exp-plugin-field-hint { font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0; }
+.exp-plugin-check {
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer; font-size: 12px; line-height: 1.45;
+}
+.exp-plugin-check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
+.exp-plugin-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  flex-shrink: 0;
+  margin-top: 0;
+  padding: 14px 0 16px;
+  border-top: 1px solid var(--panel-border);
+  background: rgba(0,0,0,.15);
+}
+.exp-plugin-save-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }

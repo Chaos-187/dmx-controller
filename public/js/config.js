@@ -259,6 +259,11 @@ function connect() {
     else if (msg.type === 'audio_input_status') {
       updateAudioStatus(msg);
     }
+    else if (msg.type === 'plugin_config') {
+      if (document.getElementById('cfgpage-experimental')?.classList.contains('active')) {
+        loadExperimentalConfig(true);
+      }
+    }
     else if (msg.type === 'seq_stale_regen_progress') {
       const statusEl = document.getElementById('cfgStaleSeqRegenStatus');
       if (statusEl) {
@@ -706,6 +711,7 @@ function loadActiveTabData() {
     companion:       () => loadCompanionExportDefaults(),
     satellites:      () => loadSatelliteConfig(),
     'event-log':     () => loadEventLog(true),
+    experimental:    () => loadExperimentalConfig(),
   };
   if (loaders[tab]) loaders[tab]();
 }
@@ -2633,6 +2639,307 @@ async function stopAudioCapture() {
 
 document.getElementById('btnStopAudioCapture')?.addEventListener('click', stopAudioCapture);
 document.getElementById('btnStopAudioCaptureLive')?.addEventListener('click', stopAudioCapture);
+
+// ═══════════════════════════════════════════════════════════════
+//  Experimental plugins
+// ═══════════════════════════════════════════════════════════════
+let _experimentalPollTimer = null;
+
+async function fetchPluginConfig(pluginId) {
+  return fetch(`/api/plugins/${pluginId}/config`).then((r) => r.json()).catch(() => ({}));
+}
+
+async function postPluginConfig(pluginId, body) {
+  return authFetch(`/api/plugins/${pluginId}/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function setExperimentalCardEnabled(card, enabled) {
+  card.classList.toggle('is-on', enabled);
+  card.classList.toggle('is-off', !enabled);
+  const panel = card.querySelector('.exp-plugin-settings');
+  if (panel) panel.classList.toggle('is-collapsed', !enabled);
+}
+
+const BPM_LIVE_LOOKS = [
+  { id: 'sound_flash', label: 'Beat flash' },
+  { id: 'sound_pulse_bass', label: 'Bass pulse' },
+  { id: 'sound_pulse_energy', label: 'Energy pulse' },
+  { id: 'sound_pulse_treble', label: 'Treble pulse' },
+  { id: 'sound_strobe', label: 'Energy strobe' },
+  { id: 'sound_strobe_bass', label: 'Bass strobe' },
+  { id: 'sound_chase', label: 'Bass chase (BPM)' },
+  { id: 'sound_wave', label: 'Energy color wave (BPM)' },
+  { id: 'sound_vu', label: 'VU meter (rig height)' },
+  { id: 'sound_vu_lr', label: 'VU meter (left → right)' },
+  { id: 'sound_vu_tb', label: 'VU meter (top → bottom)' },
+  { id: 'spectrum', label: 'Spectrum (4-band)' },
+  { id: 'kick_chase', label: 'Kick chase (BPM + bass)' },
+  { id: 'mid_treble_alternate', label: 'Mid / treble alternate' },
+  { id: 'sub_flash', label: 'Sub flash' },
+  { id: 'auto_rotate', label: 'Auto rotate sound looks' },
+];
+
+function renderBpmLiveSequenceSettings(cfg, pluginId) {
+  const pid = esc(pluginId);
+  const look = cfg.look || 'sound_flash';
+  const lookOptions = BPM_LIVE_LOOKS.map((o) =>
+    `<option value="${esc(o.id)}"${o.id === look ? ' selected' : ''}>${esc(o.label)}</option>`,
+  ).join('');
+  return `
+    <div class="exp-plugin-settings-grid" data-settings-for="${pid}">
+      <div class="exp-plugin-field">
+        <span class="exp-plugin-field-label">Look</span>
+        <select class="audio-config-select" data-field="look" style="max-width:100%">${lookOptions}</select>
+        <p class="exp-plugin-field-hint">All looks react to live audio (smoothed for DMX). Chase and wave also follow BPM. Auto rotate cycles sound looks every 8 beats.</p>
+      </div>
+      <div class="exp-plugin-field">
+        <span class="exp-plugin-field-label">Motion cycle (beats)</span>
+        <div class="audio-gain-row">
+          <input type="range" data-field="cycle_beats" min="1" max="16" step="1" value="${cfg.cycle_beats ?? 4}">
+          <span data-cycle-beats-label>${cfg.cycle_beats ?? 4} beat${(cfg.cycle_beats ?? 4) === 1 ? '' : 's'}</span>
+        </div>
+        <p class="exp-plugin-field-hint">Affects BPM-driven chase and wave only. At speed 1, one cycle ≈ this many beats (4 = one bar).</p>
+      </div>
+      <div class="exp-plugin-field">
+        <span class="exp-plugin-field-label">Effect speed</span>
+        <div class="audio-gain-row">
+          <input type="range" data-field="effect_speed" min="0.25" max="4" step="0.25" value="${cfg.effect_speed ?? 1}">
+          <span data-effect-speed-label>${cfg.effect_speed ?? 1}×</span>
+        </div>
+      </div>
+      <label class="exp-plugin-check">
+        <input type="checkbox" data-field="yield_sequence" ${cfg.yield_sequence !== false ? 'checked' : ''}>
+        <span><strong>Yield to deck sequences</strong><br><span class="exp-plugin-field-hint">Pause this effect while a sequencer deck is playing.</span></span>
+      </label>
+      <label class="exp-plugin-check">
+        <input type="checkbox" data-field="use_halftime" ${cfg.use_halftime ? 'checked' : ''}>
+        <span><strong>Use half-time BPM</strong><br><span class="exp-plugin-field-hint">Match Beatport-style or halftime counting instead of the fast grid.</span></span>
+      </label>
+      <label class="exp-plugin-check">
+        <input type="checkbox" data-field="blackout_no_bpm" ${cfg.blackout_no_bpm !== false ? 'checked' : ''}>
+        <span><strong>Blackout when BPM is lost</strong><br><span class="exp-plugin-field-hint">Set affected fixtures to off when tempo lock is gone (breakdowns, silence).</span></span>
+      </label>
+      <div class="exp-plugin-field">
+        <span class="exp-plugin-field-label">Output intensity</span>
+        <div class="audio-gain-row">
+          <input type="range" data-field="intensity" min="10" max="100" step="5" value="${cfg.intensity ?? 85}">
+          <span data-intensity-label>${cfg.intensity ?? 85}%</span>
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" data-action="open-audio">Open audio input setup</button>
+    </div>`;
+}
+
+function renderGenericPluginSettings(_cfg, pluginId) {
+  return `<p class="exp-plugin-field-hint">No settings UI for <code>${esc(pluginId)}</code> yet.</p>`;
+}
+
+function renderPluginSettingsHtml(pluginId, cfg) {
+  if (pluginId === 'bpm-live-sequence') return renderBpmLiveSequenceSettings(cfg, pluginId);
+  return renderGenericPluginSettings(cfg, pluginId);
+}
+
+function collectPluginSettingsFromCard(card, pluginId) {
+  const body = {};
+  const grid = card.querySelector('[data-settings-for]') || card.querySelector('.exp-plugin-settings-grid');
+  if (!grid) return body;
+
+  if (pluginId === 'bpm-live-sequence') {
+    body.yield_sequence = !!grid.querySelector('[data-field="yield_sequence"]')?.checked;
+    body.use_halftime = !!grid.querySelector('[data-field="use_halftime"]')?.checked;
+    body.blackout_no_bpm = !!grid.querySelector('[data-field="blackout_no_bpm"]')?.checked;
+    body.look = grid.querySelector('[data-field="look"]')?.value || 'sound_flash';
+    body.intensity = parseInt(grid.querySelector('[data-field="intensity"]')?.value || '85', 10);
+    body.cycle_beats = parseInt(grid.querySelector('[data-field="cycle_beats"]')?.value || '4', 10);
+    body.effect_speed = parseFloat(grid.querySelector('[data-field="effect_speed"]')?.value || '1');
+  }
+  return body;
+}
+
+function wireExperimentalPluginCard(card, pluginId) {
+  const enableInput = card.querySelector('.exp-plugin-enable');
+  enableInput?.addEventListener('change', async () => {
+    const on = enableInput.checked;
+    setExperimentalCardEnabled(card, on);
+    try {
+      await postPluginConfig(pluginId, { enabled: on });
+      refreshExperimentalRuntime([pluginId]);
+    } catch (e) {
+      enableInput.checked = !on;
+      setExperimentalCardEnabled(card, !on);
+      console.error('Plugin enable failed', e);
+    }
+  });
+
+  const intensity = card.querySelector('[data-field="intensity"]');
+  const intensityLabel = card.querySelector('[data-intensity-label]');
+  intensity?.addEventListener('input', () => {
+    if (intensityLabel) intensityLabel.textContent = intensity.value + '%';
+  });
+
+  const cycleBeats = card.querySelector('[data-field="cycle_beats"]');
+  const cycleBeatsLabel = card.querySelector('[data-cycle-beats-label]');
+  cycleBeats?.addEventListener('input', () => {
+    if (cycleBeatsLabel) {
+      const n = parseInt(cycleBeats.value, 10);
+      cycleBeatsLabel.textContent = `${n} beat${n === 1 ? '' : 's'}`;
+    }
+  });
+
+  const effectSpeed = card.querySelector('[data-field="effect_speed"]');
+  const effectSpeedLabel = card.querySelector('[data-effect-speed-label]');
+  effectSpeed?.addEventListener('input', () => {
+    if (effectSpeedLabel) effectSpeedLabel.textContent = `${effectSpeed.value}×`;
+  });
+
+  card.querySelector('.exp-plugin-save')?.addEventListener('click', async () => {
+    const btn = card.querySelector('.exp-plugin-save');
+    const enabled = card.querySelector('.exp-plugin-enable')?.checked;
+    const body = { ...collectPluginSettingsFromCard(card, pluginId), enabled };
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await postPluginConfig(pluginId, body);
+      btn.textContent = 'Saved ✓';
+      setTimeout(() => { btn.textContent = 'Save settings'; }, 1800);
+      refreshExperimentalRuntime([pluginId]);
+    } catch (e) {
+      btn.textContent = 'Error';
+      setTimeout(() => { btn.textContent = 'Save settings'; }, 2000);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  card.querySelector('[data-action="open-audio"]')?.addEventListener('click', () => {
+    document.querySelector('.config-sidebar-btn[data-cfgtab="devices"]')?.click();
+    setTimeout(() => {
+      document.querySelector('.device-tab-btn[data-devtab="audio"]')?.click();
+      switchAudioSubTab('config');
+    }, 50);
+  });
+}
+
+async function renderExperimentalPluginCard(meta) {
+  const pluginId = meta.id;
+  const cfg = await fetchPluginConfig(pluginId);
+  const enabled = cfg.enabled === true || cfg.enabled === '1' || meta.enabled === true;
+
+  const card = document.createElement('article');
+  card.className = 'exp-plugin-card' + (enabled ? ' is-on' : ' is-off');
+  card.dataset.pluginId = pluginId;
+
+  card.innerHTML =
+    `<header class="exp-plugin-header">` +
+      `<div class="exp-plugin-title">` +
+        `<h4>${esc(meta.name || pluginId)} <span class="experimental-badge">Experimental</span></h4>` +
+        `<span class="exp-plugin-version">v${esc(meta.version || '0.0.0')}</span>` +
+      `</div>` +
+      `<label class="exp-toggle" title="${enabled ? 'Disable' : 'Enable'} ${esc(meta.name || pluginId)}">` +
+        `<input type="checkbox" class="exp-plugin-enable" ${enabled ? 'checked' : ''}>` +
+        `<span class="exp-toggle-track" aria-hidden="true"></span>` +
+      `</label>` +
+    `</header>` +
+    `<p class="exp-plugin-desc">${esc(meta.description || '')}</p>` +
+    `<div class="exp-plugin-status" data-runtime-for="${esc(pluginId)}"></div>` +
+    `<div class="exp-plugin-settings${enabled ? '' : ' is-collapsed'}">` +
+      `<div class="exp-plugin-settings-head">Settings</div>` +
+      `<div class="exp-plugin-settings-body">` +
+        renderPluginSettingsHtml(pluginId, cfg) +
+      `</div>` +
+      `<div class="exp-plugin-actions">` +
+        `<button type="button" class="btn btn-primary btn-sm exp-plugin-save">Save settings</button>` +
+        `<span class="exp-plugin-save-hint">Enable toggle saves immediately; other fields need Save.</span>` +
+      `</div>` +
+    `</div>`;
+
+  wireExperimentalPluginCard(card, pluginId);
+  refreshExperimentalRuntime([pluginId]);
+  return card;
+}
+
+async function loadExperimentalConfig(quiet) {
+  const list = document.getElementById('experimentalPluginsList');
+  const pathHint = document.getElementById('expPluginsPathHint');
+  if (!list) return;
+
+  if (_experimentalPollTimer) {
+    clearInterval(_experimentalPollTimer);
+    _experimentalPollTimer = null;
+  }
+
+  try {
+    const plugins = await fetch('/api/plugins').then((r) => r.json());
+    if (pathHint) pathHint.textContent = 'Changes to plugin folders require a hub restart.';
+    if (!plugins.length) {
+      list.innerHTML =
+        '<div class="exp-plugin-card" style="padding:18px"><p class="config-desc">No plugins loaded. See <code>plugins/README.md</code>.</p></div>';
+      return;
+    }
+
+    list.innerHTML = '';
+    for (const p of plugins) {
+      list.appendChild(await renderExperimentalPluginCard(p));
+    }
+
+    const ids = plugins.map((x) => x.id);
+    _experimentalPollTimer = setInterval(() => {
+      if (!document.getElementById('cfgpage-experimental')?.classList.contains('active')) {
+        clearInterval(_experimentalPollTimer);
+        _experimentalPollTimer = null;
+        return;
+      }
+      refreshExperimentalRuntime(ids);
+    }, 2000);
+  } catch (e) {
+    if (!quiet) console.error('Experimental plugins load failed', e);
+    list.innerHTML = '<p class="config-desc" style="color:var(--danger)">Could not load plugins.</p>';
+  }
+}
+
+function formatExperimentalRuntimeReason(rt) {
+  if (rt.reason === 'sequence_playing') return 'Paused — deck sequence playing';
+  if (rt.reason === 'audio_inactive') return 'Waiting for audio capture';
+  if (rt.reason === 'no_bpm') {
+    return rt.blackout ? 'No BPM — blackout' : 'Waiting for BPM lock';
+  }
+  if (rt.reason === 'disabled') return 'Feature off';
+  return 'Standby';
+}
+
+async function refreshExperimentalRuntime(ids) {
+  for (const id of ids) {
+    const el = document.querySelector(`[data-runtime-for="${id}"]`);
+    if (!el) continue;
+    try {
+      const st = await fetch(`/api/plugins/${id}/status`).then((r) => r.json());
+      const rt = st.runtime || {};
+      if (rt.active) {
+        if (id === 'bpm-live-sequence') {
+          const lookLabel = BPM_LIVE_LOOKS.find((o) => o.id === (rt.effective_look || rt.look))?.label
+            || rt.effective_look || rt.look || '—';
+          el.innerHTML =
+            `<span class="experimental-runtime-pill active">Live</span>` +
+            `${rt.bpm || '—'} BPM · ${esc(lookLabel)} · ${rt.fixtures ?? 0} fixtures`;
+        } else {
+          el.innerHTML = `<span class="experimental-runtime-pill active">Running</span>`;
+        }
+      } else {
+        el.innerHTML =
+          `<span class="experimental-runtime-pill">${esc(formatExperimentalRuntimeReason(rt))}</span>` +
+          (id === 'bpm-live-sequence' && rt.reason === 'audio_inactive'
+            ? ' — configure under Devices → Audio Input'
+            : '');
+      }
+    } catch {
+      el.textContent = '';
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  About

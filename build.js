@@ -153,6 +153,11 @@ if (fs.existsSync(usbPrebuildsDir)) {
   }
 }
 
+// ─── Copy optional plugins (external to pkg snapshot) ───────────────────────
+
+console.log('\nCopying plugins folder...');
+copyDirSync(path.join(ROOT, 'plugins'), path.join(DIST, 'plugins'));
+
 // ─── Copy ffmpeg binaries ───────────────────────────────────────────────────
 
 console.log('\nCopying ffmpeg binaries...');
