@@ -3884,6 +3884,7 @@ let moverPresets = [];
 let moverFixtures = [];
 let moverPositions = {};
 let moverSelectedFixture = null;
+let moverEditingPresetId = null;
 
 async function loadMoverConfig() {
   try { moverPresets = await fetch('/api/mover-presets').then(r => r.json()); } catch { moverPresets = []; }
@@ -3985,7 +3986,34 @@ function xyPadHandler(e) {
   pad.addEventListener('touchstart', (e) => { e.preventDefault(); dragging = true; xyPadHandler(e); }, { passive: false });
   window.addEventListener('touchmove', (e) => { if (dragging) { e.preventDefault(); xyPadHandler(e); } }, { passive: false });
   window.addEventListener('touchend', () => { dragging = false; });
+  pad.addEventListener('mousedown', () => pad.focus({ preventScroll: true }));
+  pad.addEventListener('touchstart', () => pad.focus({ preventScroll: true }), { passive: true });
 })();
+
+function isMoverConfigPageActive() {
+  return document.getElementById('cfgpage-movers')?.classList.contains('active');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!isMoverConfigPageActive()) return;
+  if (e.target.matches('input, textarea, select')) return;
+  if (!moverSelectedFixture) return;
+  const step = e.shiftKey ? 1 : 5;
+  const pos = moverPositions[moverSelectedFixture] || { pan: 128, tilt: 128 };
+  let pan = pos.pan;
+  let tilt = pos.tilt;
+  let handled = false;
+  switch (e.key) {
+    case 'ArrowLeft': pan -= step; handled = true; break;
+    case 'ArrowRight': pan += step; handled = true; break;
+    case 'ArrowUp': tilt -= step; handled = true; break;
+    case 'ArrowDown': tilt += step; handled = true; break;
+    default: break;
+  }
+  if (!handled) return;
+  e.preventDefault();
+  updateXYPad(pan, tilt);
+});
 
 document.getElementById('moverPanInput').addEventListener('change', () => {
   const pos = moverPositions[moverSelectedFixture] || { pan: 128, tilt: 128 };
@@ -4053,7 +4081,11 @@ document.getElementById('btnSaveMoverPreset').addEventListener('click', async ()
   const positions = getPositionsArray();
   if (positions.length === 0) { alert('No fixture positions set.'); return; }
   const editId = document.getElementById('moverPresetEditId').value;
-  const body = { name, positions };
+  const body = {
+    name,
+    positions,
+    exclude_from_sequence: document.getElementById('moverExcludeFromSequence').checked,
+  };
   if (editId) {
     await fetch(`/api/mover-presets/${editId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } else {
@@ -4068,19 +4100,24 @@ document.getElementById('btnCancelMoverEdit').addEventListener('click', () => { 
 function resetMoverForm() {
   document.getElementById('moverPresetEditId').value = '';
   document.getElementById('moverPresetName').value = '';
+  document.getElementById('moverExcludeFromSequence').checked = false;
   document.getElementById('btnCancelMoverEdit').style.display = 'none';
   document.getElementById('btnSaveMoverPreset').textContent = 'Save Preset';
+  moverEditingPresetId = null;
   for (const f of moverFixtures) moverPositions[f.id] = { pan: 128, tilt: 128 };
   if (moverFixtures.length > 0) moverSelectedFixture = moverFixtures[0].id;
   syncXYPadToFixture();
   renderMoverFixtureTabs();
+  renderMoverPresetList();
 }
 
-window.editMoverPreset = function(id) {
+function editMoverPreset(id) {
   const preset = moverPresets.find(p => p.id === id);
   if (!preset) return;
+  moverEditingPresetId = preset.id;
   document.getElementById('moverPresetEditId').value = preset.id;
   document.getElementById('moverPresetName').value = preset.name;
+  document.getElementById('moverExcludeFromSequence').checked = !!preset.exclude_from_sequence;
   document.getElementById('btnSaveMoverPreset').textContent = 'Update Preset';
   document.getElementById('btnCancelMoverEdit').style.display = '';
   for (const f of moverFixtures) moverPositions[f.id] = { pan: 128, tilt: 128 };
@@ -4088,7 +4125,10 @@ window.editMoverPreset = function(id) {
   if (moverFixtures.length > 0) moverSelectedFixture = moverFixtures[0].id;
   syncXYPadToFixture();
   renderMoverFixtureTabs();
-};
+  sendMoverTestPositions(preset.positions || []);
+  renderMoverPresetList();
+}
+window.editMoverPreset = editMoverPreset;
 
 window.deleteMoverPreset = async function(id) {
   const preset = moverPresets.find(p => p.id === id);
@@ -4109,36 +4149,36 @@ function renderMoverPresetList() {
   }
   for (const p of moverPresets) {
     const card = document.createElement('div');
-    card.className = 'mover-preset-card';
+    card.className = 'mover-preset-card' + (moverEditingPresetId === p.id ? ' active' : '');
     const posCount = p.positions ? p.positions.length : 0;
     const posDetail = (p.positions || []).map(pos => {
       const fix = moverFixtures.find(f => f.id === pos.fixture_id);
       return fix ? `${fix.name}: ${pos.pan}/${pos.tilt}` : `#${pos.fixture_id}: ${pos.pan}/${pos.tilt}`;
     }).join(' \u00B7 ');
     const systemBadge = p.is_system ? '<span style="font-size:9px;background:var(--cyan);color:#000;padding:1px 5px;border-radius:3px;margin-left:6px">SYSTEM</span>' : '';
-    const deleteBtn = p.is_system ? '' : `<button class="mp-delete" title="Delete" onclick="deleteMoverPreset(${p.id})">&times;</button>`;
+    const seqBadge = p.exclude_from_sequence ? '<span class="mp-no-seq-badge" title="Excluded from auto-generated sequences">NO SEQ</span>' : '';
+    const deleteBtn = p.is_system ? '' : `<button type="button" class="mp-delete" title="Delete">&times;</button>`;
     card.innerHTML = `
       <div class="mover-preset-card-header">
-        <span class="mover-preset-card-name">${p.icon ? p.icon + ' ' : ''}${esc(p.name)}${systemBadge}</span>
-        <span class="mover-preset-card-actions">
-          <button class="mp-edit" title="Edit" onclick="editMoverPreset(${p.id})">\u270E</button>
-          ${deleteBtn}
-        </span>
+        <span class="mover-preset-card-name">${p.icon ? p.icon + ' ' : ''}${esc(p.name)}${systemBadge}${seqBadge}</span>
+        <span class="mover-preset-card-actions">${deleteBtn}</span>
       </div>
       <div class="mover-preset-card-meta">
         <span>${posCount} fixture(s)</span>
         <span style="font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px" title="${esc(posDetail)}">${esc(posDetail)}</span>
       </div>`;
     card.addEventListener('click', (e) => {
-      if (e.target.tagName === 'BUTTON') return;
-      sendMoverTestPositions(p.positions || []);
-      for (const f of moverFixtures) moverPositions[f.id] = { pan: 128, tilt: 128 };
-      for (const pos of (p.positions || [])) moverPositions[pos.fixture_id] = { pan: pos.pan, tilt: pos.tilt };
-      syncXYPadToFixture();
-      renderMoverFixtureTabs();
-      list.querySelectorAll('.mover-preset-card').forEach(c => c.classList.remove('active'));
-      card.classList.add('active');
+      if (e.target.closest('.mp-delete') || e.target.closest('label') || e.target.closest('input')) return;
+      editMoverPreset(p.id);
+      document.getElementById('moverXYPad')?.focus({ preventScroll: true });
     });
+    const del = card.querySelector('.mp-delete');
+    if (del) {
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteMoverPreset(p.id);
+      });
+    }
     list.appendChild(card);
   }
 }

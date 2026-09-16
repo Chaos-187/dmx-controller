@@ -603,6 +603,13 @@ function init() {
     console.log('[DB] Migrated mover_presets: added is_system, icon columns');
   }
 
+  try {
+    db.prepare('SELECT exclude_from_sequence FROM mover_presets LIMIT 1').get();
+  } catch (e) {
+    db.exec('ALTER TABLE mover_presets ADD COLUMN exclude_from_sequence INTEGER NOT NULL DEFAULT 0');
+    console.log('[DB] Migrated mover_presets: added exclude_from_sequence column');
+  }
+
   // Migrate: add is_active column to rig_layouts if missing
   try {
     db.prepare("SELECT is_active FROM rig_layouts LIMIT 1").get();
@@ -3859,7 +3866,7 @@ function getFixtureChannelMap() {
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
            f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
-           f.rig_x, f.rig_y, f.rig_order, f.exclude_from_sequence, f.cell_path,
+           f.rig_x, f.rig_y, f.rig_z, f.rig_order, f.exclude_from_sequence, f.cell_path,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
            ft.name as type_name, ft.category, ft.cell_rows, ft.cell_cols,
            ftm.name as mode_name
@@ -4119,32 +4126,45 @@ function setGroupFixtures(groupId, fixtureIds) {
 
 function getMoverPresets() {
   const rows = db.prepare('SELECT * FROM mover_presets ORDER BY sort_order, id').all();
-  return rows.map(r => ({ ...r, positions: JSON.parse(r.positions || '[]') }));
+  return rows.map(r => ({
+    ...r,
+    positions: JSON.parse(r.positions || '[]'),
+    exclude_from_sequence: !!r.exclude_from_sequence,
+  }));
+}
+
+function getMoverPresetsForSequence() {
+  return getMoverPresets().filter(p => !p.exclude_from_sequence);
 }
 
 function getMoverPreset(id) {
   const r = db.prepare('SELECT * FROM mover_presets WHERE id = ?').get(id);
   if (!r) return null;
-  return { ...r, positions: JSON.parse(r.positions || '[]') };
+  return {
+    ...r,
+    positions: JSON.parse(r.positions || '[]'),
+    exclude_from_sequence: !!r.exclude_from_sequence,
+  };
 }
 
-function createMoverPreset({ name, positions }) {
+function createMoverPreset({ name, positions, exclude_from_sequence }) {
   if (!name || !name.trim()) return { error: 'Name is required' };
   if (!Array.isArray(positions) || positions.length === 0) return { error: 'At least one fixture position is required' };
   const result = db.prepare(
-    'INSERT INTO mover_presets (name, positions) VALUES (?, ?)'
-  ).run(name.trim(), JSON.stringify(positions));
+    'INSERT INTO mover_presets (name, positions, exclude_from_sequence) VALUES (?, ?, ?)'
+  ).run(name.trim(), JSON.stringify(positions), exclude_from_sequence ? 1 : 0);
   return getMoverPreset(result.lastInsertRowid);
 }
 
-function updateMoverPreset(id, { name, positions }) {
+function updateMoverPreset(id, { name, positions, exclude_from_sequence }) {
   const existing = db.prepare('SELECT * FROM mover_presets WHERE id = ?').get(id);
   if (!existing) return null;
   db.prepare(
-    'UPDATE mover_presets SET name = ?, positions = ? WHERE id = ?'
+    'UPDATE mover_presets SET name = ?, positions = ?, exclude_from_sequence = ? WHERE id = ?'
   ).run(
     name !== undefined ? name.trim() : existing.name,
     positions !== undefined ? JSON.stringify(positions) : existing.positions,
+    exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0),
     id
   );
   return getMoverPreset(id);
@@ -5487,7 +5507,7 @@ module.exports = {
   getConfig, setConfig, getAllConfig,
   getTracks, getTrack, getTrackByPath, getTrackGenres, getTrackStats, importTracks, clearTracks, updateTrackBeatgridPos,
   getButtonMaps, getEnabledButtonMaps, getButtonMap, createButtonMap, updateButtonMap, deleteButtonMap, toggleButtonMap,
-  getMoverPresets, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset, SYSTEM_MOVER_PRESETS,
+  getMoverPresets, getMoverPresetsForSequence, getMoverPreset, createMoverPreset, updateMoverPreset, deleteMoverPreset, SYSTEM_MOVER_PRESETS,
   getGeneratorConfig, getGeneratorConfigKey, setGeneratorConfigKey, resetGeneratorConfig, GENERATOR_CONFIG_DEFAULTS,
   getEffects, getEffect, createEffect, updateEffect, deleteEffect,
   getSequences, getSequence, getSequenceByTrackId, createSequence, updateSequence, deleteSequence,

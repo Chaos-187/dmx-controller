@@ -941,6 +941,48 @@ button.fx-pal-preset.btn.btn-secondary { border-style: dashed !important; }
 }
 .rig-toolbar .btn { font-size: 11px; padding: 4px 10px; }
 
+.rig-output-section { padding: 4px 0 16px; }
+.rig-output-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+  max-width: 720px;
+  line-height: 1.45;
+}
+.rig-output-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.rig-output-enable-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+.rig-output-hint { font-size: 11px; color: var(--text-dim); }
+.rig-output-viz-wrap {
+  position: relative;
+  height: min(520px, calc(100vh - 280px));
+  min-height: 280px;
+  background: var(--input-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.rig-output-viz-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .rig-canvas-wrap {
   position: relative;
   width: 100%; height: 420px;

@@ -1258,7 +1258,11 @@ textarea.gen-raw-editor {
   position: relative;
   cursor: crosshair;
   touch-action: none;
-  overflow: hidden;
+  outline: none;
+}
+.mover-xy-pad:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(99,102,241,.25);
 }
 .mover-xy-pad .xy-grid {
   position: absolute;
@@ -1357,6 +1361,25 @@ textarea.gen-raw-editor {
   font-size: 10px;
   color: var(--text-dim);
   margin-top: 4px;
+}
+.mover-exclude-seq-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.mover-preset-card .mp-no-seq-badge {
+  font-size: 9px;
+  background: var(--danger);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: 600;
 }
 
 /* ── APC Mini Grid ── */

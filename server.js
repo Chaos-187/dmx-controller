@@ -43,6 +43,8 @@ const { WebSocketServer } = require('ws');
 const Bonjour = require('bonjour-service').Bonjour;
 const mdns = require('multicast-dns');
 const db = require('./db');
+const dmxShadow = require('./dmx-shadow');
+const { buildRigOutputSnapshot, invalidateRigOutputSnapshotCache } = require('./rig-output-snapshot');
 const ArtNetServer = require('./artnet-server');
 const DmxUsbServer = require('./dmx-usb-server');
 /** @type {import('./artnet-server')} */
@@ -1455,6 +1457,73 @@ app.get('/api/fixture-channel-map', (req, res) => {
   res.json(db.getFixtureChannelMap());
 });
 
+const rigOutputLive = { cache: null, dmxRev: -1, builtAt: 0 };
+let rigOutputWsSubs = 0;
+let rigOutputBroadcastTimer = null;
+
+function countRigOutputWsSubs() {
+  let n = 0;
+  for (const client of wsClients) {
+    if (client.readyState === 1 && client.rigOutputViz) n += 1;
+  }
+  return n;
+}
+
+function getRigOutputPayload(includeRigElements) {
+  const rev = dmxShadow.getRevision();
+  const now = Date.now();
+  if (rigOutputLive.cache && rigOutputLive.dmxRev === rev && now - rigOutputLive.builtAt < 400) {
+    const cached = rigOutputLive.cache;
+    if (includeRigElements && !cached.rig_elements) {
+      return { ...cached, rig_elements: db.getRigElements() };
+    }
+    return cached;
+  }
+  const fixtures = buildRigOutputSnapshot(getFixtureChannelMapCached());
+  const payload = { ts: now, seq: rev, fixtures };
+  if (includeRigElements) payload.rig_elements = db.getRigElements();
+  rigOutputLive.cache = payload;
+  rigOutputLive.dmxRev = rev;
+  rigOutputLive.builtAt = now;
+  return payload;
+}
+
+function syncRigOutputBroadcastLoop() {
+  rigOutputWsSubs = countRigOutputWsSubs();
+  if (rigOutputWsSubs <= 0) {
+    if (rigOutputBroadcastTimer) {
+      clearInterval(rigOutputBroadcastTimer);
+      rigOutputBroadcastTimer = null;
+    }
+    return;
+  }
+  if (rigOutputBroadcastTimer) return;
+  rigOutputBroadcastTimer = setInterval(() => {
+    rigOutputWsSubs = countRigOutputWsSubs();
+    if (rigOutputWsSubs <= 0) {
+      clearInterval(rigOutputBroadcastTimer);
+      rigOutputBroadcastTimer = null;
+      return;
+    }
+    const payload = getRigOutputPayload(false);
+    broadcast({ type: 'rig_output', ts: payload.ts, seq: payload.seq, fixtures: payload.fixtures });
+  }, 50);
+}
+
+function setWsRigOutputSubscribe(ws, on) {
+  ws.rigOutputViz = !!on;
+  syncRigOutputBroadcastLoop();
+  if (on && ws.readyState === 1) {
+    const payload = getRigOutputPayload(false);
+    ws.send(JSON.stringify({ type: 'rig_output', ts: payload.ts, seq: payload.seq, fixtures: payload.fixtures }));
+  }
+}
+
+app.get('/api/rig-output/snapshot', (req, res) => {
+  const includeRig = req.query.rig !== '0';
+  res.json(getRigOutputPayload(includeRig));
+});
+
 // ─── Fixture Groups API ─────────────────────────────────────────────────────
 
 app.get('/api/groups', (req, res) => {
@@ -1759,6 +1828,7 @@ app.get('/api/export', (req, res) => {
     return {
       name: p.name,
       sort_order: p.sort_order,
+      exclude_from_sequence: p.exclude_from_sequence ? 1 : 0,
       positions: p.positions.map(pos => {
         const f = allFix.find(x => x.id === pos.fixture_id);
         return { ...pos, fixture_name: f ? f.name : null };
@@ -1953,10 +2023,11 @@ app.post('/api/import', (req, res) => {
             return pos;
           });
           const existing = db.getMoverPresets().find(p => p.name === mp.name);
+          const excludeSeq = !!mp.exclude_from_sequence;
           if (existing) {
-            db.updateMoverPreset(existing.id, { name: mp.name, positions });
+            db.updateMoverPreset(existing.id, { name: mp.name, positions, exclude_from_sequence: excludeSeq });
           } else {
-            db.createMoverPreset({ name: mp.name, positions });
+            db.createMoverPreset({ name: mp.name, positions, exclude_from_sequence: excludeSeq });
           }
           results.mover_presets++;
         } catch (e) { results.errors.push(`Mover preset "${mp.name}": ${e.message}`); }
@@ -5314,6 +5385,8 @@ function invalidateFixtureChannelMapCache() {
   _cachedFixtureChannelMapById = null;
   _disabledDmxChannelCacheKey = '';
   _disabledDmxChannelSet = null;
+  invalidateRigOutputSnapshotCache();
+  rigOutputLive.cache = null;
 }
 
 // Cached effects for hot-path processing (refreshed on effect changes)
@@ -5902,12 +5975,15 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(rawMsg.toString());
       if (msg.type === 'sequence') {
         handleSequenceCommand(ws, msg);
+      } else if (msg.type === 'rig_output_subscribe') {
+        setWsRigOutputSubscribe(ws, !!msg.on);
       }
     } catch (e) { /* ignore invalid JSON */ }
   });
 
   ws.on('close', () => {
     wsClients.delete(ws);
+    syncRigOutputBroadcastLoop();
     console.log('[WS] Browser client disconnected');
   });
 });
@@ -6355,6 +6431,33 @@ async function loadVdjDatabaseAsync() {
   return runVdjLibraryImport({ force: false, updateBootStep: true });
 }
 
+/** Mirror DMX writes into dmx-shadow for the rig output visualizer. */
+function installDmxShadowTracking(server) {
+  const origSetChannel = server.setChannel.bind(server);
+  const origSetChannels = server.setChannels.bind(server);
+  const origSetFullUniverse = server.setFullUniverse?.bind(server);
+  const origBlackout = server.blackout.bind(server);
+
+  server.setChannel = (localUniverse, channel, value) => {
+    origSetChannel(localUniverse, channel, value);
+    dmxShadow.setChannel(localUniverse, channel, value);
+  };
+  server.setChannels = (localUniverse, channels) => {
+    origSetChannels(localUniverse, channels);
+    dmxShadow.setChannels(localUniverse, channels);
+  };
+  if (origSetFullUniverse) {
+    server.setFullUniverse = (localUniverse, data) => {
+      origSetFullUniverse(localUniverse, data);
+      dmxShadow.setFullUniverse(localUniverse, data);
+    };
+  }
+  server.blackout = () => {
+    origBlackout();
+    dmxShadow.blackout();
+  };
+}
+
 /** Block all DMX writes while blackout hold is active (emergency stop). */
 function installBlackoutDmxGuard(server) {
   const origSetChannel = server.setChannel.bind(server);
@@ -6528,6 +6631,8 @@ async function hubStartupAfterListen() {
     dmxUsbServer = new DmxUsbServer();
     installBlackoutDmxGuard(artnetServer);
     installBlackoutDmxGuard(dmxUsbServer);
+    installDmxShadowTracking(artnetServer);
+    installDmxShadowTracking(dmxUsbServer);
 
     os2l.init({
   db,

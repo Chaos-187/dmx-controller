@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rig Output — Thaluxis DMX</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: #07080d;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      background: #0c0e14;
+    }
+    header h1 { font-size: 14px; font-weight: 600; flex: 1; }
+    header .sub { font-size: 10px; color: #64748b; font-weight: 400; margin-left: 8px; }
+    header label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #94a3b8;
+      cursor: pointer;
+      user-select: none;
+    }
+    .viz-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rig output visualizer<span class="sub">3D · live DMX</span></h1>
+    <label title="When off, no DMX polling runs">
+      <input type="checkbox" id="rigOutputVizEnablePop" style="accent-color:#6366f1">
+      Live preview
+    </label>
+  </header>
+  <div class="viz-wrap">
+    <canvas id="rigOutputVizCanvasPop"></canvas>
+  </div>
+  <script src="js/rig-output-viz.js"></script>
+  <script>
+    const cb = document.getElementById('rigOutputVizEnablePop');
+    const viz = new RigOutputVisualizer(document.getElementById('rigOutputVizCanvasPop'), { mode: 'external' });
+    cb.checked = RigOutputVisualizer.isEnabledInStorage();
+    viz.setEnabled(cb.checked);
+    function syncExternalClaim() {
+      if (viz.enabled) RigOutputVisualizer.touchExternalHeartbeat();
+      else RigOutputVisualizer.releaseExternal();
+    }
+    cb.addEventListener('change', () => {
+      viz.setEnabled(cb.checked);
+      syncExternalClaim();
+    });
+    syncExternalClaim();
+    const extHeartbeat = setInterval(syncExternalClaim, 1500);
+    function releasePopout() {
+      clearInterval(extHeartbeat);
+      RigOutputVisualizer.releaseExternal();
+    }
+    window.addEventListener('pagehide', releasePopout);
+    window.addEventListener('beforeunload', releasePopout);
+    window.addEventListener('storage', (e) => {
+      if (e.key === RIG_OUTPUT_VIZ_LS) {
+        const on = e.newValue === '1';
+        cb.checked = on;
+        viz.setEnabled(on);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -121,6 +121,7 @@
   <div class="fixture-tabs">
     <button class="fixture-tab-btn active" data-fixtab="fixtures">&#9881; Fixtures</button>
     <button class="fixture-tab-btn" data-fixtab="rig">&#9638; Rig Layout</button>
+    <button class="fixture-tab-btn" data-fixtab="output">&#128161; Live Output</button>
     <button class="fixture-tab-btn" data-fixtab="universe">&#9783; Universe</button>
     <div class="rig-layout-bar" id="rigLayoutBar">
       <span class="rig-layout-bar-title">Layout preset</span>
@@ -225,6 +226,24 @@
         Drag fixtures on the X/Y plane. Right-click to adjust depth (Z). Double-click multicell fixtures to edit strip path with corners and wrapping. Use view buttons for Top, 3D, Front, and Side views.
         <strong style="color:var(--text-dim);font-weight:600"> Commit positions</strong> saves the canvas to the live rig;
         <strong style="font-weight:600">layout presets</strong> (tab bar) are named snapshots — use <em>Switch to preset</em> to apply one, or <em>Preset actions</em> to save, update, export, or import.
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Live rig output visualizer ─── -->
+  <div class="fixture-tab-panel" id="fixtab-output">
+    <div class="rig-output-section">
+      <p class="rig-output-desc">3D preview of live DMX on the rig (same layout as <strong>Rig Layout</strong> 3D view). Movers show a light beam cone. Turn off when not needed — polling stops while disabled.</p>
+      <div class="rig-output-toolbar">
+        <label class="rig-output-enable-label" title="Polls output only while enabled">
+          <input type="checkbox" id="rigOutputVizEnable" style="accent-color:var(--accent)">
+          Enable live preview
+        </label>
+        <button type="button" class="btn btn-secondary btn-sm" id="btnRigOutputOpenWindow">Open in window</button>
+        <span class="rig-output-hint">Pop-out takes over live updates (in-tab preview pauses while it is open)</span>
+      </div>
+      <div class="rig-output-viz-wrap">
+        <canvas id="rigOutputVizCanvas"></canvas>
       </div>
     </div>
   </div>
@@ -1143,6 +1162,10 @@
               <div class="mover-save-row">
                 <input type="text" id="moverPresetName" placeholder="Preset name" style="flex:1">
                 <input type="hidden" id="moverPresetEditId" value="">
+                <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);white-space:nowrap;cursor:pointer" title="Auto-generated sequences will not pick this preset">
+                  <input type="checkbox" id="moverExcludeFromSequence" style="accent-color:var(--accent)">
+                  Exclude from sequences
+                </label>
                 <button class="btn btn-primary btn-sm" id="btnSaveMoverPreset">Save Preset</button>
                 <button class="btn btn-secondary btn-sm" id="btnTestMoverPos">Test All</button>
                 <button class="btn btn-secondary btn-sm" id="btnCancelMoverEdit" style="display:none">Cancel</button>
@@ -2967,6 +2990,7 @@
      ══════════════════════════════════════════════════════════════ -->
 <script src="js/hub-connection.js"></script>
 <script src="js/hub-event-log.js"></script>
+<script src="js/rig-output-viz.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════
 //  Authentication
@@ -3141,6 +3165,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       const ft = activeFixTab ? activeFixTab.dataset.fixtab : 'fixtures';
       if (ft === 'fixtures') { loadFixtures(); loadGroups(); }
       else if (ft === 'rig') { loadRigElements(); renderRigLayout(); }
+      else if (ft === 'output') initRigOutputVisualizer();
       else if (ft === 'universe') loadUniverseMap();
     }
     if (btn.dataset.tab === 'scenes') loadScenes();
@@ -3161,9 +3186,45 @@ document.querySelectorAll('.fixture-tab-btn').forEach(btn => {
     document.getElementById('fixtab-' + btn.dataset.fixtab).classList.add('active');
     if (btn.dataset.fixtab === 'fixtures') { loadFixtures(); loadGroups(); }
     if (btn.dataset.fixtab === 'rig') { loadRigElements(); renderRigLayout(); }
+    if (btn.dataset.fixtab === 'output') initRigOutputVisualizer();
     if (btn.dataset.fixtab === 'universe') loadUniverseMap();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  Rig live output visualizer
+// ═══════════════════════════════════════════════════════════════
+let _rigOutputViz = null;
+
+function initRigOutputVisualizer() {
+  if (typeof RigOutputVisualizer === 'undefined') return null;
+  if (!_rigOutputViz) {
+    const canvas = document.getElementById('rigOutputVizCanvas');
+    if (!canvas) return null;
+    _rigOutputViz = new RigOutputVisualizer(canvas, { mode: 'embedded' });
+    const cb = document.getElementById('rigOutputVizEnable');
+    cb.checked = RigOutputVisualizer.isEnabledInStorage();
+    _rigOutputViz.setEnabled(cb.checked);
+    cb.addEventListener('change', () => _rigOutputViz.setEnabled(cb.checked));
+    document.getElementById('btnRigOutputOpenWindow').addEventListener('click', () => {
+      RigOutputVisualizer.touchExternalHeartbeat();
+      _rigOutputViz._syncRunning();
+      window.open('/rig-output-visualizer.html', 'thaluxisRigOutputViz', 'width=960,height=720,menubar=no,toolbar=no');
+    });
+    window.addEventListener('storage', (e) => {
+      if (e.key === RIG_OUTPUT_VIZ_LS && cb) {
+        const on = e.newValue === '1';
+        cb.checked = on;
+        _rigOutputViz.setEnabled(on);
+      }
+      if (e.key === RIG_OUTPUT_VIZ_EXTERNAL_LS) _rigOutputViz._syncRunning();
+    });
+  } else {
+    _rigOutputViz._resize();
+    _rigOutputViz._syncRunning();
+  }
+  return _rigOutputViz;
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Build Deck Panels
@@ -3438,6 +3499,7 @@ let ws;
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
+  window.ws = ws;
   ws.onopen = () => {
     console.log('[WS] Connected');
     HubConnection.notifyOpen();
@@ -12583,7 +12645,11 @@ document.getElementById('btnSaveMoverPreset').addEventListener('click', async ()
   const positions = getPositionsArray();
   if (positions.length === 0) { alert('No fixture positions set.'); return; }
   const editId = document.getElementById('moverPresetEditId').value;
-  const body = { name, positions };
+  const body = {
+    name,
+    positions,
+    exclude_from_sequence: document.getElementById('moverExcludeFromSequence').checked,
+  };
 
   if (editId) {
     await fetch(`/api/mover-presets/${editId}`, {
@@ -12605,6 +12671,7 @@ document.getElementById('btnCancelMoverEdit').addEventListener('click', () => {
 function resetMoverForm() {
   document.getElementById('moverPresetEditId').value = '';
   document.getElementById('moverPresetName').value = '';
+  document.getElementById('moverExcludeFromSequence').checked = false;
   document.getElementById('btnCancelMoverEdit').style.display = 'none';
   document.getElementById('btnSaveMoverPreset').textContent = 'Save Preset';
   // Reset all positions to centre
@@ -12623,6 +12690,7 @@ function editMoverPreset(id) {
   if (!preset) return;
   document.getElementById('moverPresetEditId').value = preset.id;
   document.getElementById('moverPresetName').value = preset.name;
+  document.getElementById('moverExcludeFromSequence').checked = !!preset.exclude_from_sequence;
   document.getElementById('btnSaveMoverPreset').textContent = 'Update Preset';
   document.getElementById('btnCancelMoverEdit').style.display = '';
 
@@ -12669,10 +12737,11 @@ function renderMoverPresetList() {
       return fix ? `${fix.name}: ${pos.pan}/${pos.tilt}` : `#${pos.fixture_id}: ${pos.pan}/${pos.tilt}`;
     }).join(' · ');
     const systemBadge = p.is_system ? '<span style="font-size:9px;background:var(--cyan);color:#000;padding:1px 5px;border-radius:3px;margin-left:6px">SYSTEM</span>' : '';
+    const seqBadge = p.exclude_from_sequence ? '<span style="font-size:9px;background:var(--danger);color:#fff;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:600" title="Excluded from auto-generated sequences">NO SEQ</span>' : '';
     const deleteBtn = p.is_system ? '' : `<button class="mp-delete" title="Delete" onclick="deleteMoverPreset(${p.id})">&times;</button>`;
     card.innerHTML = `
       <div class="mover-preset-card-header">
-        <span class="mover-preset-card-name">${p.icon ? p.icon + ' ' : ''}${esc(p.name)}${systemBadge}</span>
+        <span class="mover-preset-card-name">${p.icon ? p.icon + ' ' : ''}${esc(p.name)}${systemBadge}${seqBadge}</span>
         <span class="mover-preset-card-actions">
           <button class="mp-edit" title="Edit" onclick="editMoverPreset(${p.id})">✎</button>
           ${deleteBtn}

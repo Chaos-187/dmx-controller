@@ -774,7 +774,7 @@
     <div class="config-sub-page" id="cfgpage-movers">
       <div class="config-section">
         <h3><span class="section-icon">&#10146;</span> Mover Presets</h3>
-        <p class="config-desc">Create position presets for moving head fixtures. Select each fixture and set its pan/tilt position using the XY pad, then save as a preset.</p>
+        <p class="config-desc">Create position presets for moving head fixtures. Select each fixture and set pan/tilt with the XY pad or arrow keys (Shift for fine steps). Click a saved preset to edit it.</p>
         <div class="mover-editor-layout">
           <div>
             <div class="form-group">
@@ -782,7 +782,7 @@
               <div id="moverFixtureTabs"></div>
             </div>
             <div class="xy-pad-container">
-              <div class="mover-xy-pad" id="moverXYPad">
+              <div class="mover-xy-pad" id="moverXYPad" tabindex="0" title="Drag to set position. Arrow keys: pan/tilt (Shift = 1 step)">
                 <div class="xy-grid"></div>
                 <div id="xyCrossH"></div>
                 <div id="xyCrossV"></div>
@@ -797,9 +797,13 @@
               <div class="form-group" style="flex:1"><label>Pan (0–255)</label><input type="number" id="moverPanInput" min="0" max="255" value="128"></div>
               <div class="form-group" style="flex:1"><label>Tilt (0–255)</label><input type="number" id="moverTiltInput" min="0" max="255" value="128"></div>
             </div>
-            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-              <input type="text" id="moverPresetName" placeholder="Preset name" style="flex:1">
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="moverPresetName" placeholder="Preset name" style="flex:1;min-width:120px">
               <input type="hidden" id="moverPresetEditId" value="">
+              <label class="mover-exclude-seq-label" title="Auto-generated sequences will not pick this preset">
+                <input type="checkbox" id="moverExcludeFromSequence" style="accent-color:var(--accent)">
+                Exclude from sequences
+              </label>
               <button class="btn btn-primary btn-sm" id="btnSaveMoverPreset">Save Preset</button>
               <button class="btn btn-secondary btn-sm" id="btnTestMoverPos">Test All</button>
               <button class="btn btn-secondary btn-sm" id="btnCancelMoverEdit" style="display:none">Cancel</button>
