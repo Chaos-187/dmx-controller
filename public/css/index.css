@@ -518,6 +518,15 @@ body { padding-bottom: 32px; }
 }
 .deck-seq .seq-state.loaded { background: rgba(68,138,255,.12); color: var(--blue); }
 .deck-seq .seq-state.playing { background: var(--cyan); color: #003; box-shadow: 0 0 8px rgba(0,229,255,.4); }
+.deck-seq .seq-state.generating {
+  background: rgba(251,191,36,.18); color: #fbbf24;
+  animation: seq-gen-pulse 1.2s ease-in-out infinite;
+}
+.deck-seq.generating { border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.06); }
+@keyframes seq-gen-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .65; }
+}
 .deck-seq .seq-time { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 42px; text-align: right; font-family: var(--mono); font-size: 10px; }
 .deck-seq .seq-open {
   font-size: 8px; padding: 3px 9px; border-radius: 8px;

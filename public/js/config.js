@@ -274,7 +274,10 @@ function connect() {
       if (msg.phase === 'import' && msg.done != null && msg.total != null) {
         updateVdjImportProgress(`Importing ${msg.done}/${msg.total}…`);
       } else if (msg.phase === 'parse') {
-        updateVdjImportProgress(`Parsing ${msg.total || ''} tracks…`);
+        updateVdjImportProgress(
+          msg.detail
+            || (msg.total ? `Processing ${Number(msg.total).toLocaleString()} tracks…` : 'Parsing VirtualDJ library…'),
+        );
       } else if (msg.phase === 'done') {
         updateVdjImportProgress('');
         loadVdjImportStatus();

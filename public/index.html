@@ -3427,6 +3427,33 @@ window.addEventListener('resize', () => {
 // ═══════════════════════════════════════════════════════════════
 //  Hub boot / startup status
 // ═══════════════════════════════════════════════════════════════
+function patchBootLibraryImportDetail(msg) {
+  const overlay = document.getElementById('bootOverlay');
+  if (!overlay || overlay.hidden) return;
+  let detail;
+  if (msg.phase === 'import' && msg.done != null && msg.total != null) {
+    detail = `Importing tracks ${msg.done}/${msg.total}`;
+  } else if (msg.phase === 'parse') {
+    detail = msg.detail
+      || (msg.total ? `Processing ${Number(msg.total).toLocaleString()} tracks…` : 'Parsing VirtualDJ library…');
+  } else if (msg.phase === 'done' || msg.phase === 'error') {
+    return;
+  }
+  if (!detail) return;
+  const list = document.getElementById('bootSteps');
+  if (!list) return;
+  const row = list.querySelector('.boot-step[data-boot-id="library"]')
+    || list.querySelector('.boot-step.boot-running');
+  if (!row) return;
+  let detailEl = row.querySelector('.boot-detail');
+  if (!detailEl) {
+    detailEl = document.createElement('span');
+    detailEl.className = 'boot-detail';
+    row.appendChild(detailEl);
+  }
+  detailEl.textContent = detail;
+}
+
 function renderBootOverlay(boot, errorMsg) {
   const overlay = document.getElementById('bootOverlay');
   const list = document.getElementById('bootSteps');
@@ -3446,7 +3473,7 @@ function renderBootOverlay(boot, errorMsg) {
   list.innerHTML = (boot.steps || []).map((s) => {
     const icon = s.status === 'done' ? '✓' : s.status === 'running' ? '…' : s.status === 'error' ? '!' : '○';
     const detail = s.detail ? ` <span class="boot-detail">${esc(s.detail)}</span>` : '';
-    return `<li class="boot-step boot-${s.status}"><span class="boot-step-icon">${icon}</span><span>${esc(s.label)}</span>${detail}</li>`;
+    return `<li class="boot-step boot-${s.status}" data-boot-id="${esc(s.id)}"><span class="boot-step-icon">${icon}</span><span>${esc(s.label)}</span>${detail}</li>`;
   }).join('');
   if (errEl) {
     const err = errorMsg || boot.error;
@@ -3511,6 +3538,10 @@ function connect() {
       renderBootOverlay(msg.boot, msg.error);
       return;
     }
+    if (msg.type === 'vdj_import') {
+      patchBootLibraryImportDetail(msg);
+      return;
+    }
     if (msg.type === 'state') updateState(msg.state);
     else if (msg.type === 'connection') { updateConnection(msg.connected, msg.address); HubEventLog.handleWsMessage(msg); }
     else if (msg.type === 'satellite_status') { updateSatelliteStatus(msg); }
@@ -3519,7 +3550,8 @@ function connect() {
       || msg.type === 'satellite_discovered') { refreshSatelliteStatus(); }
     else if (msg.type === 'beat') { handleBeat(msg.data); }
     else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
-    else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing' || msg.type === 'seq_time') { handleSeqWsMessage(msg); }
+    else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing' || msg.type === 'seq_time'
+      || msg.type === 'seq_generating' || msg.type === 'seq_generating_end' || msg.type === 'seq_generated') { handleSeqWsMessage(msg); }
     else if (msg.type === 'scene_activated' || msg.type === 'scene_deactivated') { handleSceneWsMessage(msg); }
     else if (msg.type === 'effectSpeed') {
       const pct = Math.round(msg.value * 100);
@@ -3663,7 +3695,10 @@ fetchAndRenderMidiState();
 // ═══════════════════════════════════════════════════════════════
 //  Deck State Update
 // ═══════════════════════════════════════════════════════════════
+let lastDeckHubState = null;
+
 function updateState(state) {
+  lastDeckHubState = state;
   updateConnection(state.connected, state.vdjAddress);
   document.getElementById('crossfaderThumb').style.left = `${(state.crossfader * 100).toFixed(1)}%`;
 
@@ -3745,7 +3780,22 @@ function updateState(state) {
 // ═══════════════════════════════════════════════════════════════
 //  Sequence Status on Deck Cards
 // ═══════════════════════════════════════════════════════════════
-const deckSeqState = {}; // { deckNum: { id, name, playing } }
+const deckSeqState = {}; // { deckNum: { id, name, playing, generating?, genPhase?, genProgress? } }
+
+function deckNumForTrackId(trackId) {
+  if (!trackId || !lastDeckHubState?.decks) return null;
+  for (let d = 1; d <= deckCount; d++) {
+    if (lastDeckHubState.decks[d]?.track_id === trackId) return d;
+  }
+  return null;
+}
+
+const SEQ_GEN_PHASE_LABELS = {
+  preparing: 'Preparing…',
+  analyzing: 'Analyzing…',
+  stems: 'Stems…',
+  sequencing: 'Generating…',
+};
 
 function isAnyDeckSequencePlaying() {
   return Object.values(deckSeqState).some(s => s && s.playing);
@@ -3901,6 +3951,38 @@ function openDeckSequencer(deck) {
 }
 
 function handleSeqWsMessage(msg) {
+  if (msg.type === 'seq_generating') {
+    const d = msg.deck || deckNumForTrackId(msg.track_id);
+    if (!d) return;
+    const dk = lastDeckHubState?.decks?.[d];
+    const prev = deckSeqState[d];
+    deckSeqState[d] = {
+      id: prev?.id ?? null,
+      name: prev?.name || msg.sequence?.name || dk?.filename?.replace(/\.[^.]+$/, '') || dk?.filename || 'Track',
+      playing: prev?.playing || false,
+      timeMs: prev?.timeMs,
+      generating: true,
+      genPhase: msg.phase || 'sequencing',
+      genProgress: msg.progress,
+      genReason: msg.reason,
+    };
+    updateDeckSeqUI(d);
+    return;
+  }
+
+  if (msg.type === 'seq_generating_end' || msg.type === 'seq_generated') {
+    const d = msg.deck || deckNumForTrackId(msg.track_id);
+    if (d && deckSeqState[d]) {
+      deckSeqState[d].generating = false;
+      deckSeqState[d].genPhase = null;
+      deckSeqState[d].genProgress = null;
+      deckSeqState[d].genReason = null;
+      updateDeckSeqUI(d);
+    }
+    if (msg.type === 'seq_generated') return;
+    return;
+  }
+
   const d = msg.deck;
   if (!d) return;
 
@@ -3908,8 +3990,14 @@ function handleSeqWsMessage(msg) {
     deckSeqState[d] = { id: msg.sequence?.id || null, name: msg.sequence?.name || '?', playing: false };
     updateDeckSeqUI(d);
   } else if (msg.type === 'seq_unloaded') {
-    delete deckSeqState[d];
-    updateDeckSeqUI(d);
+    if (deckSeqState[d]?.generating) {
+      deckSeqState[d].id = null;
+      deckSeqState[d].playing = false;
+      updateDeckSeqUI(d);
+    } else {
+      delete deckSeqState[d];
+      updateDeckSeqUI(d);
+    }
   } else if (msg.type === 'seq_playing') {
     if (deckSeqState[d]) deckSeqState[d].playing = msg.playing;
     updateDeckSeqUI(d);
@@ -3931,17 +4019,30 @@ function updateDeckSeqUI(d) {
   if (!wrap) return;
 
   const info = deckSeqState[d];
-  if (!info) {
+  if (!info || (!info.id && !info.generating)) {
     wrap.classList.remove('visible');
     return;
   }
   wrap.classList.add('visible');
+  if (info.generating) wrap.classList.add('generating');
+  else wrap.classList.remove('generating');
   nameEl.textContent = info.name;
-  stateEl.textContent = info.playing ? 'Playing' : 'Loaded';
-  stateEl.className = 'seq-state ' + (info.playing ? 'playing' : 'loaded');
-  if (!info.playing) timeEl.textContent = '';
+  if (info.generating) {
+    let label = SEQ_GEN_PHASE_LABELS[info.genPhase] || 'Generating…';
+    if (info.genPhase === 'stems' && info.genProgress != null) {
+      label = `Stems ${Math.round(info.genProgress)}%`;
+    }
+    if (info.genReason === 'stale_fixtures' && info.genPhase === 'sequencing') label = 'Updating sequence…';
+    stateEl.textContent = label;
+    stateEl.className = 'seq-state generating';
+    timeEl.textContent = '';
+  } else {
+    stateEl.textContent = info.playing ? 'Playing' : 'Loaded';
+    stateEl.className = 'seq-state ' + (info.playing ? 'playing' : 'loaded');
+    if (!info.playing) timeEl.textContent = '';
+  }
   const openBtn = document.getElementById(`seq-open-${d}`);
-  if (openBtn) openBtn.style.display = info.id ? '' : 'none';
+  if (openBtn) openBtn.style.display = info.id && !info.generating ? '' : 'none';
 }
 
 function buildNowPlayingBar() {

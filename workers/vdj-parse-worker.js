@@ -10,10 +10,11 @@ function fail(err) {
     || (err != null ? String(err) : '')
     || 'Unknown VDJ parse worker error';
   try {
-    parentPort.postMessage({ ok: false, error: msg });
+    parentPort.postMessage({ vdjParse: true, ok: false, error: msg });
   } catch (postErr) {
     try {
       parentPort.postMessage({
+        vdjParse: true,
         ok: false,
         error: `${msg} (postMessage failed: ${postErr?.message || postErr})`,
       });
@@ -34,7 +35,18 @@ try {
     throw new Error(resolved.error || `VDJ database not found: ${readPath}`);
   }
 
-  const tracks = vdjParser.parseVdjDatabase(readPath);
+  const tracks = vdjParser.parseVdjDatabase(readPath, {
+    onProgress: (p) => {
+      parentPort.postMessage({
+        vdjParse: true,
+        progress: true,
+        detail: p.detail,
+        step: p.step,
+        total: p.total,
+      });
+    },
+  });
+
 
   // Large libraries (~40k+ tracks) can fail structured clone over postMessage.
   const CACHE_THRESHOLD = 2000;
@@ -44,9 +56,9 @@ try {
       `thaluxis-vdj-parse-${process.pid}-${Date.now()}.json`,
     );
     fs.writeFileSync(cacheFile, JSON.stringify(tracks));
-    parentPort.postMessage({ ok: true, cacheFile, count: tracks.length });
+    parentPort.postMessage({ vdjParse: true, ok: true, cacheFile, count: tracks.length });
   } else {
-    parentPort.postMessage({ ok: true, tracks, count: tracks.length });
+    parentPort.postMessage({ vdjParse: true, ok: true, tracks, count: tracks.length });
   }
 } catch (e) {
   fail(e);

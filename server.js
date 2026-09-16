@@ -502,6 +502,29 @@ function ensureTrackForOs2lPath(filepath, deckNum) {
   return track;
 }
 
+function deckForTrackId(trackId) {
+  if (!trackId) return null;
+  for (let d = 1; d <= 4; d++) {
+    if (state.decks[d]?.track_id === trackId) return d;
+  }
+  return null;
+}
+
+function emitSeqGenerating(deck, trackId, phase, extra = {}) {
+  broadcast({
+    type: 'seq_generating',
+    deck: deck ?? deckForTrackId(trackId),
+    track_id: trackId,
+    phase,
+    ...extra,
+  });
+}
+
+function emitSeqGeneratingEnd(deck, trackId) {
+  const d = deck ?? deckForTrackId(trackId);
+  if (d) broadcast({ type: 'seq_generating_end', deck: d, track_id: trackId });
+}
+
 function handleOs2lSubscribed(data) {
     const trigger = data.trigger;
     const value = data.value;
@@ -571,6 +594,7 @@ function handleOs2lSubscribed(data) {
           const regenDeck = deck;
           const regenFilePath = value;
           (async () => {
+            emitSeqGenerating(regenDeck, regenTrackId, 'sequencing', { reason: 'stale_fixtures' });
             try {
               console.log(`[SEQ] Sequence for track ${regenTrackId} is outdated — regenerating in background...`);
               const liveFirstbeat = state.decks[regenDeck] && state.decks[regenDeck].firstbeat;
@@ -598,6 +622,8 @@ function handleOs2lSubscribed(data) {
               }
             } catch (e) {
               console.error(`[SEQ] Stale auto-regenerate failed for track ${regenTrackId}:`, e.message);
+            } finally {
+              emitSeqGeneratingEnd(regenDeck, regenTrackId);
             }
           })();
           // Continue — load existing sequence now; hot-swap when background regen completes
@@ -610,6 +636,9 @@ function handleOs2lSubscribed(data) {
             return;
           }
           seqAutoGeneratePending.add(track.id);
+          const autoGenDeck = deck;
+          const autoGenTrackId = track.id;
+          emitSeqGenerating(autoGenDeck, autoGenTrackId, 'preparing');
           // Only pause/unload when the deck is not playing (avoid interrupting live output)
           if (!isDeckPlaying(deck)) {
             pauseSequenceOutput(deck);
@@ -641,6 +670,7 @@ function handleOs2lSubscribed(data) {
                       analysisBeatgridPos = liveFirstbeatForAnalysis > 60 ? liveFirstbeatForAnalysis / 1000 : liveFirstbeatForAnalysis;
                     }
                     console.log(`[SEQ] Auto-analyzing "${track.title || track.filename}" before sequence generation...`);
+                    emitSeqGenerating(autoGenDeck, autoGenTrackId, 'analyzing');
                     const result = await audioAnalyzer.analyzeTrack(actualFilePath, {
                       bpm: track.bpm || 0,
                       beatgridPos: analysisBeatgridPos,
@@ -661,8 +691,12 @@ function handleOs2lSubscribed(data) {
               if (!noStems && analysis && !analysis.stem_energy && actualFilePath && fileExists) {
                 try {
                   console.log(`[SEQ] Auto-separating stems for "${track.title || track.filename}"...`);
+                  emitSeqGenerating(autoGenDeck, autoGenTrackId, 'stems');
                   const stemResult = await stemSeparator.separateStems(actualFilePath, {
-                    onProgress: (pct) => broadcast({ type: 'stem_progress', track_id: track.id, progress: pct }),
+                    onProgress: (pct) => {
+                      broadcast({ type: 'stem_progress', track_id: track.id, progress: pct });
+                      emitSeqGenerating(autoGenDeck, autoGenTrackId, 'stems', { progress: pct });
+                    },
                   });
                   if (stemResult && stemResult.stems) {
                     const summary = stemSeparator.computeStemSummary(stemResult.stems);
@@ -687,6 +721,7 @@ function handleOs2lSubscribed(data) {
                 return;
               }
 
+              emitSeqGenerating(autoGenDeck, autoGenTrackId, 'sequencing');
               const result = await sequenceRoutes.generateSequenceForTrack(
                 { ...track, beatgrid_pos: fbPos },
                 {
@@ -716,6 +751,7 @@ function handleOs2lSubscribed(data) {
               console.error(`[SEQ] Auto-generate failed for track ${track ? track.id : '?'}: ${ge.message}`);
             } finally {
               seqAutoGeneratePending.delete(track.id);
+              emitSeqGeneratingEnd(autoGenDeck, autoGenTrackId);
             }
           })();
           // Async block handles load/play after generation completes
@@ -6279,7 +6315,20 @@ function loadTracksFromWorkerMessage(m) {
   return m.tracks || [];
 }
 
-function parseVdjDatabaseInWorker(xmlPath) {
+function broadcastVdjImportProgress(phase, data, updateBootStep) {
+  broadcast({ type: 'vdj_import', phase, ...data });
+  if (!updateBootStep) return;
+  let detail;
+  if (phase === 'import' && data.done != null && data.total != null) {
+    detail = `Importing tracks ${data.done}/${data.total}`;
+  } else if (phase === 'parse') {
+    detail = data.detail
+      || (data.total ? `Processing ${Number(data.total).toLocaleString()} tracks…` : 'Parsing VirtualDJ library…');
+  }
+  if (detail) setBootStep('library', 'running', detail);
+}
+
+function parseVdjDatabaseInWorker(xmlPath, { onParseProgress } = {}) {
   const { Worker } = require('worker_threads');
   let workerPath = path.resolve(__dirname, 'workers', 'vdj-parse-worker.js');
   if (!fs.existsSync(workerPath)) {
@@ -6295,12 +6344,16 @@ function parseVdjDatabaseInWorker(xmlPath) {
     const finish = (err, tracks) => {
       if (settled) return;
       settled = true;
+      worker.terminate().catch(() => {});
       if (err) reject(err);
       else resolve(tracks);
     };
     worker.on('message', (m) => {
-      if (!m || typeof m !== 'object') {
-        finish(new Error('VDJ parse worker sent invalid message'));
+      if (!m || typeof m !== 'object') return;
+      // Node --watch (npm run dev) emits internal watch:require on worker message ports.
+      if (m.vdjParse !== true) return;
+      if (m.progress) {
+        onParseProgress?.(m);
         return;
       }
       if (m.ok) {
@@ -6315,9 +6368,15 @@ function parseVdjDatabaseInWorker(xmlPath) {
     });
     worker.on('error', (err) => finish(err));
     worker.on('exit', (code) => {
-      if (!settled && code !== 0) {
-        finish(new Error(`VDJ parse worker exited with code ${code} (no result message)`));
-      }
+      if (settled) return;
+      setImmediate(() => {
+        if (settled) return;
+        finish(new Error(
+          code === 0
+            ? 'VDJ parse worker exited without a result'
+            : `VDJ parse worker exited with code ${code} (no result message)`,
+        ));
+      });
     });
   });
 }
@@ -6368,26 +6427,42 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
     } catch { /* ignore */ }
 
     console.log(`[VDJ] Loading database from ${xmlPath}...`);
-    if (updateBootStep) setBootStep('library', 'running', 'Reading VirtualDJ library…');
+    broadcastVdjImportProgress('parse', { detail: 'Reading VirtualDJ library…' }, updateBootStep);
 
     let tracks;
     try {
-      tracks = await parseVdjDatabaseInWorker(xmlPath);
+      tracks = await parseVdjDatabaseInWorker(xmlPath, {
+        onParseProgress: (p) => {
+          broadcastVdjImportProgress('parse', {
+            detail: p.detail,
+            step: p.step,
+            total: p.total,
+          }, updateBootStep);
+        },
+      });
     } catch (workerErr) {
       console.warn(`[VDJ] Background parse failed (${workerErr.message}) — parsing on main thread`);
       await require('./lib/yield').yieldToEventLoop();
-      tracks = vdjParser.parseVdjDatabase(xmlPath);
+      tracks = vdjParser.parseVdjDatabase(xmlPath, {
+        onProgress: (p) => {
+          broadcastVdjImportProgress('parse', {
+            detail: p.detail,
+            step: p.step,
+            total: p.total,
+          }, updateBootStep);
+        },
+      });
     }
 
-    broadcast({ type: 'vdj_import', phase: 'parse', total: tracks.length });
-    if (updateBootStep) setBootStep('library', 'running', `Importing ${tracks.length} tracks…`);
+    broadcastVdjImportProgress('parse', {
+      detail: `Parsed ${tracks.length.toLocaleString()} tracks — importing…`,
+      total: tracks.length,
+    }, updateBootStep);
 
     const result = await db.importTracksBatched(tracks, {
       batchSize: 150,
       onProgress: (done, total) => {
-        const detail = `Importing tracks ${done}/${total}`;
-        if (updateBootStep) setBootStep('library', 'running', detail);
-        broadcast({ type: 'vdj_import', phase: 'import', done, total });
+        broadcastVdjImportProgress('import', { done, total }, updateBootStep);
       },
     });
 
@@ -6621,6 +6696,7 @@ async function hubStartupAfterListen() {
       requireAuth,
       generateSequenceForTrack: sequenceRoutes.generateSequenceForTrack,
       onSequenceGenerated: (trackId, result) => autoLoadSequenceForTrack(trackId, result?.sequence),
+      deckForTrackId,
     });
 
     loadTouchGroupDimmers();

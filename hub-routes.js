@@ -17,6 +17,7 @@ let getAnalysisConfig;
 let getAnchorPoints;
 let generateSequenceForTrack;
 let onSequenceGenerated;
+let deckForTrackId;
 let requireHubAdminAuth = (_req, _res, next) => next();
 
 function init(deps) {
@@ -29,6 +30,7 @@ function init(deps) {
   getAnchorPoints = deps.getAnchorPoints;
   generateSequenceForTrack = deps.generateSequenceForTrack;
   onSequenceGenerated = deps.onSequenceGenerated;
+  deckForTrackId = deps.deckForTrackId;
   requireHubAdminAuth = deps.requireAuth || requireHubAdminAuth;
   ensureSatelliteToken();
 
@@ -115,6 +117,8 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   const analysis = db.getTrackAnalysis(trackId);
   if (!analysis) return null;
 
+  const deck = deckForTrackId ? deckForTrackId(trackId) : null;
+  broadcast?.({ type: 'seq_generating', deck, track_id: trackId, phase: 'sequencing', source });
   try {
     const fixtures = db.getFixtureChannelMap();
     const result = await generateSequenceForTrack(track, {
@@ -141,6 +145,9 @@ async function maybeAutoGenerateSequence(trackId, { source = 'hub' } = {}) {
   } catch (e) {
     console.error(`[Hub] Auto-generate sequence failed for track ${trackId}: ${e.message}`);
     return null;
+  } finally {
+    const d = deckForTrackId ? deckForTrackId(trackId) : deck;
+    if (d) broadcast?.({ type: 'seq_generating_end', deck: d, track_id: trackId });
   }
 }
 

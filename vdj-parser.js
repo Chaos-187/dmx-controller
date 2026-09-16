@@ -218,14 +218,20 @@ function readDatabaseXml(filePath) {
   }
 }
 
-function parseVdjDatabase(xmlPath) {
+function parseVdjDatabase(xmlPath, { onProgress } = {}) {
+  const report = (detail, extra = {}) => {
+    if (typeof onProgress === 'function') onProgress({ detail, ...extra });
+  };
+
   const resolved = resolveDatabasePath(xmlPath);
   if (!resolved.path) {
     throw new Error(resolved.error || `VDJ database not found: ${xmlPath}`);
   }
 
   const actualPath = resolved.path;
+  report('Reading VirtualDJ library file…', { step: 'read' });
   const xmlData = readDatabaseXml(actualPath);
+  report('Parsing XML…', { step: 'parse' });
   const parser = new XMLParser(parserOptions);
   const result = parser.parse(xmlData);
 
@@ -238,6 +244,7 @@ function parseVdjDatabase(xmlPath) {
   let songs = root.Song || [];
   if (!Array.isArray(songs)) songs = [songs];
 
+  report(`Processing ${songs.length.toLocaleString()} tracks…`, { step: 'map', total: songs.length });
   const tracks = songs.map(parseSong);
 
   return tracks;
