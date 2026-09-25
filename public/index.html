@@ -3245,6 +3245,7 @@ function buildDeckPanels(count) {
       <div class="beat-flash"></div>
       <div class="deck-header">
         <span class="deck-number">Deck ${d}</span>
+        <span class="deck-output-badge" id="deck-out-${d}" hidden title="This deck is driving sequence DMX">LIVE OUT</span>
         <span class="deck-play-state" id="play-${d}">Stopped</span>
       </div>
       <div class="deck-waveform" id="wf-wrap-${d}">
@@ -3569,6 +3570,7 @@ function connect() {
     console.log('[WS] Connected');
     HubConnection.notifyOpen();
     checkBootStatus();
+    fetchSequenceOutputOwner();
   };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -3592,6 +3594,12 @@ function connect() {
       || msg.type === 'satellite_discovered') { refreshSatelliteStatus(); }
     else if (msg.type === 'beat') { handleBeat(msg.data); }
     else if (msg.type === 'dmxOutput') { dmxOutputOn = msg.enabled; updateOutputToggle(); }
+    else if (msg.type === 'seq_output_owner') {
+      seqOutputOwnerDeck = msg.deck ?? null;
+      seqOutputOwnerAuto = msg.auto !== false;
+      seqOutputOwnerLatched = !!msg.latched;
+      updateDeckOutputOwnerUI();
+    }
     else if (msg.type === 'seq_loaded' || msg.type === 'seq_unloaded' || msg.type === 'seq_playing' || msg.type === 'seq_time'
       || msg.type === 'seq_generating' || msg.type === 'seq_generating_end' || msg.type === 'seq_generated') { handleSeqWsMessage(msg); }
     else if (msg.type === 'scene_activated' || msg.type === 'scene_deactivated') { handleSceneWsMessage(msg); }
@@ -3823,6 +3831,36 @@ function updateState(state) {
 //  Sequence Status on Deck Cards
 // ═══════════════════════════════════════════════════════════════
 const deckSeqState = {}; // { deckNum: { id, name, playing, generating?, genPhase?, genProgress? } }
+let seqOutputOwnerDeck = null;
+let seqOutputOwnerAuto = true;
+let seqOutputOwnerLatched = false;
+
+function updateDeckOutputOwnerUI() {
+  for (let d = 1; d <= deckCount; d++) {
+    const deckEl = document.getElementById(`deck-${d}`);
+    if (deckEl) deckEl.classList.toggle('seq-output-active', seqOutputOwnerDeck === d);
+    const badge = document.getElementById(`deck-out-${d}`);
+    if (badge) {
+      const on = seqOutputOwnerDeck === d;
+      badge.hidden = !on;
+      if (!seqOutputOwnerAuto) badge.textContent = 'LIVE OUT (held)';
+      else if (seqOutputOwnerLatched) badge.textContent = 'LIVE OUT (latched)';
+      else badge.textContent = 'LIVE OUT';
+    }
+    const np = document.getElementById(`np-deck-${d}`);
+    if (np) np.classList.toggle('seq-output-active', seqOutputOwnerDeck === d);
+  }
+}
+
+async function fetchSequenceOutputOwner() {
+  try {
+    const data = await fetch('/api/sequences/output-owner').then((r) => r.json());
+    seqOutputOwnerDeck = data.deck ?? null;
+    seqOutputOwnerAuto = data.auto !== false;
+    seqOutputOwnerLatched = !!data.latched;
+    updateDeckOutputOwnerUI();
+  } catch { /* ignore */ }
+}
 
 function deckNumForTrackId(trackId) {
   if (!trackId || !lastDeckHubState?.decks) return null;

@@ -932,6 +932,8 @@ async function loadSequencerConfig() {
   document.getElementById('cfgSeqNoStems').checked = config.seq_no_stems === '1';
   document.getElementById('cfgSeqCrossfaderGating').checked = config.seq_crossfader_gating === '1';
   document.getElementById('cfgSeqCrossfaderMode').value = config.seq_crossfader_mode || 'gate';
+  const dualEx = document.getElementById('cfgSeqDualDeckExclusive');
+  if (dualEx) dualEx.checked = config.seq_dual_deck_exclusive !== '0';
   document.getElementById('cfgSeqDeckFaderDimmer').checked = config.seq_deck_fader_dimmer === '1';
   document.getElementById('cfgSeqEndAction').value = config.seq_end_action || 'none';
   const seqs = await fetch('/api/sequences').then(r => r.json());
@@ -991,6 +993,7 @@ document.getElementById('btnSaveSeqConfig').addEventListener('click', () => {
     ['seq_no_stems', document.getElementById('cfgSeqNoStems').checked ? '1' : '0'],
     ['seq_crossfader_gating', document.getElementById('cfgSeqCrossfaderGating').checked ? '1' : '0'],
     ['seq_crossfader_mode', document.getElementById('cfgSeqCrossfaderMode').value],
+    ['seq_dual_deck_exclusive', document.getElementById('cfgSeqDualDeckExclusive')?.checked !== false ? '1' : '0'],
     ['seq_deck_fader_dimmer', document.getElementById('cfgSeqDeckFaderDimmer').checked ? '1' : '0'],
     ['seq_end_action', document.getElementById('cfgSeqEndAction').value],
   ], 'btnSaveSeqConfig');

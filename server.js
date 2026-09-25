@@ -529,7 +529,39 @@ function emitSeqGeneratingEnd(deck, trackId) {
   if (d) broadcast({ type: 'seq_generating_end', deck: d, track_id: trackId });
 }
 
-function handleOs2lSubscribed(data) {
+function os2lSubscribedPriority(trigger) {
+  const t = String(trigger || '');
+  if (/\bplay$/i.test(t)) return 0;
+  if (/get_filepath/i.test(t)) return 1;
+  if (/^crossfader$/i.test(t)) return 1;
+  if (/get_time elapsed/i.test(t)) return 5;
+  if (/beatpos|\blevel\b|get_beat|get_loop/i.test(t)) return 6;
+  return 3;
+}
+
+const _os2lSubscribedCoalesce = new Map();
+let _os2lSubscribedFlushScheduled = false;
+
+/** Batch OS2L subscribed updates (latest value per trigger) to avoid blocking the TCP read loop. */
+function ingestOs2lSubscribed(data) {
+  if (!data?.trigger) return;
+  _os2lSubscribedCoalesce.set(data.trigger, data);
+  if (_os2lSubscribedFlushScheduled) return;
+  _os2lSubscribedFlushScheduled = true;
+  setImmediate(flushOs2lSubscribedCoalesce);
+}
+
+function flushOs2lSubscribedCoalesce() {
+  _os2lSubscribedFlushScheduled = false;
+  if (!_os2lSubscribedCoalesce.size) return;
+  const batch = [..._os2lSubscribedCoalesce.values()];
+  _os2lSubscribedCoalesce.clear();
+  batch.sort((a, b) => os2lSubscribedPriority(a.trigger) - os2lSubscribedPriority(b.trigger));
+  for (const item of batch) handleOs2lSubscribed(item, { skipScheduleBroadcast: true });
+  scheduleBroadcast();
+}
+
+function handleOs2lSubscribed(data, opts = {}) {
     const trigger = data.trigger;
     const value = data.value;
 
@@ -544,20 +576,16 @@ function handleOs2lSubscribed(data) {
 
     if (key === 'crossfader') {
       state.crossfader = value;
+      sequenceOutputOwnerLatch = null;
       scheduleBroadcast();
+      refreshSequenceOutputAfterMixChange();
       return;
     }
 
     if (deck === null || !state.decks[deck]) return;
 
-    // Normalize "on"/"off" string values to 1/0 for play, loop, etc.
-    if (typeof value === 'string') {
-      if (value === 'on')  state.decks[deck][key] = 1;
-      else if (value === 'off') state.decks[deck][key] = 0;
-      else state.decks[deck][key] = value;
-    } else {
-      state.decks[deck][key] = value;
-    }
+    const normalizedValue = os2l.normalizeSubscribedValue(key, value);
+    state.decks[deck][key] = normalizedValue;
 
     // Update track beatgrid_pos from live firstbeat if the track exists and has no beatgrid
     if (key === 'firstbeat' && typeof value === 'number' && value > 0) {
@@ -648,9 +676,11 @@ function handleOs2lSubscribed(data) {
             pauseSequenceOutput(deck);
             if (seqAutoUnload && activeSequences[deck]) {
               stopPlaybackTimer(deck);
-              blackoutDeckFixtures(deck);
+              const preserve = otherDecksHaveLiveSequenceOutput(deck);
+              if (!preserve) blackoutDeckFixtures(deck);
               delete activeSequences[deck];
               broadcast({ type: 'seq_unloaded', deck });
+              if (preserve) refreshSequenceOutputAfterMixChange();
             }
           }
           (async () => {
@@ -770,9 +800,11 @@ function handleOs2lSubscribed(data) {
         } else if (seqAutoUnload && activeSequences[deck]) {
           // No matching sequence — unload the current one
           stopPlaybackTimer(deck);
-          blackoutDeckFixtures(deck);
+          const preserve = otherDecksHaveLiveSequenceOutput(deck);
+          if (!preserve) blackoutDeckFixtures(deck);
           delete activeSequences[deck];
           broadcast({ type: 'seq_unloaded', deck });
+          if (preserve) refreshSequenceOutputAfterMixChange();
           console.log(`[SEQ] Auto-unloaded sequence from deck ${deck} (no match)`);
         }
       }
@@ -842,11 +874,7 @@ function handleOs2lSubscribed(data) {
           // Natural track end — apply configured end action
           applySequenceEndAction(deck);
         } else {
-          // Manual pause — standard blackout
-          ds.playing = false;
-          stopPlaybackTimer(deck);
-          blackoutDeckFixtures(deck);
-          broadcast({ type: 'seq_playing', deck, playing: false });
+          stopSequenceOutputOnDeck(deck);
           console.log(`[SEQ] Deck ${deck} paused — pausing sequence`);
         }
         }
@@ -883,20 +911,26 @@ function handleOs2lSubscribed(data) {
           }
         }
         const pastEnd = sequenceTimePastEnd(ds, value);
-        const playheadMoving = vdjPlayheadLooksPlaying(deck, value, prevTimeMs);
-        const vdjStillRunning = shouldUseVdjTime(deck) && playheadMoving && os2lTimeIsActive(deck);
-        if (!ds.playing && !ds._endActionApplied && !pastEnd && (isDeckPlaying(deck) || vdjStillRunning)) {
-          if (!isDeckPlaying(deck) && vdjStillRunning) {
+        const playheadAdvancing = noteVdjPlayheadAdvance(deck, value, prevTimeMs);
+        const missedPlayOn =
+          shouldUseVdjTime(deck) &&
+          os2lTimeIsActive(deck) &&
+          playheadAdvancing &&
+          !isDeckPlaying(deck);
+        if (!ds.playing && !ds._endActionApplied && !pastEnd) {
+          if (isDeckPlaying(deck)) {
+            startSequencePlayback(deck);
+          } else if (missedPlayOn) {
             state.decks[deck].play = 1;
-            console.log(`[SEQ] Deck ${deck} — resynced play=1 (playhead advancing, stale play=0)`);
+            console.log(`[SEQ] Deck ${deck} — resynced play=1 (playhead advancing, missed play=on)`);
+            startSequencePlayback(deck);
           }
-          startSequencePlayback(deck);
         }
       }
-      processSequenceAtTime(deck, value);
+      // Sequence DMX runs on the playback timer (~100 Hz) using ds.currentTimeMs — not per OS2L time message.
     }
 
-    scheduleBroadcast();
+    if (!opts.skipScheduleBroadcast) scheduleBroadcast();
 }
 
 // ─── Express Web Server ─────────────────────────────────────────────────────
@@ -907,6 +941,34 @@ app.use(compression());
 app.use(express.json({ limit: '200mb' }));
 app.use('/lib', express.static(path.join(__dirname, 'node_modules/waveform-data/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/docs/companion', (req, res) => {
+  const helpPath = path.join(__dirname, 'companion', 'companion', 'HELP.md');
+  let md;
+  try {
+    md = fs.readFileSync(helpPath, 'utf8');
+  } catch {
+    return res.status(404).type('text/plain').send('Companion HELP.md not found');
+  }
+  const body = md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Companion module setup — DMX Controller</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #e8e8e8; background: #121212; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+  a { color: #6eb5ff; }
+</style>
+</head><body>
+<p><a href="/config.html">← Config</a></p>
+<pre>${body}</pre>
+</body></html>`);
+});
 
 app.use((req, res, next) => {
   if (bootState.ready) return next();
@@ -3184,6 +3246,7 @@ companionRoutes.init({
   db, midiController, touchOverrides, broadcast,
   getSeqNoMirrorSpin: () => _cachedMixerConfig.seqNoMirrorSpin,
   setSeqNoMirrorSpin,
+  applySequenceOutputOwner,
 });
 companionRoutes.registerRoutes(app);
 
@@ -4557,7 +4620,15 @@ function cancelAllFixtureIdentify() {
 }
 
 app.get('/api/sequences/playback-status', (req, res) => {
-  res.json({ anyPlaying: isAnySequencePlaying() });
+  res.json({ anyPlaying: isAnySequencePlaying(), ...getSequenceOutputOwnerSnapshot() });
+});
+
+app.get('/api/sequences/output-owner', (req, res) => {
+  res.json(getSequenceOutputOwnerSnapshot());
+});
+
+app.post('/api/sequences/output-owner', (req, res) => {
+  res.json(applySequenceOutputOwner(req.body || {}));
 });
 
 app.post('/api/fixtures/:id/identify', (req, res) => {
@@ -4733,6 +4804,8 @@ function isAnySequencePlaying() {
 const activeSequences = {};  // { deckNum: { sequence, lastTimeMs, playing, ... } }
 const playbackTimers = {};   // { deckNum: intervalId }
 const vdjTimeLastAt = {};    // { deckNum: timestamp } — last OS2L time event per deck
+const vdjTimeAdvanceStreak = {}; // { deckNum: { count, lastWall } } — consecutive forward playhead samples
+const OS2L_STALE_TIME_PAUSE_MS = 900; // no playhead while sequence playing → infer pause
 /** Ignore brief play=0 OS2L glitches right after a track/sequence load (VDJ load/cue races). */
 const deckSeqPauseSuppressUntil = {};
 
@@ -4753,14 +4826,44 @@ function vdjPlayheadLooksPlaying(_deck, timeMs, prevTimeMs) {
   return delta > 20 && delta < 6000;
 }
 
+function noteVdjPlayheadAdvance(deck, timeMs, prevTimeMs) {
+  if (!vdjPlayheadLooksPlaying(deck, timeMs, prevTimeMs)) {
+    vdjTimeAdvanceStreak[deck] = { count: 0, lastWall: 0 };
+    return false;
+  }
+  const now = Date.now();
+  const entry = vdjTimeAdvanceStreak[deck] || { count: 0, lastWall: 0 };
+  if (now - entry.lastWall > 450) entry.count = 0;
+  entry.count += 1;
+  entry.lastWall = now;
+  vdjTimeAdvanceStreak[deck] = entry;
+  return entry.count >= 2;
+}
+
+/** Missed play=off while VDJ paused — playhead stops but state still thinks playing. */
+function maybePauseSequenceFromStaleOs2lTime(deck) {
+  const ds = activeSequences[deck];
+  if (!ds?.playing || !shouldUseVdjTime(deck)) return;
+  const gap = Date.now() - (vdjTimeLastAt[deck] || 0);
+  const threshold = isHubOs2lLocal() ? OS2L_STALE_TIME_PAUSE_MS : 2800;
+  if (gap < threshold) return;
+  if (deckSequencePauseSuppressed(deck)) return;
+  state.decks[deck].play = 0;
+  stopSequenceOutputOnDeck(deck);
+  console.log(`[SEQ] Deck ${deck} paused — stale OS2L playhead (${gap}ms, likely missed play=off)`);
+  scheduleBroadcast();
+}
+
 // Cached mixer integration settings (refreshed on config save / startup)
 let _cachedMixerConfig = {
   crossfaderGating: false, crossfaderMode: 'gate', deckFaderDimmer: false, endAction: 'none',
+  dualDeckExclusive: true,
   seqNoStrobes: false, seqNoMirrorSpin: false,
 };
 function refreshMixerConfig() {
   _cachedMixerConfig.crossfaderGating = db.getConfig('seq_crossfader_gating') === '1';
   _cachedMixerConfig.crossfaderMode = db.getConfig('seq_crossfader_mode') || 'gate'; // gate | blend | off
+  _cachedMixerConfig.dualDeckExclusive = db.getConfig('seq_dual_deck_exclusive') !== '0';
   _cachedMixerConfig.deckFaderDimmer = db.getConfig('seq_deck_fader_dimmer') === '1';
   _cachedMixerConfig.endAction = db.getConfig('seq_end_action') || 'none'; // none | blackout | scene
   _cachedMixerConfig.seqNoStrobes = db.getConfig('seq_no_strobes') === '1';
@@ -4789,7 +4892,282 @@ try { refreshMixerConfig(); } catch(e) { /* DB not ready yet at require-time */ 
 
 function isDeckPlaying(deck) {
   const ps = state.decks[deck]?.play;
-  return ps === 1 || ps === true || ps === 'on';
+  return ps === 1 || ps === true;
+}
+
+/** Decks with an active sequence and DJ transport playing. */
+function getPlayingSequenceDecks() {
+  const decks = [];
+  for (const deckStr of Object.keys(activeSequences)) {
+    const deck = +deckStr;
+    const ds = activeSequences[deck];
+    if (!ds?.playing || !ds.sequence) continue;
+    if (!isDeckPlaying(deck)) continue;
+    decks.push(deck);
+  }
+  return decks;
+}
+
+/** True when another deck is actively playing a sequence (shared rig — avoid DMX blackouts on idle loads). */
+function otherDecksHaveLiveSequenceOutput(deck) {
+  return getPlayingSequenceDecks().some((d) => d !== deck);
+}
+
+function clearOverridesForSequenceLoad() {
+  touchOverrides.os2lOverrideFixtures.clear();
+  touchOverrides.colorOverrideFixtures.clear();
+  touchOverrides.movementOverrideFixtures.clear();
+  touchOverrides.smokeOverrideFixtures.clear();
+  touchOverrides.atmosphereOverrideFixtures.clear();
+  clearSequenceColorOverride();
+  clearSequenceBlockingOverrides();
+}
+
+function getDeckCrossfaderWeight(deckNum) {
+  if (deckNum !== 1 && deckNum !== 2) return 1;
+  const cf = parseFloat(state.crossfader) || 0;
+  if (deckNum === 1) return Math.max(0, Math.min(1, 1 - cf));
+  return Math.max(0, Math.min(1, cf));
+}
+
+/** 0–1 score for which deck should own shared rig output (higher wins). */
+function scoreDeckForSequenceMix(deckNum) {
+  const fader = Math.max(0, Math.min(1, parseFloat(state.decks[deckNum]?.level) || 0));
+  if (deckNum !== 1 && deckNum !== 2) return fader > 0.001 ? fader : 1;
+
+  const cfMode = _cachedMixerConfig.crossfaderMode || 'gate';
+  if (cfMode === 'off') return fader > 0.001 ? fader : 1;
+
+  if (cfMode === 'gate' || _cachedMixerConfig.crossfaderGating) {
+    const cf = parseFloat(state.crossfader) || 0;
+    if (deckNum === 1) return cf <= 0.5 ? 1 : 0;
+    return cf > 0.5 ? 1 : 0;
+  }
+
+  const cfWeight = getDeckCrossfaderWeight(deckNum);
+  return cfWeight * (fader > 0.001 ? fader : 1);
+}
+
+const _seqMixHold = { deck: null, since: 0 };
+const SEQ_MIX_MIN_HOLD_MS = 280;
+const SEQ_MIX_SWITCH_MARGIN = 0.1;
+/** Manual sequence DMX owner (null = follow crossfader / auto mix). */
+let sequenceOutputOverride = null;
+/** After a deck pauses, keep output on the survivor until crossfader clearly switches. */
+let sequenceOutputOwnerLatch = null;
+let _lastBroadcastOutputOwnerKey = null;
+
+function pickDominantSequenceDeckRaw(playing) {
+  if (!playing.length) return null;
+  if (playing.length === 1) return playing[0];
+
+  const cfMode = _cachedMixerConfig.crossfaderMode || 'gate';
+  const only12 = playing.length === 2 && playing.includes(1) && playing.includes(2);
+  if (only12 && (cfMode === 'gate' || _cachedMixerConfig.crossfaderGating)) {
+    const cf = parseFloat(state.crossfader) || 0;
+    return cf <= 0.5 ? 1 : 2;
+  }
+
+  let bestDeck = playing[0];
+  let bestScore = scoreDeckForSequenceMix(bestDeck);
+  for (let i = 1; i < playing.length; i++) {
+    const d = playing[i];
+    const score = scoreDeckForSequenceMix(d);
+    if (score > bestScore + 0.0001) {
+      bestDeck = d;
+      bestScore = score;
+    } else if (Math.abs(score - bestScore) <= 0.0001) {
+      const lv = parseFloat(state.decks[d]?.level) || 0;
+      const bestLv = parseFloat(state.decks[bestDeck]?.level) || 0;
+      if (lv > bestLv + 0.0001) {
+        bestDeck = d;
+        bestScore = score;
+      }
+    }
+  }
+  return bestScore < 0.01 ? null : bestDeck;
+}
+
+function resolveSequenceOutputOwner(playing) {
+  if (!playing?.length) return null;
+  if (sequenceOutputOverride != null && playing.includes(sequenceOutputOverride)) {
+    return sequenceOutputOverride;
+  }
+  if (playing.length === 1) {
+    const only = playing[0];
+    if (sequenceOutputOwnerLatch != null && sequenceOutputOwnerLatch !== only) {
+      sequenceOutputOwnerLatch = null;
+    }
+    return only;
+  }
+  if (sequenceOutputOwnerLatch != null && playing.includes(sequenceOutputOwnerLatch)) {
+    const raw = pickDominantSequenceDeckRaw(playing);
+    if (raw != null && raw !== sequenceOutputOwnerLatch) {
+      const latScore = scoreDeckForSequenceMix(sequenceOutputOwnerLatch);
+      const rawScore = scoreDeckForSequenceMix(raw);
+      if (rawScore - latScore >= SEQ_MIX_SWITCH_MARGIN) {
+        sequenceOutputOwnerLatch = raw;
+        _seqMixHold.deck = raw;
+        return raw;
+      }
+    }
+    return sequenceOutputOwnerLatch;
+  }
+  return pickDominantSequenceDeck(playing);
+}
+
+function getSequenceOutputOwnerSnapshot() {
+  const playing = getPlayingSequenceDecks();
+  const owner = resolveSequenceOutputOwner(playing);
+  return {
+    deck: owner,
+    auto: sequenceOutputOverride == null && sequenceOutputOwnerLatch == null,
+    override: sequenceOutputOverride,
+    latched: sequenceOutputOwnerLatch,
+    playing,
+  };
+}
+
+function broadcastSequenceOutputOwnerIfChanged() {
+  const snap = getSequenceOutputOwnerSnapshot();
+  const key = `${snap.deck}:${snap.auto}:${snap.override}:${snap.playing.join(',')}`;
+  if (_lastBroadcastOutputOwnerKey === key) return;
+  _lastBroadcastOutputOwnerKey = key;
+  broadcast({
+    type: 'seq_output_owner',
+    deck: snap.deck,
+    auto: snap.auto,
+    override: snap.override,
+    latched: snap.latched,
+    playing: snap.playing,
+  });
+}
+
+function applySequenceOutputOwner(body = {}) {
+  const mode = body.mode || (body.deck != null ? 'deck' : 'auto');
+  if (mode === 'auto') {
+    sequenceOutputOverride = null;
+    sequenceOutputOwnerLatch = null;
+    _seqMixHold.deck = null;
+  } else if (mode === 'cycle' || mode === 'next') {
+    const playing = getPlayingSequenceDecks();
+    if (!playing.length) {
+      return { ok: false, error: 'no_playing_sequences', ...getSequenceOutputOwnerSnapshot() };
+    }
+    const current = resolveSequenceOutputOwner(playing);
+    let idx = playing.indexOf(sequenceOutputOverride ?? current ?? playing[0]);
+    if (idx < 0) idx = 0;
+    sequenceOutputOverride = playing[(idx + 1) % playing.length];
+    sequenceOutputOwnerLatch = null;
+  } else if (mode === 'deck') {
+    const d = +body.deck;
+    if (!Number.isFinite(d) || d < 1 || d > 4) {
+      return { ok: false, error: 'invalid_deck', ...getSequenceOutputOwnerSnapshot() };
+    }
+    sequenceOutputOverride = d;
+    sequenceOutputOwnerLatch = null;
+  } else {
+    return { ok: false, error: 'invalid_mode', ...getSequenceOutputOwnerSnapshot() };
+  }
+  refreshSequenceOutputAfterMixChange();
+  broadcastSequenceOutputOwnerIfChanged();
+  console.log(`[SEQ] Output owner → ${sequenceOutputOverride == null ? 'auto' : `deck ${sequenceOutputOverride}`}`);
+  return { ok: true, ...getSequenceOutputOwnerSnapshot() };
+}
+
+companionRoutes.setApplySequenceOutputOwner(applySequenceOutputOwner);
+
+function pickDominantSequenceDeck(playing) {
+  const candidate = pickDominantSequenceDeckRaw(playing);
+  if (candidate == null) {
+    _seqMixHold.deck = null;
+    return null;
+  }
+  const now = Date.now();
+  if (_seqMixHold.deck != null && playing.includes(_seqMixHold.deck) && candidate !== _seqMixHold.deck) {
+    const heldScore = scoreDeckForSequenceMix(_seqMixHold.deck);
+    const candScore = scoreDeckForSequenceMix(candidate);
+    if (now - _seqMixHold.since < SEQ_MIX_MIN_HOLD_MS) return _seqMixHold.deck;
+    if (candScore - heldScore < SEQ_MIX_SWITCH_MARGIN) return _seqMixHold.deck;
+  }
+  if (_seqMixHold.deck !== candidate) {
+    _seqMixHold.deck = candidate;
+    _seqMixHold.since = now;
+    if (db.getConfig('debug_logging') === '1') {
+      console.log(`[SEQ] Output owner → deck ${candidate} (playing: ${playing.join(', ')})`);
+    }
+  }
+  return candidate;
+}
+
+/**
+ * Which deck may write sequence DMX when multiple decks share the same rig.
+ */
+function getSequenceOutputAuthority(deckNum, opts = {}) {
+  if (opts.preview) return { write: true, level: 1 };
+
+  const playing = getPlayingSequenceDecks();
+  if (!playing.includes(deckNum)) return { write: false, level: 0 };
+
+  if (playing.length === 1) {
+    return { write: true, level: 1 };
+  }
+
+  const allowDual = !_cachedMixerConfig.dualDeckExclusive;
+  if (allowDual) {
+    const cfMode = _cachedMixerConfig.crossfaderMode || 'gate';
+    if (cfMode === 'blend' && (deckNum === 1 || deckNum === 2)) {
+      const w = getDeckCrossfaderWeight(deckNum);
+      if (w < 0.01) return { write: false, level: 0 };
+      return { write: true, level: w };
+    }
+    return { write: true, level: 1 };
+  }
+
+  const owner = resolveSequenceOutputOwner(playing);
+  if (owner == null || owner !== deckNum) return { write: false, level: 0 };
+
+  let level = 1;
+  const cfMode = _cachedMixerConfig.crossfaderMode || 'gate';
+  if (cfMode === 'blend' && (deckNum === 1 || deckNum === 2)) {
+    level = Math.max(0.01, getDeckCrossfaderWeight(deckNum));
+  }
+  return { write: true, level };
+}
+
+function refreshSequenceOutputAfterMixChange() {
+  const playing = getPlayingSequenceDecks();
+  if (!playing.length) {
+    broadcastSequenceOutputOwnerIfChanged();
+    return;
+  }
+  const owner = resolveSequenceOutputOwner(playing) ?? playing[0];
+  const ds = activeSequences[owner];
+  if (!ds) return;
+  const t = ds.currentTimeMs ?? state.decks[owner]?.time ?? 0;
+  processSequenceAtTime(owner, t);
+  broadcastSequenceOutputOwnerIfChanged();
+}
+
+function stopSequenceOutputOnDeck(deck, { blackoutIfAlone = true } = {}) {
+  const ds = activeSequences[deck];
+  if (!ds || !ds.playing) return;
+  const others = getPlayingSequenceDecks().filter((d) => d !== deck);
+  ds.playing = false;
+  stopPlaybackTimer(deck);
+  if (others.length > 0) {
+    const survivor = others.length === 1
+      ? others[0]
+      : (pickDominantSequenceDeckRaw(others) ?? others[0]);
+    sequenceOutputOwnerLatch = survivor;
+    _seqMixHold.deck = survivor;
+    refreshSequenceOutputAfterMixChange();
+  } else if (blackoutIfAlone) {
+    blackoutDeckFixtures(deck);
+    _seqMixHold.deck = null;
+    sequenceOutputOwnerLatch = null;
+  }
+  broadcast({ type: 'seq_playing', deck, playing: false });
 }
 
 /** True when this deck has received OS2L time recently (local VDJ or satellite forward). */
@@ -4860,12 +5238,7 @@ function deckHasTrack(deck, trackId) {
 
 /** Stop sequence output on a deck without unloading (e.g. while generating a new sequence). */
 function pauseSequenceOutput(deck) {
-  const ds = activeSequences[deck];
-  if (!ds || !ds.playing) return;
-  ds.playing = false;
-  stopPlaybackTimer(deck);
-  blackoutDeckFixtures(deck);
-  broadcast({ type: 'seq_playing', deck, playing: false });
+  stopSequenceOutputOnDeck(deck);
 }
 
 /**
@@ -4890,15 +5263,13 @@ function loadGeneratedSequenceOntoDeck(deck, generatedSeq, trackId) {
   if (!generatedSeq.cues && generatedSeq.id) {
     generatedSeq.cues = db.getSequenceCues(generatedSeq.id);
   }
-  touchOverrides.os2lOverrideFixtures.clear();
-  touchOverrides.colorOverrideFixtures.clear();
-  touchOverrides.movementOverrideFixtures.clear();
-  touchOverrides.smokeOverrideFixtures.clear();
-  touchOverrides.atmosphereOverrideFixtures.clear();
-  clearSequenceColorOverride();
-  clearSequenceBlockingOverrides();
 
   const deckIsPlaying = isDeckPlaying(deck);
+  const preserveLiveOutput = otherDecksHaveLiveSequenceOutput(deck);
+  if (deckIsPlaying || !preserveLiveOutput) {
+    clearOverridesForSequenceLoad();
+  }
+
   const existing = activeSequences[deck];
   // Satellite forwards OS2L after sync — treat matching filepath as live even before play sync
   const satelliteDeckLive = !isHubOs2lLocal() && deckPathMatchesTrack(deck, trackId);
@@ -4935,18 +5306,24 @@ function loadGeneratedSequenceOntoDeck(deck, generatedSeq, trackId) {
     return;
   }
 
-  deactivateScene();
   stopPlaybackTimer(deck);
-  blackoutDeckFixtures(deck);
+  if (!preserveLiveOutput) {
+    deactivateScene();
+    blackoutDeckFixtures(deck);
+  }
+  const timeMs = typeof state.decks[deck]?.time === 'number' && state.decks[deck].time >= 0
+    ? state.decks[deck].time
+    : 0;
   activeSequences[deck] = {
     sequence: generatedSeq,
     cuesByStart: sortCuesByStart(generatedSeq.cues),
     lastTimeMs: -1,
     playing: false,
-    currentTimeMs: 0,
-    vdjDriven: false,
+    currentTimeMs: timeMs,
+    vdjDriven: shouldUseVdjTime(deck),
   };
   broadcast({ type: 'seq_loaded', deck, sequence: sequenceForClient(generatedSeq) });
+  if (preserveLiveOutput) refreshSequenceOutputAfterMixChange();
 }
 
 /** Begin sequence playback after load/generation — seeds playhead and emits DMX immediately. */
@@ -4962,8 +5339,29 @@ function startSequencePlayback(deck) {
   ds._endActionApplied = false;
 
   startPlaybackTimer(deck);
-  processSequenceAtTime(deck, timeMs);
+  const playing = getPlayingSequenceDecks();
+  const owner = playing.length ? resolveSequenceOutputOwner(playing) : deck;
+  if (owner === deck) processSequenceAtTime(deck, timeMs);
+  else refreshSequenceOutputAfterMixChange();
   broadcast({ type: 'seq_playing', deck, playing: true });
+}
+
+/** One sequence tick while VDJ playhead is driven by OS2L (called from playback timer, not each OS2L message). */
+function runVdjLinkedSequenceTick(deck, ds, timeMs, lastBroadcastRef) {
+  if (!isDeckPlaying(deck)) {
+    if (ds.playing) stopSequenceOutputOnDeck(deck);
+    return;
+  }
+  if (shouldEndSequenceByPlayhead(deck, ds, timeMs)) {
+    applySequenceEndAction(deck);
+    return;
+  }
+  processSequenceAtTime(deck, timeMs);
+  const now = Date.now();
+  if (now - lastBroadcastRef.at >= 66) {
+    lastBroadcastRef.at = now;
+    broadcast({ type: 'seq_time', deck, timeMs });
+  }
 }
 
 // Start a standalone playback timer for a deck (runs when VDJ isn't driving time)
@@ -4976,10 +5374,17 @@ function startPlaybackTimer(deck) {
   deckSeq.startOffset = deckSeq.currentTimeMs || 0;
 
   const TICK_MS = 10; // ~100 Hz for DMX processing (audio-reactive needs fast updates)
-  let _lastSeqTimeBroadcast = 0;
+  const _lastSeqTimeBroadcast = { at: 0 };
+  let _staleOs2lCheckTick = 0;
   playbackTimers[deck] = setInterval(() => {
     const ds = activeSequences[deck];
     if (!ds || !ds.playing) { stopPlaybackTimer(deck); return; }
+
+    const multiPlaying = getPlayingSequenceDecks();
+    if (multiPlaying.length > 1) {
+      const owner = resolveSequenceOutputOwner(multiPlaying);
+      if (owner != null && owner !== deck) return;
+    }
 
     // If VDJ/Serato is driving time, extrapolate between sparse Remote playhead updates.
     if (ds.vdjDriven) {
@@ -4998,22 +5403,34 @@ function startPlaybackTimer(deck) {
             applySequenceEndAction(deck);
             return;
           }
-          processSequenceAtTime(deck, t);
-          const now = Date.now();
-          if (now - _lastSeqTimeBroadcast >= 66) {
-            _lastSeqTimeBroadcast = now;
-            broadcast({ type: 'seq_time', deck, timeMs: t });
-            scheduleBroadcast();
-          }
+          runVdjLinkedSequenceTick(deck, ds, t, _lastSeqTimeBroadcast);
+          scheduleBroadcast();
         }
         return;
       }
       const vdjTimeGapMs = isHubOs2lLocal() ? 500 : 2000;
-      if (gap < vdjTimeGapMs) return;
-      if (isHubOs2lLocal()) return;
+      if (gap < vdjTimeGapMs) {
+        const t = ds.currentTimeMs ?? state.decks[deck]?.time ?? 0;
+        runVdjLinkedSequenceTick(deck, ds, t, _lastSeqTimeBroadcast);
+        if (++_staleOs2lCheckTick % 25 === 0) maybePauseSequenceFromStaleOs2lTime(deck);
+        return;
+      }
+      if (isHubOs2lLocal()) {
+        maybePauseSequenceFromStaleOs2lTime(deck);
+        return;
+      }
+      if (!isDeckPlaying(deck)) {
+        maybePauseSequenceFromStaleOs2lTime(deck);
+        return;
+      }
       ds.vdjDriven = false;
       ds.startWall = Date.now();
       ds.startOffset = ds.currentTimeMs || 0;
+    }
+
+    if (!isDeckPlaying(deck)) {
+      if (ds.playing) stopSequenceOutputOnDeck(deck);
+      return;
     }
 
     const elapsedMs = Date.now() - ds.startWall;
@@ -5029,8 +5446,8 @@ function startPlaybackTimer(deck) {
 
     // Broadcast playhead position to frontend (throttled to ~15Hz to reduce WS traffic)
     const now = Date.now();
-    if (now - _lastSeqTimeBroadcast >= 66) {
-      _lastSeqTimeBroadcast = now;
+    if (now - _lastSeqTimeBroadcast.at >= 66) {
+      _lastSeqTimeBroadcast.at = now;
       broadcast({ type: 'seq_time', deck, timeMs: ds.currentTimeMs });
     }
   }, TICK_MS);
@@ -5081,12 +5498,29 @@ function applySequenceEndAction(deck) {
   broadcast({ type: 'seq_playing', deck, playing: false });
 
   const action = _cachedMixerConfig.endAction;
+  const othersStillPlaying = getPlayingSequenceDecks();
   if (action === 'blackout') {
-    blackoutDeckFixtures(deck);
-    console.log(`[SEQ] Sequence ended on deck ${deck} — blackout`);
+    if (othersStillPlaying.length > 0) {
+      for (const d of othersStillPlaying) {
+        const other = activeSequences[d];
+        const t = other?.currentTimeMs ?? state.decks[d]?.time ?? 0;
+        processSequenceAtTime(d, t);
+      }
+      console.log(`[SEQ] Sequence ended on deck ${deck} — handed output to other deck(s)`);
+    } else {
+      blackoutDeckFixtures(deck);
+      console.log(`[SEQ] Sequence ended on deck ${deck} — blackout`);
+    }
   } else if (action === 'scene') {
-    // Blackout first, then activate the default scene
-    blackoutDeckFixtures(deck);
+    if (othersStillPlaying.length > 0) {
+      for (const d of othersStillPlaying) {
+        const other = activeSequences[d];
+        const t = other?.currentTimeMs ?? state.decks[d]?.time ?? 0;
+        processSequenceAtTime(d, t);
+      }
+    } else {
+      blackoutDeckFixtures(deck);
+    }
     const defaultScene = db.getDefaultScene();
     if (defaultScene) {
       activateScene(defaultScene.id);
@@ -5553,40 +5987,14 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
 
   try {
 
-  // ── Crossfader: gate, blend, or off ────────────────────────────────────
-  let crossfaderLevel = 1; // 0–1 multiplier for crossfader blending
-
-  const cfMode = _cachedMixerConfig.crossfaderMode || 'gate';
-  const legacyGating = _cachedMixerConfig.crossfaderGating;
-
-  if (cfMode === 'blend' && (deckNum === 1 || deckNum === 2)) {
-    const cf = parseFloat(state.crossfader) || 0; // 0 = full deck 1, 1 = full deck 2
-    crossfaderLevel = deckNum === 1 ? Math.max(0, Math.min(1, 1 - cf)) : Math.max(0, Math.min(1, cf));
-    // If level is near zero, blackout and skip
-    if (crossfaderLevel < 0.01) {
-      if (!deckSeq._gated) {
-        deckSeq._gated = true;
-        blackoutDeckFixtures(deckNum);
-      }
-      return;
-    }
-    if (deckSeq._gated) deckSeq._gated = false;
-  } else if ((cfMode === 'gate' || legacyGating) && cfMode !== 'off') {
-    // Legacy binary gating
-    if (legacyGating || cfMode === 'gate') {
-      const cf = parseFloat(state.crossfader) || 0;
-      const gated = (deckNum === 1 && cf > 0.5) || (deckNum === 2 && cf < 0.55);
-      if (gated) {
-        if (!deckSeq._gated) {
-          deckSeq._gated = true;
-          blackoutDeckFixtures(deckNum);
-        }
-        return;
-      }
-      if (deckSeq._gated) deckSeq._gated = false;
-    }
+  // ── Dual-deck mix: one sequence owns DMX at a time (crossfader picks winner) ──
+  const outputAuth = getSequenceOutputAuthority(deckNum, opts);
+  if (!outputAuth.write) {
+    deckSeq.lastTimeMs = timeMs;
+    return;
   }
-  // cfMode === 'off' or decks 3-4: crossfaderLevel stays 1
+  let crossfaderLevel = outputAuth.level;
+  if (deckSeq._gated) deckSeq._gated = false;
 
   // ── Deck fader dimmer: scale output by deck volume fader ──
   const deckLevel = _cachedMixerConfig.deckFaderDimmer
@@ -5954,6 +6362,7 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
   }
 
   deckSeq.lastTimeMs = timeMs;
+  broadcastSequenceOutputOwnerIfChanged();
 
   } catch (e) {
     console.error(`[SEQ] Playback error on deck ${deckNum} @ ${Math.round(timeMs)}ms:`, e.message);
@@ -6659,7 +7068,7 @@ async function bootstrapAfterListen() {
     if (isDenonEngineActive()) {
       await denonStagelinq.start({
         getConfig: (key) => db.getConfig(key),
-        onSubscribed: handleOs2lSubscribed,
+        onSubscribed: ingestOs2lSubscribed,
         scheduleBroadcast,
         state,
         eventLog,
@@ -6668,7 +7077,7 @@ async function bootstrapAfterListen() {
     } else if (isSeratoActive()) {
       await seratoDj.start({
         getConfig: (key) => db.getConfig(key),
-        onSubscribed: handleOs2lSubscribed,
+        onSubscribed: ingestOs2lSubscribed,
         touchDeckPlayhead: (deckId) => {
           vdjTimeLastAt[deckId] = Date.now();
         },
@@ -6750,7 +7159,7 @@ async function hubStartupAfterListen() {
     hubRoutes.init({
       db,
       audioAnalyzer,
-      handleOs2lSubscribed,
+      handleOs2lSubscribed: ingestOs2lSubscribed,
       handleOs2lButton: os2l.handleButtonAction,
       broadcast,
       getAnalysisConfig,
@@ -6792,7 +7201,7 @@ async function hubStartupAfterListen() {
   applyTouchDimmerChain,
   applyInvert,
   isAnySequencePlaying,
-  onMessage: handleOs2lSubscribed,
+  onMessage: ingestOs2lSubscribed,
   setBlackoutHold,
     });
 

@@ -624,11 +624,7 @@ function handleOs2lSubscribed(data) {
   const deck = vdjDeckToLogical(vdjDeck);
   if (deck === null || !state.decks[deck]) return;
 
-  let nextValue = value;
-  if (typeof value === 'string') {
-    if (value === 'on') nextValue = 1;
-    else if (value === 'off') nextValue = 0;
-  }
+  let nextValue = os2l.normalizeSubscribedValue(key, value);
   if (key === 'filepath' && typeof nextValue === 'string') {
     nextValue = normalizeVdjFilepath(nextValue);
   }

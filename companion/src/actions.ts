@@ -24,6 +24,9 @@ export type ActionsSchema = {	dmx_output: { options: { mode: string } }
 	sequence_play: { options: { deck: number } }
 	sequence_pause: { options: { deck: number } }
 	sequence_unload: { options: { deck: number } }
+	sequence_output_deck: { options: { deck: number } }
+	sequence_output_next: { options: Record<string, never> }
+	sequence_output_auto: { options: Record<string, never> }
 	refresh_lists: { options: Record<string, never> }
 }
 
@@ -665,6 +668,52 @@ export function UpdateActions(self: ModuleInstance): void {
 				if (!requireClient(self, client, 'sequence_unload')) return
 				client!.sendSequenceCommand('unload', Number(event.options.deck))
 				self.checkAllFeedbacks()
+			},
+		},
+
+		sequence_output_deck: {
+			name: 'Sequence: Output Deck (hold)',
+			description: 'Force sequence DMX from this deck until Auto is pressed or crossfader auto mode is restored.',
+			options: [
+				{
+					id: 'deck',
+					type: 'number',
+					label: 'Deck',
+					default: 1,
+					min: 1,
+					max: 4,
+				},
+			],
+			callback: async (event) => {
+				const deck = Number(optionValue(event.options.deck))
+				logAction(self, 'sequence_output_deck', { deck })
+				if (!requireClient(self, client, 'sequence_output_deck')) return
+				await client!.setSequenceOutputOwner({ mode: 'deck', deck })
+				self.checkFeedbacks('sequence_output_owner')
+			},
+		},
+
+		sequence_output_next: {
+			name: 'Sequence: Output Next Deck',
+			description: 'Cycle which playing deck drives sequence DMX (manual hold).',
+			options: [],
+			callback: async () => {
+				logAction(self, 'sequence_output_next', {})
+				if (!requireClient(self, client, 'sequence_output_next')) return
+				await client!.setSequenceOutputOwner({ mode: 'cycle' })
+				self.checkFeedbacks('sequence_output_owner')
+			},
+		},
+
+		sequence_output_auto: {
+			name: 'Sequence: Output Auto (crossfader)',
+			description: 'Follow crossfader / auto mix for sequence DMX owner.',
+			options: [],
+			callback: async () => {
+				logAction(self, 'sequence_output_auto', {})
+				if (!requireClient(self, client, 'sequence_output_auto')) return
+				await client!.setSequenceOutputOwner({ mode: 'auto' })
+				self.checkFeedbacks('sequence_output_owner')
 			},
 		},
 

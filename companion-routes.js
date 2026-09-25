@@ -13,6 +13,7 @@ let touchOverrides;
 let broadcast;
 let getSeqNoMirrorSpin;
 let setSeqNoMirrorSpin;
+let applySequenceOutputOwner;
 
 function init(deps) {
   midiController = deps.midiController;
@@ -21,6 +22,11 @@ function init(deps) {
   broadcast = deps.broadcast || null;
   getSeqNoMirrorSpin = deps.getSeqNoMirrorSpin || (() => false);
   setSeqNoMirrorSpin = deps.setSeqNoMirrorSpin || null;
+  if (deps.applySequenceOutputOwner) applySequenceOutputOwner = deps.applySequenceOutputOwner;
+}
+
+function setApplySequenceOutputOwner(fn) {
+  applySequenceOutputOwner = typeof fn === 'function' ? fn : null;
 }
 
 function resolveCompanionColorMode(mode) {
@@ -109,6 +115,16 @@ function registerRoutes(app) {
           `[Companion] color raw=${rawMode} resolved=${mode} push=${touchOverrides.companionColorPushMode}`,
           action_data || {},
         );
+      } else if (action_type === 'seq_output_owner') {
+        if (!applySequenceOutputOwner) {
+          return res.status(503).json({ error: 'Sequence output owner not available' });
+        }
+        const data = action_data || req.body || {};
+        const result = applySequenceOutputOwner({
+          mode: data.mode || (data.deck != null ? 'deck' : 'auto'),
+          deck: data.deck,
+        });
+        return res.json(result);
       } else {
         console.log(`[Companion] ${action_type} mode=${mode || 'momentary'}`, action_data || {});
       }
@@ -179,4 +195,4 @@ function writeConfigFiles({ host = '127.0.0.1', port = 80, outDir } = {}) {
   }
 }
 
-module.exports = { init, registerRoutes, writeConfigFiles };
+module.exports = { init, registerRoutes, writeConfigFiles, setApplySequenceOutputOwner };

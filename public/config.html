@@ -468,7 +468,7 @@
         </div>
         <div class="config-card" style="margin-top:16px">
           <h4>Module Setup</h4>
-          <p class="config-desc" style="margin-bottom:0">Install the DMX Controller module in Companion (developer path → repo root). See <code>companion/companion/HELP.md</code> in the project for build and connection steps.</p>
+          <p class="config-desc" style="margin-bottom:0">Install the DMX Controller module in Companion (developer path → repo root). <a href="/docs/companion" target="_blank" rel="noopener" style="color:var(--accent)">Companion module setup guide</a> (build, connection, sequence output buttons).</p>
         </div>
       </div>
     </div>
@@ -872,7 +872,8 @@
               <label>Crossfader Mode</label>
               <select id="cfgSeqCrossfaderMode" style="width:180px"><option value="off">Off (no effect)</option><option value="gate">Gate (binary cut)</option><option value="blend">Blend (proportional)</option></select>
             </div>
-            <p class="config-desc" style="margin:-4px 0 8px 0;font-size:11px"><b>Gate</b>: hard cut at crossfader midpoint. <b>Blend</b>: proportionally dims each deck.</p>
+            <p class="config-desc" style="margin:-4px 0 8px 0;font-size:11px"><b>Gate</b>: hard cut at crossfader midpoint. <b>Blend</b>: crossfader picks one sequence at a time (dims that deck when both are playing).</p>
+            <div class="config-row"><label>Dual-deck DMX</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqDualDeckExclusive" style="width:16px;height:16px;accent-color:var(--accent)" checked><span style="font-size:12px">Single sequence output when multiple decks play (leave on — off causes flicker)</span></label></div>
             <div class="config-row" id="cfgSeqCrossfaderGatingRow" style="display:none"><label>Legacy Gating Override</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqCrossfaderGating" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Enable legacy gating</span></label></div>
             <div class="config-row"><label>Deck Fader as Dimmer</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cfgSeqDeckFaderDimmer" style="width:16px;height:16px;accent-color:var(--accent)"><span style="font-size:12px">Scale sequence output brightness by each deck's volume fader level</span></label></div>
           </div>
