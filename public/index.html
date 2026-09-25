@@ -14,6 +14,8 @@
     <p class="boot-sub">Starting services…</p>
     <ul id="bootSteps" class="boot-steps"></ul>
     <p class="boot-hint">The page is connected; lighting and deck control activate when startup finishes.</p>
+    <button id="bootCancelImport" class="btn" type="button" hidden onclick="cancelBootImport()">Stop library import</button>
+    <p id="bootCancelStatus" class="boot-hint" role="status" hidden></p>
     <p id="bootError" class="boot-error" hidden></p>
   </div>
 </div>
@@ -3454,12 +3456,48 @@ function patchBootLibraryImportDetail(msg) {
   detailEl.textContent = detail;
 }
 
+async function cancelBootImport() {
+  const button = document.getElementById('bootCancelImport');
+  const status = document.getElementById('bootCancelStatus');
+  button.disabled = true;
+  status.hidden = false;
+  status.textContent = 'Requesting stop…';
+  try {
+    const response = await authFetch('/api/boot/cancel-import', { method: 'POST' });
+    if (!response || !response.ok) throw new Error('Could not stop the import. Check your connection and sign in if required.');
+    renderBootOverlay(await response.json());
+  } catch (error) {
+    status.textContent = error.message;
+    button.disabled = false;
+  }
+}
+
 function renderBootOverlay(boot, errorMsg) {
   const overlay = document.getElementById('bootOverlay');
   const list = document.getElementById('bootSteps');
   const errEl = document.getElementById('bootError');
   if (!overlay || !list || !boot) return;
+  const cancelButton = document.getElementById('bootCancelImport');
+  const cancelStatus = document.getElementById('bootCancelStatus');
+  if (cancelButton) {
+    cancelButton.hidden = !boot.canCancelImport && !boot.importCancelRequested;
+    cancelButton.disabled = !boot.canCancelImport;
+  }
+  if (cancelStatus && boot.importCancelRequested) {
+    cancelStatus.hidden = false;
+    const stopped = boot.steps?.some(s => s.id === 'library' && s.status === 'cancelled');
+    cancelStatus.textContent = stopped
+      ? 'Library import stopped. Completed batches were kept; finishing startup…'
+      : 'Stopping library import. Completed batches are kept; other startup steps continue.';
+  }
   if (boot.ready) {
+    if (boot.steps?.some(s => s.id === 'library' && s.status === 'cancelled') && !overlay.hidden) {
+      // Keep the final outcome visible after the startup overlay closes.
+      const notice = document.createElement('div');
+      notice.className = 'boot-hint'; notice.setAttribute('role', 'status');
+      notice.textContent = 'Ready — startup library import stopped. Existing tracks and completed batches were kept.';
+      overlay.insertAdjacentElement('afterend', notice);
+    }
     overlay.hidden = true;
     document.body.classList.remove('hub-booting');
     const txt = document.getElementById('statusText');
@@ -3471,7 +3509,7 @@ function renderBootOverlay(boot, errorMsg) {
   overlay.hidden = false;
   document.body.classList.add('hub-booting');
   list.innerHTML = (boot.steps || []).map((s) => {
-    const icon = s.status === 'done' ? '✓' : s.status === 'running' ? '…' : s.status === 'error' ? '!' : '○';
+    const icon = s.status === 'cancelled' ? '–' : s.status === 'done' ? '✓' : s.status === 'running' ? '…' : s.status === 'error' ? '!' : '○';
     const detail = s.detail ? ` <span class="boot-detail">${esc(s.detail)}</span>` : '';
     return `<li class="boot-step boot-${s.status}" data-boot-id="${esc(s.id)}"><span class="boot-step-icon">${icon}</span><span>${esc(s.label)}</span>${detail}</li>`;
   }).join('');

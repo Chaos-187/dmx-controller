@@ -188,6 +188,8 @@ function broadcast(data) {
 
 // ─── Boot progress (web UI loads before heavy startup work finishes) ─────────
 
+const startupImportController = new AbortController();
+
 const bootState = {
   ready: false,
   startedAt: Date.now(),
@@ -207,6 +209,8 @@ const bootState = {
 
 function bootSnapshot() {
   return {
+    canCancelImport: !bootState.ready && !startupImportController.signal.aborted && bootState.steps.some(s => s.id === 'library' && s.status === 'running'),
+    importCancelRequested: startupImportController.signal.aborted,
     ready: bootState.ready,
     startedAt: bootState.startedAt,
     readyAt: bootState.readyAt,
@@ -907,7 +911,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {
   if (bootState.ready) return next();
   const p = req.path;
-  if (p === '/api/boot/status' || p === '/api/auth/status' || p === '/api/auth/login' || p === '/api/dj/providers') return next();
+  if (p === '/api/boot/cancel-import' || p === '/api/boot/status' || p === '/api/auth/status' || p === '/api/auth/login' || p === '/api/dj/providers') return next();
   if (p.startsWith('/api/')) {
     return res.status(503).json({ error: 'Hub is still starting', boot: bootSnapshot() });
   }
@@ -917,6 +921,18 @@ app.use((req, res, next) => {
 // ─── Auth API ───────────────────────────────────────────────────────────────
 
 app.get('/api/boot/status', (req, res) => {
+  res.json(bootSnapshot());
+});
+
+// Only the optional startup library import can be stopped; services still initialize.
+app.post('/api/boot/cancel-import', (req, res, next) => {
+  if (!bootSnapshot().canCancelImport) {
+    return res.status(startupImportController.signal.aborted ? 200 : 409).json(bootSnapshot());
+  }
+  requireAuth(req, res, next);
+}, (req, res) => {
+  startupImportController.abort();
+  setBootStep('library', 'running', 'Stopping import after current work…');
   res.json(bootSnapshot());
 });
 
@@ -6328,7 +6344,8 @@ function broadcastVdjImportProgress(phase, data, updateBootStep) {
   if (detail) setBootStep('library', 'running', detail);
 }
 
-function parseVdjDatabaseInWorker(xmlPath, { onParseProgress } = {}) {
+function parseVdjDatabaseInWorker(xmlPath, { onParseProgress, signal } = {}) {
+  signal?.throwIfAborted();
   const { Worker } = require('worker_threads');
   let workerPath = path.resolve(__dirname, 'workers', 'vdj-parse-worker.js');
   if (!fs.existsSync(workerPath)) {
@@ -6339,16 +6356,23 @@ function parseVdjDatabaseInWorker(xmlPath, { onParseProgress } = {}) {
     return Promise.reject(new Error(`VDJ parse worker not found at ${workerPath}`));
   }
   return new Promise((resolve, reject) => {
-    const worker = new Worker(workerPath, { workerData: { xmlPath } });
+    const cacheFile = path.join(require('os').tmpdir(), `thaluxis-vdj-${require('crypto').randomUUID()}.json`);
+    const worker = new Worker(workerPath, { workerData: { xmlPath, cacheFile } });
     let settled = false;
-    const finish = (err, tracks) => {
+    const onAbort = () => finish(signal.reason);
+    const finish = async (err, tracks) => {
       if (settled) return;
       settled = true;
-      worker.terminate().catch(() => {});
+      signal?.removeEventListener('abort', onAbort);
+      await worker.terminate().catch(() => {});
+      try { fs.unlinkSync(cacheFile); } catch { /* removed already or not written */ }
       if (err) reject(err);
       else resolve(tracks);
     };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
     worker.on('message', (m) => {
+      if (settled) return;
       if (!m || typeof m !== 'object') return;
       // Node --watch (npm run dev) emits internal watch:require on worker message ports.
       if (m.vdjParse !== true) return;
@@ -6381,7 +6405,7 @@ function parseVdjDatabaseInWorker(xmlPath, { onParseProgress } = {}) {
   });
 }
 
-async function runVdjLibraryImport({ force = false, updateBootStep = false } = {}) {
+async function runVdjLibraryImport({ force = false, updateBootStep = false, signal } = {}) {
   if (isAlternateDjProviderActive() && !force) {
     const msg = 'Alternate DJ provider active';
     if (updateBootStep) setBootStep('library', 'done', msg);
@@ -6401,6 +6425,7 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
   vdjImportInProgress = true;
 
   try {
+    signal?.throwIfAborted();
     let xmlPath = plan.xmlPath || resolveVdjXmlPath();
     if (!xmlPath) {
       const msg = 'No database path configured';
@@ -6432,6 +6457,7 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
     let tracks;
     try {
       tracks = await parseVdjDatabaseInWorker(xmlPath, {
+        signal,
         onParseProgress: (p) => {
           broadcastVdjImportProgress('parse', {
             detail: p.detail,
@@ -6441,6 +6467,9 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
         },
       });
     } catch (workerErr) {
+      signal?.throwIfAborted();
+      // A startup fallback on the main thread would make Stop unresponsive.
+      if (signal) throw workerErr;
       console.warn(`[VDJ] Background parse failed (${workerErr.message}) — parsing on main thread`);
       await require('./lib/yield').yieldToEventLoop();
       tracks = vdjParser.parseVdjDatabase(xmlPath, {
@@ -6459,13 +6488,16 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
       total: tracks.length,
     }, updateBootStep);
 
+    signal?.throwIfAborted();
     const result = await db.importTracksBatched(tracks, {
+      signal,
       batchSize: 150,
       onProgress: (done, total) => {
         broadcastVdjImportProgress('import', { done, total }, updateBootStep);
       },
     });
 
+    signal?.throwIfAborted();
     const xmlCount = tracks.length;
     const hubCount = db.getTrackStats().total;
     const mergedCount = Math.max(0, xmlCount - hubCount);
@@ -6493,6 +6525,12 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
     broadcast({ type: 'vdj_import', phase: 'done', ...summary });
     return summary;
   } catch (e) {
+    if (signal?.aborted) {
+      const detail = 'Import stopped. Existing tracks and completed batches kept; startup continues.';
+      if (updateBootStep) setBootStep('library', 'cancelled', detail);
+      broadcast({ type: 'vdj_import', phase: 'cancelled', detail });
+      return { cancelled: true };
+    }
     console.error(`[VDJ] Failed to load database: ${e.message}`);
     if (updateBootStep) setBootStep('library', 'done', `Import failed: ${e.message}`);
     broadcast({ type: 'vdj_import', phase: 'error', error: e.message });
@@ -6503,7 +6541,7 @@ async function runVdjLibraryImport({ force = false, updateBootStep = false } = {
 }
 
 async function loadVdjDatabaseAsync() {
-  return runVdjLibraryImport({ force: false, updateBootStep: true });
+  return runVdjLibraryImport({ force: false, updateBootStep: true, signal: startupImportController.signal });
 }
 
 /** Mirror DMX writes into dmx-shadow for the rig output visualizer. */

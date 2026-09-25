@@ -1015,7 +1015,8 @@ async function initAsync(onProgress) {
   }
 }
 
-async function importTracksBatched(trackArray, { batchSize = 150, onProgress } = {}) {
+async function importTracksBatched(trackArray, { batchSize = 150, onProgress, signal } = {}) {
+  signal?.throwIfAborted();
   if (!trackArray?.length) {
     return { inserted: 0, updated: 0, pathUpdated: 0, duplicatesRemoved: 0, total: 0 };
   }
@@ -1027,6 +1028,8 @@ async function importTracksBatched(trackArray, { batchSize = 150, onProgress } =
   const total = trackArray.length;
 
   for (let i = 0; i < total; i += batchSize) {
+    // Each batch is a transaction; cancellation keeps completed batches intact.
+    signal?.throwIfAborted();
     const slice = trackArray.slice(i, i + batchSize);
     const r = importTracks(slice);
     inserted += r.inserted || 0;
@@ -1035,6 +1038,7 @@ async function importTracksBatched(trackArray, { batchSize = 150, onProgress } =
     duplicatesRemoved += r.duplicatesRemoved || 0;
     if (onProgress) onProgress(Math.min(i + slice.length, total), total);
     await yieldToEventLoop();
+    signal?.throwIfAborted();
   }
 
   return { inserted, updated, pathUpdated, duplicatesRemoved, total };
