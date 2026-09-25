@@ -3694,21 +3694,42 @@ function buildTrackImportIndex() {
   return index;
 }
 
+/**
+ * Pick the hub row to update for an incoming VDJ track.
+ *
+ * Identity / audio-sig matching runs first so drive-letter moves keep sequences
+ * on the canonical row. If that row would need to claim a filepath already
+ * owned by another protected row (has sequence or analysis), prefer the path
+ * owner — otherwise UPDATE would hit UNIQUE(tracks.filepath) and abort import.
+ */
 function resolveExistingId(track, index) {
+  const pathOwner = track.filepath ? index.byExactPath.get(track.filepath) : null;
+
+  const preferIdentityOrPath = (candidate) => {
+    if (!candidate) return null;
+    if (!pathOwner || pathOwner.id === candidate.id) return candidate.id;
+    // Path occupied by another row. Only steal it when the occupant is stale
+    // (no sequence/analysis) — clearStaleDuplicateAtPath will delete it.
+    if (pathOwner.has_seq || pathOwner.has_an) return pathOwner.id;
+    return candidate.id;
+  };
+
   if (normTrackTag(track.title)) {
     const full = index.byIdentityFull.get(identityFullKey(track.author, track.title, track.remix));
-    if (full) return full.id;
+    const fromFull = preferIdentityOrPath(full);
+    if (fromFull) return fromFull;
     const titleOnly = index.byIdentityTitle.get(identityTitleKey(track.author, track.title));
-    if (titleOnly) return titleOnly.id;
+    const fromTitle = preferIdentityOrPath(titleOnly);
+    if (fromTitle) return fromTitle;
   }
 
   if (track.audio_sig) {
     const bySig = index.byAudioSig.get(track.audio_sig);
-    if (bySig) return bySig.id;
+    const fromSig = preferIdentityOrPath(bySig);
+    if (fromSig) return fromSig;
   }
 
-  const exact = index.byExactPath.get(track.filepath);
-  if (exact) return exact.id;
+  if (pathOwner) return pathOwner.id;
 
   const suffix = pathSuffixKey(track.filepath);
   if (suffix) {
@@ -3799,14 +3820,21 @@ function importTracks(trackArray) {
     let duplicatesRemoved = 0;
 
     for (const track of tracks) {
-      const existingId = resolveExistingId(track, index);
+      let existingId = resolveExistingId(track, index);
 
       if (existingId) {
-        const oldFilepath = index.filepathById.get(existingId);
         if (clearStaleDuplicateAtPath(index, existingId, track.filepath, deleteTrack)) {
           duplicatesRemoved++;
         }
 
+        // Defense in depth: never UPDATE another row onto a filepath that is
+        // still owned (protected path owner was not cleared above).
+        const pathOwner = index.byExactPath.get(track.filepath);
+        if (pathOwner && pathOwner.id !== existingId) {
+          existingId = pathOwner.id;
+        }
+
+        const oldFilepath = index.filepathById.get(existingId);
         const pathChanged = oldFilepath && oldFilepath !== track.filepath;
         updateExisting.run({ ...track, id: existingId });
         updated++;
@@ -3817,6 +3845,7 @@ function importTracks(trackArray) {
 
         const prev = index.byIdentityFull.get(identityFullKey(track.author, track.title, track.remix))
           || index.byIdentityTitle.get(identityTitleKey(track.author, track.title))
+          || index.byExactPath.get(track.filepath)
           || { has_seq: false, has_an: false };
         registerTrackInIndex(index, existingId, track, {
           has_seq: prev.has_seq,
@@ -3831,11 +3860,17 @@ function importTracks(trackArray) {
         registerTrackInIndex(index, Number(result.lastInsertRowid), track, { has_seq: false, has_an: false });
       } catch (e) {
         if (String(e.message || '').includes('UNIQUE')) {
-          const byPath = index.byExactPath.get(track.filepath);
+          let byPath = index.byExactPath.get(track.filepath);
+          if (!byPath) {
+            const row = db.prepare('SELECT id FROM tracks WHERE filepath = ?').get(track.filepath);
+            if (row) byPath = { id: row.id, has_seq: false, has_an: false };
+          }
           if (byPath) {
             updateExisting.run({ ...track, id: byPath.id });
             updated++;
             registerTrackInIndex(index, byPath.id, track, byPath);
+          } else {
+            throw e;
           }
         } else {
           throw e;
