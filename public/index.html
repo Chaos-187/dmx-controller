@@ -3203,7 +3203,7 @@ function initRigOutputVisualizer() {
   if (!_rigOutputViz) {
     const canvas = document.getElementById('rigOutputVizCanvas');
     if (!canvas) return null;
-    _rigOutputViz = new RigOutputVisualizer(canvas, { mode: 'embedded' });
+    _rigOutputViz = new RigOutputVisualizer(canvas, { mode: 'embedded', hostWsDispatch: true });
     const cb = document.getElementById('rigOutputVizEnable');
     cb.checked = RigOutputVisualizer.isEnabledInStorage();
     _rigOutputViz.setEnabled(cb.checked);
@@ -3578,6 +3578,10 @@ function connect() {
     }
     if (msg.type === 'vdj_import') {
       patchBootLibraryImportDetail(msg);
+      return;
+    }
+    if (msg.type === 'rig_output') {
+      _rigOutputViz?.handleRigOutputMessage(msg);
       return;
     }
     if (msg.type === 'state') updateState(msg.state);

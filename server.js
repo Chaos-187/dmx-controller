@@ -1512,6 +1512,7 @@ app.get('/api/fixture-channel-map', (req, res) => {
 const rigOutputLive = { cache: null, dmxRev: -1, builtAt: 0 };
 let rigOutputWsSubs = 0;
 let rigOutputBroadcastTimer = null;
+const RIG_OUTPUT_BROADCAST_MS = 120;
 
 function countRigOutputWsSubs() {
   let n = 0;
@@ -1519,6 +1520,27 @@ function countRigOutputWsSubs() {
     if (client.readyState === 1 && client.rigOutputViz) n += 1;
   }
   return n;
+}
+
+function refreshRigOutputSubscriberCount() {
+  rigOutputWsSubs = countRigOutputWsSubs();
+  return rigOutputWsSubs;
+}
+
+function rigOutputHasSubscribers() {
+  return rigOutputWsSubs > 0;
+}
+
+function sendRigOutputToSubscribers(payload) {
+  const msg = JSON.stringify({
+    type: 'rig_output',
+    ts: payload.ts,
+    seq: payload.seq,
+    fixtures: payload.fixtures,
+  });
+  for (const client of wsClients) {
+    if (client.readyState === 1 && client.rigOutputViz) client.send(msg);
+  }
 }
 
 function getRigOutputPayload(includeRigElements) {
@@ -1541,25 +1563,26 @@ function getRigOutputPayload(includeRigElements) {
 }
 
 function syncRigOutputBroadcastLoop() {
-  rigOutputWsSubs = countRigOutputWsSubs();
+  refreshRigOutputSubscriberCount();
   if (rigOutputWsSubs <= 0) {
     if (rigOutputBroadcastTimer) {
       clearInterval(rigOutputBroadcastTimer);
       rigOutputBroadcastTimer = null;
     }
+    rigOutputLive.cache = null;
     return;
   }
   if (rigOutputBroadcastTimer) return;
   rigOutputBroadcastTimer = setInterval(() => {
-    rigOutputWsSubs = countRigOutputWsSubs();
-    if (rigOutputWsSubs <= 0) {
+    if (refreshRigOutputSubscriberCount() <= 0) {
       clearInterval(rigOutputBroadcastTimer);
       rigOutputBroadcastTimer = null;
+      rigOutputLive.cache = null;
       return;
     }
     const payload = getRigOutputPayload(false);
-    broadcast({ type: 'rig_output', ts: payload.ts, seq: payload.seq, fixtures: payload.fixtures });
-  }, 50);
+    sendRigOutputToSubscribers(payload);
+  }, RIG_OUTPUT_BROADCAST_MS);
 }
 
 function setWsRigOutputSubscribe(ws, on) {
@@ -6035,6 +6058,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     wsClients.delete(ws);
+    refreshRigOutputSubscriberCount();
     syncRigOutputBroadcastLoop();
     console.log('[WS] Browser client disconnected');
   });
@@ -6553,21 +6577,21 @@ function installDmxShadowTracking(server) {
 
   server.setChannel = (localUniverse, channel, value) => {
     origSetChannel(localUniverse, channel, value);
-    dmxShadow.setChannel(localUniverse, channel, value);
+    if (rigOutputHasSubscribers()) dmxShadow.setChannel(localUniverse, channel, value);
   };
   server.setChannels = (localUniverse, channels) => {
     origSetChannels(localUniverse, channels);
-    dmxShadow.setChannels(localUniverse, channels);
+    if (rigOutputHasSubscribers()) dmxShadow.setChannels(localUniverse, channels);
   };
   if (origSetFullUniverse) {
     server.setFullUniverse = (localUniverse, data) => {
       origSetFullUniverse(localUniverse, data);
-      dmxShadow.setFullUniverse(localUniverse, data);
+      if (rigOutputHasSubscribers()) dmxShadow.setFullUniverse(localUniverse, data);
     };
   }
   server.blackout = () => {
     origBlackout();
-    dmxShadow.blackout();
+    if (rigOutputHasSubscribers()) dmxShadow.blackout();
   };
 }
 
