@@ -13,6 +13,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { stripNpmCrossCompileEnv } = require('./scripts/native-rebuild-env');
 
 const ROOT = __dirname;
 const DIST = path.join(ROOT, 'dist');
@@ -78,10 +79,12 @@ function rebuildNativeModulesForPkg() {
   console.log('\nRebuilding native modules for pkg target (this may take a minute)...');
   console.log('(Close dmx-controller.exe if running — the .node file cannot be replaced while in use.)\n');
 
-  const rebuildEnv = {
-    ...process.env,
-    npm_config_disturl: 'https://nodejs.org/dist',
-  };
+  const gypFlags = [
+    'rebuild',
+    `--target=${PKG_NODE_VERSION}`,
+    '--arch=x64',
+    '--dist-url=https://nodejs.org/dist/',
+  ].join(' ');
 
   for (const mod of NATIVE_MODULES) {
     const modPath = path.join(ROOT, 'node_modules', mod);
@@ -89,29 +92,42 @@ function rebuildNativeModulesForPkg() {
       console.warn(`  SKIP (not installed): ${mod}`);
       continue;
     }
+    if (!fs.existsSync(path.join(modPath, 'binding.gyp'))) {
+      console.log(`  ${mod}: skip (no binding.gyp — uses prebuilds)`);
+      continue;
+    }
     console.log(`  rebuilding ${mod}...`);
-    execSync(
-      `npm rebuild ${mod} --build-from-source --target=${PKG_NODE_VERSION} --target_arch=x64 --target_platform=win32`,
-      {
-        cwd: ROOT,
-        stdio: 'inherit',
-        env: { ...process.env, npm_config_disturl: 'https://nodejs.org/dist' },
-      }
-    );
+    // npm 11+ rejects --target on `npm rebuild`; invoke node-gyp directly (no npm config warnings).
+    execSync(`npx --yes node-gyp@10 ${gypFlags}`, {
+      cwd: modPath,
+      stdio: 'inherit',
+      env: stripNpmCrossCompileEnv(),
+    });
   }
 
   console.log('Native rebuild complete.\n');
-  console.warn(
-    'Note: native modules in node_modules now target Node 24 (for the exe).',
-    'For local dev with another Node version, run: npm rebuild better-sqlite3 ftdi-d2xx usb\n'
-  );
+}
+
+function restoreNativeModulesForLocalDev() {
+  if (+process.versions.modules === PKG_NODE_ABI) return;
+
+  console.log('\nRestoring native modules for local dev…');
+  try {
+    execSync('node scripts/rebuild-native-dev.js', {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: stripNpmCrossCompileEnv(),
+    });
+  } catch {
+    console.warn('  WARN: local native restore failed — run: npm run rebuild:native:dev');
+  }
 }
 
 rebuildNativeModulesForPkg();
 
 // ─── Run pkg ────────────────────────────────────────────────────────────────
 
-console.log('\nRunning pkg...');
+console.log('\nRunning pkg (hub)...');
 try {
   execSync('npx pkg . --compress GZip', {
     cwd: ROOT,
@@ -119,6 +135,17 @@ try {
   });
 } catch (e) {
   console.error('\npkg failed. Make sure @yao-pkg/pkg is installed (npm install).');
+  process.exit(1);
+}
+
+console.log('\nRunning pkg (satellite)...');
+try {
+  execSync('npx pkg satellite-entry.js --compress GZip --targets node24-win-x64 --output dist/thaluxis-satellite.exe', {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+} catch (e) {
+  console.error('\nSatellite pkg failed.');
   process.exit(1);
 }
 
@@ -152,6 +179,8 @@ if (fs.existsSync(usbPrebuildsDir)) {
     copyFile(path.join(usbPrebuildsDir, f), path.join(usbDestDir, f));
   }
 }
+
+restoreNativeModulesForLocalDev();
 
 // ─── Copy optional plugins (external to pkg snapshot) ───────────────────────
 
@@ -190,6 +219,11 @@ if (fs.existsSync(serviceScriptsDir)) {
   }
 }
 
+const satExample = path.join(ROOT, 'satellite', 'config.example.json');
+if (fs.existsSync(satExample)) {
+  copyFile(satExample, path.join(DIST, 'satellite-config.example.json'));
+}
+
 // ─── Done ───────────────────────────────────────────────────────────────────
 
 console.log('\n=== Build complete ===');
@@ -202,6 +236,7 @@ for (const f of fs.readdirSync(DIST, { recursive: true })) {
     console.log(`  ${f} (${size} MB)`);
   }
 }
-console.log('\nTo run: dist\\dmx-controller.exe');
+console.log('\nTo run: dist\\dmx-controller.exe  (hub)');
+console.log('          dist\\thaluxis-satellite.exe  (VDJ laptop satellite)');
 console.log('Note: Database is stored in data/dmx-controller.db alongside the exe (created on first run if missing).');
-console.log('Service: run install-service.bat as Administrator (registers via sc.exe + run-service.bat).\n');
+console.log('Service: run install-service.bat as Administrator (hub) or install-satellite-service.bat (satellite).\n');

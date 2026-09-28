@@ -39,7 +39,7 @@ Build the installer locally after `npm run build`:
 npm run build:installer
 ```
 
-Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`iscc` on PATH).
+Requires [Inno Setup 6 or 7](https://jrsoftware.org/isinfo.php) (`iscc` on PATH or default install folder).
 
 ### Zip asset (auto-updater)
 
@@ -61,7 +61,9 @@ The zip includes:
 
 The **setup.exe** on GitHub Releases:
 
-- Installs to `C:\Program Files\EYUP Events\ThaluxisMaster\`
+- **Install type** (first wizard page): **Thaluxis Hub** (show PC) or **Thaluxis Satellite** (VirtualDJ laptop)
+- Hub installs to `C:\Program Files\EYUP Events\ThaluxisMaster\`
+- Satellite installs to `C:\Program Files\EYUP Events\ThaluxisSatellite\` (`thaluxis-satellite.exe`)
 - **Upgrades** an existing install in place (same AppId) — stops the service, replaces binaries, re-registers the service, preserves database
 - Creates Start Menu shortcuts (hub, config URL, service scripts)
 - Optional: desktop shortcut

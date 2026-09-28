@@ -22,13 +22,14 @@
     "build": "node build.js",
     "build:installer": "node scripts/build-installer.js",
     "release:prepare": "node scripts/release-prepare.js",
-    "rebuild:native": "npm rebuild better-sqlite3 ftdi-d2xx usb",
+    "rebuild:native": "node scripts/rebuild-native-dev.js",
     "rebuild:native:dev": "node scripts/rebuild-native-dev.js",
     "companion:config": "node companion/generate-config.cjs"
   },
   "pkg": {
     "assets": [
       "public/**/*",
+      "satellite/public/**/*",
       "node_modules/waveform-data/dist/**/*",
       "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "node_modules/better-sqlite3/build/Release/test_extension.node",
@@ -36,7 +37,17 @@
       "node_modules/usb/prebuilds/win32-x64/*.node"
     ],
     "scripts": [
+      "satellite-entry.js",
+      "satellite/server.js",
+      "satellite/lib/hub-client.js",
+      "satellite/lib/hub-registry.js",
+      "satellite/lib/event-log.js",
       "db.js",
+      "os2l.js",
+      "network-drives.js",
+      "thaluxis-brand.js",
+      "effects-engine.js",
+      "lib/console-ansi.js",
       "artnet-server.js",
       "artnet-worker.js",
       "dmx-usb-server.js",

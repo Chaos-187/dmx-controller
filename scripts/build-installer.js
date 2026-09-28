@@ -2,7 +2,7 @@
  * Build the Windows installer with Inno Setup (optional local step after npm run build).
  *
  * Usage: node scripts/build-installer.js
- * Requires Inno Setup 6 (iscc on PATH), e.g. choco install innosetup
+ * Requires Inno Setup 6 or 7 (iscc on PATH or default install folder).
  */
 
 const fs = require('fs');
@@ -18,9 +18,15 @@ if (!fs.existsSync(path.join(DIST, 'dmx-controller.exe'))) {
   console.error('dist/dmx-controller.exe not found — run npm run build first.');
   process.exit(1);
 }
+if (!fs.existsSync(path.join(DIST, 'thaluxis-satellite.exe'))) {
+  console.error('dist/thaluxis-satellite.exe not found — run npm run build first.');
+  process.exit(1);
+}
 
 const isccPaths = [
   'iscc',
+  'C:\\Program Files\\Inno Setup 7\\ISCC.exe',
+  'C:\\Program Files (x86)\\Inno Setup 7\\ISCC.exe',
   'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe',
   'C:\\Program Files\\Inno Setup 6\\ISCC.exe',
 ];

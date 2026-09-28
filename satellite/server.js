@@ -12,23 +12,38 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const Bonjour = require('bonjour-service').Bonjour;
 
-const ROOT = path.join(__dirname, '..');
-const DATA_DIR = path.join(__dirname, 'data');
-const CONFIG_PATH = path.join(__dirname, 'config.json');
+function satelliteInstallRoot() {
+  if (process.pkg) return path.dirname(process.execPath);
+  return __dirname;
+}
+
+function satelliteWritableRoot() {
+  const installRoot = satelliteInstallRoot();
+  if (process.pkg && /Program Files/i.test(installRoot)) {
+    return path.join(process.env.ProgramData || 'C:\\ProgramData', 'EYUP Events', 'ThaluxisSatellite');
+  }
+  if (process.pkg) return installRoot;
+  return __dirname;
+}
+
+const DATA_DIR = path.join(satelliteWritableRoot(), 'data');
+const CONFIG_PATH = path.join(satelliteWritableRoot(), 'config.json');
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 process.env.DMX_DB_PATH = path.join(DATA_DIR, 'satellite.db');
 
-const db = require(path.join(ROOT, 'db'));
-const os2l = require(path.join(ROOT, 'os2l'));
-const audioAnalyzer = require(path.join(ROOT, 'audio-analyzer'));
-const vdjParser = require(path.join(ROOT, 'vdj-parser'));
-const networkDrives = require(path.join(ROOT, 'network-drives'));
+const db = require('../db');
+const os2l = require('../os2l');
+const audioAnalyzer = require('../audio-analyzer');
+const vdjParser = require('../vdj-parser');
+const networkDrives = require('../network-drives');
 const HubClient = require('./lib/hub-client');
 const { HubRegistry, normalizeUrl } = require('./lib/hub-registry');
 const eventLog = require('./lib/event-log');
 
 eventLog.installConsoleHook();
-const brand = require(path.join(ROOT, 'thaluxis-brand'));
+const brand = require('../thaluxis-brand');
 const crypto = require('crypto');
 const os = require('os');
 
