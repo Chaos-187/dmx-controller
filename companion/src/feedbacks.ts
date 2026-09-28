@@ -17,6 +17,7 @@ export type FeedbacksSchema = {
 	color_toggle_mode: { type: 'boolean'; options: Record<string, never> }
 	color_push_mode: { type: 'boolean'; options: Record<string, never> }
 	sequence_playing: { type: 'boolean'; options: { deck: number } }
+	sequence_output_owner: { type: 'boolean'; options: { deck: number } }
 	mirror_spin_blocked: { type: 'boolean'; options: Record<string, never> }
 }
 
@@ -153,6 +154,30 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			},
 			options: [],
 			callback: () => !!self.client?.state.colorPushMode,
+		},
+
+		sequence_output_owner: {
+			name: 'Sequence DMX Output from Deck',
+			type: 'boolean',
+			defaultStyle: {
+				bgcolor: 0xfbbf24,
+				color: 0x000000,
+				text: 'OUT',
+			},
+			options: [
+				{
+					id: 'deck',
+					type: 'number',
+					label: 'Deck',
+					default: 1,
+					min: 1,
+					max: 4,
+				},
+			],
+			callback: (feedback) => {
+				if (!self.client) return false
+				return self.client.state.seqOutputOwner === Number(feedback.options.deck)
+			},
 		},
 
 		sequence_playing: {

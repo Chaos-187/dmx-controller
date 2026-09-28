@@ -42,6 +42,10 @@ let setBlackoutHold;
 // Message handler callback (provided by server.js for trigger processing)
 let onMessage;
 let onButton;
+let eventLogModule = null;
+
+const triggerParseCache = new Map();
+const OS2L_NOISY_TRIGGER = /get_time elapsed|beatpos|\blevel\b|get_beat|get_loop/i;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -105,27 +109,112 @@ function sendSubscription() {
 
 // ─── Trigger Parser ─────────────────────────────────────────────────────────
 
+/** Normalize OS2L toggle values (play, loop, etc.) to 0 or 1 when possible. */
+function normalizeSubscribedValue(key, value) {
+  const k = String(key || '');
+  const isToggle =
+    k === 'play' ||
+    k === 'loop' ||
+    k === 'get_loop' ||
+    k.includes('loop_roll');
+  if (!isToggle) {
+    if (typeof value === 'string') {
+      if (value === 'on') return 1;
+      if (value === 'off') return 0;
+    }
+    return value;
+  }
+  if (value === true || value === 1 || value === '1' || value === 'on' || value === 'ON') return 1;
+  if (value === false || value === 0 || value === '0' || value === 'off' || value === 'OFF') return 0;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (v === 'true' || v === 'yes') return 1;
+    if (v === 'false' || v === 'no') return 0;
+  }
+  return value;
+}
+
+/** Pull complete JSON objects from a TCP buffer (newline-delimited or back-to-back `{...}{...}`). */
+function drainJsonObjects(buffer) {
+  const objects = [];
+  let rest = buffer;
+  while (rest.length) {
+    rest = rest.replace(/^\s+/, '');
+    if (!rest.length) break;
+    if (rest[0] !== '{') {
+      const nl = rest.search(/\r?\n/);
+      if (nl === -1) break;
+      rest = rest.slice(nl + (rest[nl] === '\r' ? 2 : 1));
+      continue;
+    }
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let i = 0; i < rest.length; i++) {
+      const c = rest[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') {
+        inStr = true;
+        continue;
+      }
+      if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end === -1) break;
+    const slice = rest.slice(0, end);
+    try {
+      objects.push(JSON.parse(slice));
+    } catch {
+      /* skip malformed chunk */
+    }
+    rest = rest.slice(end);
+  }
+  return { objects, rest };
+}
+
 function parseTrigger(trigger) {
-  const m = trigger.match(/^deck (\d+) (.+)$/);
-  if (!m) return { deck: null, key: trigger };
+  const t = String(trigger || '').trim();
+  if (triggerParseCache.has(t)) return triggerParseCache.get(t);
 
-  const deck = parseInt(m[1]);
-  const param = m[2];
+  const m = t.match(/^deck (\d+) (.+)$/i);
+  if (!m) {
+    const miss = { deck: null, key: t };
+    triggerParseCache.set(t, miss);
+    return miss;
+  }
 
-  if (param.startsWith("get_text '%SOUNDSWITCH_ID'")) return { deck, key: 'soundswitch_id' };
-  if (param === 'get_filepath') return { deck, key: 'filepath' };
-  if (param === 'get_genre') return { deck, key: 'genre' };
-  if (param === 'level') return { deck, key: 'level' };
-  if (param === 'get_time elapsed absolute') return { deck, key: 'time' };
-  if (param === 'get_beatpos') return { deck, key: 'beatpos' };
-  if (param === 'get_firstbeat') return { deck, key: 'firstbeat' };
-  if (param === 'get_bpm') return { deck, key: 'bpm' };
-  if (param === 'play') return { deck, key: 'play' };
-  if (param === 'loop') return { deck, key: 'loop' };
-  if (param === 'get_loop') return { deck, key: 'get_loop' };
-  if (param.includes('loop_roll')) return { deck, key: 'loop_roll' };
+  const deck = parseInt(m[1], 10);
+  const param = m[2].trim();
 
-  return { deck, key: param };
+  let key = param;
+  if (param.startsWith("get_text '%SOUNDSWITCH_ID'")) key = 'soundswitch_id';
+  else if (param === 'get_filepath') key = 'filepath';
+  else if (param === 'get_genre') key = 'genre';
+  else if (param === 'level') key = 'level';
+  else if (param === 'get_time elapsed absolute') key = 'time';
+  else if (param === 'get_beatpos') key = 'beatpos';
+  else if (param === 'get_firstbeat') key = 'firstbeat';
+  else if (param === 'get_bpm') key = 'bpm';
+  else if (param === 'play') key = 'play';
+  else if (param === 'loop') key = 'loop';
+  else if (param === 'get_loop') key = 'get_loop';
+  else if (param.includes('loop_roll')) key = 'loop_roll';
+
+  const parsed = { deck, key };
+  triggerParseCache.set(t, parsed);
+  return parsed;
 }
 
 // ─── TCP Server ─────────────────────────────────────────────────────────────
@@ -164,31 +253,10 @@ function startServer(port, host = '0.0.0.0') {
 
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf-8');
-
-      // Process newline-delimited JSON
-      let idx;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.substring(0, idx).trim();
-        buffer = buffer.substring(idx + 1);
-        if (line) {
-          try {
-            const parsed = JSON.parse(line);
-            handleMessage(parsed);
-          } catch (e) {
-            // Try parsing as standalone JSON
-          }
-        }
-      }
-
-      // Try parsing remaining buffer as complete JSON
-      if (buffer.trim()) {
-        try {
-          const parsed = JSON.parse(buffer.trim());
-          handleMessage(parsed);
-          buffer = '';
-        } catch (e) {
-          // Incomplete, wait for more data
-        }
+      const drained = drainJsonObjects(buffer);
+      buffer = drained.rest;
+      for (const parsed of drained.objects) {
+        handleMessage(parsed);
       }
     });
 
@@ -226,14 +294,18 @@ function startServer(port, host = '0.0.0.0') {
 // ─── Message Dispatch ───────────────────────────────────────────────────────
 
 function handleMessage(data) {
-  try {
-    const eventLog = require('./lib/event-log');
-    eventLog.addFromOs2l(data);
-  } catch {
-    /* event log not initialized yet */
+  const evt = data.evt;
+  const trigger = data?.trigger;
+  const skipLog = evt === 'subscribed' && trigger && OS2L_NOISY_TRIGGER.test(String(trigger));
+  if (!skipLog) {
+    try {
+      if (!eventLogModule) eventLogModule = require('./lib/event-log');
+      eventLogModule.addFromOs2l(data);
+    } catch {
+      /* event log not initialized yet */
+    }
   }
 
-  const evt = data.evt;
 
   if (evt === 'subscribed') {
     // Delegate trigger processing to the main server's onMessage callback
@@ -754,6 +826,8 @@ module.exports = {
   stopServer,
   sendSubscription,
   parseTrigger,
+  normalizeSubscribedValue,
+  drainJsonObjects,
   handleButtonAction,
   registerRoutes,
   getActiveToggles: () => [...activeToggles],

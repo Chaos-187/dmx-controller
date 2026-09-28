@@ -51,7 +51,7 @@ try {
   // Large libraries (~40k+ tracks) can fail structured clone over postMessage.
   const CACHE_THRESHOLD = 2000;
   if (tracks.length >= CACHE_THRESHOLD) {
-    const cacheFile = path.join(
+    const cacheFile = workerData.cacheFile || path.join(
       os.tmpdir(),
       `thaluxis-vdj-parse-${process.pid}-${Date.now()}.json`,
     );

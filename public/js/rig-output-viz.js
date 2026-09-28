@@ -127,6 +127,8 @@
       this.ctx = canvas.getContext('2d');
       this.options = options || {};
       this.mode = options.mode || (options.standalone ? 'external' : 'embedded');
+      /** When true, index.html routes rig_output WS messages here (avoids duplicate JSON parse). */
+      this.hostWsDispatch = !!options.hostWsDispatch;
       this.enabled = false;
       this._pollTimer = null;
       this._fetchInFlight = false;
@@ -205,6 +207,13 @@
       this._syncRunning();
     }
 
+    /** Called from host page WebSocket handler when hostWsDispatch is enabled. */
+    handleRigOutputMessage(msg) {
+      if (!this.enabled || !msg) return;
+      this._applyPayload(msg);
+      this._scheduleRender();
+    }
+
     _isPausedByExternal() {
       return this.mode === 'embedded' && RigOutputVisualizer.isExternalActive();
     }
@@ -264,7 +273,7 @@
         this._ws = global.ws;
         this._wsOk = true;
         this._wsShared = true;
-        if (!this._wsSharedHandler) {
+        if (!this.hostWsDispatch && !this._wsSharedHandler) {
           this._wsSharedHandler = (ev) => {
             try {
               const msg = JSON.parse(ev.data);

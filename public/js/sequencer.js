@@ -31,6 +31,7 @@ const SEQ = (() => {
   let clipboard = null;
   let dragState = null;
   let marquee = null;
+  let cancelTimelineInteraction = () => {};
   let draggingPlayhead = false;
 
   // Waveform
@@ -145,39 +146,42 @@ const SEQ = (() => {
     return !hasRgb && hasCW;
   }
 
+  let snapCache = null;
   function snapToGrid(ms) {
     if (!snapBeats || !currentSeq?.bpm) return ms;
-    const beatOffsetMs = currentSeq.beat_offset_ms || 0;
-    // If we have fluid beat positions from analysis, snap to those (with offset)
-    const rawBeats = wfAnalysis?.beats;
-    const beats = rawBeats && rawBeats.length > 1 ? rawBeats.map(b => b + beatOffsetMs) : null;
+    const offset = currentSeq.beat_offset_ms || 0, beats = wfAnalysis?.beats;
     if (beats && beats.length > 1) {
-      // Snap granularity: snapBeats 4=bar(every 4th beat), 1=beat, 0.5=half, 0.25=quarter
-      const step = Math.max(1, Math.round(snapBeats));
-      // Build snap candidates at the requested granularity
-      let best = ms, bestDist = Infinity;
-      for (let i = 0; i < beats.length; i += step) {
-        const d = Math.abs(beats[i] - ms);
-        if (d < bestDist) { bestDist = d; best = beats[i]; }
-      }
-      // For sub-beat snapping, interpolate between beats
-      if (snapBeats < 1) {
-        const subDiv = Math.round(1 / snapBeats); // 2 for half-beat, 4 for quarter
-        for (let i = 0; i < beats.length - 1; i++) {
-          const bStart = beats[i], bEnd = beats[i + 1];
-          for (let s = 0; s < subDiv; s++) {
-            const t = bStart + (bEnd - bStart) * (s / subDiv);
-            const d = Math.abs(t - ms);
-            if (d < bestDist) { bestDist = d; best = t; }
+      if (!snapCache || snapCache.beats !== beats || snapCache.step !== snapBeats || snapCache.offset !== offset) {
+        const points = [], step = Math.max(1, Math.round(snapBeats));
+        for (let i = 0; i < beats.length; i += step) {
+          points.push(beats[i] + offset);
+          if (snapBeats < 1 && i + 1 < beats.length) {
+            const divisions = Math.round(1 / snapBeats);
+            for (let j = 1; j < divisions; j++) points.push(beats[i] + (beats[i+1]-beats[i])*j/divisions + offset);
           }
         }
+        snapCache = { beats, step: snapBeats, offset, points };
       }
-      return best;
+      const points = snapCache.points;
+      let lo = 0, hi = points.length;
+      while (lo < hi) { const mid = (lo+hi) >>> 1; if (points[mid] < ms) lo = mid+1; else hi = mid; }
+      if (!lo) return points[0];
+      if (lo === points.length) return points[lo-1];
+      return ms-points[lo-1] <= points[lo]-ms ? points[lo-1] : points[lo];
     }
-    // Fallback: uniform grid (with offset)
-    const snapMs = (60000 / currentSeq.bpm) * snapBeats;
-    const shifted = ms - beatOffsetMs;
-    return Math.round(shifted / snapMs) * snapMs + beatOffsetMs;
+    const interval = 60000/currentSeq.bpm*snapBeats;
+    return Math.round((ms-offset)/interval)*interval+offset;
+  }
+
+  function interactionValues(state, dx) {
+    const delta = dx*1000/state.zoom;
+    if (state.type === 'move') {
+      // Snap the grabbed cue once, preserving every selected cue's relative timing.
+      const shift = Math.max(-state.minStart, Math.round(snapToGrid(state.anchor+delta)-state.anchor));
+      return state.items.map(it => ({ start_ms: it.before.start_ms+shift }));
+    }
+    return state.items.map(it => ({ duration_ms: Math.max(100,
+      Math.round(snapToGrid(it.before.start_ms+it.before.duration_ms+delta)-it.before.start_ms)) }));
   }
 
   // ── API ───────────────────────────────────────────────────────
@@ -375,6 +379,7 @@ const SEQ = (() => {
   });
 
   async function loadSequenceById(id, opts = {}) {
+    cancelTimelineInteraction();
     if (!id) {
       currentId = null; currentSeq = null; cues = [];
       activeLanes.clear(); selectedIds.clear(); selectedPrimary = null;
@@ -949,6 +954,7 @@ const SEQ = (() => {
   // ═══════════════════════════════════════════════════════════════
 
   function renderTimeline() {
+    cancelTimelineInteraction();
     const canvas = $('tlCanvas');
     const empty = $('tlEmpty');
     const ruler = $('tlRuler');
@@ -972,7 +978,7 @@ const SEQ = (() => {
 
     // Determine actual beat positions (fluid from analysis, or uniform fallback)
     const analysisBeats = wfAnalysis?.beats;
-    const useFluidBeats = analysisBeats && analysisBeats.length > 4;
+    const useFluidBeats = analysisBeats && analysisBeats.length > 1;
     const beatOffsetMs = currentSeq.beat_offset_ms || 0;
     let beatPositions; // array of beat times in ms
     if (useFluidBeats) {
@@ -2313,208 +2319,155 @@ const SEQ = (() => {
       selectCue(cue.id);
     });
 
-    // ── Mousedown: cue click / marquee ──
-    on('tlLanes', 'mousedown', e => {
-      if (e.button !== 0) return;
+    // Cache gesture references; coalesce previews and flush the release position.
+    let interactionFrame = 0, latestPointer = null, interactionSaving = false;
+    function contentPoint(e) {
+      const r = $('tlLanes').getBoundingClientRect();
+      return { x: e.clientX-r.left, y: e.clientY-r.top };
+    }
+    function cleanupInteraction() {
+      if (interactionFrame) cancelAnimationFrame(interactionFrame);
+      interactionFrame = 0; latestPointer = null;
+      dragState?.target?.classList.remove('drop-target');
+      const line = $('resizeSnapLine'); if (line) line.style.display = 'none';
+      const box = $('tlMarquee'); if (box) box.style.display = 'none';
+      dragState = null; marquee = null;
+    }
+    function cancelInteraction() {
+      if (!dragState && !marquee) return;
+      cleanupInteraction(); paintVisibleCues(); updateSelectionVisuals();
+    }
+    cancelTimelineInteraction = cancelInteraction;
+    function previewInteraction(e) {
+      if (marquee) {
+        const p = contentPoint(e), start = marquee.start;
+        const left = Math.min(start.x,p.x), top = Math.min(start.y,p.y);
+        const right = Math.max(start.x,p.x), bottom = Math.max(start.y,p.y);
+        const hits = new Set(marquee.base);
+        for (const item of marquee.items) {
+          const r = item.rect;
+          if (r.right >= left && r.left <= right && r.bottom >= top && r.top <= bottom) hits.add(item.id);
+        }
+        marquee.hits = hits;
+        Object.assign(marquee.el.style, { left:left+'px', top:top+'px', width:(right-left)+'px', height:(bottom-top)+'px' });
+        for (const item of marquee.items) item.el.classList.toggle('selected',hits.has(item.id));
+        return;
+      }
+      const state = dragState; if (!state) return;
+      const dx = e.clientX-state.startX+$('tlScroll').scrollLeft-state.scrollLeft, dy = e.clientY-state.startY;
+      if (Math.abs(dx)>2 || (state.type === 'move' && Math.abs(dy)>2)) state.moved = true;
+      if (!state.moved) return;
+      state.values = interactionValues(state,dx);
+      let target = null;
+      if (state.type === 'move' && Math.abs(dy)>18) {
+        target = document.elementFromPoint(e.clientX,e.clientY)?.closest('.tl-lane-track[data-fix]');
+        if (!(+target?.dataset.fix > 0)) target = null;
+      }
+      if (target !== state.target) {
+        state.target?.classList.remove('drop-target'); target?.classList.add('drop-target'); state.target = target;
+      }
+      state.items.forEach((it,i) => {
+        if (!it.el) return;
+        if (state.type === 'move') it.el.style.left = state.values[i].start_ms/1000*state.zoom+'px';
+        else it.el.style.width = Math.max(4,state.values[i].duration_ms/1000*state.zoom)+'px';
+      });
+      const primary = state.values[state.primaryIndex];
+      const time = state.type === 'move' ? primary.start_ms : state.anchor+primary.duration_ms;
+      state.line.style.left = state.trackLeft+time/1000*state.zoom+'px';
+      state.line.style.display = snapBeats ? 'block' : 'none';
+    }
+    function queueInteraction(e) {
+      if (!dragState && !marquee) return;
+      latestPointer = { clientX:e.clientX, clientY:e.clientY };
+      if (!interactionFrame) interactionFrame = requestAnimationFrame(() => {
+        interactionFrame = 0; if (latestPointer) previewInteraction(latestPointer);
+      });
+    }
+    on('tlLanes','mousedown',e => {
+      if (e.button !== 0 || interactionSaving) return;
+      cancelInteraction();
       const cueEl = e.target.closest('.tl-cue');
       if (cueEl) {
-        const id = +cueEl.dataset.cue;
-        const cue = cues.find(c => c.id === id); if (!cue) return;
-        if (e.ctrlKey || e.metaKey) { selectCue(id, true); }
-        else if (!selectedIds.has(id)) { selectCue(id); }
-
-        if (e.target.classList.contains('tl-cue-resize')) {
-          // Multi-cue resize: capture all selected cues
-          const resizeItems = [];
-          for (const sid of selectedIds) {
-            const sc = cues.find(c => c.id === sid);
-            const sel = document.querySelector(`.tl-cue[data-cue="${sid}"]`);
-            if (sc && sel) resizeItems.push({ cueId: sid, origW: parseFloat(sel.style.width), origDur: sc.duration_ms });
-          }
-          dragState = { type: 'resize', cueId: id, startX: e.clientX, origW: parseFloat(cueEl.style.width), origDur: cue.duration_ms, items: resizeItems };
-        } else {
-          const items = [];
-          for (const sid of selectedIds) {
-            const sc = cues.find(c => c.id === sid);
-            const sel = document.querySelector(`.tl-cue[data-cue="${sid}"]`);
-            if (sc && sel) items.push({ cueId: sid, origLeft: parseFloat(sel.style.left), origStart: sc.start_ms });
-          }
-          const track = cueEl.closest('.tl-lane-track');
-          dragState = { type: 'move', cueId: id, startX: e.clientX, startY: e.clientY, items, origFix: track ? +track.dataset.fix : null, crossLane: false, moved: false };
-        }
+        const id = +cueEl.dataset.cue, cue = cues.find(c => c.id === id); if (!cue) return;
+        if (e.ctrlKey || e.metaKey) selectCue(id,true); else if (!selectedIds.has(id)) selectCue(id);
+        if (!selectedIds.has(id)) { e.preventDefault(); return; }
+        const elements = new Map(Array.from($$('.tl-cue[data-cue]'), el => [+el.dataset.cue,el]));
+        const items = cues.filter(c => selectedIds.has(c.id)).map(c => ({ cue:c, el:elements.get(c.id),
+          before:{ start_ms:c.start_ms, duration_ms:c.duration_ms, fixture_id:c.fixture_id } }));
+        let line = $('resizeSnapLine');
+        if (!line) { line = document.createElement('div'); line.id = 'resizeSnapLine'; line.className = 'tl-snap-line'; $('tlCanvas').appendChild(line); }
+        const track = cueEl.closest('.tl-lane-track');
+        dragState = { type:e.target.classList.contains('tl-cue-resize') ? 'resize' : 'move',
+          startX:e.clientX, startY:e.clientY, scrollLeft:$('tlScroll').scrollLeft, zoom:zoomPxPerSec,
+          anchor:cue.start_ms, primaryIndex:items.findIndex(it => it.cue.id === id),
+          minStart:items.reduce((min,it) => Math.min(min,it.before.start_ms),Infinity), items,line,
+          trackLeft:track.getBoundingClientRect().left-$('tlCanvas').getBoundingClientRect().left,
+          sequenceId:currentId, moved:false, target:null };
         e.preventDefault(); return;
       }
-
-      // Marquee
       const track = e.target.closest('.tl-lane-track');
       if (!track) { if (!e.ctrlKey && !e.metaKey) clearSelection(); return; }
       if (!e.ctrlKey && !e.metaKey) clearSelection();
-
-      const lw = $('tlLanes'), wr = lw.getBoundingClientRect(), sw = $('tlScroll');
-      const sx = e.clientX - wr.left + sw.scrollLeft, sy = e.clientY - wr.top + sw.scrollTop;
-      let mEl = document.getElementById('tlMarquee');
-      if (!mEl) { mEl = document.createElement('div'); mEl.id = 'tlMarquee'; mEl.className = 'tl-marquee'; lw.appendChild(mEl); }
-      mEl.style.display = 'block'; mEl.style.left = sx+'px'; mEl.style.top = sy+'px'; mEl.style.width = '0'; mEl.style.height = '0';
-      marquee = { sx, sy, add: e.ctrlKey || e.metaKey };
-      e.preventDefault();
+      const lanes = $('tlLanes'), origin = lanes.getBoundingClientRect();
+      // Read all rectangles before writing any selection styles.
+      const items = Array.from($$('.tl-cue[data-cue]'), el => {
+        const r = el.getBoundingClientRect();
+        return { el,id:+el.dataset.cue,rect:{ left:r.left-origin.left, right:r.right-origin.left, top:r.top-origin.top, bottom:r.bottom-origin.top } };
+      });
+      let el = $('tlMarquee');
+      if (!el) { el = document.createElement('div'); el.id = 'tlMarquee'; el.className = 'tl-marquee'; lanes.appendChild(el); }
+      marquee = { start:contentPoint(e), base:new Set(selectedIds), items,el };
+      previewInteraction(e); el.style.display = 'block'; e.preventDefault();
     });
+    document.addEventListener('mousemove',queueInteraction);
+    $('tlScroll').addEventListener('scroll',() => { if (latestPointer) queueInteraction(latestPointer); });
+    window.addEventListener('blur',cancelInteraction);
+    document.addEventListener('keydown',e => { if (e.key === 'Escape') cancelInteraction(); });
 
-    // ── Mousemove: drag / marquee ──
-    let _mqRAF = 0;
-    document.addEventListener('mousemove', e => {
+    async function persistInteraction(changes,direction) {
+      const results = await Promise.allSettled(changes.map(async change => {
+        const body = change[direction];
+        const result = await apiPut(`/api/cues/${change.cue.id}`,body);
+        if (result?.error) throw new Error(result.error);
+        Object.assign(change.cue,body); return change;
+      }));
+      if (results.some(r => r.status === 'rejected')) alert('Some cue changes could not be saved. Successfully saved changes are kept; please retry the remaining cues.');
+      return results.filter(r => r.status === 'fulfilled').map(r => r.value);
+    }
+    function refreshInteraction(sequenceId,crossLane) {
+      if (currentId !== sequenceId) return;
+      if (crossLane) renderTimeline(); else { buildCueIndex(buildLaneList()); paintVisibleCues(); }
+      updateSelectionVisuals(); updateProps();
+    }
+    document.addEventListener('mouseup',async e => {
+      if (e.button !== 0 || (!marquee && !dragState)) return;
+      previewInteraction(e);
       if (marquee) {
-        const lw = $('tlLanes'), wr = lw.getBoundingClientRect(), sw = $('tlScroll');
-        const cx = e.clientX - wr.left + sw.scrollLeft, cy = e.clientY - wr.top + sw.scrollTop;
-        const x = Math.min(marquee.sx, cx), y = Math.min(marquee.sy, cy);
-        const w = Math.abs(cx - marquee.sx), h = Math.abs(cy - marquee.sy);
-        const mEl = document.getElementById('tlMarquee');
-        if (mEl) { mEl.style.left = x+'px'; mEl.style.top = y+'px'; mEl.style.width = w+'px'; mEl.style.height = h+'px'; }
-        // Throttle hit-testing to animation frames to avoid layout thrash
-        marquee._rect = { left: x, top: y, right: x+w, bottom: y+h };
-        if (!_mqRAF) {
-          _mqRAF = requestAnimationFrame(() => {
-            _mqRAF = 0;
-            if (!marquee || !marquee._rect) return;
-            const mr = marquee._rect;
-            $$('.tl-cue').forEach(cel => {
-              const cid = +cel.dataset.cue;
-              const lane = cel.closest('.tl-lane');
-              const cr = { left: cel.offsetLeft, top: lane.offsetTop + cel.offsetTop, right: cel.offsetLeft + cel.offsetWidth, bottom: lane.offsetTop + cel.offsetTop + cel.offsetHeight };
-              const hit = !(cr.right < mr.left || cr.left > mr.right || cr.bottom < mr.top || cr.top > mr.bottom);
-              cel.classList.toggle('selected', hit || (marquee.add && selectedIds.has(cid)));
-            });
-          });
-        }
-        return;
+        selectedIds = marquee.hits; selectedPrimary = selectedIds.values().next().value ?? null;
+        cleanupInteraction(); paintVisibleCues(); updateSelectionVisuals(); updateProps(); return;
       }
-      if (!dragState) return;
-      const dx = e.clientX - dragState.startX;
-      if (dragState.type === 'resize') {
-        // Resize all selected cues proportionally
-        for (const it of (dragState.items || [{ cueId: dragState.cueId, origW: dragState.origW }])) {
-          const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
-          if (el) el.style.width = Math.max(4, it.origW + dx) + 'px';
+      const state = dragState, newFix = state.target ? +state.target.dataset.fix : null;
+      const changes = state.moved ? state.items.map((it,i) => {
+        const after = { ...state.values[i] };
+        if (newFix && newFix !== it.before.fixture_id) after.fixture_id = newFix;
+        const before = Object.fromEntries(Object.keys(after).map(key => [key,it.before[key]]));
+        return { cue:it.cue,before,after };
+      }).filter(change => Object.keys(change.after).some(key => change.after[key] !== change.before[key])) : [];
+      cleanupInteraction();
+      if (!changes.length) { if (state.moved) paintVisibleCues(); return; }
+      interactionSaving = true;
+      try {
+        const saved = await persistInteraction(changes,'after');
+        if (saved.length && currentId === state.sequenceId) {
+          if (newFix) activeLanes.add(newFix);
+          const replay = async direction => {
+            await persistInteraction(saved,direction); refreshInteraction(state.sequenceId,!!newFix);
+          };
+          pushUndo(state.type,() => replay('before'),() => replay('after'));
         }
-        // Show snap preview line at the primary cue's snapped end position
-        const cue = cues.find(c => c.id === dragState.cueId);
-        const primEl = document.querySelector(`.tl-cue[data-cue="${dragState.cueId}"]`);
-        if (cue && primEl) {
-          const newW = Math.max(4, dragState.origW + dx);
-          const rawEndMs = cue.start_ms + (newW / zoomPxPerSec) * 1000;
-          const snappedEnd = snapToGrid(rawEndMs);
-          const snapX = (snappedEnd / 1000) * zoomPxPerSec;
-          let snapLine = document.getElementById('resizeSnapLine');
-          if (!snapLine) {
-            snapLine = document.createElement('div');
-            snapLine.id = 'resizeSnapLine';
-            snapLine.className = 'tl-snap-line';
-            $('tlCanvas').appendChild(snapLine);
-          }
-          snapLine.style.left = snapX.toFixed(1) + 'px';
-          snapLine.style.display = 'block';
-        }
-      } else if (dragState.type === 'move') {
-        if (Math.abs(dx) > 2 || Math.abs(e.clientY - dragState.startY) > 2) dragState.moved = true;
-        for (const it of dragState.items) {
-          const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
-          if (el) el.style.left = Math.max(0, it.origLeft + dx) + 'px';
-        }
-        dragState.crossLane = Math.abs(e.clientY - dragState.startY) > 18;
-        $$('.tl-lane-track').forEach(lt => lt.classList.remove('drop-target'));
-        if (dragState.crossLane) {
-          const tgt = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tl-lane-track');
-          if (tgt) tgt.classList.add('drop-target');
-        }
+      } finally {
+        interactionSaving = false; refreshInteraction(state.sequenceId,!!newFix);
       }
-    });
-
-    // ── Mouseup: commit ──
-    document.addEventListener('mouseup', async e => {
-      if (marquee) {
-        const mEl = document.getElementById('tlMarquee');
-        if (mEl) mEl.style.display = 'none';
-        const lw = $('tlLanes'), wr = lw.getBoundingClientRect(), sw = $('tlScroll');
-        const cx = e.clientX - wr.left + sw.scrollLeft, cy = e.clientY - wr.top + sw.scrollTop;
-        const x = Math.min(marquee.sx, cx), y = Math.min(marquee.sy, cy);
-        const w = Math.abs(cx - marquee.sx), h = Math.abs(cy - marquee.sy);
-        const mr = { left: x, top: y, right: x+w, bottom: y+h };
-        if (!marquee.add) selectedIds.clear();
-        $$('.tl-cue').forEach(cel => {
-          const cid = +cel.dataset.cue, lane = cel.closest('.tl-lane');
-          const cr = { left: cel.offsetLeft, top: lane.offsetTop + cel.offsetTop, right: cel.offsetLeft + cel.offsetWidth, bottom: lane.offsetTop + cel.offsetTop + cel.offsetHeight };
-          if (!(cr.right < mr.left || cr.left > mr.right || cr.bottom < mr.top || cr.top > mr.bottom)) selectedIds.add(cid);
-        });
-        selectedPrimary = selectedIds.size > 0 ? [...selectedIds][0] : null;
-        marquee = null; updateSelectionVisuals(); updateProps(); return;
-      }
-      if (!dragState) return;
-      $$('.tl-lane-track').forEach(lt => lt.classList.remove('drop-target'));
-      // Hide snap preview line
-      const snapLine = document.getElementById('resizeSnapLine');
-      if (snapLine) snapLine.style.display = 'none';
-      if (dragState.type === 'resize') {
-        // Multi-cue resize commit
-        const resizeItems = dragState.items || [{ cueId: dragState.cueId, origW: dragState.origW, origDur: dragState.origDur }];
-        const resizeUndos = [];
-        for (const it of resizeItems) {
-          const cue = cues.find(c => c.id === it.cueId);
-          const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
-          if (!cue || !el) continue;
-          const rawEndMs = cue.start_ms + (parseFloat(el.style.width) / zoomPxPerSec) * 1000;
-          const snappedEnd = snapToGrid(rawEndMs);
-          const oldDur = it.origDur;
-          const newDur = Math.max(100, Math.round(snappedEnd - cue.start_ms));
-          cue.duration_ms = newDur;
-          resizeUndos.push({ id: it.cueId, oldDur, newDur });
-          await apiPut(`/api/cues/${it.cueId}`, { duration_ms: newDur });
-        }
-        const frozen = [...resizeUndos];
-        pushUndo('resize', async () => {
-          for (const r of frozen) { const c = cues.find(q => q.id === r.id); if (c) { c.duration_ms = r.oldDur; await apiPut(`/api/cues/${r.id}`, { duration_ms: r.oldDur }); } }
-          renderTimeline(); updateSelectionVisuals();
-        }, async () => {
-          for (const r of frozen) { const c = cues.find(q => q.id === r.id); if (c) { c.duration_ms = r.newDur; await apiPut(`/api/cues/${r.id}`, { duration_ms: r.newDur }); } }
-          renderTimeline(); updateSelectionVisuals();
-        });
-      } else if (dragState.type === 'move' && dragState.moved) {
-        let newFix = null;
-        if (dragState.crossLane) {
-          const tgt = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tl-lane-track');
-          if (tgt) newFix = +tgt.dataset.fix || null;
-        }
-        const moveUndos = []; // capture before/after for undo
-        const ups = [];
-        for (const it of dragState.items) {
-          const cue = cues.find(c => c.id === it.cueId);
-          const el = document.querySelector(`.tl-cue[data-cue="${it.cueId}"]`);
-          if (!cue || !el) continue;
-          const oldStart = it.origStart, oldFix = it.cueId === dragState.cueId ? dragState.origFix : cue.fixture_id;
-          cue.start_ms = Math.max(0, Math.round(snapToGrid((parseFloat(el.style.left) / zoomPxPerSec) * 1000)));
-          const body = { start_ms: cue.start_ms };
-          if (newFix && newFix !== cue.fixture_id) { cue.fixture_id = newFix; body.fixture_id = newFix; activeLanes.add(newFix); }
-          moveUndos.push({ id: it.cueId, oldStart, oldFix, newStart: cue.start_ms, newFix: cue.fixture_id });
-          ups.push(apiPut(`/api/cues/${it.cueId}`, body));
-        }
-        await Promise.all(ups);
-        // Push undo entry for move
-        const frozen = [...moveUndos];
-        pushUndo('move', async () => {
-          for (const m of frozen) {
-            const c = cues.find(q => q.id === m.id); if (!c) continue;
-            c.start_ms = m.oldStart; c.fixture_id = m.oldFix;
-            await apiPut(`/api/cues/${m.id}`, { start_ms: m.oldStart, fixture_id: m.oldFix });
-          }
-          renderTimeline(); updateSelectionVisuals();
-        }, async () => {
-          for (const m of frozen) {
-            const c = cues.find(q => q.id === m.id); if (!c) continue;
-            c.start_ms = m.newStart; c.fixture_id = m.newFix;
-            await apiPut(`/api/cues/${m.id}`, { start_ms: m.newStart, fixture_id: m.newFix });
-          }
-          renderTimeline(); updateSelectionVisuals();
-        });
-      }
-      dragState = null; renderTimeline(); updateSelectionVisuals();
     });
 
     // ── Keyboard Shortcuts ──
@@ -2522,6 +2475,7 @@ const SEQ = (() => {
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
+      if (interactionSaving || dragState || marquee) return;
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 

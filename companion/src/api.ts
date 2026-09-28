@@ -58,6 +58,8 @@ export type DmxState = {
 	effectSlots: Record<string, { effectId: number; name: string; type: string } | null>
 	decks: Record<string, { filepath?: string; bpm?: number; play?: number; filename?: string }>
 	seqPlaying: Record<number, boolean>
+	seqOutputOwner: number | null
+	seqOutputOwnerAuto: boolean
 	disabledFixtures: number[]
 	colorPushMode: boolean
 	seqMirrorSpinBlocked: boolean
@@ -77,6 +79,8 @@ export class DmxControllerClient {
 		effectSlots: {},
 		decks: {},
 		seqPlaying: {},
+		seqOutputOwner: null,
+		seqOutputOwnerAuto: true,
 		disabledFixtures: [],
 		colorPushMode: true,
 		seqMirrorSpinBlocked: false,
@@ -322,6 +326,16 @@ export class DmxControllerClient {
 					changed = true
 				}
 				break
+			case 'seq_output_owner': {
+				const deck = typeof msg.deck === 'number' ? msg.deck : null
+				const auto = msg.auto !== false
+				if (deck !== this.state.seqOutputOwner || auto !== this.state.seqOutputOwnerAuto) {
+					this.state.seqOutputOwner = deck
+					this.state.seqOutputOwnerAuto = auto
+					changed = true
+				}
+				break
+			}
 		}
 		if (changed) this.notify()
 	}
@@ -380,12 +394,13 @@ export class DmxControllerClient {
 	}
 
 	async syncState(): Promise<void> {
-		const [output, scene, effects, touch, mirrorSpin] = await Promise.all([
+		const [output, scene, effects, touch, mirrorSpin, seqOut] = await Promise.all([
 			this.fetch<{ enabled: boolean }>('/api/dmx/output'),
 			this.fetch<{ activeSceneId: number | null }>('/api/scenes/active'),
 			this.fetch<{ slots: DmxState['effectSlots'] }>('/api/effects/status'),
 			this.fetch<{ disabledFixtures?: number[]; companionColorPushMode?: boolean; companionColorHoldMode?: boolean; seqNoMirrorSpin?: boolean }>('/api/touch/state'),
 			this.fetch<{ blocked?: boolean }>('/api/companion/mirror-spin'),
+			this.fetch<{ deck?: number | null; auto?: boolean }>('/api/sequences/output-owner'),
 		])
 		this.state.dmxOutput = !!output.enabled
 		this.state.activeSceneId = scene.activeSceneId
@@ -396,6 +411,18 @@ export class DmxControllerClient {
 			this.state.colorPushMode = !!pushMode
 		}
 		this.state.seqMirrorSpinBlocked = !!(mirrorSpin.blocked ?? touch.seqNoMirrorSpin)
+		this.state.seqOutputOwner = seqOut.deck ?? null
+		this.state.seqOutputOwnerAuto = seqOut.auto !== false
+		this.notify()
+	}
+
+	async setSequenceOutputOwner(opts: { deck?: number; mode?: 'auto' | 'deck' | 'cycle' | 'next' }): Promise<void> {
+		const res = await this.fetch<{ deck?: number | null; auto?: boolean; ok?: boolean }>('/api/sequences/output-owner', {
+			method: 'POST',
+			body: JSON.stringify(opts),
+		})
+		this.state.seqOutputOwner = res.deck ?? null
+		this.state.seqOutputOwnerAuto = res.auto !== false
 		this.notify()
 	}
 
