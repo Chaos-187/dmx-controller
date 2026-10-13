@@ -121,7 +121,7 @@ begin
   Result := IsComponentSelected('satellite');
 end;
 
-{ DefaultDirName={code:...} runs before the wizard exists — do not use IsComponentSelected there. }
+// DefaultDirName code callback runs before the wizard exists; do not use IsComponentSelected there.
 function GetDefaultInstallDir(Param: String): String;
 begin
   Result := ExpandConstant('{autopf}\EYUP Events\ThaluxisMaster');
@@ -137,7 +137,7 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
-  { Hub vs satellite is chosen on the type/components pages — set {app} after that. }
+  // Hub vs satellite is chosen on the type/components pages; set install dir after that.
   if (CurPageID = wpSelectComponents) or (CurPageID = wpSelectDir) or (CurPageID = wpSelectTasks) then
     WizardForm.DirEdit.Text := ResolvedInstallDir();
 end;
