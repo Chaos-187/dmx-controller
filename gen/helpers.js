@@ -343,6 +343,38 @@ function getDrumDensity(startMs, endMs, ctx) {
   return durationSec > 0 ? onsets / durationSec : null;
 }
 
+/** Shutter/strobe channel on moving spots (e.g. MAC Krypton CH1). */
+function findSpotShutterChannel(fix) {
+  const channels = fix?.channels;
+  if (!channels) return null;
+  const withOpen = channels.find(ch =>
+    ch.type === 'strobe'
+    && Array.isArray(ch.ranges)
+    && ch.ranges.some(r => r.type === 'shutter_open'));
+  if (withOpen) return withOpen;
+  const named = channels.find(ch => ch.type === 'strobe' && /\bshutter\b/i.test(ch.name || ''));
+  if (named) return named;
+  const isSpot = channels.some(c => c.type === 'color_wheel') && channels.some(c => c.type === 'dimmer');
+  if (!isSpot) return null;
+  return channels.find(ch => ch.type === 'strobe' && ch.channel_number === 1)
+    || channels.find(ch => ch.type === 'strobe')
+    || null;
+}
+
+/**
+ * Ensure generated cues open the shutter and set dimmer for color-wheel spots.
+ * Uses strobe: 255 as steady-beam intent (playback maps to shutter_open DMX).
+ */
+function applySpotLightChannelValues(channelValues, fix, { dimmer } = {}) {
+  const vals = channelValues || {};
+  if (!findSpotShutterChannel(fix)) return vals;
+  if (fix.channels.some(c => c.type === 'dimmer') && dimmer != null && vals.dimmer === undefined) {
+    vals.dimmer = dimmer;
+  }
+  vals.strobe = 255;
+  return vals;
+}
+
 module.exports = {
   CUE_COLORS,
   applyIntensity,
@@ -363,4 +395,6 @@ module.exports = {
   getStemEnergy,
   hasVocals,
   getDrumDensity,
+  findSpotShutterChannel,
+  applySpotLightChannelValues,
 };

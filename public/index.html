@@ -836,7 +836,7 @@
             </div>
             <div class="form-group">
               <label>Refresh Rate</label>
-              <input type="number" id="usbDevRefreshRate" value="40" min="1" max="44">
+              <input type="number" id="usbDevRefreshRate" value="10" min="1" max="44">
               <div style="font-size:10px;color:var(--text-dim);margin-top:4px">Hz (DMX512 max ~44 Hz)</div>
             </div>
           </div>
@@ -2467,6 +2467,11 @@
         <label>Home Tilt <span id="fHomeTiltVal" style="color:var(--cyan)">128</span></label>
         <input type="range" id="fHomeTilt" min="0" max="255" value="128" style="width:100%">
       </div>
+    </div>
+    <div class="form-group" id="fMotionRangeGroup" style="display:none">
+      <label>Motion FX scale <span id="fMotionRangeVal" style="color:var(--cyan)">20%</span></label>
+      <input type="range" id="fMotionRange" min="5" max="100" value="20" style="width:100%">
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">Lower for 16-bit movers (e.g. MAC Krypton). Auto 20% when pan/tilt fine channels exist.</div>
     </div>
     <div class="form-error" id="fixtureError"></div>
     <div class="modal-actions">
@@ -4682,6 +4687,7 @@ async function _updateInvertVisibility() {
   const hasPanTilt = channels.some(ch => ['pan','pan_fine','tilt','tilt_fine'].includes(ch.type));
   document.getElementById('fInvertRow').style.display = hasPanTilt ? 'flex' : 'none';
   document.getElementById('fHomeRow').style.display = hasPanTilt ? 'flex' : 'none';
+  document.getElementById('fMotionRangeGroup').style.display = hasPanTilt ? 'block' : 'none';
 }
 
 document.getElementById('fModeId').onchange = () => { _updateInvertVisibility(); _updateNextAddress(); };
@@ -4764,6 +4770,9 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fHomePanVal').textContent = f.home_pan ?? 128;
     document.getElementById('fHomeTilt').value = f.home_tilt ?? 128;
     document.getElementById('fHomeTiltVal').textContent = f.home_tilt ?? 128;
+    const mPct = f.motion_range != null ? Math.round(Number(f.motion_range) * 100) : 20;
+    document.getElementById('fMotionRange').value = mPct;
+    document.getElementById('fMotionRangeVal').textContent = `${mPct}%`;
     document.getElementById('fQuantityGroup').style.display = 'none';
     document.getElementById('fBatchPreview').style.display = 'none';
     _renderPickerResults(f.fixture_type_id);
@@ -4786,6 +4795,8 @@ async function openFixtureModal(fixtureId) {
     document.getElementById('fHomePanVal').textContent = '128';
     document.getElementById('fHomeTilt').value = 128;
     document.getElementById('fHomeTiltVal').textContent = '128';
+    document.getElementById('fMotionRange').value = 20;
+    document.getElementById('fMotionRangeVal').textContent = '20%';
 
     // Show search picker, hide selected bar
     document.getElementById('fTypePickerSelected').style.display = 'none';
@@ -4816,7 +4827,9 @@ function sendHomePanTiltLive() {
   const dmxChannels = [];
   for (const ch of channels) {
     if (ch.type === 'pan') dmxChannels.push({ ch: fix.address + ch.channel_number - 1, val: panVal });
+    if (ch.type === 'pan_fine') dmxChannels.push({ ch: fix.address + ch.channel_number - 1, val: 128 });
     if (ch.type === 'tilt') dmxChannels.push({ ch: fix.address + ch.channel_number - 1, val: tiltVal });
+    if (ch.type === 'tilt_fine') dmxChannels.push({ ch: fix.address + ch.channel_number - 1, val: 128 });
   }
   if (dmxChannels.length) {
     fetch('/api/dmx/channels', {
@@ -4832,6 +4845,9 @@ document.getElementById('fHomePan').addEventListener('input', (e) => {
 document.getElementById('fHomeTilt').addEventListener('input', (e) => {
   document.getElementById('fHomeTiltVal').textContent = e.target.value;
   sendHomePanTiltLive();
+});
+document.getElementById('fMotionRange').addEventListener('input', (e) => {
+  document.getElementById('fMotionRangeVal').textContent = `${e.target.value}%`;
 });
 
 window.deleteFixture = async (id, name) => {
@@ -4892,6 +4908,7 @@ document.getElementById('btnSaveFixture').addEventListener('click', async () => 
     invert_tilt: document.getElementById('fInvertTilt').checked,
     home_pan: +document.getElementById('fHomePan').value,
     home_tilt: +document.getElementById('fHomeTilt').value,
+    motion_range: (+document.getElementById('fMotionRange').value || 20) / 100,
     exclude_from_sequence: document.getElementById('fExcludeFromSequence').checked,
   };
   if (!body.name) return showError('fixtureError', 'Name is required');
@@ -8638,7 +8655,7 @@ function openUsbDeviceModal(device) {
   document.getElementById('usbDevVid').value = device ? (device.vid || '') : '';
   document.getElementById('usbDevPid').value = device ? (device.pid || '') : '';
   document.getElementById('usbDevUniverse').value = device ? device.local_universe : 1;
-  document.getElementById('usbDevRefreshRate').value = device ? device.refresh_rate : 40;
+  document.getElementById('usbDevRefreshRate').value = device ? device.refresh_rate : 10;
   document.getElementById('usbDevAutoConnect').checked = device ? !!device.auto_connect : true;
   toggleVidPidRow();
   document.getElementById('usbDeviceModal').classList.add('open');
@@ -8672,7 +8689,7 @@ document.getElementById('btnSaveUsbDevice').addEventListener('click', async () =
     vid: document.getElementById('usbDevVid').value,
     pid: document.getElementById('usbDevPid').value,
     local_universe: parseInt(document.getElementById('usbDevUniverse').value) || 1,
-    refresh_rate: parseInt(document.getElementById('usbDevRefreshRate').value) || 40,
+    refresh_rate: parseInt(document.getElementById('usbDevRefreshRate').value) || 10,
     auto_connect: document.getElementById('usbDevAutoConnect').checked ? 1 : 0,
   };
   try {
@@ -8753,7 +8770,7 @@ function addScannedDevice(preset) {
     id: null, label: preset.label, source: preset.source,
     serial_number: preset.serial_number || '', description: preset.description || '',
     vid: preset.vid || '', pid: preset.pid || '',
-    local_universe: 1, refresh_rate: 40, auto_connect: 1,
+    local_universe: 1, refresh_rate: 10, auto_connect: 1,
   });
 }
 

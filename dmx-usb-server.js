@@ -66,7 +66,7 @@ class UsbDeviceHandle {
 
   /** Start the DMX TX loop at the configured rate */
   startTx() {
-    this._send('startTx', { rate: this.config.refresh_rate || 40 });
+    this._send('startTx', { rate: this.config.refresh_rate || 10 });
   }
 
   /** List connected FTDI devices via this worker */
@@ -418,9 +418,15 @@ class DmxUsbServer {
   updateDeviceConfig(id, newConfig) {
     const handle = this.devices.get(id);
     if (!handle) return false;
+    const prevRate = handle.config.refresh_rate;
     handle.config = { ...handle.config, ...newConfig };
     handle._tag = `[USB:${handle.config.label || handle.config.id}]`;
     this._rebuildUniverseMap();
+    if (handle.isOpen && newConfig.refresh_rate != null && handle.config.refresh_rate !== prevRate) {
+      handle.stopTx();
+      handle.startTx();
+      console.log(`[DMX-USB] Device ${id} TX rate → ${handle.config.refresh_rate} Hz`);
+    }
     console.log(`[DMX-USB] Updated in-memory config for device ${id} → universe ${handle.config.local_universe}`);
     return true;
   }

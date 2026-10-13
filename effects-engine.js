@@ -137,8 +137,74 @@ const MIRROR_SPIN_EFFECT_TYPES = new Set([
 ]);
 const RIG_EFFECT_TYPES         = new Set(['rig_chase','rig_color_wave','rig_sweep','rig_alternate','rig_converge','rig_rainbow','rig_depth_chase','rig_depth_wave','rig_round_robin']);
 const SOUND_EFFECT_TYPES       = new Set(['sound_pulse','sound_strobe','sound_chase','sound_wave','sound_flash','sound_vu','sound_vu_tb','sound_vu_lr']);
-const PAN_TILT = new Set(['pan','tilt']);
+const PAN_TILT = new Set(['pan', 'tilt', 'pan_fine', 'tilt_fine']);
 const COLOR_CHANNELS = new Set(['red','green','blue','white','dimmer','amber','uv','color_wheel']);
+
+/** Scale for moving-head FX (MAC Krypton etc. — coarse+fine needs smaller swings). */
+function moverMotionScale(params, data, channelCtx) {
+  const fromParams = params.motion_scale ?? data.motion_scale;
+  if (fromParams != null && fromParams !== '') {
+    return Math.max(0.02, Math.min(1, Number(fromParams)));
+  }
+  if (channelCtx.motion_range != null && channelCtx.motion_range !== '') {
+    return Math.max(0.02, Math.min(1, Number(channelCtx.motion_range)));
+  }
+  if (channelCtx._hasPanFine || channelCtx._hasTiltFine) return 0.2;
+  return 1;
+}
+
+function clamp255(v) {
+  return Math.max(0, Math.min(255, Math.round(v)));
+}
+
+/**
+ * Map motion delta (−1…1) to pan/tilt coarse (+ fine when fixture has 16-bit axes).
+ * @returns {number|null}
+ */
+function moverAxisDmx(channelType, axis, delta, channelCtx, params, data, rangeOrSize) {
+  const range = rangeOrSize ?? 1;
+  const scale = moverMotionScale(params, data, channelCtx);
+  const home = axis === 'pan' ? (channelCtx.home_pan ?? 128) : (channelCtx.home_tilt ?? 128);
+  const hasFine = axis === 'pan' ? channelCtx._hasPanFine : channelCtx._hasTiltFine;
+
+  if (hasFine) {
+    const center = (home << 8) + 128;
+    const amp = 32767 * range * scale;
+    const pos = Math.max(0, Math.min(65535, Math.round(center + delta * amp)));
+    if (channelType === axis) return pos >> 8;
+    if (channelType === `${axis}_fine`) return pos & 0xff;
+    return null;
+  }
+
+  const amp = 127 * range * scale;
+  if (channelType === axis) return clamp255(home + amp * delta);
+  if (channelType === 'pan_fine' || channelType === 'tilt_fine') return 128;
+  return null;
+}
+
+function moverHoldAxis(channelType, axis, channelCtx) {
+  const home = axis === 'pan' ? (channelCtx.home_pan ?? 128) : (channelCtx.home_tilt ?? 128);
+  if (channelType === axis) return home;
+  if (channelType === `${axis}_fine`) return 128;
+  return null;
+}
+
+/** Default seconds for one full pan/tilt cycle when running live QA effects. */
+const MOVER_DEFAULT_SEC_PER_CYCLE = 24;
+
+/** Phase 0–1 for repeating mover FX; progress is in cycle units (may be >1 over a long cue). */
+function moverCycle01(progress, params, data) {
+  const speed = Math.max(0.05, Number(params.speed ?? data.speed ?? 1) || 1);
+  const p = Number(progress) || 0;
+  return ((p * speed) % 1 + 1) % 1;
+}
+
+/** Convert live elapsed time (seconds) to slow cycle count for movers. */
+function moverProgressFromElapsedSeconds(elapsedSec, params, data) {
+  const speed = Math.max(0.05, Number(params.speed ?? data.speed ?? 1) || 1);
+  const secPerCycle = Number(params.seconds_per_cycle ?? data.seconds_per_cycle ?? MOVER_DEFAULT_SEC_PER_CYCLE) / speed;
+  return elapsedSec / Math.max(0.5, secPerCycle);
+}
 
 /** Intensity-based rig spatial output; uses live palette on RGB when color_mode is palette. */
 function rigSpatialColorOutput(channelType, brightness, baseValues, data, params, colorPhase) {
@@ -229,30 +295,82 @@ function mapShutterStrobeValue(value, ch) {
   return getShutterOpenDmxValue(ch);
 }
 
+const SPOT_LIGHT_INTENT_TYPES = new Set([
+  ...COLOR_CHANNELS,
+  'gobo',
+]);
+
 function fixtureHasLightOutputInUpdates(channelUpdates, fixMap) {
   const chMap = channelUpdates[fixMap.universe];
   if (!chMap) return false;
   for (const ch of fixMap.channels) {
-    if (!COLOR_CHANNELS.has(ch.type) && ch.type !== 'dimmer') continue;
+    if (!SPOT_LIGHT_INTENT_TYPES.has(ch.type)) continue;
     const val = chMap[ch.dmx_address];
     if (val !== undefined && val > 0) return true;
   }
   return false;
 }
 
-/** Open the shutter on combined strobe/shutter fixtures when outputting steady light. */
+/** Shutter/strobe channel used for beam on/off (e.g. MAC Krypton CH1). */
+function findFixtureShutterChannel(channels) {
+  const withRanges = channels.find(hasShutterStrobeChannel)
+    || channels.find(ch => ch.type === 'strobe' && /\bshutter\b/i.test(ch.name || ''));
+  if (withRanges) return withRanges;
+  const isSpot = channels.some(c => c.type === 'color_wheel') && channels.some(c => c.type === 'dimmer');
+  if (!isSpot) return null;
+  return channels.find(ch => ch.type === 'strobe' && ch.channel_number === 1)
+    || channels.find(ch => ch.type === 'strobe');
+}
+
+/**
+ * Map preset/logical coarse pan or tilt (0–255) to DMX for 8- or 16-bit fixtures.
+ */
+function moverAbsoluteAxisDmx(channelType, axis, coarseVal, channelCtx) {
+  const hasFine = axis === 'pan' ? channelCtx._hasPanFine : channelCtx._hasTiltFine;
+  const coarse = Math.max(0, Math.min(255, Math.round(coarseVal)));
+  if (hasFine) {
+    const pos = (coarse << 8) + 128;
+    if (channelType === axis) return pos >> 8;
+    if (channelType === `${axis}_fine`) return pos & 0xff;
+    return null;
+  }
+  if (channelType === axis) return coarse;
+  if (channelType === 'pan_fine' || channelType === 'tilt_fine') return 128;
+  return null;
+}
+
+function shutterOpenDmxForChannel(ch) {
+  let val = getShutterOpenDmxValue(ch);
+  if (val <= 0) val = 32;
+  return val;
+}
+
+/** Open shutter and ensure dimmer when a spot/mover is outputting color (incl. color wheel). */
 function ensureShutterOpenInUpdates(channelUpdates, fixtures, { activeStrobeFixtureIds = new Set(), applyInvertFn = null } = {}) {
   for (const fixMap of fixtures) {
-    if (activeStrobeFixtureIds.has(fixMap.id)) continue;
-    const strobeCh = fixMap.channels.find(hasShutterStrobeChannel);
-    if (!strobeCh) continue;
     if (!fixtureHasLightOutputInUpdates(channelUpdates, fixMap)) continue;
     const u = fixMap.universe;
     if (!channelUpdates[u]) channelUpdates[u] = {};
-    if (channelUpdates[u][strobeCh.dmx_address] !== undefined) continue;
-    let val = getShutterOpenDmxValue(strobeCh);
-    if (applyInvertFn) val = applyInvertFn(val, strobeCh);
-    channelUpdates[u][strobeCh.dmx_address] = val;
+
+    const shutterCh = findFixtureShutterChannel(fixMap.channels);
+    if (shutterCh) {
+      const combinedShutterStrobe = hasShutterStrobeChannel(shutterCh);
+      const skipForStrobeCue = !combinedShutterStrobe && activeStrobeFixtureIds.has(fixMap.id);
+      const addr = shutterCh.dmx_address;
+      const mayWrite = combinedShutterStrobe || channelUpdates[u][addr] === undefined;
+      if (!skipForStrobeCue && mayWrite) {
+        let val = shutterOpenDmxForChannel(shutterCh);
+        if (applyInvertFn) val = applyInvertFn(val, shutterCh);
+        channelUpdates[u][addr] = val;
+      }
+    }
+
+    const dimmerCh = fixMap.channels.find(ch => ch.type === 'dimmer');
+    if (dimmerCh && channelUpdates[u][dimmerCh.dmx_address] === undefined) {
+      let val = 255;
+      if (applyInvertFn) val = applyInvertFn(val, dimmerCh);
+      channelUpdates[u][dimmerCh.dmx_address] = val;
+    }
   }
 }
 
@@ -1120,104 +1238,99 @@ function computeEffectValue(effect, channelType, progress, baseValues, params, c
 
     // ── Pan Sweep: sweep pan back and forth around home ────────────────
     case 'pan_sweep': {
-      const speed = params.speed || data.speed || 1;
-      const range = params.range || data.range || 1.0;
-      const homePan = channelCtx.home_pan ?? 128;
-      const homeTilt = channelCtx.home_tilt ?? 128;
-      const amplitude = 127 * range;
-      const cycle = (progress * speed) % 1;
-      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + amplitude * Math.sin(cycle * 2 * Math.PI)));
-      if (channelType === 'tilt') return homeTilt;
-      return null;
+      const range = params.range || data.range || 0.5;
+      const cycle = moverCycle01(progress, params, data);
+      const delta = Math.sin(cycle * 2 * Math.PI);
+      const panVal = moverAxisDmx(channelType, 'pan', delta, channelCtx, params, data, range);
+      if (panVal != null) return panVal;
+      return moverHoldAxis(channelType, 'tilt', channelCtx);
     }
 
     // ── Tilt Sweep: sweep tilt back and forth around home ──────────────
     case 'tilt_sweep': {
-      const speed = params.speed || data.speed || 1;
-      const range = params.range || data.range || 1.0;
-      const homePan = channelCtx.home_pan ?? 128;
-      const homeTilt = channelCtx.home_tilt ?? 128;
-      const amplitude = 127 * range;
-      const cycle = (progress * speed) % 1;
-      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + amplitude * Math.sin(cycle * 2 * Math.PI)));
-      if (channelType === 'pan') return homePan;
-      return null;
+      const range = params.range || data.range || 0.5;
+      const cycle = moverCycle01(progress, params, data);
+      const delta = Math.sin(cycle * 2 * Math.PI);
+      const tiltVal = moverAxisDmx(channelType, 'tilt', delta, channelCtx, params, data, range);
+      if (tiltVal != null) return tiltVal;
+      return moverHoldAxis(channelType, 'pan', channelCtx);
     }
 
     // ── Circle: circular pan/tilt motion around home ───────────────────
     case 'circle': {
-      const speed = params.speed || data.speed || 1;
-      const size = params.size || data.size || 0.5;
-      const homePan = channelCtx.home_pan ?? 128;
-      const homeTilt = channelCtx.home_tilt ?? 128;
-      const cycle = (progress * speed) % 1;
+      const size = params.size ?? data.size ?? 0.35;
+      const tiltSize = params.tilt_size ?? data.tilt_size ?? size;
+      const cycle = moverCycle01(progress, params, data);
       const angle = cycle * 2 * Math.PI;
-      const amplitude = 127 * size;
-      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + amplitude * Math.cos(angle)));
-      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + amplitude * Math.sin(angle)));
+      const panVal = moverAxisDmx(channelType, 'pan', Math.cos(angle), channelCtx, params, data, size);
+      if (panVal != null) return panVal;
+      const tiltVal = moverAxisDmx(channelType, 'tilt', Math.sin(angle), channelCtx, params, data, tiltSize);
+      if (tiltVal != null) return tiltVal;
       return null;
     }
 
     // ── Figure Eight: lissajous figure-8 around home ───────────────────
     case 'figure_eight': {
-      const speed = params.speed || data.speed || 1;
-      const size = params.size || data.size || 0.5;
-      const homePan = channelCtx.home_pan ?? 128;
-      const homeTilt = channelCtx.home_tilt ?? 128;
-      const cycle = (progress * speed) % 1;
+      const size = params.size ?? data.size ?? 0.35;
+      const cycle = moverCycle01(progress, params, data);
       const angle = cycle * 2 * Math.PI;
-      const amplitude = 127 * size;
-      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + amplitude * Math.sin(angle)));
-      if (channelType === 'tilt') return Math.max(0, Math.min(255, homeTilt + amplitude * Math.sin(angle * 2)));
+      const panVal = moverAxisDmx(channelType, 'pan', Math.sin(angle), channelCtx, params, data, size);
+      if (panVal != null) return panVal;
+      const tiltVal = moverAxisDmx(channelType, 'tilt', Math.sin(angle * 2), channelCtx, params, data, size);
+      if (tiltVal != null) return tiltVal;
       return null;
     }
 
     // ── Random Movement: pseudo-random positions around home ───────────
     case 'random_move': {
-      const speed = params.speed || data.speed || 1;
-      const range = params.range || data.range || 0.5;
-      if (channelType !== 'pan' && channelType !== 'tilt') return null;
-
-      const home = channelType === 'pan' ? (channelCtx.home_pan ?? 128) : (channelCtx.home_tilt ?? 128);
-      const t = progress * speed * 10;
+      const range = params.range || data.range || 0.35;
+      if (!PAN_TILT.has(channelType)) return null;
+      const t = (Number(progress) || 0) * 1.5;
       const slot = Math.floor(t);
       const frac = t - slot;
-      const seed1 = channelType === 'pan' ? 137 : 251;
-      const pos1 = pseudoRandom(slot * seed1) * 2 - 1;
-      const pos2 = pseudoRandom((slot + 1) * seed1) * 2 - 1;
-      const smooth = frac * frac * (3 - 2 * frac); // smoothstep
-      const pos = pos1 + (pos2 - pos1) * smooth;
-      return Math.max(0, Math.min(255, home + 127 * range * pos));
+      const smooth = frac * frac * (3 - 2 * frac);
+      const panDelta = (() => {
+        const pos1 = pseudoRandom(slot * 137) * 2 - 1;
+        const pos2 = pseudoRandom((slot + 1) * 137) * 2 - 1;
+        return pos1 + (pos2 - pos1) * smooth;
+      })();
+      const tiltDelta = (() => {
+        const pos1 = pseudoRandom(slot * 251) * 2 - 1;
+        const pos2 = pseudoRandom((slot + 1) * 251) * 2 - 1;
+        return pos1 + (pos2 - pos1) * smooth;
+      })();
+      const panVal = moverAxisDmx(channelType, 'pan', panDelta, channelCtx, params, data, range);
+      if (panVal != null) return panVal;
+      const tiltVal = moverAxisDmx(channelType, 'tilt', tiltDelta, channelCtx, params, data, range);
+      if (tiltVal != null) return tiltVal;
+      return null;
     }
 
     // ── Fan: spread movers apart on pan, tilt stays at home ────────────
     case 'fan': {
       const speed = params.speed || data.speed || 0.5;
-      const spread = params.spread || data.spread || 1.0;
-      if (channelType !== 'pan' && channelType !== 'tilt') return null;
-
-      const homePan = channelCtx.home_pan ?? 128;
-      const homeTilt = channelCtx.home_tilt ?? 128;
-      const panChannels = (channelCtx._fixtureCount || 1);
-      const fixtureOrdinal = (channelCtx._fixtureOrdinal || 0);
+      const spread = params.spread || data.spread || 0.6;
+      const panChannels = channelCtx._fixtureCount || 1;
+      const fixtureOrdinal = channelCtx._fixtureOrdinal || 0;
       const normalizedIdx = panChannels > 1 ? (fixtureOrdinal / (panChannels - 1) - 0.5) : 0;
-
-      const cycle = (progress * speed) % 1;
-      const currentSpread = spread * Math.sin(cycle * Math.PI);
-      if (channelType === 'pan') return Math.max(0, Math.min(255, homePan + 127 * normalizedIdx * currentSpread));
-      if (channelType === 'tilt') return homeTilt;
-      return null;
+      const cycle = moverCycle01(progress, params, data);
+      const delta = normalizedIdx * spread * Math.sin(cycle * Math.PI);
+      const panVal = moverAxisDmx(channelType, 'pan', delta, channelCtx, params, data, 1);
+      if (panVal != null) return panVal;
+      return moverHoldAxis(channelType, 'tilt', channelCtx);
     }
 
     // ── Nod/Shake: rapid small oscillation on one axis around home ─────
     case 'nod': {
-      const speed = params.speed || data.speed || 2;
-      const range = params.range || data.range || 0.3;
+      const range = params.range || data.range || 0.25;
       const axis = params.axis || data.axis || 'tilt';
-      const home = channelType === 'pan' ? (channelCtx.home_pan ?? 128) : (channelCtx.home_tilt ?? 128);
-      if (channelType === axis) return Math.max(0, Math.min(255, home + 127 * range * Math.sin(((progress * speed) % 1) * 2 * Math.PI)));
-      if (channelType === 'pan' || channelType === 'tilt') return home;
-      return null;
+      const nodParams = { ...params, speed: (params.speed ?? data.speed ?? 2) * 2 };
+      const cycle = moverCycle01(progress, nodParams, { ...data, speed: (data.speed ?? 2) * 2 });
+      const delta = Math.sin(cycle * 2 * Math.PI);
+      const activeVal = moverAxisDmx(channelType, axis, delta, channelCtx, params, data, range);
+      if (activeVal != null) return activeVal;
+      const idle = axis === 'pan' ? 'tilt' : 'pan';
+      return moverHoldAxis(channelType, idle, channelCtx);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1750,8 +1863,9 @@ function sequenceEffectProgress(effectType, cueStartMs, cueDurationMs, timeMs, e
   }
 
   const beatSec = 60 / Math.max(60, Math.min(200, bpm || 128));
-  // speed=1 → about one motion cycle per bar (4 beats), not per beat
-  const beatsPerCycle = 4;
+  let beatsPerCycle = 4;
+  if (effectType === 'circle' || effectType === 'figure_eight') beatsPerCycle = 16;
+  else if (effectType === 'random_move') beatsPerCycle = 8;
   return ((clamped / 1000 / beatSec) * speed) / beatsPerCycle;
 }
 
@@ -1762,6 +1876,7 @@ module.exports = {
   hslToRgb,
   computeEffectValue,
   sequenceEffectProgress,
+  moverProgressFromElapsedSeconds,
   isFixtureCompatibleWithEffect,
   isGlobalMasterChannel,
   shouldApplyCellCue,
@@ -1781,5 +1896,7 @@ module.exports = {
   getShutterOffDmxValue,
   mapShutterStrobeValue,
   ensureShutterOpenInUpdates,
+  findFixtureShutterChannel,
+  moverAbsoluteAxisDmx,
   mirrorMotorDmx,
 };

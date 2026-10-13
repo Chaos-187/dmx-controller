@@ -62,12 +62,13 @@ const updater = require('./lib/updater');
 const networkUtils = require('./network-utils');
 const { WebUSB } = require('usb');
 const {
-  pseudoRandom, hslToRgb, computeEffectValue, sequenceEffectProgress, isFixtureCompatibleWithEffect,
+  pseudoRandom, hslToRgb, computeEffectValue, sequenceEffectProgress, moverProgressFromElapsedSeconds, isFixtureCompatibleWithEffect,
   shouldApplyCellCue, isAuxiliaryMulticellChannel,
   MOVING_HEAD_EFFECT_TYPES, MULTICELL_EFFECT_TYPES, COLOR_EFFECT_TYPES, MIRROR_BALL_EFFECT_TYPES,
   RIG_EFFECT_TYPES, SOUND_EFFECT_TYPES,
   PAN_TILT, COLOR_CHANNELS,
   hasShutterStrobeChannel, getShutterOpenDmxValue, getShutterOffDmxValue, mapShutterStrobeValue, ensureShutterOpenInUpdates,
+  moverAbsoluteAxisDmx,
   mirrorMotorDmx,
 } = require('./effects-engine');
 
@@ -3934,6 +3935,8 @@ app.post('/api/effects/run', (req, res) => {
         let progress;
         if (eff.type === 'color_fade') {
           progress = (elapsed % 4) / 4;
+        } else if (MOVING_HEAD_EFFECT_TYPES.has(eff.type)) {
+          progress = moverProgressFromElapsedSeconds(elapsed, effectParams, eff.effect_data || {});
         } else {
           progress = elapsed;
         }
@@ -4455,8 +4458,11 @@ function processSceneEffects(scene, startTime) {
 
       for (const ch of fix.channels) {
         let progress;
+        const seqEffectParams = entry.effect_params || {};
         if (effect.type === 'color_fade') {
           progress = (elapsed % 4) / 4;
+        } else if (MOVING_HEAD_EFFECT_TYPES.has(effect.type)) {
+          progress = moverProgressFromElapsedSeconds(elapsed, seqEffectParams, effect.effect_data || {});
         } else {
           progress = elapsed;
         }
@@ -4466,7 +4472,6 @@ function processSceneEffects(scene, startTime) {
         channelCtx._fixtureOrdinal = fi;
         channelCtx._fixtureCount = fixtureIds.length;
         channelCtx._rigFixtureCount = fixMap.length;
-        const seqEffectParams = entry.effect_params || {};
         if (SOUND_EFFECT_TYPES.has(effect.type) && !seqEffectParams.audio) seqEffectParams.audio = getCurrentAudioData();
         let value = computeEffectValue(effect, ch.type, progress, baseValues, seqEffectParams, channelCtx);
 
@@ -5826,6 +5831,8 @@ function interpolateAlongPath(waypoints, t) {
  * correctly resolve cell index and count rather than guessing via stride.
  */
 function buildChannelCtx(ch, fix) {
+  const hasPanFine = fix._hasPanFine ?? fix.channels.some(c => c.type === 'pan_fine');
+  const hasTiltFine = fix._hasTiltFine ?? fix.channels.some(c => c.type === 'tilt_fine');
   const ctx = {
     channel_number: ch.channel_number,
     channel_type: ch.type,
@@ -5834,6 +5841,9 @@ function buildChannelCtx(ch, fix) {
     total_channels: fix.channels.length,
     home_pan: fix.home_pan ?? 128,
     home_tilt: fix.home_tilt ?? 128,
+    motion_range: fix.motion_range,
+    _hasPanFine: hasPanFine,
+    _hasTiltFine: hasTiltFine,
     // Rig position data for rig-wide effects (fixture-level defaults)
     _rigPosition:  fix.rig_x ?? 0.5,
     _rigPositionY: fix.rig_y ?? 0.5,   // depth: 0=front/audience, 1=back/stage
@@ -6075,7 +6085,11 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         // All cues support start→end transitions; if no end values, hold start
         const startVal = channelVals[ch.type] !== undefined ? channelVals[ch.type] : null;
         if (startVal === null) { value = null; }
-        else if (ch.type === 'color_wheel' || ch.type === 'gobo') {
+        else if (ch.type === 'strobe' && (hasShutterStrobeChannel(ch) || /\bshutter\b/i.test(ch.name || ''))) {
+          // Steady color cues: open shutter (logical strobe values map into strobe speed, not open)
+          value = getShutterOpenDmxValue(ch) || 32;
+          skipRangeMap = true;
+        } else if (ch.type === 'color_wheel' || ch.type === 'gobo') {
           // Physical wheel channels must snap — interpolating sweeps through
           // random intermediate positions on the physical wheel.
           value = startVal;
@@ -6093,7 +6107,11 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
         // Check if this channel has a hardware strobe range
         const strobeRange = ch.ranges ? ch.ranges.find(r => r.type === 'strobe') : null;
 
-        if (strobeRange) {
+        if (strobeRange && hasShutterStrobeChannel(ch)) {
+          // Spots (color wheel + shutter): flash dimmer/RGB; keep shutter open for beam
+          value = getShutterOpenDmxValue(ch) || 32;
+          skipRangeMap = true;
+        } else if (strobeRange) {
           // Hardware strobe: map strobe speed into the strobe range
           const strobeSpeed = Math.min(255, Math.round((strobeHz / 20) * 255));
           value = Math.round(strobeRange.min + (strobeSpeed / 255) * (strobeRange.max - strobeRange.min));
@@ -6195,11 +6213,14 @@ function processSequenceAtTime(deckNum, timeMs, opts = {}) {
             const stepFrac = linearFrac * linearFrac * (3 - 2 * linearFrac);
             const curr = fixPositions[stepIdx % totalSteps];
             const next = fixPositions[(stepIdx + 1) % totalSteps];
-            // Smooth interpolation between positions
-            if (ch.type === 'pan' && curr.pan !== undefined) {
-              value = curr.pan + (next.pan - curr.pan) * stepFrac;
-            } else if (ch.type === 'tilt' && curr.tilt !== undefined) {
-              value = curr.tilt + (next.tilt - curr.tilt) * stepFrac;
+            const channelCtx = buildChannelCtx(ch, fixMap);
+            // Smooth interpolation between positions (incl. 16-bit pan/tilt fine)
+            if ((ch.type === 'pan' || ch.type === 'pan_fine') && curr.pan !== undefined) {
+              const p = curr.pan + (next.pan - curr.pan) * stepFrac;
+              value = moverAbsoluteAxisDmx(ch.type, 'pan', p, channelCtx);
+            } else if ((ch.type === 'tilt' || ch.type === 'tilt_fine') && curr.tilt !== undefined) {
+              const t = curr.tilt + (next.tilt - curr.tilt) * stepFrac;
+              value = moverAbsoluteAxisDmx(ch.type, 'tilt', t, channelCtx);
             } else if (ch.type === 'speed') {
               value = channelVals.speed !== undefined ? channelVals.speed
                     : (curr.speed !== undefined ? curr.speed : null);

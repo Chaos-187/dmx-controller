@@ -6,8 +6,12 @@
  * via USB adapters.
  *
  * Supported backends:
- *   1. FTDI D2XX — for Enttec Open DMX, DMXKING ultraDMX Micro, etc.
- *      - 250,000 baud, 8N2, break via baud-rate switch or setBreakOn/Off
+ *   1. FTDI D2XX — Open DMX style (FT232R + RS-485, Enttec Open DMX, etc.)
+ *      Host + D2XX must generate every frame:
+ *        • 250000 baud, 8 data bits, 2 stop bits, no parity
+ *        • BREAK (logic low ≥88µs) → MAB → start code 0x00 → 512 channel bytes
+ *        • clrRts() so the RS-485 transceiver drives the line
+ *      Default break: FT_SetBreakOn / FT_SetBreakOff; optional baud-rate fallback.
  *   2. libusb (USB bulk) — for SoundSwitch DMX Micro, etc.
  *      - USB bulk OUT transfer on endpoint 1
  *      - Uses device-specific packet framing (e.g. "sTRt" header)
@@ -42,6 +46,11 @@ const DMX_BAUD_RATE = 250000;
 const DMX_BREAK_BAUD = 76800;    // lower baud to generate >88µs break with a 0x00
 const DMX_CHANNELS = 512;
 const DMX_START_CODE = 0x00;
+/** 513×10 bits @ 250k 8N2 — do not start the next frame before this (ms). */
+const FTDI_WIRE_FRAME_MS = 22;
+/** Open DMX tools often stream ~10 Hz (USB capture); avoids back-to-back USB bulk (TX LED solid). */
+const FTDI_DEFAULT_TX_HZ = 10;
+const FTDI_MAX_TX_HZ = 44;
 
 // SoundSwitch DMX Micro protocol (observed via Wireshark USB capture)
 // 522-byte bulk OUT packet: 4-byte "sTRt" header + 6 control bytes + 512 DMX data
@@ -88,11 +97,15 @@ let usbEndpoint = null;    // USB bulk OUT endpoint
 let usbProtocol = null;    // 'soundswitch' or null
 let activeBackend = null;  // 'ftdi' or 'usb'
 let dmxBuffer = Buffer.alloc(DMX_CHANNELS, 0);   // 512 channels
-let txInterval = null;
-let txRate = 40;           // Hz
+/** Reused each frame: start code + 512 slots (same layout as SerialPort Open DMX examples). */
+const ftdiTxPacket = Buffer.alloc(1 + DMX_CHANNELS);
+ftdiTxPacket[0] = DMX_START_CODE;
+let txTimer = null;
+let txLoopGeneration = 0;
+let txRate = FTDI_DEFAULT_TX_HZ;
 let isOpen = false;
 let deviceInfo = null;     // info about the opened device
-let useBreakMethod = 'baud'; // 'baud' or 'break' — how to generate DMX break (FTDI only)
+let useBreakMethod = 'break'; // 'break' (Enttec Open DMX) or 'baud' fallback
 
 // ─── Utility ────────────────────────────────────────────────────────────────
 
@@ -112,6 +125,33 @@ function reply(type, data = {}) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Wait until the FTDI TX queue is drained (break/data must finish before baud changes). */
+async function waitFtdiTxEmpty(maxMs = 50) {
+  if (!device) return;
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    try {
+      const q = device.status?.tx_queue_bytes ?? 0;
+      if (q === 0) return;
+    } catch {
+      return;
+    }
+    await sleep(1);
+  }
+}
+
+/** Enttec Open DMX / FT232 RS-485 init (see Enttec OpenDMX.cs, enttecopendmx crate). */
+function configureFtdiOpenDmx() {
+  const FT = FTDI;
+  device.setBaudRate(DMX_BAUD_RATE);
+  device.setDataCharacteristics(FT.FT_BITS_8, FT.FT_STOP_BITS_2, FT.FT_PARITY_NONE);
+  device.setFlowControl(FT.FT_FLOW_NONE, 0, 0);
+  device.setTimeouts(500, 500);
+  device.clrRts(); // RS-485 transmit enable on Open DMX hardware
+  device.purge(FT.FT_PURGE_RX | FT.FT_PURGE_TX);
+  device.setLatencyTimer(2);
 }
 
 // ─── FTDI Device Management ─────────────────────────────────────────────────
@@ -149,21 +189,11 @@ async function openDevice(identifier) {
 
     // identifier can be { serial_number } or { description } or { usb_loc_id }
     device = await FTDI.openDevice(identifier);
+    activeBackend = 'ftdi';
 
-    // Configure for DMX512
-    await device.setBaudRate(DMX_BAUD_RATE);
-    await device.setDataCharacteristics(8, 2, 0); // 8N2 (8 data, 2 stop, no parity)
-    await device.setFlowControl(0);                // None
-    await device.purge(3);                         // Purge RX + TX buffers
-    await device.setLatencyTimer(2);               // 2ms latency (minimum)
-    await device.resetDevice();
-
-    // Re-apply after reset
+    device.resetDevice();
     await sleep(50);
-    await device.setBaudRate(DMX_BAUD_RATE);
-    await device.setDataCharacteristics(8, 2, 0);
-    await device.setFlowControl(0);
-    await device.purge(3);
+    configureFtdiOpenDmx();
 
     isOpen = true;
     deviceInfo = identifier;
@@ -400,16 +430,12 @@ async function sendDmxFrameUsb() {
 // ─── DMX Frame Transmission ─────────────────────────────────────────────────
 
 /**
- * Send a single DMX512 frame.
- * 
- * DMX frame structure:
- *   1. BREAK  — at least 88µs of space (logic low)
- *   2. MAB    — at least 8µs of mark (logic high)
- *   3. Start Code (0x00) + up to 512 channel bytes
+ * Send one Open DMX / DMX512 frame over FTDI.
  *
- * We use the baud-rate trick for the break:
- *   - Switch to a lower baud rate and send 0x00 to create a long low pulse
- *   - Switch back to 250k baud and send the DMX data
+ *   BREAK (≥88µs low) → MAB (≥8µs high after setBreakOff) → 0x00 start code → 512 slots
+ *
+ * Timing is entirely host-side: we repeat this at txRate Hz in the worker thread and
+ * wait for the FTDI TX queue to drain so break and payload are not truncated.
  */
 async function sendDmxFrame() {
   // Route to the active backend
@@ -417,25 +443,21 @@ async function sendDmxFrame() {
   if (!device || !isOpen) return;
 
   try {
+    // Same sequence as SerialPort Open DMX: brk on → hold → brk off → write 513 bytes
     if (useBreakMethod === 'break') {
-      // Method 1: Use setBreakOn/Off (simpler but not all FTDI chips support timing precisely)
-      await device.setBreakOn();
-      await sleep(1); // ~1ms break (exceeds 88µs minimum)
-      await device.setBreakOff();
-      // MAB is inherent in the line going high before we start transmitting
+      device.setBreakOn();
+      await sleep(1); // ≥88µs break (1 ms is safe on Windows)
+      device.setBreakOff();
     } else {
-      // Method 2: Baud rate switching (most reliable for Enttec Open DMX)
-      await device.setBaudRate(DMX_BREAK_BAUD);
-      await device.write(Buffer.from([0x00])); // sends ~130µs break at 76800 baud
-      await device.setBaudRate(DMX_BAUD_RATE);
+      device.setBaudRate(DMX_BREAK_BAUD);
+      await device.write(Uint8Array.from([0x00]));
+      await waitFtdiTxEmpty(20);
+      device.setBaudRate(DMX_BAUD_RATE);
     }
 
-    // Build DMX packet: start code + 512 channels
-    const packet = Buffer.alloc(1 + DMX_CHANNELS);
-    packet[0] = DMX_START_CODE;
-    dmxBuffer.copy(packet, 1);
-
-    await device.write(packet);
+    dmxBuffer.copy(ftdiTxPacket, 1);
+    await device.write(new Uint8Array(ftdiTxPacket));
+    await waitFtdiTxEmpty(50);
   } catch (e) {
     log('error', `[DMX-USB] TX error: ${e.message}`);
     // If we get a write error, the device may have been unplugged
@@ -451,29 +473,36 @@ async function sendDmxFrame() {
 
 // ─── Transmit Loop ──────────────────────────────────────────────────────────
 
-let txBusy = false;
+function ftdiFramePeriodMs(rateHz) {
+  const hz = Math.max(1, Math.min(FTDI_MAX_TX_HZ, rateHz || FTDI_DEFAULT_TX_HZ));
+  // Full frame on the wire ~22 ms; slower Hz adds idle time (visible TX blink on Open DMX).
+  return Math.max(1000 / hz, FTDI_WIRE_FRAME_MS + 2);
+}
 
 function startTxLoop(rate) {
   stopTxLoop();
-  txRate = rate || 40;
-  const interval = Math.round(1000 / txRate);
+  txRate = Math.max(1, Math.min(FTDI_MAX_TX_HZ, rate || FTDI_DEFAULT_TX_HZ));
+  const periodMs = Math.round(ftdiFramePeriodMs(txRate));
+  const generation = ++txLoopGeneration;
 
-  txInterval = setInterval(async () => {
-    if (txBusy) return; // skip frame if previous still sending
-    txBusy = true;
+  const tick = async () => {
+    if (generation !== txLoopGeneration || !isOpen) return;
+    const frameStart = Date.now();
     await sendDmxFrame();
-    txBusy = false;
-  }, interval);
+    const wait = Math.max(0, periodMs - (Date.now() - frameStart));
+    txTimer = setTimeout(tick, wait);
+  };
 
-  log('info', `[DMX-USB] TX loop started at ${txRate} fps (${interval}ms)`);
+  tick();
+  log('info', `[DMX-USB] TX loop started at ${txRate} Hz (~${periodMs} ms/frame)`);
   reply('txStarted', { rate: txRate });
 }
 
 function stopTxLoop() {
-  if (txInterval) {
-    clearInterval(txInterval);
-    txInterval = null;
-    txBusy = false;
+  txLoopGeneration++;
+  if (txTimer) {
+    clearTimeout(txTimer);
+    txTimer = null;
     log('info', '[DMX-USB] TX loop stopped');
   }
 }

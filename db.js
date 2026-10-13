@@ -328,7 +328,7 @@ function init() {
       description     TEXT    DEFAULT '',
       local_universe  INTEGER NOT NULL DEFAULT 1,
       auto_connect    INTEGER NOT NULL DEFAULT 1,
-      refresh_rate    INTEGER NOT NULL DEFAULT 40,
+      refresh_rate    INTEGER NOT NULL DEFAULT 10,
       enabled         INTEGER NOT NULL DEFAULT 1,
       created_at      TEXT    DEFAULT (datetime('now'))
     );
@@ -490,6 +490,13 @@ function init() {
   } catch (e) {
     db.exec("ALTER TABLE fixtures ADD COLUMN home_tilt INTEGER NOT NULL DEFAULT 128");
     console.log('[DB] Migrated fixtures: added home_tilt column');
+  }
+
+  try {
+    db.prepare('SELECT motion_range FROM fixtures LIMIT 1').get();
+  } catch (e) {
+    db.exec('ALTER TABLE fixtures ADD COLUMN motion_range REAL DEFAULT NULL');
+    console.log('[DB] Migrated fixtures: added motion_range column');
   }
 
   // Migrate: add cell column to sequence_cues if missing
@@ -952,6 +959,7 @@ function init() {
 
   migrateMotorRotationChannelTypes();
   migrateKamMotorRangesV2();
+  migrateFtdiUsbRefreshRate();
   migrateShutterStrobeChannelTypes();
 
   // Seed default color wheel map for 60W Spot Moving Head
@@ -1155,10 +1163,10 @@ function seedNewEffectsV3() {
     ['Tilt Sweep',        'tilt_sweep',   'movement', 'moving_head', J({ speed:1, range:1.0 }), 4],
     ['Fast Tilt Sweep',   'tilt_sweep',   'movement', 'moving_head', J({ speed:4, range:1.0 }), 2],
     ['Narrow Tilt Sweep', 'tilt_sweep',   'movement', 'moving_head', J({ speed:1, range:0.3 }), 4],
-    ['Circle',            'circle',       'movement', 'moving_head', J({ speed:1, size:0.5 }), 4],
-    ['Fast Circle',       'circle',       'movement', 'moving_head', J({ speed:3, size:0.5 }), 2],
-    ['Small Circle',      'circle',       'movement', 'moving_head', J({ speed:1, size:0.2 }), 4],
-    ['Large Circle',      'circle',       'movement', 'moving_head', J({ speed:0.5, size:0.8 }), 8],
+    ['Circle',            'circle',       'movement', 'moving_head', J({ speed:0.5, size:0.35, seconds_per_cycle:24 }), 4],
+    ['Fast Circle',       'circle',       'movement', 'moving_head', J({ speed:1.5, size:0.35, seconds_per_cycle:12 }), 2],
+    ['Small Circle',      'circle',       'movement', 'moving_head', J({ speed:0.5, size:0.2, seconds_per_cycle:24 }), 4],
+    ['Large Circle',      'circle',       'movement', 'moving_head', J({ speed:0.35, size:0.5, seconds_per_cycle:32 }), 8],
     ['Figure Eight',      'figure_eight', 'movement', 'moving_head', J({ speed:1, size:0.5 }), 8],
     ['Fast Figure Eight', 'figure_eight', 'movement', 'moving_head', J({ speed:2, size:0.5 }), 4],
     ['Random Movement',   'random_move',  'movement', 'moving_head', J({ speed:1, range:0.5, smoothing:0.3 }), 8],
@@ -2104,6 +2112,23 @@ function migrateMotorRotationChannelTypes() {
   db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('motor_rotation_types_v1', '1')").run();
   if (typeIds.length) {
     console.log('[DB] Updated motor rotation channels to motor / motor_cw / motor_ccw / motor_stop types');
+  }
+}
+
+/** Open DMX FTDI: 40 Hz back-to-back USB bulk keeps TX LED solid; ~10 Hz matches typical test tools. */
+function migrateFtdiUsbRefreshRate() {
+  const done = db.prepare("SELECT value FROM config WHERE key = 'ftdi_usb_refresh_v1'").get();
+  if (done?.value === '1') return;
+
+  const result = db.prepare(`
+    UPDATE usb_devices
+    SET refresh_rate = 10
+    WHERE (source IS NULL OR source = 'ftdi') AND refresh_rate >= 40
+  `).run();
+
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('ftdi_usb_refresh_v1', '1')").run();
+  if (result.changes > 0) {
+    console.log(`[DB] FTDI USB refresh rate set to 10 Hz for ${result.changes} device(s) (was 40+ Hz)`);
   }
 }
 
@@ -3165,7 +3190,7 @@ function createFixtureBatch(baseFixture, quantity) {
   return { created: created.length, fixtures: created.map(id => getFixture(id)) };
 }
 
-function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence }) {
+function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, output_type, notes, invert_pan, invert_tilt, home_pan, home_tilt, motion_range, rig_x, rig_y, rig_z, rig_order, exclude_from_sequence }) {
   const existing = db.prepare('SELECT * FROM fixtures WHERE id = ?').get(id);
   if (!existing) return null;
 
@@ -3195,9 +3220,13 @@ function updateFixture(id, { name, fixture_type_id, mode_id, universe, address, 
   const overlap = checkAddressOverlap(univ, addr, channelCount, id);
   if (overlap) return { error: overlap };
 
+  const resolvedMotionRange = motion_range !== undefined
+    ? (motion_range === '' || motion_range == null ? null : Math.max(0.02, Math.min(1, Number(motion_range))))
+    : existing.motion_range;
+
   db.prepare(
-    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, rig_x=?, rig_y=?, rig_z=?, rig_order=?, exclude_from_sequence=?, updated_at=datetime('now') WHERE id=?`
-  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_z ?? existing.rig_z ?? 0.5, rig_order ?? existing.rig_order ?? 0, exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0), id);
+    `UPDATE fixtures SET name=?, fixture_type_id=?, mode_id=?, universe=?, address=?, output_type=?, notes=?, invert_pan=?, invert_tilt=?, home_pan=?, home_tilt=?, motion_range=?, rig_x=?, rig_y=?, rig_z=?, rig_order=?, exclude_from_sequence=?, updated_at=datetime('now') WHERE id=?`
+  ).run(name || existing.name, typeId, resolvedModeId, univ, addr, otype, notes ?? existing.notes, invert_pan !== undefined ? (invert_pan ? 1 : 0) : existing.invert_pan, invert_tilt !== undefined ? (invert_tilt ? 1 : 0) : existing.invert_tilt, home_pan ?? existing.home_pan ?? 128, home_tilt ?? existing.home_tilt ?? 128, resolvedMotionRange, rig_x ?? existing.rig_x ?? 0.5, rig_y ?? existing.rig_y ?? 0.5, rig_z ?? existing.rig_z ?? 0.5, rig_order ?? existing.rig_order ?? 0, exclude_from_sequence !== undefined ? (exclude_from_sequence ? 1 : 0) : (existing.exclude_from_sequence || 0), id);
 
   invalidateFixtureChannelMapCache();
   return getFixture(id);
@@ -3904,7 +3933,7 @@ function getFixtureChannelMap() {
 
   const fixtures = db.prepare(`
     SELECT f.id, f.name, f.universe, f.address, f.invert_pan, f.invert_tilt,
-           f.home_pan, f.home_tilt, f.mode_id, f.fixture_type_id,
+           f.home_pan, f.home_tilt, f.motion_range, f.mode_id, f.fixture_type_id,
            f.rig_x, f.rig_y, f.rig_z, f.rig_order, f.exclude_from_sequence, f.cell_path,
            COALESCE(ftm.channel_count, ft.channel_count) as channel_count,
            ft.name as type_name, ft.category, ft.cell_rows, ft.cell_cols,
@@ -3934,12 +3963,16 @@ function getFixtureChannelMap() {
     const cell_count = cellNums.length > 0 ? Math.max(...cellNums) : 0;
     const color_wheel_map = cwMaps[f.fixture_type_id] || null;
     const cell_path = f.cell_path ? JSON.parse(f.cell_path) : null;
+    const _hasPanFine = channels.some(ch => ch.type === 'pan_fine');
+    const _hasTiltFine = channels.some(ch => ch.type === 'tilt_fine');
     return {
       ...f,
       group_ids,
       cell_count,
       cell_path,
       color_wheel_map,
+      _hasPanFine,
+      _hasTiltFine,
       channels: channels.map(ch => {
         // Derive per-channel invert from fixture-level pan/tilt invert settings
         const isPan = ch.type === 'pan' || ch.type === 'pan_fine';
@@ -4730,7 +4763,7 @@ function createUsbDevice({ label, source, vid, pid, serial_number, description, 
     label || '', source || 'ftdi', vid || null, pid || null,
     serial_number || '', description || '',
     local_universe || 1, auto_connect !== undefined ? (auto_connect ? 1 : 0) : 1,
-    refresh_rate || 40
+    refresh_rate || 10
   );
   return getUsbDevice(info.lastInsertRowid);
 }

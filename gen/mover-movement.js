@@ -33,11 +33,81 @@ const SPEED_DMX = { slow: 200, medium: 140, fast: 40 };
  * IDs to cycle through. At playback the engine looks up current preset
  * positions, so changing presets per-venue updates all sequences automatically.
  */
+const MOVER_FX_TYPES = ['circle', 'figure_eight', 'random_move', 'pan_sweep', 'tilt_sweep'];
+
+/** When no saved mover presets exist, drive pan/tilt with moving-head effect cues. */
+function generateMoverEffectMovement(cues, movers, sections, ctx) {
+  const effects = ctx.effects || [];
+  const pool = effects.filter(e => MOVER_FX_TYPES.includes(e.type));
+  if (pool.length === 0) return;
+
+  const { durationMs, barMs } = ctx;
+  const useSections = sections && sections.length > 0;
+
+  for (let fiIdx = 0; fiIdx < movers.length; fiIdx++) {
+    const fix = movers[fiIdx];
+    const hasPanTilt = fix.channels.some(c => c.type === 'pan' || c.type === 'pan_fine')
+      && fix.channels.some(c => c.type === 'tilt' || c.type === 'tilt_fine');
+    if (!hasPanTilt) continue;
+
+    const existingCue = cues.find(c => c.fixture_id === fix.id);
+    const lane = existingCue ? existingCue.lane : fiIdx;
+
+    if (useSections) {
+      for (let si = 0; si < sections.length; si++) {
+        const sec = sections[si];
+        const secStartMs = si === 0 ? 0 : Math.round(sec.start_ms || 0);
+        const secEndMs = si === sections.length - 1
+          ? Math.round(durationMs)
+          : Math.round(sec.end_ms || durationMs);
+        const secDur = secEndMs - secStartMs;
+        if (secDur <= barMs * 0.5) continue;
+
+        const rollKey = `mfx-${fix.id}-${sec.label || si}`;
+        const effect = pool[Math.floor(stableRoll(rollKey) * pool.length)];
+        const speed = sec.label === 'chorus' || sec.label === 'drop' ? 0.85 : 0.55;
+
+        cues.push({
+          lane,
+          start_ms: secStartMs,
+          duration_ms: secDur,
+          cue_type: 'effect',
+          fixture_id: fix.id,
+          track: 'move',
+          effect_id: effect.id,
+          effect_params: { speed, seconds_per_cycle: 24 },
+          channel_values: {},
+          color: '#4488ff',
+          label: sec.label ? `${sec.label} move` : 'move fx',
+        });
+      }
+    } else {
+      const effect = pool.find(e => e.type === 'circle') || pool[0];
+      cues.push({
+        lane,
+        start_ms: 0,
+        duration_ms: Math.round(durationMs),
+        cue_type: 'effect',
+        fixture_id: fix.id,
+        track: 'move',
+        effect_id: effect.id,
+        effect_params: { speed: 0.6, seconds_per_cycle: 24 },
+        channel_values: {},
+        color: '#4488ff',
+        label: 'move fx',
+      });
+    }
+  }
+}
+
 function generateMoverMovement(cues, movers, sections, beats, ctx, moverPresets) {
   const { barMs, beatMs, rand, preset, durationMs, snapBar, bpmFactor } = ctx;
   const groupMap = ctx.groupMap;
 
-  if (!moverPresets || moverPresets.length === 0) return;
+  if (!moverPresets || moverPresets.length === 0) {
+    generateMoverEffectMovement(cues, movers, sections, ctx);
+    return;
+  }
 
   // Slow-BPM scaling: below 100 BPM, stretch timing and use slower motor speeds
   const bpm = ctx.bpm || 120;

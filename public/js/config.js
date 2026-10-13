@@ -798,7 +798,7 @@ function openUsbDeviceModal(device) {
   document.getElementById('usbDevVid').value = device ? (device.vid || '') : '';
   document.getElementById('usbDevPid').value = device ? (device.pid || '') : '';
   document.getElementById('usbDevUniverse').value = device ? device.local_universe : 1;
-  document.getElementById('usbDevRefreshRate').value = device ? device.refresh_rate : 40;
+  document.getElementById('usbDevRefreshRate').value = device ? device.refresh_rate : 10;
   document.getElementById('usbDevAutoConnect').checked = device ? !!device.auto_connect : true;
   toggleVidPidRow();
   document.getElementById('usbDeviceModal').classList.add('open');
@@ -829,7 +829,7 @@ document.getElementById('btnSaveUsbDevice').addEventListener('click', async () =
     vid: document.getElementById('usbDevVid').value,
     pid: document.getElementById('usbDevPid').value,
     local_universe: parseInt(document.getElementById('usbDevUniverse').value) || 1,
-    refresh_rate: parseInt(document.getElementById('usbDevRefreshRate').value) || 40,
+    refresh_rate: parseInt(document.getElementById('usbDevRefreshRate').value) || 10,
     auto_connect: document.getElementById('usbDevAutoConnect').checked ? 1 : 0,
   };
   try {
@@ -895,7 +895,7 @@ window.addScannedDevice = function(preset) {
   openUsbDeviceModal({ id: null, label: preset.label, source: preset.source,
     serial_number: preset.serial_number || '', description: preset.description || '',
     vid: preset.vid || '', pid: preset.pid || '',
-    local_universe: 1, refresh_rate: 40, auto_connect: 1 });
+    local_universe: 1, refresh_rate: 10, auto_connect: 1 });
 };
 
 // ═══════════════════════════════════════════════════════════════

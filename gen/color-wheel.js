@@ -7,7 +7,10 @@
  * random physical wheel colours.
  */
 
-const { applyIntensity, findNearestWheelColor, findSplitWheelPosition, getFixtureIntensity, walkBeats } = require('./helpers');
+const {
+  applyIntensity, findNearestWheelColor, findSplitWheelPosition, getFixtureIntensity, walkBeats,
+  applySpotLightChannelValues, findSpotShutterChannel,
+} = require('./helpers');
 const { sectionStyles, getSectionPalettes } = require('./palettes');
 const { getFixtureGroup, pickCoordMode, getColorOffset } = require('./group-coordination');
 
@@ -35,7 +38,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
     const existingCue = cues.find(c => c.fixture_id === fix.id);
     const lane = existingCue ? existingCue.lane : fiIdx;
     const hasDimmer = fix.channels.some(ch => ch.type === 'dimmer');
-    const hasStrobe = fix.channels.some(ch => ch.type === 'strobe');
+    const hasSpotShutter = !!findSpotShutterChannel(fix);
 
     if (useSections) {
       for (let si = 0; si < sections.length; si++) {
@@ -136,10 +139,11 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
             }
           }
 
-          const startVals = { color_wheel: cwDmxValue };
+          let startVals = { color_wheel: cwDmxValue };
           if (hasDimmer) {
             startVals.dimmer = Math.round(startIntensity * 255);
           }
+          startVals = applySpotLightChannelValues(startVals, fix);
 
           cues.push({
             lane,
@@ -155,7 +159,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
         }
 
         // ── Strobe hits for color-wheel fixtures ────────────────────
-        if (!noStrobes && hasStrobe) {
+        if (!noStrobes && hasSpotShutter) {
           const effectiveStrobeChance = ((style.strobeChance || 0) * preset.strobeMult * (0.3 + 0.7 * bpmFactor));
           if (effectiveStrobeChance > 0 && beats.length > 0) {
             const strobeBeats = beats.filter(b => b >= secStartMs && b < secEndMs);
@@ -171,7 +175,7 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
                   cue_type: 'strobe',
                   fixture_id: fix.id,
                   track: 'color',
-                  channel_values: { strobe_hz: 10, dimmer: 255 },
+                  channel_values: applySpotLightChannelValues({ strobe_hz: 10, dimmer: 255 }, fix),
                   color: '#ffffff',
                   label: 'strobe',
                 });
@@ -196,8 +200,9 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
               // Place it at the start of the section
               const spinStart = secStartMs;
               if (spinDurMs > 0 && spinStart + spinDurMs <= secEndMs) {
-                const spinVals = { color_wheel: spinDmx };
+                let spinVals = { color_wheel: spinDmx };
                 if (hasDimmer) spinVals.dimmer = 255;
+                spinVals = applySpotLightChannelValues(spinVals, fix);
                 cues.push({
                   lane,
                   start_ms: Math.round(spinStart),
@@ -235,10 +240,11 @@ function generateColorWheelCues(cues, cwFixtures, sections, beats, energyLevels,
         const endWheel = findNearestWheelColor(palette[1], wheelMap);
         if (!startWheel) continue;
 
-        const startVals = { color_wheel: startWheel.dmx_start };
+        let startVals = { color_wheel: startWheel.dmx_start };
         if (hasDimmer) {
           startVals.dimmer = Math.round(intensity * 255);
         }
+        startVals = applySpotLightChannelValues(startVals, fix);
 
         cues.push({
           lane,
